@@ -47,6 +47,55 @@ export { pdfZoomFactor }
 import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
+
+// ─── THE BOTTOM TOOLBAR IS A READER BAR, NOT THE PAGE (2026-08-30) ───────────────────────────────
+// This file's chrome did not theme AT ALL, in either direction: at night the toolbar stayed #faf8fc
+// with #fff control faces and a #5c2d8a glyph on each — a strip of daylight welded under a dark app,
+// directly below a reader header that HAD been migrated. One panel, two themes.
+//
+// It joins the reader family rather than growing a palette, and the reason is that its day values
+// already ARE that family's: bar #faf8fc, face #fff, outline #d6cfe0, glyph #5c2d8a, byte for byte.
+// PdfReaderView's header is the same bar in the same panel — the ¶ toggle only swaps what is
+// between them. So the day rendering is unchanged BY CONSTRUCTION, not by measurement.
+//
+// ⚠ THE PAGE IS NOT THE BAR, and the split is the whole care of this change. Anything drawn ON a
+// page — a note's sheet and its ink, the eraser ✕, the delete badge, the page canvas — keeps its
+// literal: pdf.js renders a picture of a white page in both themes, and a mark's colour is STORED
+// IN THE DOCUMENT and shared with the source reader. Re-toning either would make one highlight two
+// colours on two devices, which is the fill/stroke rule CLAUDE.md's reader section states. The
+// popovers anchored at a click on the page are page surfaces for the same reason and stay light.
+const BAR = 'var(--iw-reader-bar, #faf8fc)'
+const CTL = 'var(--iw-reader-ctl, #fff)'
+const EDGE = 'var(--iw-reader-edge, #d6cfe0)'
+const BAR_INK = 'var(--iw-reader-accent, #5c2d8a)'
+const BAR_MUTED = 'var(--iw-reader-muted, #6b645f)'
+const GALLERY = 'var(--iw-reader-gallery, #e9e7e3)'
+// Ink ON a mark's own fill — a sticky note's text, and the ▮/T button that wears that note's colour.
+// NOT a theme decision dressed up as one: PdfReaderView already renders THESE SAME NOTES with this
+// token, and this file was rendering them with a bare #2a2a2a, so one note had two inks depending on
+// which view you were in. Dark in both themes, because a mark's fill is pale in both.
+const ON_MARK = 'var(--iw-reader-on-mark, #2c2a28)'
+/**
+ * A tint of the bar's own accent — a lit toggle's fill, a divider pip, the bar's top rule.
+ *
+ * It reads --iw-reader-accent-RGB and not --iw-reader-accent because a tint needs the COMPONENTS:
+ * `${INK}22` (the shape every one of these used to be written in) has no var() equivalent, which is
+ * exactly why --iw-ink-rgb exists one token family over.
+ *
+ * The alphas below are the original hex suffixes to three places, so nothing moves in day. That
+ * FIVE of them do THREE jobs — 0.078 and 0.122 are both "this control is lit", 0.094 and 0.133 are
+ * both "a hairline" — is real accumulated drift, and it is REPORTED rather than consolidated here:
+ * collapsing them is a visible day change and belongs to a decision, not to a tokenising pass.
+ */
+const tint = (a: number) => `rgb(var(--iw-reader-accent-rgb, 92 45 138) / ${a})`
+const HAIR = tint(0.133)      // was `${INK}22` — the bar's top rule, its divider pips, a track
+const HAIR_SOFT = tint(0.094) // was `${INK}18` — the context strip's top rule
+const LIT = tint(0.122)       // was `${INK}1f` — a toggle that is ON
+const LIT_SOFT = tint(0.078)  // was `${INK}14` — a tool that is armed
+const CARD_EDGE = tint(0.267) // was `${INK}44` — a floating card's outline
+const FIELD_EDGE = tint(0.2)  // was `${INK}33` — the find field's outline
+const PILL_EDGE = tint(0.333) // was `${INK}55` — the page-number pill's outline
+
 // Annotation palette (Peter, 2026-07-10): violet removed; dark red + dark blue added.
 // DARK_BLUE is also the default for underlines and strikethroughs (see armTool).
 const DARK_RED = '#991b1b'
@@ -147,7 +196,12 @@ function EraserIcon() {
     <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true">
       <path fill="#f9a8d4" stroke="#9d174d" strokeWidth="1.1" strokeLinejoin="round"
         d="M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0Z" />
-      <path stroke="#9d174d" strokeWidth="1.1" d="M8.5 9.9l4.95 4.95" />
+      {/* fill="none" is not cosmetic: SVG's DEFAULT fill is black, and this crease has no fill
+          attribute — so the night audit read a #000000 fill on the control face at 1.75:1 the
+          moment that face stopped being white. It paints nothing either way (a two-point path
+          encloses no area), which is exactly why nobody noticed for a year; declaring it makes the
+          contrast walker stop scoring a shape that is not there, without moving a pixel. */}
+      <path fill="none" stroke="#9d174d" strokeWidth="1.1" d="M8.5 9.9l4.95 4.95" />
     </svg>
   )
 }
@@ -493,7 +547,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           // are small boxes; if a tall one ever makes a page hard to scroll, the narrower fix is to
           // set this only while the note is SELECTED (tap, then drag) — at the price of dragging
           // meaning something different on touch than it does with a mouse.
-          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${noteW}px;${minH}background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:#2a2a2a;pointer-events:auto;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;touch-action:none;`
+          note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${noteW}px;${minH}background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:var(--iw-reader-on-mark, #2c2a28);pointer-events:auto;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;touch-action:none;`
           note.textContent = hl.note || hl.text
           note.title = 'Click/tap to select (✕ or Delete removes) · double-click or tap again to edit'
           const removeNote = () => {
@@ -2111,13 +2165,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           the ✕ sits above the cover so the panel stays dismissible from the first frame. */}
       {!revealed && (
         <>
-          <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 10, background: '#fff' }} />
+          <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 10, background: CTL }} />
           {onClose && (
             // The TOOLBAR's ✕, in its exact final position/style (BOTTOM-left — the toolbar lives
             // at the bottom now) — visual continuity: when the toolbar reveals, the ✕ doesn't move
             // or restyle (Peter, 2026-07-10: a moving loading ✕ read as a different control).
             <button type="button" onClick={onClose} title="Close (Esc)"
-              style={{ position: 'absolute', bottom: 7, left: 12, zIndex: 11, width: 28, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+              style={{ position: 'absolute', bottom: 7, left: 12, zIndex: 11, width: 28, height: 28, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_MUTED, cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
           )}
         </>
       )}
@@ -2141,11 +2195,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           per side and grows to 44px TALL, without the row reflowing — Peter asked this bar down to
           ONE ROW and a 28px icon cannot become 44px wide without breaking that. See index.css. */}
       <div className="iw-tap-row"
-        style={{ order: 3, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, rowGap: 4, padding: '6px 8px', borderTop: `1px solid ${INK}22`, background: '#faf8fc', flexWrap: 'wrap', ['--iw-tap-x' as string]: '3px' }}
+        style={{ order: 3, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 3, rowGap: 4, padding: '6px 8px', borderTop: `1px solid ${HAIR}`, background: BAR, flexWrap: 'wrap', ['--iw-tap-x' as string]: '3px' }}
         onMouseLeave={() => setHint(null)}>
         {onClose && (
           <button type="button" onClick={onClose} title="Close (Esc)" onMouseEnter={() => setHint('close the PDF')}
-            style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid #d6cfe0`, background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+            style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_MUTED, cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         )}
         {/* ⇄ sync-editor and # don't-add-pages MOVED TO THE RIGHT END (Peter, 2026-08-28: "let's
             move these two buttons over to the rhs"). They are per-session preferences, not actions
@@ -2159,10 +2213,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onMouseEnter={() => setHint('in full screen, clicking back into the editor drops the PDF viewer (off by default)')}
           onClick={() => setHideOnEditorClick(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
-            border: `1px solid ${hideOnEditorClick ? INK : '#d6cfe0'}`, background: hideOnEditorClick ? `${INK}1f` : '#fff', color: INK }}>◧</button>
+            border: `1px solid ${hideOnEditorClick ? BAR_INK : EDGE}`, background: hideOnEditorClick ? `${LIT}` : CTL, color: BAR_INK }}>◧</button>
         )}
         {fullscreenButton}
-        <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 3px', flexShrink: 0 }} />
+        <span style={{ width: 1, height: 18, background: `${HAIR}`, margin: '0 3px', flexShrink: 0 }} />
         {TOOLS.map(t => {
           const active = tool === t.kind
           const btn = (
@@ -2192,7 +2246,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               style={{
                 width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: `1px solid ${active ? INK : '#d6cfe0'}`,
+                border: `1px solid ${active ? BAR_INK : EDGE}`,
                 // THE BUTTON WEARS ITS OWN COLOUR (Peter, 2026-08-28: "the colour of these buttons
                 // needs to reflect the colour chosen"). Now that each palette lives under its tool,
                 // the tool is the only place the choice is visible — a fixed yellow ▮ over a pink
@@ -2206,9 +2260,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                 // The `text` tool's SHEET colour wins over the armed tint: which colour the note
                 // will be is the more useful fact, and the ring already shows it is armed.
                 ...(t.kind === 'text'
-                  ? { background: toolColorsRef.current.text ?? COLORS[0], color: '#2a2a2a' }
-                  : { background: active ? `${INK}14` : '#fff',
-                      color: t.kind === 'highlight' ? (toolColorsRef.current.highlight ?? COLORS[0]) : INK,
+                  ? { background: toolColorsRef.current.text ?? COLORS[0], color: ON_MARK }
+                  : { background: active ? `${LIT_SOFT}` : CTL,
+                      // The highlighter wears its MARK's stored colour (never re-toned — see the
+                      // fill/stroke note at the top of this file); every other tool wears the bar's
+                      // own glyph colour, which is what follows the theme.
+                      color: t.kind === 'highlight' ? (toolColorsRef.current.highlight ?? COLORS[0]) : BAR_INK,
                       // ⚠ THE SWATCH MUST STILL BE VISIBLE. Peter's rule above is that the button
                       // wears the armed colour — but the default is #ffe066 on a white face, which
                       // MEASURED 1.3:1 (a control needs 3:1), i.e. the one thing the ▮ exists to
@@ -2248,7 +2305,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                       mousedown (iOS withholds one when the gesture is treated as a scroll, or when
                       a touchmove was preventDefaulted). Same fix as the source reader's palette. */}
                   <div style={{ position: 'fixed', inset: 0, zIndex: 20 }} onPointerDown={() => setColorOpen(null)} />
-                  <div className="iw-nightable" style={{ position: 'absolute', bottom: 34, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
+                  <div className="iw-nightable" style={{ position: 'absolute', bottom: 34, left: 0, zIndex: 21, display: 'flex', gap: 6, padding: '7px 8px', borderRadius: 10, background: CTL, border: `1px solid ${CARD_EDGE}`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)' }}>
                     {palette.map((c) => (
                       <button key={c} type="button" title={c}
                         onMouseDown={(ev) => ev.preventDefault()}
@@ -2260,7 +2317,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                           toolColorsRef.current[t.kind] = c
                           setColorOpen(null)
                         }}
-                        style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: (toolColorsRef.current[t.kind] ?? color) === c ? `2px solid ${INK}` : '1px solid rgba(0,0,0,0.15)' }} />
+                        style={{ width: 20, height: 20, borderRadius: '50%', background: c, cursor: 'pointer', border: (toolColorsRef.current[t.kind] ?? color) === c ? `2px solid ${BAR_INK}` : '1px solid rgba(0,0,0,0.15)' }} />
                     ))}
                   </div>
                 </>
@@ -2279,16 +2336,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           // A <select> gets no pseudo-element in Chrome/Safari, so it cannot borrow the `.iw-tap`
           // hit region — its box has to be the target. 34px is also what the forced 16px iOS floor
           // (index.css) needs to hold its own line without clipping.
-          style={{ height: isTouch ? 40 : 28, width: isTouch ? 44 : 34, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: isTouch ? '16px' : '0.78rem', padding: '0 2px', cursor: 'pointer', flexShrink: 0, textAlign: 'center', appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none' as never }}>
+          style={{ height: isTouch ? 40 : 28, width: isTouch ? 44 : 34, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_INK, fontSize: isTouch ? '16px' : '0.78rem', padding: '0 2px', cursor: 'pointer', flexShrink: 0, textAlign: 'center', appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none' as never }}>
           {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 3px', flexShrink: 0 }} />
-        <span style={{ width: 1, height: 18, background: `${INK}22`, margin: '0 3px', flexShrink: 0 }} />
+        <span style={{ width: 1, height: 18, background: `${HAIR}`, margin: '0 3px', flexShrink: 0 }} />
+        <span style={{ width: 1, height: 18, background: `${HAIR}`, margin: '0 3px', flexShrink: 0 }} />
         {/* Scroll-highlighted navigator */}
         <button type="button" title="Previous highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(-1)}
-          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
+          style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>‹</button>
         <button type="button" title="Next highlight" onMouseEnter={() => setHint('scroll through the highlights in order')} onClick={() => stepHighlight(1)}
-          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
+          style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>›</button>
         {/* Rotate lives in the toolbar (Peter, 2026-07-10) — the floating −/%/+ zoom pill is gone;
             Ctrl/⌘+wheel (and the persisted user zoom) remain the zoom path. */}
         <button type="button" title="Rotate 90°" aria-label="Rotate 90 degrees"
@@ -2304,7 +2361,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             setRendered(zoom)
             void renderPages(fitScaleRef.current * zoom)
           }}
-          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1.1rem', lineHeight: 1 }}>⟳</button>
+          style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_INK, cursor: 'pointer', flexShrink: 0, fontSize: '1.1rem', lineHeight: 1 }}>⟳</button>
         {/* FIT THE TEXT TO THE WINDOW (Peter, 2026-08-28: "it needs to zoom and pan sideways so
             that the edge of the text is flush with the window on both sides, and go into a state
             such that this flushness is maintained if you make the window bigger or smaller").
@@ -2329,7 +2386,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               ? Math.max(0, textFitX0Ref.current * fit - TEXT_FIT_INSET)
               : Math.max(0, (el.scrollWidth - el.clientWidth) / 2)
           }}
-          style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>⤢</button>
+          style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_INK, cursor: 'pointer', flexShrink: 0, fontSize: '1rem', lineHeight: 1 }}>⤢</button>
         {/* READER VIEW toggle (Peter, 2026-08-28: "yep build the reader view for pdfs"). ¶ = the
             text, reflowed in your own font at your own line spacing; the page view is one tap back.
             A MODE beside the page view, never instead of it — a scan with no text layer is still
@@ -2339,7 +2396,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onMouseEnter={() => setHint('read the text reflowed, with your own font and line spacing')}
           onClick={() => setReaderMode(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
-            border: `1px solid ${readerMode ? INK : '#d6cfe0'}`, background: readerMode ? `${INK}1f` : '#fff', color: INK }}>¶</button>
+            border: `1px solid ${readerMode ? BAR_INK : EDGE}`, background: readerMode ? `${LIT}` : CTL, color: BAR_INK }}>¶</button>
         {/* COMMENT MARGIN (Peter, 2026-08-28: "another button over here that refers to viewing with
             a padding on the right for adding comments"). Reserves a strip to the right of the page
             so sticky notes have somewhere to live that is not on top of the text. It changes the
@@ -2349,7 +2406,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onMouseEnter={() => setHint('reserve a margin on the right to put notes in')}
           onClick={() => setCommentMargin(v => { const n = !v; try { localStorage.setItem('inkwave:pdfCommentMargin', n ? '1' : '0') } catch { /* private */ } ; return n })}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem',
-            border: `1px solid ${commentMargin ? INK : '#d6cfe0'}`, background: commentMargin ? `${INK}1f` : '#fff', color: INK }}>◨</button>
+            border: `1px solid ${commentMargin ? BAR_INK : EDGE}`, background: commentMargin ? `${LIT}` : CTL, color: BAR_INK }}>◨</button>
         {/* ⋮ MORE — Export / Print the marked-up PDF (Peter, 2026-08-28: "we need a three dots
             button with an export and print button"). A MENU, not two more buttons: Peter has asked
             twice for this row to stay on ONE line, and these are actions reached occasionally, not
@@ -2361,7 +2418,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             onMouseEnter={() => setHint('export or print this PDF with your annotations on it')}
             onClick={() => { setMoreOpen(v => !v); setOutput({ phase: 'idle' }) }}
             style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1.1rem', lineHeight: 1,
-              border: `1px solid ${moreOpen ? INK : '#d6cfe0'}`, background: moreOpen ? `${INK}1f` : '#fff', color: INK }}>⋮</button>
+              border: `1px solid ${moreOpen ? BAR_INK : EDGE}`, background: moreOpen ? `${LIT}` : CTL, color: BAR_INK }}>⋮</button>
           {moreOpen && (
             <>
               {/* POINTERDOWN — a finger is not guaranteed to produce a synthetic mousedown (iOS
@@ -2380,8 +2437,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                 position: 'absolute', bottom: 34, right: 0, zIndex: 21, minWidth: 232,
                 maxWidth: 'min(300px, calc(100vw - 16px))',
                 display: 'flex', flexDirection: 'column', gap: 2, padding: 6, borderRadius: 10,
-                background: '#fff', border: `1px solid ${INK}44`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)',
-                fontSize: isTouch ? '15px' : '0.82rem', color: '#3f3a48',
+                background: CTL, border: `1px solid ${CARD_EDGE}`, boxShadow: '0 4px 16px rgba(0,0,0,0.16)',
+                fontSize: isTouch ? '15px' : '0.82rem', color: 'var(--iw-panel-fg, #4a4035)',
               }}>
                 {output.phase === 'idle' && (
                   <>
@@ -2408,7 +2465,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button type="button" onClick={() => void runOutput(output.what, output.scale)}
-                        style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), background: INK, color: '#fff', textAlign: 'center' }}>
+                        style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', textAlign: 'center' }}>
                         {output.what === 'export' ? 'Export anyway' : 'Print anyway'}
                       </button>
                       <button type="button" onClick={() => { setOutput({ phase: 'idle' }); setMoreOpen(false) }}
@@ -2422,8 +2479,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                       {output.what === 'export' ? 'Building your PDF' : 'Preparing to print'} — page{' '}
                       <strong>{output.done}</strong> of <strong>{output.total}</strong>
                     </div>
-                    <div aria-hidden="true" style={{ height: 4, borderRadius: 2, background: `${INK}22`, overflow: 'hidden', marginBottom: 8 }}>
-                      <div style={{ height: '100%', width: `${output.total ? (100 * output.done) / output.total : 0}%`, background: INK, transition: 'width 120ms linear' }} />
+                    <div aria-hidden="true" style={{ height: 4, borderRadius: 2, background: `${HAIR}`, overflow: 'hidden', marginBottom: 8 }}>
+                      <div style={{ height: '100%', width: `${output.total ? (100 * output.done) / output.total : 0}%`, background: 'var(--iw-ink, #5c2d8a)', transition: 'width 120ms linear' }} />
                     </div>
                     <button type="button" onClick={() => { cancelOutputRef.current = true }}
                       style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), textAlign: 'center' }}>Cancel</button>
@@ -2449,12 +2506,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           onMouseEnter={() => setHint('scroll the editor to where the highlight is cited on clicking the arrows')}
           onClick={() => setSyncEditor(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '1rem',
-            border: `1px solid ${syncEditor ? INK : '#d6cfe0'}`, background: syncEditor ? `${INK}1f` : '#fff', color: INK }}>⇄</button>
+            border: `1px solid ${syncEditor ? BAR_INK : EDGE}`, background: syncEditor ? `${LIT}` : CTL, color: BAR_INK }}>⇄</button>
         {/* "Don't add pages to inline" toggle — lights up purple when on. */}
         <button type="button" disabled={!!noRef} title="When on, highlights won't add page numbers to inline citations, wherever you opened from"
           onClick={() => setDontAddPages(v => !v)}
           style={{ width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: noRef ? 'default' : 'pointer', fontSize: '1rem',
-            border: `1px solid ${(!!noRef || dontAddPages) ? INK : '#d6cfe0'}`, background: (!!noRef || dontAddPages) ? `${INK}1f` : '#fff', color: '#6b5b7e' }}>
+            border: `1px solid ${(!!noRef || dontAddPages) ? BAR_INK : EDGE}`, background: (!!noRef || dontAddPages) ? `${LIT}` : CTL, color: BAR_INK }}>
           {/* ⚠ REDRAWN (Peter, 2026-08-28: "this button is really ugly. Do you think you can do
               better"). It was a text "#" with an absolutely-positioned 1.5px bar dragged across its
               middle — two glyph-metric hacks fighting each other, and it looked it. Now one SVG: a
@@ -2464,7 +2521,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <path d="M6 3h8l4 4v14H6z" />
             <path d="M14 3v4h4" />
-            <path d="m8.5 17.5 7-7" stroke="#b45309" strokeWidth="1.8" />
+            <path d="m8.5 17.5 7-7" stroke="var(--iw-danger, #b91c1c)" strokeWidth="1.8" />
             <text x="12" y="17" textAnchor="middle" fontSize="7" stroke="none" fill="currentColor">7</text>
           </svg>
         </button>
@@ -2478,12 +2535,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         <div
           onClick={() => { if (instanceIdRef.current) window.dispatchEvent(new CustomEvent('inkwave:goto-citation-instance', { detail: { instanceId: instanceIdRef.current } })) }}
           title={instanceIdRef.current ? 'Go to this citation in the document' : undefined}
-          style={{ order: 2, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: '#6b5b7e', background: '#f6f2fb', borderTop: `1px solid ${INK}18`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
+          style={{ order: 2, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: '0.82rem', lineHeight: 1.4, color: BAR_MUTED, background: BAR, borderTop: `1px solid ${HAIR_SOFT}`, cursor: instanceIdRef.current ? 'pointer' : 'default' }}>
           <span style={{ fontStyle: 'italic', flex: 1, minWidth: 0 }}>“…{context}”</span>
           {/* Per-open dismiss — reclaims the strip's height; stopPropagation so it never jumps to the citation. */}
           <button type="button" title="Hide this context strip" className="iw-tap"
             onClick={ev => { ev.stopPropagation(); setContextDismissed(true) }}
-            style={{ flexShrink: 0, width: 20, height: 20, border: 'none', background: 'transparent', color: '#8d7ba3', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, borderRadius: 4 }}>×</button>
+            style={{ flexShrink: 0, width: 20, height: 20, border: 'none', background: 'transparent', color: BAR_MUTED, cursor: 'pointer', fontSize: '1rem', lineHeight: 1, borderRadius: 4 }}>×</button>
         </div>
       )}
 
@@ -2492,7 +2549,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       {searchOpen && (
         <div className="iw-nightable iw-tap-row" style={{
           position: 'absolute', bottom: 10, right: 18, zIndex: 25,
-          display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: `1px solid ${INK}44`,
+          display: 'flex', alignItems: 'center', gap: 8, background: CTL, border: `1px solid ${CARD_EDGE}`,
           borderRadius: 10, boxShadow: '0 3px 14px rgba(0,0,0,0.22)', padding: '8px 12px',
           // The bar is 240px of input + a counter + three buttons: at 375px it overflows the panel
           // it is anchored inside. Cap it and let the input take what is left.
@@ -2507,17 +2564,17 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
               if (e.key === 'Escape') { e.preventDefault(); setSearchOpen(false); clearFindHits() }
             }}
             placeholder="Find in PDF…"
-            style={{ width: 240, minWidth: 0, flex: '1 1 auto', fontSize: isTouch ? '16px' : '15px' /* <16px makes iOS auto-zoom on focus */, border: `1px solid ${INK}33`, borderRadius: 6, padding: '5px 10px', outline: 'none' }}
+            style={{ width: 240, minWidth: 0, flex: '1 1 auto', fontSize: isTouch ? '16px' : '15px' /* <16px makes iOS auto-zoom on focus */, border: `1px solid ${FIELD_EDGE}`, borderRadius: 6, padding: '5px 10px', outline: 'none' }}
           />
           <span style={{ fontSize: '13px', color: 'var(--iw-pill-fg, #78716c)', minWidth: 48, textAlign: 'center' }}>
             {matchInfo.total ? `${matchInfo.cur}/${matchInfo.total}` : (searchQuery ? '0/0' : '')}
           </span>
           <button type="button" onClick={() => stepMatch(-1)} title="Previous (Shift+Enter)"
-            style={{ width: 28, height: 28, border: 'none', background: 'transparent', color: 'var(--iw-pill-fg, #5c2d8a)', cursor: 'pointer', borderRadius: 5, fontSize: '1.1rem' }}>‹</button>
+            style={{ width: 28, height: 28, border: 'none', background: 'transparent', color: 'var(--iw-pill-fg, #78716c)', cursor: 'pointer', borderRadius: 5, fontSize: '1.1rem' }}>‹</button>
           <button type="button" onClick={() => stepMatch(1)} title="Next (Enter)"
-            style={{ width: 28, height: 28, border: 'none', background: 'transparent', color: 'var(--iw-pill-fg, #5c2d8a)', cursor: 'pointer', borderRadius: 5, fontSize: '1.1rem' }}>›</button>
+            style={{ width: 28, height: 28, border: 'none', background: 'transparent', color: 'var(--iw-pill-fg, #78716c)', cursor: 'pointer', borderRadius: 5, fontSize: '1.1rem' }}>›</button>
           <button type="button" onClick={() => { setSearchOpen(false); clearFindHits() }} title="Close (Esc)"
-            style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: '#78716c', cursor: 'pointer', borderRadius: 5, fontSize: '0.95rem' }}>×</button>
+            style={{ width: 24, height: 24, border: 'none', background: 'transparent', color: BAR_MUTED, cursor: 'pointer', borderRadius: 5, fontSize: '0.95rem' }}>×</button>
         </div>
       )}
       {/* touch-action:none ONLY while a drag tool (note placement / eraser) is armed — normal browsing
@@ -2526,7 +2583,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       <div ref={scrollRef} onMouseUp={onMouseUp} onPointerDown={onPdfPointerDown}
         // The comment margin is PADDING on the scroller, not a change to the page: a note's position
         // is a position on the page, so turning the margin on or off can never move one.
-        style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#e9e7e3',
+        style={{ position: 'absolute', inset: 0, overflow: 'auto', background: GALLERY,
           padding: 12, paddingRight: 12 + commentMarginPx,
           touchAction: tool === 'text' || tool === 'erase' ? 'none' : 'auto',
           WebkitUserSelect: tool === 'text' || tool === 'erase' ? 'none' : undefined,
@@ -2546,14 +2603,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         {/* Lower and clearer (Peter, 2026-08-28) — it sat on the text and read as part of it. */}
         {status === 'ready' && pageTotal > 0 && (
           <div aria-live="off" style={{ position: 'sticky', bottom: -2, left: 0, width: 'fit-content', marginLeft: 8,
-            zIndex: 6, pointerEvents: 'none', background: '#fff', color: INK,
-            border: `1px solid ${INK}55`, borderRadius: 999, padding: '3px 11px', fontSize: '12px',
+            zIndex: 6, pointerEvents: 'none', background: CTL, color: BAR_INK,
+            border: `1px solid ${PILL_EDGE}`, borderRadius: 999, padding: '3px 11px', fontSize: '12px',
             fontWeight: 600, fontFamily: 'system-ui, sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,0.18)' }}>
             {pageNow} / {pageTotal}
           </div>
         )}
-        {status === 'loading' && <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>Loading PDF…</p>}
-        {status === 'error' && <p style={{ textAlign: 'center', color: '#b45309', marginTop: 40 }}>Couldn't render this PDF.</p>}
+        {status === 'loading' && <p style={{ textAlign: 'center', color: BAR_MUTED, marginTop: 40 }}>Loading PDF…</p>}
+        {status === 'error' && <p style={{ textAlign: 'center', color: 'var(--iw-danger, #b91c1c)', marginTop: 40 }}>Couldn't render this PDF.</p>}
       </div>
 
       {/* The reader view COVERS the page scroller rather than replacing it: every fit calculation in

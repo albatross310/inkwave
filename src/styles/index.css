@@ -1861,6 +1861,21 @@
    Only PdfReaderView had been migrated to --iw-reader-bar; the web reader was left behind. */
 :root { --iw-reader-bar: #faf8fc; --iw-reader-ctl: #ffffff; --iw-reader-edge: #d6cfe0; }
 :root[data-theme="night"] { --iw-reader-bar: #302d27; --iw-reader-ctl: #3a3630; --iw-reader-edge: #57514a; }
+/* THE PDF VIEWER'S BOTTOM TOOLBAR JOINS THIS FAMILY (2026-08-30), and the argument is that its day
+   values already WERE these: bar #faf8fc, control face #fff, outline #d6cfe0, glyph #5c2d8a — the
+   four literals PdfViewer.tsx had been carrying since July. Not a coincidence and not a new palette:
+   PdfReaderView's header is the SAME bar in the SAME panel (the ¶ toggle swaps what is between
+   them), so a bar that stayed daylight while the header above it went dark was one panel wearing two
+   themes. Day is byte-unchanged by construction; night follows for free.
+   --iw-reader-accent-rgb is the accent's COMPONENTS, for the toolbar's tints (a lit toggle's fill,
+   the divider pips, the bar's top rule). A tint needs the numbers, not a colour, which is the same
+   reason --iw-ink-rgb exists — and the same gate keeps each in step with the colour it tints.
+   --iw-reader-gallery is the VOID BEHIND THE PAGES in the page view. It is not paper: the pages
+   themselves are pdf.js canvases and stay a picture of white paper in both themes (re-toning one
+   would reinterpret the document). It is the darkest of the family so a page reads as an object
+   lying on it, the way every PDF reader's dark mode does it. */
+:root { --iw-reader-accent-rgb: 92 45 138; --iw-reader-gallery: #e9e7e3; }
+:root[data-theme="night"] { --iw-reader-accent-rgb: 195 168 239; --iw-reader-gallery: #1c1a17; }
 /* THE READER PANEL'S OWN CHROME — the header strip, which is .iw-nightable dolphin grey at night and
    is NOT a reading surface. Peter: *"the top bar's fonts are too dark."* Two separate faults, both
    measured on the live panel: the back/forward arrows carried the LITERAL #5c2d8a, which is 1.13:1

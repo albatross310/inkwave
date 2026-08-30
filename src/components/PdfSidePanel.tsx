@@ -23,6 +23,17 @@ import { getPaperSize, getOrientation } from '../editor/pageSettings'
 import { tabDocId } from '../storage/tabDoc'
 
 const INK = '#5c2d8a'
+
+// ─── THE THREE BUTTONS THIS FILE HANDS TO THE PDF TOOLBAR ────────────────────────────────────────
+// ⛶ full screen, ⇤/⇥ dock side, ▭/▯ dock orientation — they RENDER INSIDE PdfViewer's bottom bar
+// (passed down as `fullscreenButton` / `sideButtons` / `dockButton`), so they have to be painted in
+// that bar's palette or half the row themes and half of it does not. Same tokens, same reason: the
+// day values already were the reader family's, byte for byte. See the header of PdfViewer.tsx.
+const CTL = 'var(--iw-reader-ctl, #fff)'
+const EDGE = 'var(--iw-reader-edge, #d6cfe0)'
+const BAR_INK = 'var(--iw-reader-accent, #5c2d8a)'
+const BAR_MUTED = 'var(--iw-reader-muted, #6b645f)'
+const LIT = 'rgb(var(--iw-reader-accent-rgb, 92 45 138) / 0.122)'
 const MIN_W = 320, MIN_H = 200
 const ORIENT_KEY = 'inkwave:pdfPanelOrientation'
 const DOCK_SIDE_KEY = 'inkwave:pdfDockSide' // side dock on the 'left' or 'right' screen edge
@@ -262,7 +273,7 @@ export function PdfSidePanel() {
       {/* `iw-dock-panel` owns the divider colour — see dockLayout.ts. This root carries no
           `iw-nightable`, so its inline border already resolves the token; the class is here so the
           two dock panels answer to ONE rule rather than to whichever happens to apply. */}
-      <div className="iw-dock-panel" style={{ position: 'fixed', zIndex: 80, background: '#fff', display: 'flex', flexDirection: 'column', ...panelPos }}>
+      <div className="iw-dock-panel" style={{ position: 'fixed', zIndex: 80, background: CTL, display: 'flex', flexDirection: 'column', ...panelPos }}>
         {/* Resize handle on the edge facing the editor (hidden in fullscreen, and on the phone's
             fixed 50dvh top dock — a touch drag there fights scrolling). */}
         {!fullscreen && orientation !== 'top' && (
@@ -283,24 +294,24 @@ export function PdfSidePanel() {
           // Bottom-LEFT, in the toolbar ✕'s exact final position/style — the loading→revealed
           // transition never moves or restyles the close control (Peter, 2026-07-10).
           <button type="button" onClick={close} title="Close (Esc)"
-            style={{ position: 'absolute', bottom: 7, left: 12, zIndex: 3, width: 28, height: 28, borderRadius: 6, border: '1px solid #d6cfe0', background: '#fff', color: '#78716c', cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
+            style={{ position: 'absolute', bottom: 7, left: 12, zIndex: 3, width: 28, height: 28, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_MUTED, cursor: 'pointer', fontSize: '1.4rem', lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         )}
 
         {loading && !viewing ? (
           // Instant state = pure white + the floating ✕ above (Peter, 2026-07-09) — same interior the
           // viewer's pre-reveal cover shows, so the window is ONE white surface until the atomic
           // contents reveal. No text, no shimmer.
-          <div aria-hidden="true" style={{ flex: 1, minHeight: 0, background: '#fff' }} />
+          <div aria-hidden="true" style={{ flex: 1, minHeight: 0, background: CTL }} />
         ) : noAttachment ? (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: '1rem', fontStyle: 'italic' }}>No attachment</div>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: BAR_MUTED, fontSize: '1rem', fontStyle: 'italic' }}>No attachment</div>
         ) : error ? (
-          <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: '#b45309' }}>
+          <div style={{ padding: '1.5rem', fontSize: '0.85rem', color: 'var(--iw-danger, #b91c1c)' }}>
             {error === 'NOAUTH' ? (
               <>
                 This source’s PDF isn’t on this device yet.
                 <button type="button"
                   onClick={() => void startOneDriveSignIn()}
-                  style={{ display: 'block', marginTop: 12, padding: '8px 14px', borderRadius: 8, border: 'none', background: '#5c2d8a', color: '#fff', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  style={{ display: 'block', marginTop: 12, padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', cursor: 'pointer', fontSize: '0.9rem' }}>
                   Sign in to OneDrive to fetch it
                 </button>
               </>
@@ -324,20 +335,20 @@ export function PdfSidePanel() {
                 <button type="button" onClick={() => setFullscreen(f => !f)}
                   title={fullscreen ? 'Exit full screen (Esc)' : 'Full screen — float the PDF over the water'}
                   style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer', fontSize: '0.95rem', borderRadius: 6, lineHeight: 1,
-                    border: `1px solid ${fullscreen ? INK : '#d6cfe0'}`, background: fullscreen ? `${INK}1f` : '#fff', color: INK }}>⛶</button>
+                    border: `1px solid ${fullscreen ? BAR_INK : EDGE}`, background: fullscreen ? LIT : CTL, color: BAR_INK }}>⛶</button>
               }
               sideButtons={!fullscreen && side ? (
                 // Swap which screen edge the side dock hugs (persisted) — distinct from the
                 // ▭/▯ dock-ORIENTATION toggle next to it and the ⇄ sync-editor toggle at the left.
                 <button type="button" onClick={toggleDockSide}
                   title={dockSide === 'right' ? 'Move the panel to the LEFT edge of the screen' : 'Move the panel to the RIGHT edge of the screen'}
-                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.95rem', borderRadius: 6, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
+                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${EDGE}`, background: CTL, color: BAR_INK, fontSize: '0.95rem', borderRadius: 6, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
                   {dockSide === 'right' ? '⇤' : '⇥'}
                 </button>
               ) : null}
               dockButton={isWide && !fullscreen && !isPhone ? (
                 <button type="button" onClick={toggleOrient} title={side ? 'Dock to the bottom (panel under the editor)' : 'Dock to the side (side-by-side with the editor)'}
-                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #d6cfe0', background: '#fff', color: INK, fontSize: '0.95rem', borderRadius: 6, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
+                  style={{ width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${EDGE}`, background: CTL, color: BAR_INK, fontSize: '0.95rem', borderRadius: 6, cursor: 'pointer', flexShrink: 0, lineHeight: 1 }}>
                   {side ? '▭' : '▯'}
                 </button>
               ) : null}

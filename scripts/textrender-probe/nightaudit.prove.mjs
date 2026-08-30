@@ -735,6 +735,51 @@ try {
     if (pdfOpen !== 'no pdf panel') {
       const barItems = await audit(theme, 'pdf toolbar', '[data-iw-probe="pdfbar"]')
       check(Array.isArray(barItems), `[${theme}] the pdf toolbar was actually read`)
+
+      // ── DID IT ACTUALLY GO DARK? ──────────────────────────────────────────────────────────────
+      // The contrast walker CANNOT ask this, and on this exact surface it proved it: the PDF
+      // toolbar carried bare literals (bar #faf8fc, faces #fff, glyph #5c2d8a) from July until
+      // 2026-08-30 and scored ZERO failures in both themes the whole time, because dark-on-white
+      // passes beautifully — at midnight, in a strip of daylight welded under a dark app. Same
+      // shape as the markup-bar bug above. So read what the pixels ARE, in both themes, and hold
+      // the bar, a control face and the page-view gallery to it. (The pages themselves are pdf.js
+      // canvases and are deliberately NOT asked to invert: re-toning one would reinterpret the
+      // document.)
+      const pdfSurf = await page.evaluate(() => {
+        const bar = document.querySelector('[data-iw-probe="pdfbar"]')
+        const face = bar && [...bar.querySelectorAll('button')].find((b3) => b3.textContent.trim() === '⟳')
+        // The gallery is the scroller the .pdfViewer lives IN, found from the viewer upward — not by
+        // matching an overflow style, which would happily return the reader view's own scroller once
+        // ¶ has ever been on (it is a persisted toggle; the comment below records that trap).
+        const viewer = document.querySelector('.pdfViewer')
+        const gallery = viewer ? viewer.parentElement : null
+        if (face) face.setAttribute('data-iw-probe', 'pdfface')
+        if (gallery) gallery.setAttribute('data-iw-probe', 'pdfgallery')
+        return {
+          bar: window.__iwSurface('[data-iw-probe="pdfbar"]'),
+          face: face ? window.__iwSurface('[data-iw-probe="pdfface"]') : null,
+          gallery: gallery ? window.__iwSurface('[data-iw-probe="pdfgallery"]') : null,
+        }
+      })
+      const pdfOk = pdfSurf.bar && pdfSurf.face && pdfSurf.gallery
+      check(!!pdfOk, `[${theme}] read back the PDF toolbar, a control face and the page gallery`,
+        JSON.stringify(pdfSurf))
+      if (pdfOk) {
+        console.log(`      · bar ${pdfSurf.bar.bg} (lum ${pdfSurf.bar.lum}) · face ${pdfSurf.face.bg} · gallery ${pdfSurf.gallery.bg} (lum ${pdfSurf.gallery.lum})`)
+        if (theme === 'night') {
+          check(pdfSurf.bar.lum < 0.1, '[night] the PDF TOOLBAR inverted', `${pdfSurf.bar.bg} lum ${pdfSurf.bar.lum}`)
+          check(pdfSurf.face.lum < 0.1, '[night] …and so did the control faces on it', `${pdfSurf.face.bg} lum ${pdfSurf.face.lum}`)
+          check(pdfSurf.gallery.lum < 0.1, '[night] …and the gallery the pages lie on', `${pdfSurf.gallery.bg} lum ${pdfSurf.gallery.lum}`)
+          // A face you cannot pick out of the bar is not a control. This is the pairing that makes
+          // a 28px icon button legible as a button rather than as a smudge on the strip.
+          const sep = await page.evaluate(([a, b3]) => window.__iwRatio(a, b3), [pdfSurf.face.bg, pdfSurf.bar.bg])
+          check(sep !== null && sep > 1.05, '[night] the control faces are distinct from the bar', `ratio ${sep}`)
+        } else {
+          check(pdfSurf.bar.lum > 0.5, '[day] the PDF toolbar is UNCHANGED — still light', pdfSurf.bar.bg)
+          check(pdfSurf.face.lum > 0.5, '[day] …and so are its control faces', pdfSurf.face.bg)
+          check(pdfSurf.gallery.lum > 0.5, '[day] …and the gallery', pdfSurf.gallery.bg)
+        }
+      }
       // Hold the highlight tool for its palette, then re-audit so the palette is included.
       await page.evaluate(async () => {
         const hl = [...document.querySelectorAll('[data-iw-probe="pdfbar"] button')].find((x) => (x.getAttribute('title') || '').toLowerCase().includes('highlight'))
