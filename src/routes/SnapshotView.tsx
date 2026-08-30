@@ -8,6 +8,8 @@ import { VerifyModal } from '../components/VerifyModal'
 import type { InkwaveDocument } from '../types/document'
 import { loadLibrary } from '../citations/library'
 import { diffStats, type DiffOp } from '../provenance/diff'
+// The pure layout/diff rules live next door, where they can be tested without mounting this route.
+import { splitEdges, longestChangeOpIdx, stackHeight, bestGrid } from './snapshotLayout'
 import { opsBetween, peekOpsBetween, preloadDiffWindow, cancelDiffPreload } from '../provenance/diffCache'
 import { survivingNeighbourSig } from '../provenance/anchorMap'
 import { paginateStaticDoc, type StaticPaginationHandle, type StaticPageGeo } from '../editor/staticPagination'
@@ -154,15 +156,6 @@ function NavSide({
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
 
-// Split a change's text into [lead whitespace, visible core, trail whitespace] so the highlight (fill +
-// outline) wraps ONLY the core — leading/trailing spaces and especially RETURNS never paint an empty
-// highlighted line. `core` is '' when the change is pure whitespace (then it's rendered plain, unhighlighted).
-function splitEdges(text: string): { lead: string; core: string; trail: string } {
-  const lead = /^\s+/.exec(text)?.[0] ?? ''
-  if (lead.length === text.length) return { lead: '', core: '', trail: text }
-  const trail = /\s+$/.exec(text)?.[0] ?? ''
-  return { lead, core: text.slice(lead.length, text.length - trail.length), trail }
-}
 
 
 /**
@@ -554,48 +547,8 @@ function scrollTopForSignature(el: HTMLElement, sig: string, ratioBias: number):
 // Scroll lock: navigating snapshots keeps the same TEXT on the midline (content-anchored).
 // Click-to-midline: clicking any change in the hunk panel scrolls the document pane
 //   so that change's text sits at the midline.
-// The op (add or del) with the longest single character chain — the biggest contiguous change.
-// Returns its index in the ops array (= its data-opidx in the left pane), or null if no change.
-function longestChangeOpIdx(ops: DiffOp[] | null): number | null {
-  if (!ops) return null
-  let best: number | null = null, bestLen = 0
-  ops.forEach((op, i) => {
-    if (op.type === 'same') return
-    const len = op.text.length
-    if (len > bestLen) { bestLen = len; best = i }
-  })
-  return best
-}
 
-// Column stack-height for the minimap: pages stack this many high per column, then wrap into columns.
-// ≤2→1, 3–6→2, 7–9→3, 10–16→4, 17+→5 (then ≈√pages). Peter's spec.
-function stackHeight(pages: number): number {
-  if (pages <= 2) return 1
-  if (pages <= 6) return 2
-  if (pages <= 9) return 3
-  if (pages <= 16) return 4
-  return Math.ceil(Math.sqrt(pages))
-}
 
-// Pick the rows×cols to tile `n` page thumbnails into a W×H panel so each page CELL is portrait —
-// height:width clamped to Peter's band 1:2 … 1:4 (2026-07-10 revision: never taller than 1:4, never
-// squatter than 1:2 — the old [3,5] band rendered "longer than 1:5" on the phone's half-height
-// panel). We try every row count, score how far the resulting cell ratio falls outside the band
-// (heavily) plus its distance from the ideal (lightly), and take the best. Cells are 1fr so they
-// then scale to fill the panel. Recomputed whenever the panel resizes.
-function bestGrid(n: number, W: number, H: number): { rows: number; cols: number } {
-  if (n <= 1 || W <= 0 || H <= 0) return { rows: Math.max(1, n), cols: 1 }
-  const MIN = 2, MAX = 4, IDEAL = 3 // page thumbnail height:width
-  let best = { rows: 1, cols: n }, bestScore = Infinity
-  for (let rows = 1; rows <= n; rows++) {
-    const cols = Math.ceil(n / rows)
-    const ratio = (H / rows) / (W / cols) // cell height : width
-    const outside = ratio < MIN ? MIN - ratio : ratio > MAX ? ratio - MAX : 0
-    const score = outside * 100 + Math.abs(ratio - IDEAL)
-    if (score < bestScore) { bestScore = score; best = { rows, cols } }
-  }
-  return best
-}
 
 // A minimap of the whole document: one thin parchment-coloured bar per page, laid out in a column grid
 // (stackHeight tall, with gaps), on the aquamarine background. Red/green ticks mark deletions/insertions.
