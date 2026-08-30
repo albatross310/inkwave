@@ -12,8 +12,8 @@ import { ITEM_TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS } from '@inkwave/citat
 import { INKWAVE_URL_PATTERNS, QUEUE_KEY, WATCH_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 import {
   BG_ALLOW_FRAME, BG_CLEAR_FRAME,
-  BG_FETCH_PAGE, BG_OPEN_POPUP, BG_READER_STATUS, NEEDS_PERMISSION,
-  type FetchPageResult, type ReaderStatus,
+  BG_FETCH_FILE, BG_FETCH_PAGE, BG_OPEN_POPUP, BG_READER_STATUS, NEEDS_PERMISSION,
+  type FetchFileResult, type FetchPageResult, type ReaderStatus,
 } from '@inkwave/reader/extensionProtocol'
 // ⚠ THE RULE SHAPE IS DEFINED IN src/, NOT HERE. Same reason the wire names are (see the header of
 // extensionProtocol.ts): the extension imports from src/ and never the reverse, so one definition
@@ -21,7 +21,7 @@ import {
 // a restatement of it. A copy of the expected shape in a test passes for ever while the real rule
 // drifts underneath it; that is the pmToText/textMap trap this repo already carries a guard for.
 import { frameRuleFor, frameRuleIdFor } from '@inkwave/reader/framingRule'
-import { assertFetchable, decodeHtml, READER_ACCEPT } from '@inkwave/reader/fetchRules'
+import { assertFetchable, bytesToBase64, checkPdfBytes, decodeHtml, READER_ACCEPT } from '@inkwave/reader/fetchRules'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: CaptureMsg }
 
@@ -207,6 +207,14 @@ export default defineBackground(() => {
       return true
     }
 
+    // The source panel asking for the PDF it is looking at, so it can become a citable source.
+    if (m.type === BG_FETCH_FILE && typeof m.url === 'string') {
+      fetchFileForReader(m.url)
+        .then(sendResponse)
+        .catch(e => sendResponse({ ok: false, error: String((e as Error)?.message || e) } satisfies FetchFileResult))
+      return true
+    }
+
     // ── LIVE VIEW ────────────────────────────────────────────────────────────────────────────────
     // See the note above frameRuleFor for the three restrictions and what they are each for.
     // ⚠ `ok: true` means A RULE WAS INSTALLED. It does not mean the page will render: a site can
@@ -349,6 +357,51 @@ async function fetchPageForReader(rawUrl: string): Promise<FetchPageResult> {
     // A DOMException from AbortSignal.timeout has a name and an unhelpful message; everything else
     // reports its own. Nothing here is logged — the reader's posture is that no record is kept of
     // what was read, and a console line in a service worker is a record.
+    const err = e as { name?: string; message?: string }
+    return { ok: false, error: err?.name === 'TimeoutError' ? 'timed out' : String(err?.message || 'fetch failed') }
+  }
+}
+
+// A file is slower than a page and the writer pressed a button for it, so it gets its own, longer
+// deadline. Not unlimited: a request that will never answer must still stop and say so.
+const READER_FILE_TIMEOUT_MS = 60_000
+
+/**
+ * Fetch a PDF on the writer's behalf, for the source panel's "save this to my sources".
+ *
+ * ⚠ THE WHOLE REASON THIS IS HERE AND NOT IN THE PAGE. A publisher's PDF is cross-origin and almost
+ * never sends `Access-Control-Allow-Origin`, so `fetch` from Inkwave's own origin is refused by the
+ * browser before the response is readable. The worker holds `<all_urls>`, so it is not — and it is
+ * the writer's own address and the writer's own browser doing it, which is the same posture the
+ * page fetch already documents.
+ *
+ * Every refusal is a SHORT CODE the panel maps to a sentence, exactly as `fetchPageForReader` does.
+ * Nothing is logged: a console line in a service worker is a record of what was read.
+ */
+async function fetchFileForReader(rawUrl: string): Promise<FetchFileResult> {
+  let url: URL
+  try { url = assertFetchable(rawUrl) } catch (e) { return { ok: false, error: String((e as Error).message) } }
+  if (!await canFetchPages()) return { ok: false, error: NEEDS_PERMISSION }
+
+  try {
+    const res = await fetch(url.toString(), {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(READER_FILE_TIMEOUT_MS),
+      headers: { accept: 'application/pdf,*/*;q=0.8' },
+    })
+    if (!res.ok) return { ok: false, error: `http ${res.status}` }
+    const buf = await res.arrayBuffer()
+    // Throws `too large` / `not a pdf` — the two refusals that can only be made once the body is
+    // in hand, and both decided by the BYTES rather than by a header a server may lie about.
+    const bytes = checkPdfBytes(buf)
+    return {
+      ok: true,
+      finalUrl: res.url || url.toString(),
+      mime: res.headers.get('content-type') || 'application/pdf',
+      size: bytes.byteLength,
+      b64: bytesToBase64(bytes),
+    }
+  } catch (e) {
     const err = e as { name?: string; message?: string }
     return { ok: false, error: err?.name === 'TimeoutError' ? 'timed out' : String(err?.message || 'fetch failed') }
   }

@@ -36,10 +36,13 @@
 
 import type { ReaderBlock, ReaderDoc } from './types'
 import {
-  APP_SOURCE, NEEDS_PERMISSION, READER_FETCH, READER_FRAME, READER_GRANT, READER_PING,
+  APP_SOURCE, NEEDS_PERMISSION, READER_FETCH, READER_FILE, READER_FRAME, READER_GRANT, READER_PING,
   READER_UNFRAME,
-  isReaderFetched, isReaderFramed, isReaderGranted, isReaderPong, type FetchPageResult,
+  isReaderFetched, isReaderFiled, isReaderFramed, isReaderGranted, isReaderPong,
+  type FetchFileResult, type FetchPageResult,
 } from './extensionProtocol'
+import { checkPdfBytes } from './fetchRules'
+import { pdfRouteFor } from './pdfAddress'
 // The SHIPPED extractor — the same module api/_reader-core.mjs imports. Untyped Node-free ESM, so
 // the shape is asserted at the boundary here and nowhere else.
 import * as extractor from './extract.mjs'
@@ -243,6 +246,88 @@ export async function loadSource(url: string, o: LoadOptions = {}): Promise<{ do
     }
   }
   return { doc: await fetchViaServer(url, fetchFn), via: 'server' }
+}
+
+// ── THE PDF THE PANEL IS LOOKING AT (2026-08-30) ────────────────────────────────────────────────
+// Peter: "also can we have a downloads." Bringing a browsed PDF into the citation library needs its
+// BYTES, and where they can come from is not a preference — it is decided by two rules, one of
+// which is OURS:
+//
+//   • THE EXTENSION CAN FETCH ANYTHING. It holds `<all_urls>`, neither CORS nor our CSP applies to
+//     it, and the request leaves the writer's own address like every other reader fetch.
+//   • THE PAGE CAN FETCH ALMOST NOTHING, AND THE REASON IS OUR OWN CSP, NOT CORS. Measured in a
+//     real browser: `middleware.ts` sets `connect-src 'self' <named hosts>`, so a cross-origin
+//     request from here is refused BY US before CORS is consulted. See `pdfRouteFor` in
+//     pdfAddress.ts for why that header stands and the feature bends instead.
+//
+// So `pdfRouteFor` decides FIRST and the panel draws accordingly — there is no doomed attempt whose
+// only product is a console error and a wasted press. What this must never do is FAIL SILENTLY:
+// `savePdfSource.ts` turns each code below into a sentence, and the panel offers the extension at
+// exactly the wall it would remove.
+//
+// ⚠ THE SERVER IS DELIBERATELY NOT A THIRD ROUTE. `api/pdf.mjs?proxy=` was removed on 2026-07-08
+// for being slow, often blocked, and the one PDF path that passed a writer's reading through our
+// machine. Re-adding it here would undo that decision quietly, inside a feature about convenience.
+
+/** One PDF, fetched by the extension. Rejects with the extension's own short code. */
+export async function fetchFileViaExtension(
+  port: Port, url: string, timeoutMs = 65_000,
+): Promise<{ finalUrl: string; mime: string; b64: string }> {
+  const r = await ask<FetchFileResult>(port, { type: READER_FILE, url },
+    (d, uuid) => (isReaderFiled(d, uuid) ? (d as FetchFileResult) : null), timeoutMs)
+  if (!r) throw new Error('extension timed out')
+  if (!r.ok) throw new Error(r.error)
+  return { finalUrl: r.finalUrl, mime: r.mime, b64: r.b64 }
+}
+
+/** Where a fetched PDF came from. Reported, never inferred — the same rule `Via` follows. */
+export type FileVia = 'extension' | 'direct'
+
+export interface PdfFetch { bytes: Uint8Array; finalUrl: string; via: FileVia }
+
+/**
+ * The PDF's bytes, by whichever route can get them.
+ *
+ * ⚠ `no route` IS AN ANSWER, NOT A BUG. When the extension is absent AND the host refuses
+ * cross-origin reads there is genuinely nothing this origin can do, and saying so — with the
+ * extension offered beside it — is the honest end of the path. Guessing, retrying, or quietly
+ * storing an error page is not.
+ */
+export async function fetchPdfBytes(url: string, o: {
+  port?: Port | null; fetchFn?: typeof fetch; timeoutMs?: number; pageOrigin?: string
+} = {}): Promise<PdfFetch> {
+  // Decided before anything is attempted: a cross-origin request with no extension cannot leave
+  // this document, so making it anyway buys a console error and nothing else.
+  if (pdfRouteFor(url, !!o.port, o.pageOrigin) === 'none') throw new Error('no route')
+  let firstError: string | null = null
+  if (o.port) {
+    try {
+      const r = await fetchFileViaExtension(o.port, url, o.timeoutMs)
+      const bin = atob(r.b64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      return { bytes, finalUrl: r.finalUrl, via: 'extension' }
+    } catch (e) {
+      // A refusal the WRITER can act on must survive the fallback. `needs-permission`, `too large`
+      // and `not a pdf` are all verdicts about this file, and reporting the direct fetch's generic
+      // CORS failure over the top of one of them would send the writer looking in the wrong place.
+      firstError = (e as Error)?.message ?? null
+      if (firstError === NEEDS_PERMISSION || firstError === 'too large' || firstError === 'not a pdf') throw e
+    }
+  }
+  const fetchFn = o.fetchFn ?? fetch
+  try {
+    const res = await fetchFn(url, { redirect: 'follow' })
+    if (!res.ok) throw new Error(`http ${res.status}`)
+    const buf = await res.arrayBuffer()
+    return { bytes: checkPdfBytes(buf), finalUrl: res.url || url, via: 'direct' }
+  } catch (e) {
+    const m = (e as Error)?.message ?? ''
+    if (m === 'too large' || m === 'not a pdf' || /^http \d+$/.test(m)) throw e
+    // Everything else on this arm is the browser refusing to let us READ the reply — an opaque
+    // CORS failure with no detail, which is exactly the wall the extension removes.
+    throw new Error(firstError && firstError !== 'extension timed out' ? firstError : 'no route')
+  }
 }
 
 export { NEEDS_PERMISSION }

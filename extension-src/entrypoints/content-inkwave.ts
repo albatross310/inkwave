@@ -6,9 +6,11 @@
 import { QUEUE_KEY, HISTORY_KEY, HISTORY_TTL_MS } from '../utils/constants'
 import {
   BG_ALLOW_FRAME, BG_CLEAR_FRAME,
-  BG_FETCH_PAGE, BG_OPEN_POPUP, BG_READER_STATUS, EXT_SOURCE, READER_FETCH, READER_FETCHED,
+  BG_FETCH_FILE, BG_FETCH_PAGE, BG_OPEN_POPUP, BG_READER_STATUS, EXT_SOURCE,
+  READER_FETCH, READER_FETCHED, READER_FILE, READER_FILED,
   READER_FRAME, READER_FRAMED, READER_UNFRAME,
-  READER_GRANT, READER_GRANTED, READER_PING, READER_PONG, type FetchPageResult, type ReaderStatus,
+  READER_GRANT, READER_GRANTED, READER_PING, READER_PONG,
+  type FetchFileResult, type FetchPageResult, type ReaderStatus,
 } from '@inkwave/reader/extensionProtocol'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: unknown }
@@ -84,6 +86,21 @@ export default defineContentScript({
           .catch(() => ({ ok: false, error: 'extension unavailable' })) as FetchPageResult
         window.postMessage(
           { source: EXT_SOURCE, type: READER_FETCHED, uuid: d.uuid, ...r },
+          window.location.origin,
+        )
+        return
+      }
+
+      // The panel asking for a FILE rather than a page — the PDF the reader is looking at, on its
+      // way into the citation library. A separate message because a page fetch returns text and
+      // must go on being incapable of returning bytes (extensionProtocol.ts has the argument).
+      // Relayed exactly like the page fetch, including reporting a relay failure AS a failure: the
+      // panel shows the reason, and a dropped reply would instead hang until its own deadline.
+      if (d.type === READER_FILE && d.uuid && d.url) {
+        const r = await browser.runtime.sendMessage({ type: BG_FETCH_FILE, url: d.url })
+          .catch(() => ({ ok: false, error: 'extension unavailable' })) as FetchFileResult
+        window.postMessage(
+          { source: EXT_SOURCE, type: READER_FILED, uuid: d.uuid, ...r },
           window.location.origin,
         )
         return

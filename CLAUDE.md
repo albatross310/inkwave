@@ -211,6 +211,41 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
   (slow, often blocked, and the one PDF path through our server) — sources embed files only;
   legacy `pdfUrl` metadata is inert. Haiku page-offset
   detection (`citations/pageOffset.ts`). CSP (middleware.ts): `frame-src blob:`, `wasm-unsafe-eval`.
+- **"SAVE THIS PDF TO MY SOURCES" — the source panel, LIVE, default-on (2026-08-30).** Peter, while
+  browsing: *"also can we have a downloads"*. Read as the loop it serves — he reads papers to CITE
+  them — so a PDF at the panel's address becomes a SOURCE (`reader/savePdfSource.ts`), bytes into
+  the same OPFS store every other source PDF uses. The literal half is answered separately and was
+  a silent bug of its own: the live frame's `sandbox` was missing **`allow-downloads`**, so a
+  download link inside a framed page did nothing at all and only the browser's console said why.
+  - **⚠ THE WALL IS OUR OWN CSP, NOT CORS — measured, and it refuted the design.** The plan was
+    "try the extension, fall back to a direct fetch". `middleware.ts` sets `connect-src 'self'
+    <named hosts>`, so a cross-origin fetch is refused BY US before CORS is consulted. That header
+    stands — this origin holds the thesis and the signing session — so the FEATURE bends:
+    `pdfRouteFor` decides `extension | direct | none` BEFORE the card is drawn, and with no
+    extension a publisher's PDF draws **no save button at all**, states the wall, and offers the
+    extension. A button that reliably explains a wall is still a dead control.
+  - **`_iw.pdfName` IS the claim that bytes exist** (`hasPdf` is `!!pdfName`), so the write order is
+    the whole design: entry WITHOUT pdfName (to learn the key `freeCitekey` actually assigned) →
+    bytes under that key → only then pdfName. Fail in the middle and the writer has an honest
+    URL-only source, never an entry pointing at nothing.
+  - **A content-type header is not the authority; the `%PDF-` magic is.** A publisher's download
+    link that has become a login wall answers 200 `application/pdf` with HTML.
+  - **The extension gained `reader/file`, a SECOND message, not a flag on `reader/fetch`** — that
+    exchange is defined to return text (`decodeHtml` throws `not html`) and must stay incapable of
+    returning bytes. Bytes cross as base64 because `runtime.sendMessage` is JSON, not structured
+    clone; the page decodes with `base64ToBlob`, never a hand-rolled atob loop.
+  - The entry is saved with **author and year EMPTY**: a file tells us its address, not who wrote
+    it, and an invented attribution would look finished.
+  - Kept by `pdfAddress.test.ts` / `savePdfSource.test.ts` (write order mutation-proved 2/1/1) and
+    `SourceBrowser.pdf.test.tsx`; `pnpm prove:reader` audits the saved bytes **off OPFS directly**,
+    out of the app's own read path. ⚠ Its first cut asserted "/api/reader was never called" with a
+    READY extension — true whatever the panel did, because the fake answers no `reader/fetch` and
+    the fallback sits behind a 25s deadline. Mutation-proved worthless, then re-aimed.
+  - **The install card links to a VERSION-PINNED release asset** (`reader/extensionDownload.ts`,
+    one constant) with the Releases page beside it. Pinned by hand rather than derived from
+    `extension-src/package.json`: deriving makes a version bump a 404 immediately, pinning can only
+    go stale, and a stale zip still installs. A gate test asserts the two versions match, so
+    forgetting to update it is red at home rather than a 404 in front of a writer.
 - **The PDF panel's three measurement rounds are in `docs/archive/pdf-panel-rounds.md`** (zoom
   snap-back, fit-to-panel, the reader view). **Their shared lesson is a rule, not a story: the fix
   you can argue for is not the fix — reproduce the symptom against a control in the SAME build.**
