@@ -34,7 +34,27 @@ import { APP_INITIATORS } from './framingRule'
 // and Google in the reader is an empty page, so a writer who has not installed it must still get
 // results rather than a worse version of the same wall.
 export const GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
-export const SEARCH_URL = 'https://html.duckduckgo.com/html/?q='
+// ⚠ THE READER'S SEARCH ENGINE IS THE ONE OUR SERVER CAN ACTUALLY REACH (2026-08-31).
+// It was html.duckduckgo.com, and Peter reported "not searching anything" five times in one
+// evening. Measured through the DEPLOYED /api/reader, same query, same minute:
+//     html.duckduckgo.com   502  0 blocks      lite.duckduckgo.com  502  0 blocks
+//     www.mojeek.com        502  0 blocks      search.marginalia.nu 200  119 blocks / 69 links
+// Search engines refuse a data centre and serve a person. So the READER path — the one that runs
+// with no extension installed — had never worked and could never have worked; it was a fallback to
+// a wall. Every "it's broken" was that, and I kept fixing the routing that led to it instead of the
+// destination.
+//
+// Marginalia is not a compromise for this app: it deliberately indexes non-commercial, long-form,
+// text-heavy pages. Measured on "identity over time philosophy" it returns the SEP entry, a
+// philosophy department's event page and a course's lecture notes — which is what an honours
+// student is looking for, and closer to it than a commercial engine's first page.
+//
+// LIVE_SEARCH_URL is the real duckduckgo.com, used only where the extension can frame it (34
+// result links, its own styling). Two endpoints because they answer two different questions:
+// "what can a server fetch and read" and "what can this browser display".
+export const SEARCH_URL = 'https://old-search.marginalia.nu/search?query='
+export const LEGACY_DDG_SEARCH = 'https://html.duckduckgo.com/html/?q='   // kept: `isSearch` must
+                                                                          // still recognise old URLs
 /** The REAL DuckDuckGo — its own styling, its own JavaScript. Only reachable with framing. */
 export const LIVE_SEARCH_URL = 'https://duckduckgo.com/?q='
 /**
@@ -150,7 +170,8 @@ export function isPlayable(url: string): boolean {
 /** True when this address can only be read, never framed — searches, and the engines themselves. */
 /** Was this address a search we issued? */
 export function isSearch(url: string): boolean {
-  return url.startsWith(SEARCH_URL) || /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing|mojeek)\.[a-z.]+\//i.test(url)
+  return url.startsWith(SEARCH_URL) || url.startsWith(LEGACY_DDG_SEARCH)
+    || /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing|mojeek|marginalia)\.[a-z.]+\//i.test(url)
 }
 /** The words the reader typed, recovered from whichever search URL they became. */
 export function queryOf(url: string): string {
@@ -166,7 +187,7 @@ export function queryOf(url: string): string {
  *  every existing caller, and every test, on the conservative reader-only answer. */
 export function mustUseReader(url: string, canFrame = false): boolean {
   if (canFrame) return false
-  return /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing)\.[a-z.]+\//i.test(url)
+  return /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing|marginalia)\.[a-z.]+\//i.test(url)
 }
 
 /** A typed address → a URL. Bare hosts get https://; anything that is plainly a SEARCH (spaces, or

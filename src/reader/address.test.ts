@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, LIVE_SEARCH_URL, ECOSIA_SEARCH_URL, searchUrlFor, isInkwaveItself } from './address'
+import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, LIVE_SEARCH_URL, ECOSIA_SEARCH_URL, searchUrlFor, isInkwaveItself, isSearch, queryOf } from './address'
 import { APP_INITIATORS } from './framingRule'
 
 describe('addressToUrl', () => {
@@ -197,5 +197,42 @@ describe('isInkwaveItself', () => {
   it('rubbish is not us either — it must never throw in front of the writer', () => {
     expect(isInkwaveItself('not a url')).toBe(false)
     expect(isInkwaveItself('')).toBe(false)
+  })
+})
+
+// ── THE READER'S ENGINE MUST BE ONE OUR SERVER CAN REACH (2026-08-31) ────────────────────────────
+// Peter reported "not searching anything" five times in one evening. The cause was not routing —
+// which I kept fixing — but the DESTINATION: `html.duckduckgo.com` answers our deployed function
+// with a 502 and zero blocks, so the reader path (the one that runs with NO extension) had never
+// worked and could never have worked. It was a fallback to a wall.
+//
+// This is a guard against a plausible future edit, not against today's code: "put DuckDuckGo back,
+// it's the better-known engine" is a reasonable-sounding change that silently restores a search box
+// that returns nothing for anyone without the extension.
+describe('the reader search endpoint is server-fetchable', () => {
+  it('is NOT an endpoint measured to refuse our server', () => {
+    // Each of these returned 502 / 0 blocks through the deployed /api/reader, same minute, same
+    // query. They may be framed live (LIVE_SEARCH_URL is one), but they cannot be READ.
+    for (const blocked of ['html.duckduckgo.com', 'lite.duckduckgo.com', 'mojeek.com']) {
+      expect(SEARCH_URL).not.toContain(blocked)
+    }
+  })
+
+  it('still RECOGNISES the old endpoint, so saved URLs keep behaving as searches', () => {
+    // A writer's history and any stored address predate the change; `isSearch` drives the reader-only
+    // rule and the search-specific error card, and losing that would degrade quietly.
+    expect(isSearch('https://html.duckduckgo.com/html/?q=x')).toBe(true)
+    expect(isSearch(SEARCH_URL + 'x')).toBe(true)
+  })
+
+  it('recovers the query from BOTH endpoints — they use different parameter names', () => {
+    // marginalia uses ?query=, duckduckgo ?q=. The refused-search fallback re-issues the query, so
+    // reading it back wrongly turns a failed search into an empty one.
+    expect(queryOf(SEARCH_URL + encodeURIComponent('ship of theseus'))).toBe('ship of theseus')
+    expect(queryOf('https://html.duckduckgo.com/html/?q=ship%20of%20theseus')).toBe('ship of theseus')
+  })
+
+  it('is reader-only, so it is never handed to the live frame', () => {
+    expect(mustUseReader(SEARCH_URL + 'x')).toBe(true)
   })
 })
