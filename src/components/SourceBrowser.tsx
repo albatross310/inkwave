@@ -843,27 +843,44 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // the second attempt, which reads as flakiness rather than as ordering.
   useEffect(() => {
     // ⚠ DO NOT SKIP `isPlayable` PAGES. It used to short-circuit here on the reasoning that an
-    // embed endpoint already frames, so a rule for it "buys nothing" — which ignored that the
-    // early return happens AFTER the previous run's cleanup has already REMOVED the tab's rule.
-    // Peter: "youtube stopped working and I don't know why. it just never loads." Opening one video
-    // tore down framing for the entire tab, and nothing reinstalled it until he happened to
-    // navigate somewhere non-playable — so it worked once and then never, which is the signature of
-    // STATE rather than a race. The rule is per-tab and cheap; installing it unconditionally is
-    // both simpler and the only version that cannot destroy what it declines to replace.
+    // embed endpoint already frames, so a rule for it "buys nothing" — which ignored that the early
+    // return happens AFTER the previous run's cleanup ran. Opening one video tore down framing for
+    // the whole tab ("youtube stopped working… it just never loads"): worked once, then never,
+    // which is the signature of STATE rather than a race.
     if (!framed || extState !== 'ready') { setFramingOn(false); return }
     const port = windowPort()
     if (!port) { setFramingOn(false); return }
     let live = true
     void allowFramingVia(port, here).then((ok) => {
       if (!live || !ok) return                 // a refusal is ordinary: the frame behaves as before
-      setFramingOn(true)
-      setFrameKey((k) => k + 1)
+      setFramingOn((was) => {
+        // ⚠ REMOUNT ONLY ON THE FIRST INSTALL OF THIS LIVE SESSION. `frameKey` exists so the rule
+        // lands BEFORE the frame tries; bumping it on every navigation instead remounts an iframe
+        // that has already begun loading the new URL, which is a second load racing the first.
+        if (!was) setFrameKey((k) => k + 1)
+        return true
+      })
     }).catch(() => { /* likewise — never a thrown error in front of the writer */ })
-    // RELEASED ON EVERY EXIT — leaving live view, navigating elsewhere, and unmount. The worker's
-    // rule is session-scoped as the backstop, so even a release that never arrives (a tab closed
-    // mid-flight) cannot leave framing open past the browser session.
-    return () => { live = false; setFramingOn(false); releaseFraming(port) }
+    // ⚠ NO RELEASE HERE, AND THAT IS THE FIX FOR "a lot of things are never loading now".
+    // This effect re-runs on every navigation, so releasing in its cleanup meant each new page
+    // fired BOTH a release and an install — two independent async chains to the worker
+    // (`releaseFraming` is fire-and-forget by design, `allowFramingVia` awaits a reply) with no
+    // ordering guarantee between them. When the release landed second it removed the rule that had
+    // just been installed, and the page never loaded. Intermittent, and worse the more the writer
+    // clicked, which is exactly how it was reported.
+    // Nothing needs releasing between pages anyway: the rule is per-tab and each install REPLACES
+    // it. Teardown belongs to leaving live view, which is the effect below.
+    return () => { live = false }
   }, [framed, here, extState])
+
+  // Teardown, separated from installation ON PURPOSE — it must run when the writer LEAVES live view
+  // or the panel unmounts, and NOT on every navigation within it. Depending only on `framed` is
+  // what makes that true: `here` changing cannot trigger it.
+  useEffect(() => {
+    if (!framed) return
+    const port = windowPort()
+    return () => { setFramingOn(false); releaseFraming(port) }
+  }, [framed])
 
   // Keep the ref in step. `ready` means the extension answered AND holds the <all_urls> grant, so
   // it is exactly the condition under which a framing rule can be installed.
