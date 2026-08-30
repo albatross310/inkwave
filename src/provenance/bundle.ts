@@ -9,6 +9,7 @@ import { simpleInText } from '../citations/format'
 import { usedCitekeys, referenceListKeys } from '../citations/resolve'
 import { loadPdf, blobToBase64, pdfVersion } from '../citations/pdfStore'
 import { signingPublicKeyHex } from './receipts'
+import { countWords } from './countWords'
 import { POOL_ID_STATIC } from '../scas/poolId'
 import { deviceId } from '../sync/presence'
 import { collectViewSettings } from '../editor/viewSettings'
@@ -152,19 +153,6 @@ function citedItems(contentJson: TiptapJSON): CSLItem[] {
   const out: CSLItem[] = []
   for (const k of keys) { const it = bibProvider.get(k); if (it) out.push(it) }
   return out
-}
-
-function countWords(contentJson: TiptapJSON): number {
-  let text = ''
-  const walk = (node: unknown): void => {
-    if (!node || typeof node !== 'object') return
-    const n = node as { text?: string; content?: unknown[] }
-    if (typeof n.text === 'string') text += n.text + ' '
-    if (Array.isArray(n.content)) n.content.forEach(walk)
-  }
-  walk(contentJson)
-  const m = text.trim().match(/[\p{L}\p{N}]+/gu)
-  return m ? m.length : 0
 }
 
 export function buildExportBundle(doc: InkwaveDocument, snapshots: Snapshot[]): ExportBundle {
