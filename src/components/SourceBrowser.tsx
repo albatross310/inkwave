@@ -178,6 +178,7 @@ const READER_FONTS: Array<{ label: string; css: string }> = [
 // next to the module in `reader/address.test.ts`.
 import {
   isInkwaveItself, embeddableUrl, isPlayable, isSearch, queryOf, SEARCH_URL,
+  nextSearchEngine, searchLooksEmpty,
   mustUseReader, addressToUrl, stripTracking, unwrapRedirect, likelyRefusesFraming, hostOf,
 } from '../reader/address'
 
@@ -850,6 +851,26 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // Scoped to searches deliberately: for an ordinary page the refusal card is correct and offers
   // real choices (read it here / open in a tab). It is only a search — where we chose the live URL
   // on the writer's behalf — that must repair itself rather than blame the site.
+  // ⚠ A SEARCH THAT COMES BACK EMPTY TRIES THE NEXT ENGINE.
+  // MEASURED: called four times in a row through the deployed function with one query,
+  // old-search.marginalia.nu answered 170 / 170 / 3 / 3 blocks. It works, and then intermittently
+  // does not — and an engine that returns a challenge page answers 200, so nothing upstream can
+  // tell that from a genuine "no results". Peter reported "not searching anything" five separate
+  // times; a chain is the difference between a search box and a coin toss.
+  //
+  // It advances only ONCE per address (the URL itself moves to the next engine), so there is no
+  // loop: when the chain is spent the reader shows the ordinary empty-search state.
+  useEffect(() => {
+    if (framed || !doc || !isSearch(here)) return
+    const linked = doc.blocks.filter((b) => 'runs' in b && (b.runs ?? []).some((r) => r.href)).length
+    if (!searchLooksEmpty(linked)) return
+    const next = nextSearchEngine(here)
+    const q = queryOf(here)
+    if (!next || !q) return
+    go(next.url + encodeURIComponent(q))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, here, framed])
+
   useEffect(() => {
     if (!framed || !frameRefused || !isSearch(here)) return
     const q = queryOf(here)

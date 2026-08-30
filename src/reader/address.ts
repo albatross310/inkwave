@@ -52,7 +52,44 @@ export const GOOGLE_SEARCH_URL = 'https://www.google.com/search?q='
 // LIVE_SEARCH_URL is the real duckduckgo.com, used only where the extension can frame it (34
 // result links, its own styling). Two endpoints because they answer two different questions:
 // "what can a server fetch and read" and "what can this browser display".
-export const SEARCH_URL = 'https://old-search.marginalia.nu/search?query='
+// ⚠ A CHAIN, NOT AN ENGINE — because a single one is measurably not enough. Called four times in a
+// row through the deployed /api/reader with one query, old-search.marginalia.nu answered
+// 170 / 170 / 3 / 3 blocks: it works and then intermittently returns nothing. A search box that is
+// empty half the time is what Peter reported five times as "not searching anything", and pinning
+// one engine — however well it scored once — reproduces that.
+//
+// Each entry was MEASURED through the deployed function, same query, same minute. The ones that
+// answer a data centre with 502 or a challenge page are recorded in SEARCH_REFUSED below so nobody
+// re-adds them from memory.
+export interface SearchEngine { readonly name: string; readonly url: string }
+export const SEARCH_ENGINES: readonly SearchEngine[] = [
+  // 170 blocks / 90 linked at best. Indexes non-commercial long-form pages, which is why it returns
+  // the SEP entry and a course's lecture notes for a philosophy query rather than a shop.
+  { name: 'Marginalia', url: 'https://old-search.marginalia.nu/search?query=' },
+  // 104 / 66, and steady across the runs where marginalia collapsed to 3.
+  { name: 'SearXNG',    url: 'https://searxng.site/search?q=' },
+]
+
+/** Measured to refuse OUR SERVER — 502, or a challenge page with no results. Not a blocklist for
+ *  the live frame (duckduckgo.com frames beautifully); a list of what a server cannot READ. */
+export const SEARCH_REFUSED = [
+  'html.duckduckgo.com', 'lite.duckduckgo.com', 'mojeek.com', 'search.brave.com', 'startpage.com',
+] as const
+
+export const SEARCH_URL = SEARCH_ENGINES[0].url
+
+/** The next engine to try after `url` failed to produce results, or null when the chain is spent. */
+export function nextSearchEngine(url: string): SearchEngine | null {
+  const i = SEARCH_ENGINES.findIndex((e) => url.startsWith(e.url))
+  if (i < 0 || i + 1 >= SEARCH_ENGINES.length) return null
+  return SEARCH_ENGINES[i + 1]
+}
+
+/** Did a search actually return results? An engine that answers 200 with a challenge page is the
+ *  case this exists for — it is not an error, and only counting real links can tell them apart. */
+export function searchLooksEmpty(linkedBlocks: number): boolean {
+  return linkedBlocks < 5
+}
 export const LEGACY_DDG_SEARCH = 'https://html.duckduckgo.com/html/?q='   // kept: `isSearch` must
                                                                           // still recognise old URLs
 /** The REAL DuckDuckGo — its own styling, its own JavaScript. Only reachable with framing. */
@@ -170,8 +207,8 @@ export function isPlayable(url: string): boolean {
 /** True when this address can only be read, never framed — searches, and the engines themselves. */
 /** Was this address a search we issued? */
 export function isSearch(url: string): boolean {
-  return url.startsWith(SEARCH_URL) || url.startsWith(LEGACY_DDG_SEARCH)
-    || /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing|mojeek|marginalia)\.[a-z.]+\//i.test(url)
+  return SEARCH_ENGINES.some((e) => url.startsWith(e.url)) || url.startsWith(LEGACY_DDG_SEARCH)
+    || /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing|mojeek|marginalia|searxng)\.[a-z.]+\//i.test(url)
 }
 /** The words the reader typed, recovered from whichever search URL they became. */
 export function queryOf(url: string): string {
@@ -187,7 +224,7 @@ export function queryOf(url: string): string {
  *  every existing caller, and every test, on the conservative reader-only answer. */
 export function mustUseReader(url: string, canFrame = false): boolean {
   if (canFrame) return false
-  return /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing|marginalia)\.[a-z.]+\//i.test(url)
+  return /(^|\/\/)([\w-]+\.)*(duckduckgo|google|bing|marginalia|searxng)\.[a-z.]+\//i.test(url)
 }
 
 /** A typed address → a URL. Bare hosts get https://; anything that is plainly a SEARCH (spaces, or

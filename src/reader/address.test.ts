@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, LIVE_SEARCH_URL, ECOSIA_SEARCH_URL, searchUrlFor, isInkwaveItself, isSearch, queryOf } from './address'
+import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, LIVE_SEARCH_URL, ECOSIA_SEARCH_URL, searchUrlFor, isInkwaveItself, isSearch, queryOf, SEARCH_ENGINES, SEARCH_REFUSED, nextSearchEngine, searchLooksEmpty } from './address'
 import { APP_INITIATORS } from './framingRule'
 
 describe('addressToUrl', () => {
@@ -234,5 +234,51 @@ describe('the reader search endpoint is server-fetchable', () => {
 
   it('is reader-only, so it is never handed to the live frame', () => {
     expect(mustUseReader(SEARCH_URL + 'x')).toBe(true)
+  })
+})
+
+// ── THE SEARCH CHAIN (2026-08-31) ────────────────────────────────────────────────────────────────
+// One engine is measurably not enough: called four times in a row through the deployed /api/reader
+// with a single query, old-search.marginalia.nu answered 170 / 170 / 3 / 3 blocks. A search box
+// that is empty half the time is what Peter reported five separate times as "not searching
+// anything", so the fix is a chain and these pin its shape.
+describe('the search engine chain', () => {
+  it('has more than one engine — a single one has been measured to fail intermittently', () => {
+    expect(SEARCH_ENGINES.length).toBeGreaterThan(1)
+  })
+
+  it('contains none of the engines measured to refuse our server', () => {
+    // These answered 502 or a challenge page through the deployed function. They may still be
+    // FRAMED live (duckduckgo.com is), which is why this list is about reading, not about the site.
+    for (const e of SEARCH_ENGINES) {
+      for (const bad of SEARCH_REFUSED) expect(e.url).not.toContain(bad)
+    }
+  })
+
+  it('walks forward and then stops — it must not cycle', () => {
+    // A chain that wrapped would retry the first engine for ever on a genuinely empty query, which
+    // is a loop the writer sees as a flickering panel.
+    const first = SEARCH_ENGINES[0], last = SEARCH_ENGINES[SEARCH_ENGINES.length - 1]
+    expect(nextSearchEngine(first.url + 'x')?.url).toBe(SEARCH_ENGINES[1].url)
+    expect(nextSearchEngine(last.url + 'x')).toBeNull()
+    expect(nextSearchEngine('https://example.com/not-a-search')).toBeNull()
+  })
+
+  it('every engine is recognised as a search, so the reader-only rule applies to all of them', () => {
+    // If a later engine were not recognised, `mustUseReader` would let it into the live frame and
+    // `queryOf` would not recover the query for the retry — the failure would look like the search
+    // silently doing nothing, which is the bug being fixed.
+    for (const e of SEARCH_ENGINES) {
+      expect(isSearch(e.url + 'x')).toBe(true)
+      expect(mustUseReader(e.url + 'x')).toBe(true)
+      expect(queryOf(e.url + encodeURIComponent('ship of theseus'))).toBe('ship of theseus')
+    }
+  })
+
+  it('"looks empty" counts LINKS, not blocks — a challenge page answers 200 with prose', () => {
+    expect(searchLooksEmpty(0)).toBe(true)
+    expect(searchLooksEmpty(2)).toBe(true)      // measured: marginalia's bad runs, and searx.be
+    expect(searchLooksEmpty(66)).toBe(false)    // measured: searxng.site
+    expect(searchLooksEmpty(90)).toBe(false)    // measured: marginalia's good runs
   })
 })
