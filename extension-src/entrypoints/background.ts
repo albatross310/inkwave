@@ -87,6 +87,31 @@ async function injectAndShowCapture(tabId: number, capture: CaptureMsg): Promise
 }
 
 export default defineBackground(() => {
+  // ── ASK FOR PAGE FETCHING AT INSTALL, RATHER THAN LEAVING IT TO BE DISCOVERED ────────────────
+  // Peter, 2026-08-30: "can we turn this on by default". The permission itself stays OPTIONAL —
+  // the long argument in wxt.config.ts still holds, and a REQUIRED `<all_urls>` rewrites the
+  // install prompt into "Read and change all your data on all websites" for everyone and forces
+  // Chrome to disable existing installs pending re-approval. What was actually wrong is that the
+  // grant was HIDDEN: the one control that turns on the reader's whole point lived in a popup
+  // behind the puzzle-piece icon, which Peter had to be told twice how to find.
+  //
+  // An optional permission nobody is offered is a feature nobody has. So the popup is opened once,
+  // at install, where the grant button already lives — same button, same gesture, no new
+  // capability, and the writer can still decline. `permissions.request()` cannot be called from
+  // here (Chrome honours it only from a user gesture inside an extension page), which is exactly
+  // why this opens the page that CAN ask rather than trying to grant anything itself.
+  browser.runtime.onInstalled.addListener((details) => {
+    if (details.reason !== 'install') return          // not on every update — that would be a nag
+    void (async () => {
+      // Only if it is not already granted: a reinstall over an existing grant should be silent.
+      if (await canFetchPages()) return
+      // A TAB, not action.openPopup(): openPopup is recent, absent under this name on MV2 Firefox,
+      // and refuses when the window is not focused — which an install often is not. A tab always
+      // opens, and it is the same popup document either way.
+      await browser.tabs.create({ url: browser.runtime.getURL('popup.html') }).catch(() => {})
+    })()
+  })
+
   // Keyboard shortcut: Alt+Shift+I → capture current page directly (no popup).
   browser.commands.onCommand.addListener((command) => {
     if (command === 'capture') void captureActiveTab().catch(() => {})
