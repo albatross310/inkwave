@@ -11,6 +11,7 @@
     "preview": "vite preview --outDir build/client",
     "test": "vitest",
     "test:e2e": "playwright test",
+    "ext:build": "cd extension-src && pnpm install --silent && pnpm zip",
     "prove:pdfzoom": "node scripts/pdfzoom-probe/zoomanchor.prove.mjs",
     "prove:schema": "node scripts/textrender-probe/schemaIdentity.prove.mjs",
     "prove:mount": "node scripts/textrender-probe/mountcount.prove.mjs",
