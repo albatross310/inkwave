@@ -39,8 +39,12 @@ export default defineConfig({
       js: ['content-inkwave.js'],
       run_at: 'document_idle',
     }],
-    name: 'Inkwave Citation Capture',
-    description: 'Capture citations from any page into your Inkwave writing studio — one click for journal articles, AI-assisted for blogs.',
+    // Renamed from "Inkwave Citation Capture" (2026-08-30, Peter). The old name described what
+    // this was when it shipped; it now also fetches sources for the reader from the writer's own
+    // connection and lets the reader show pages that refuse to be framed. A name that describes
+    // one of three jobs sends the writer looking for a second extension for the other two.
+    name: 'Inkwave',
+    description: 'Capture citations from any page into Inkwave, and read your sources inside it — fetched from your own connection.',
     // `declarativeNetRequestWithHostAccess` rather than `declarativeNetRequest`: it grants rule
     // installation only where host access is ALREADY held, so the framing rule inherits the
     // optional `<all_urls>` grant below instead of being a second, broader permission the writer
@@ -97,7 +101,11 @@ export default defineConfig({
     ...(browser === 'firefox' ? {
       browser_specific_settings: {
         gecko: {
-          id: 'citation-capture@inkwave.studio',
+          // ⚠ CHANGED WHILE IT IS STILL FREE TO CHANGE. A gecko id is permanent once an add-on
+          // is published — AMO keys the update path to it — and this one has never been submitted,
+          // so today is the last moment it costs nothing. Renaming it after publication would mean
+          // a new listing and every user reinstalling.
+          id: 'inkwave@inkwave.studio',
           strict_min_version: '109.0',
         },
       },

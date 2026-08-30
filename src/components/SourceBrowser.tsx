@@ -842,9 +842,15 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // arrives at an error page that will not retry itself — the feature would appear to work only on
   // the second attempt, which reads as flakiness rather than as ordering.
   useEffect(() => {
-    // `isPlayable` pages already frame (youtube /embed sends no XFO), so asking would install a
-    // rule that buys nothing and still has to be cleaned up.
-    if (!framed || extState !== 'ready' || isPlayable(here)) { setFramingOn(false); return }
+    // ⚠ DO NOT SKIP `isPlayable` PAGES. It used to short-circuit here on the reasoning that an
+    // embed endpoint already frames, so a rule for it "buys nothing" — which ignored that the
+    // early return happens AFTER the previous run's cleanup has already REMOVED the tab's rule.
+    // Peter: "youtube stopped working and I don't know why. it just never loads." Opening one video
+    // tore down framing for the entire tab, and nothing reinstalled it until he happened to
+    // navigate somewhere non-playable — so it worked once and then never, which is the signature of
+    // STATE rather than a race. The rule is per-tab and cheap; installing it unconditionally is
+    // both simpler and the only version that cannot destroy what it declines to replace.
+    if (!framed || extState !== 'ready') { setFramingOn(false); return }
     const port = windowPort()
     if (!port) { setFramingOn(false); return }
     let live = true

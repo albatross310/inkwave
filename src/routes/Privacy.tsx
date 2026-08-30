@@ -1,4 +1,4 @@
-// Privacy policy — covers Inkwave Zero (web app) and the Citation Capture browser extension.
+// Privacy policy — covers Inkwave Zero (web app) and the Inkwave browser extension.
 // Prerendered to static HTML; no client-side data fetching.
 //
 // Keep this page HONEST and in sync with the code. The load-bearing facts it states:
@@ -72,7 +72,7 @@ export function Privacy() {
             That said, honesty requires caveats: a small number of features do pass data through
             our servers, or to named services, on its way somewhere else. This policy sets out each
             one — what leaves your device, where it goes, and why. It covers the web app and the
-            optional Citation Capture browser extension.
+            optional Inkwave browser extension.
           </p>
 
           <Section title="Where your writing lives">
@@ -199,7 +199,7 @@ export function Privacy() {
             </p>
           </Section>
 
-          <Section title="The Citation Capture extension">
+          <Section title="The Inkwave extension">
             <p>
               The extension is a separate, optional install. When you capture a page — by clicking
               the icon, pressing the keyboard shortcut, or revisiting a page you asked it to watch —
@@ -210,6 +210,28 @@ export function Privacy() {
               Captured citations are held in local extension storage until delivered to your Inkwave
               tab; a short-lived local history that powers "already in library" expires after five
               minutes. The extension never reads your browsing history or other tabs' content.
+            </p>
+            {/* ⚠ THIS PARAGRAPH DESCRIBES CAPABILITIES ADDED 2026-08-30 AND MUST TRACK THE CODE.
+                CLAUDE.md's standing rule for this page is that it names the mechanism that is
+                really there — the reader lane already shipped copy claiming encryption this build
+                does not have. Both claims below are checkable: the fetch path is
+                extension-src/entrypoints/background.ts (fetchPageForReader), and the header rule is
+                src/reader/framingRule.ts, whose scoping is asserted by framingRule.test.ts. */}
+            <p>
+              If you turn on <em>page fetching</em> — a separate permission, offered once when you
+              install it and revocable in your browser at any time — the extension fetches the
+              sources you open in the reader from your own connection instead of from our server.
+              Our server is then not involved at all and never sees those addresses. Nothing about
+              what you read is sent anywhere, stored by the extension, or visible to us.
+            </p>
+            <p>
+              The same permission lets the reader show pages that would otherwise refuse to be
+              displayed inside another page. To do that the extension removes those pages' framing
+              headers — but only for frames Inkwave itself opens, only in the tab your reader is
+              open in, and only while it is open. Pages you visit in your own tabs are untouched.
+              One consequence is worth knowing rather than discovering: a site you are signed in to
+              will appear signed out in the reader, because a browser does not send your session to
+              a page shown inside another page.
             </p>
           </Section>
 

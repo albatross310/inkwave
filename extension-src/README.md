@@ -1,4 +1,4 @@
-# Inkwave Citation Capture — cross-browser extension (WXT build)
+# Inkwave — cross-browser extension (WXT build)
 
 Multi-browser extension built with [WXT](https://wxt.dev). Imports the shared TypeScript pipeline from `../src/citations/` so logic is never duplicated. Targets Chrome MV3 and Firefox (MV2 via WXT's compatibility layer).
 
@@ -20,7 +20,7 @@ pnpm zip:firefox  # → .output/inkwave-extension-<version>-firefox.zip + source
 ## Store submission
 
 **Chrome Web Store:**
-1. `pnpm zip` → `inkwave-extension-0.1.0-chrome.zip`
+1. `pnpm zip` → `inkwave-extension-<version>-chrome.zip`
 2. [Chrome Developer Dashboard](https://chrome.google.com/webstore/devconsole) → New item → upload zip.
 3. Fill in store listing: name, description, privacy policy, category (Productivity).
 4. Submit for review (usually 1–3 business days for a new extension).
@@ -33,7 +33,7 @@ pnpm zip:firefox  # → .output/inkwave-extension-<version>-firefox.zip + source
 
 ## Firefox compatibility notes
 
-WXT builds the Firefox target as MV2 (the mature, stable manifest version for Firefox). The extension logic is identical; WXT's built-in `browser.*` polyfill ensures the same API surface on both browsers. The gecko extension ID is `citation-capture@inkwave.me`.
+WXT builds the Firefox target as MV2 (the mature, stable manifest version for Firefox). The extension logic is identical; WXT's built-in `browser.*` polyfill ensures the same API surface on both browsers. The gecko extension ID is `inkwave@inkwave.studio` (changed 2026-08-30 while the add-on was still unpublished — the id is permanent once AMO has it).
 
 ## Adding the LLM-scrape path
 
