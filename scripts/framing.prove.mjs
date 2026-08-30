@@ -6,10 +6,15 @@
 // rule silently does not fire and live view is exactly as broken as before, with nothing in the
 // UI to say so. So the earlier proof does NOT cover the thing we shipped; this does.
 //
-// Headed, because Playwright's HEADLESS Chromium does not load extensions at all — measured, via a
-// canary rule that never fired (docs/SEARCH-AND-THE-EXTENSION.md). Windowed off-screen so it never
-// appears over Peter's desk.
+// Headed, because HEADLESS DOES NOT LOAD EXTENSIONS on this machine — measured with a canary rule
+// across `headless:true`, `--headless=new` and `channel:'chrome'`; silent in all three.
+//
+// ⚠ AND `--window-position=-32000,-32000` DOES NOT HIDE IT ON macOS. That is the Linux/X11 trick;
+// macOS clamps a window onto a visible display, so it appeared anyway and this comment used to
+// claim otherwise. `hideBrowser()` (scripts/offscreen.mjs) hides the PROCESS the way macOS does,
+// and RETURNS whether it took — so a run that could not hide says so instead of assuming.
 import { chromium } from '@playwright/test'
+import { hideBrowser, OFFSCREEN_ARGS } from './offscreen.mjs'
 import { frameRuleFor } from '../src/reader/framingRule.ts'
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -65,9 +70,11 @@ check(new URL(base).hostname === 'localhost', 'the probe page is served from an 
 async function run(withExt) {
   const ctx = await chromium.launchPersistentContext(join(root, withExt ? 'p-on' : 'p-off'), {
     headless: false,
-    args: ['--window-position=-32000,-32000', '--window-size=1200,800',
+    args: [...OFFSCREEN_ARGS,
       ...(withExt ? [`--disable-extensions-except=${dir}`, `--load-extension=${dir}`] : [])],
   })
+  const hid = await hideBrowser()
+  if (!hid) console.log('  ⚠ could not hide the browser window — it is on screen for this run')
   const pg = await ctx.newPage()
   const refusals = []; const blocked = []
   pg.on('console', (m) => { if (/Refused to (display|frame)/i.test(m.text())) refusals.push(1) })
