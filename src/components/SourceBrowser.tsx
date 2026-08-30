@@ -983,6 +983,20 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // working", on a search, with the refusal card. `liveFrameEnabled()` is not optional here.
   useEffect(() => { canFrameRef.current = liveFrameEnabled() && extState === 'ready' }, [extState])
 
+  // ⚠ READER-ONLY IS AN INVARIANT, NOT A DECISION TAKEN AT NAVIGATION TIME. `go()` applies
+  // `mustUseReader` when the writer navigates — but the live/reader toggle is PERSISTED
+  // (`inkwave:readerLive`), so a reload restores live view without going through `go()` at all.
+  // Land on a reader-only address in that state and the panel shows the framing-refusal card for a
+  // page it was never going to frame, with no way out but the toggle. Peter hit it twice in a row
+  // on a search: "grr".
+  //
+  // It also has to be a live rule rather than a one-shot, because `canFrame` CHANGES underneath the
+  // panel — the extension can be granted mid-session, and `liveFrameEnabled()` can be flipped — and
+  // each change moves the answer for the page already on screen.
+  useEffect(() => {
+    if (framed && mustUseReader(here, canFrameRef.current)) setFramed(false)
+  }, [here, framed, extState])
+
   // ── A READABLE DIAGNOSTIC, BECAUSE "still broken" IS NOT A STAGE ─────────────────────────────
   // Live view through the extension has FIVE places it can fail and they are indistinguishable
   // from the panel: no content script in this tab (the commonest — Chrome injects them on page
