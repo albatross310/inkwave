@@ -17,6 +17,17 @@ export default defineContentScript({
   matches: ['https://iwzero.me/*', 'https://inkwave.studio/*', 'http://localhost:5173/*'],
   runAt: 'document_idle',
   main() {
+    // ⚠ RUN ONCE PER TAB. As of 2026-08-30 this script is registered DECLARATIVELY in the manifest
+    // (wxt.config.ts explains why it had to be) *and* the background worker still injects it with
+    // scripting.executeScript when it flushes a capture — three call sites, kept because they also
+    // cover a tab that loaded before the extension did. Both paths are correct; running twice is
+    // not. A second copy would add a second `message` listener, so every ping would be answered
+    // twice and every queued citation acked twice, and `inflight` — which is per-copy — could not
+    // dedupe across them.
+    const w = window as unknown as { __iwBridge?: boolean }
+    if (w.__iwBridge) return
+    w.__iwBridge = true
+
     const inflight = new Set<string>()
 
     async function flush() {

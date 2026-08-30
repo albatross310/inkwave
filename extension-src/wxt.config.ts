@@ -1,5 +1,6 @@
 import { defineConfig } from 'wxt'
 import { resolve } from 'path'
+import { INKWAVE_URL_PATTERNS } from './utils/constants'
 
 export default defineConfig({
   extensionApi: 'chrome',
@@ -17,6 +18,27 @@ export default defineConfig({
     },
   }),
   manifest: ({ browser }) => ({
+    // ⚠ THE BRIDGE MUST BE DECLARED HERE, AND FOR YEARS IT WAS NOT (found 2026-08-30).
+    // `content-inkwave.ts` says `defineContentScript({ matches: [...] })`, which LOOKS like a
+    // declarative registration and is not one: WXT recognises a content script by FILENAME
+    // (`*.content.ts`), so this file is built as an UNLISTED SCRIPT — compiled to
+    // content-inkwave.js, never named in the manifest, its `matches` inert. The manifest simply
+    // had no `content_scripts` key at all.
+    //
+    // Nothing noticed because the background worker ALSO injects it with `scripting.executeScript`
+    // — but only when flushing a captured citation. So the bridge existed exactly after you pressed
+    // Alt+Shift+C and at no other time, and the source reader's ping (which happens on page load,
+    // long before any capture) got silence. Silence on that channel is indistinguishable from "no
+    // extension installed", which is why live view stayed dark with everything else correct.
+    //
+    // Declared here rather than by renaming the entrypoint because the built filename is a
+    // load-bearing string: background.ts injects 'content-inkwave.js' by name in three places, and
+    // a rename would move the file out from under them silently.
+    content_scripts: [{
+      matches: [...INKWAVE_URL_PATTERNS],
+      js: ['content-inkwave.js'],
+      run_at: 'document_idle',
+    }],
     name: 'Inkwave Citation Capture',
     description: 'Capture citations from any page into your Inkwave writing studio — one click for journal articles, AI-assisted for blogs.',
     // `declarativeNetRequestWithHostAccess` rather than `declarativeNetRequest`: it grants rule
