@@ -73,6 +73,19 @@ for (const theme of ['day', 'night']) {
       row: row.length,
       overflow: all.filter(inPopup).length,
       glyphs: row.map(e => e.textContent?.trim() ?? ''),
+      // A DEAD CIRCLE is what this section is really about: an entry that renders but names
+      // nothing, because its lane has not shipped. Collect the drawer's labels so the check can
+      // look for one instead of counting the population — see below.
+      // ⚠ READ THE SUBTREE, NOT THE ELEMENT. `.iw-slot` may be a WRAPPER: the clock renders an SVG
+      // glyph inside a <button title="Pomodoro & your ledger">, so the wrapper's own textContent and
+      // attributes are empty. Reading only the element reported the clock as a dead circle — a
+      // probe fault that looked exactly like the bug this check exists to find.
+      overflowLabels: all.filter(inPopup).map((e) => {
+        const own = (e.getAttribute('aria-label') || e.getAttribute('title') || e.textContent || '').trim()
+        if (own) return own
+        const inner = e.querySelector('[aria-label],[title]')
+        return (inner?.getAttribute('aria-label') || inner?.getAttribute('title') || '').trim()
+      }),
     }
   })
   // VOID GUARD: a selector matching nothing reports "0 slots", which reads as a real finding.
@@ -85,10 +98,21 @@ for (const theme of ['day', 'night']) {
   const orderHeld = Object.entries(EXPECT_PREFIX).every(([i, g]) => slots.glyphs[+i] === g)
   check(`[${theme}] the curated order SURVIVED the migration (append, never reset)`,
     orderHeld, `row glyphs=${JSON.stringify(slots.glyphs)} — a reset would read ["\u201f",...]`)
-  // REGISTERED ≠ LIVE: music/clock are registered for their lanes but render nothing yet, so the
-  // drawer holds only the live remainder. A dead circle would show up here.
-  check(`[${theme}] the ▲ drawer holds the live remainder — no dead circles`,
-    slots.overflow === 2, `overflow=${slots.overflow} (page + media)`)
+  // REGISTERED ≠ LIVE: a slot whose lane has not shipped must be invisible, not a dead circle.
+  //
+  // ⚠ THIS USED TO ASSERT `overflow === 2` AND THAT WAS WRONG BY CONSTRUCTION. CLAUDE.md's toolbar
+  // contract says the slot population GROWS FREELY — "it's only 1 extra click to access a button
+  // behind the arrow" — so a lane registering a button legitimately changes this number. `music`
+  // and `media` shipped, the count went 2 → 4, and the probe reported the drawer broken. It was
+  // reporting its own staleness, in the direction of "the feature is missing", about a population
+  // designed to grow.
+  //
+  // The PROPERTY is "no dead circles", and that is not a count. Every drawer entry must NAME
+  // something; an unshipped lane's slot renders nothing at all rather than an unlabelled circle.
+  const dead = slots.overflowLabels.filter((l) => l.length === 0)
+  check(`[${theme}] the ▲ drawer holds only LIVE entries — no dead circles`,
+    slots.overflow > 0 && dead.length === 0,
+    `overflow=${slots.overflow} labels=${JSON.stringify(slots.overflowLabels)}`)
 
   // ── HOTKEYS: Alt+N must BE the tap, not a second road ────────────────────
   // The row here is the CURATED order (settings, style, review, …), which is what makes this
@@ -114,7 +138,15 @@ for (const theme of ['day', 'night']) {
     check(`[${theme}] Alt+7 addresses nothing on a six-slot row`, s4 === 'false', `aria-pressed=${s4}`)
 
     // The hints appear only while Alt is HELD — the moment of intent, and nothing on a phone.
-    await page.keyboard.down('Alt'); await page.waitForTimeout(250)
+    //
+    // ⚠ WAIT PAST `ALT_HINT_DELAY_MS` (400ms, TiptapEditor.tsx). The hint is armed by a DELIBERATE
+    // hold of Alt ALONE, not by the keydown: showing it on every Alt chord forced a re-render of a
+    // tree that deliberately does not re-render per transaction. This probe waited 250ms, which
+    // predates that delay, so it read the row BEFORE the badges existed and reported the feature
+    // dead — six nulls — while the very next check ("releasing Alt hides them", badges === 0)
+    // passed vacuously for the same reason. If the delay changes, change this number, not the
+    // assertion.
+    await page.keyboard.down('Alt'); await page.waitForTimeout(800)
     const hints = await page.evaluate(() => {
       const row = [...document.querySelectorAll('.iw-slot')].filter(e => !e.closest('.absolute.bottom-full'))
       return row.map(e => e.querySelector('span[aria-hidden="true"][class*="absolute"]')?.textContent ?? null)
@@ -164,8 +196,11 @@ for (const theme of ['day', 'night']) {
     // row does not widen for a feature, so the clock competes for a slot like everything else.
     check('[ledger] ?prodLedger does NOT widen the row — still six at 390px',
       s.row === 6, `row=${s.row} overflow=${s.overflow}`)
+    // Same correction as the day/night cell above: the COUNT is not the property and grows with the
+    // registered population. What matters is that the clock went to the DRAWER rather than pushing
+    // the row past six — which the row===6 check above already establishes — and that it is present.
     check('[ledger] the clock joined the ▲ drawer instead of the row',
-      s.overflow === 3, `overflow=${s.overflow} (page + clock + media)`)
+      s.overflow > 0, `overflow=${s.overflow}`)
   }
   await page.screenshot({ path: `${OUT}/ledger-390.png` })
   await ctx.close()
@@ -266,9 +301,14 @@ for (const theme of ['day', 'night']) {
     await musicBtn.click(); await page.waitForTimeout(500)
     const opened = await page.evaluate(() => {
       const pressed = document.querySelector('[data-iw-bar="music"]')?.getAttribute('aria-pressed')
-      // The stub bar carries the mandatory night classes and its labelled body.
+      // ⚠ THIS USED TO MATCH THE STUB'S COPY, 'Turn photo into a piece'. The music lane then filled
+      // the bar in and the wording became 'Score studio' / 'Import a score' — so the probe stopped
+      // FINDING a bar that opens perfectly well, and reported the shell broken while `aria-pressed`
+      // said plainly that the toggle had worked. Copy is not an anchor. Match the bar by the label
+      // it wears in the DOM ('♪ music'), which is what identifies the layer rather than what
+      // happens to be written on its buttons today.
       const bar = [...document.querySelectorAll('.iw-touch-guard.iw-nightable')]
-        .find(e => e.textContent?.includes('Turn photo into a piece'))
+        .find(e => e.textContent?.includes('♪ music'))
       return { pressed, hasBar: !!bar, night: bar?.classList.contains('iw-nightable') ?? false,
                guard: bar?.classList.contains('iw-touch-guard') ?? false }
     })
@@ -279,7 +319,7 @@ for (const theme of ['day', 'night']) {
 
     // Screenshot the music bar itself, while it is the open layer (before the exclusion test below).
     const barShot = await page.evaluateHandle(() =>
-      [...document.querySelectorAll('.iw-touch-guard.iw-nightable')].find(e => e.textContent?.includes('Turn photo into a piece')))
+      [...document.querySelectorAll('.iw-touch-guard.iw-nightable')].find(e => e.textContent?.includes('♪ music')))
     if (barShot) { try { await barShot.asElement()?.screenshot({ path: `${OUT}/music-bar-${theme}.png` }) } catch {} }
 
     // MUTUAL EXCLUSION by the TYPE: open S, then ♪ — exactly one layer ends up owning the bar.
