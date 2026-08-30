@@ -42,6 +42,7 @@ import { getPageReflow } from './pdfReflowStore'
 // The ⌘/ctrl-wheel step now lives in ./zoomGesture so the source reader can share the exact curve
 // rather than grow a second copy of it. Re-exported: every existing caller and test is unchanged.
 import { pdfZoomFactor } from './zoomGesture'
+import { pageFromTops } from './pdfScrollPage'
 export { pdfZoomFactor }
 import type { IwCitationMeta } from '../types/document'
 
@@ -906,12 +907,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     let raf = 0
     const report = () => {
       raf = 0
-      const top = sc.getBoundingClientRect().top
-      let best = 1, bestDist = Infinity
-      for (let i = 0; i < pagesRef.current.length; i++) {
-        const d = Math.abs(pagesRef.current[i].wrapper.getBoundingClientRect().top - top)
-        if (d < bestDist) { bestDist = d; best = i + 1 }
-      }
+      // ONE LAYOUT PASS. This used to read the pane's rect twice and every page wrapper's rect
+      // TWICE — once to find the resume page, once for the "page n of x" indicator — i.e. 2N+2
+      // reads per scroll frame on a surface that is already supersampled and lazily rendered. The
+      // two answers come from the same tops, so they come from one pass now (N+1). The RULE is
+      // `pdfScrollPage.ts`, where it is unit-tested; this loop only gathers geometry.
+      const paneRect = sc.getBoundingClientRect()
+      const top = paneRect.top
+      const tops: number[] = []
+      for (let i = 0; i < pagesRef.current.length; i++) tops.push(pagesRef.current[i].wrapper.getBoundingClientRect().top)
+      const { nearest: best, pageNow: n } = pageFromTops(tops, top, top + sc.clientHeight * 0.35)
       setLastPdfPage(citekey, best)
       setLastPdfScroll(citekey, sc.scrollTop) // exact spot, so author-year reopens where you left off
       // THE READING SIGNAL (ledger §A3.2). Rides THIS reporter — already rAF-coalesced, already
@@ -920,17 +925,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       // records only THAT we scrolled, never where (no trace — see pdfActivity.ts).
       noteScroll(citekey)
       // WHICH PAGE AM I ON (Peter, 2026-08-28: "put an indicator at bottom left of both pdf and
-      // webpage of which page n/x you're at"). The page whose top is nearest the pane's own top and
-      // not below its middle — i.e. the one you are actually reading, not the one whose last line
-      // is scrolling away. Free: this handler already has every page's rect.
-      {
-        const mid = sc.getBoundingClientRect().top + sc.clientHeight * 0.35
-        let n = 1
-        for (let i = 0; i < pagesRef.current.length; i++) {
-          if (pagesRef.current[i].wrapper.getBoundingClientRect().top <= mid) n = i + 1
-        }
-        if (n !== pageNowRef.current) { pageNowRef.current = n; setPageNow(n) }
-      }
+      // webpage of which page n/x you're at"). Deliberately NOT the same answer as `best` above: it
+      // is the last page past the reading line, so the page whose last line is scrolling away is not
+      // reported as the one you are reading. See pdfScrollPage.ts.
+      if (n !== pageNowRef.current) { pageNowRef.current = n; setPageNow(n) }
       // FULLSCREEN WAVE SWAY (Peter, 2026-07-10): while the PDF floats over the water, its scroll
       // drives the editor's --wave-x sway + dash twinkle exactly like editor scrolling does.
       // Scroll.tsx's sway effect folds this absolute top into its base+top formula.
