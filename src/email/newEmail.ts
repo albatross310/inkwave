@@ -11,9 +11,17 @@ import type { InkwaveDocument, EmailHeaders } from '../types/document'
 /** An empty email document, ready to compose into. */
 export function newEmailDocument(headers?: Partial<EmailHeaders>): InkwaveDocument {
   const now = new Date().toISOString()
+  // The headers are built first so the title comes from titleForEmail rather than a second copy of
+  // the blank-subject rule. Two copies is how the library and the ledger's doc_label start disagreeing.
+  const email: EmailHeaders = {
+    to: headers?.to ?? [],
+    cc: headers?.cc ?? [],
+    bcc: headers?.bcc ?? [],
+    subject: headers?.subject ?? '',
+  }
   return {
     id: uuidv4(),
-    title: headers?.subject?.trim() || 'Untitled email',
+    title: titleForEmail(email),
     contentJson: { type: 'doc', content: [{ type: 'paragraph' }] },
     createdAt: now,
     updatedAt: now,
@@ -21,12 +29,7 @@ export function newEmailDocument(headers?: Partial<EmailHeaders>): InkwaveDocume
     scasLimitN: 'infinite',
     scasSessionSeed: uuidv4(),
     docType: 'email',
-    email: {
-      to: headers?.to ?? [],
-      cc: headers?.cc ?? [],
-      bcc: headers?.bcc ?? [],
-      subject: headers?.subject ?? '',
-    },
+    email,
   }
 }
 

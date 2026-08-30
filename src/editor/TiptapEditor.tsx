@@ -44,7 +44,7 @@ import { summariseParagraph, summariseBullets, summariseDiff } from '../provenan
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
 import { emailEnabled } from '../email/flag'
-import { titleForEmail } from '../email/newEmail'
+import { titleForDocument } from './docTitle'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
@@ -2003,13 +2003,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       ...docRef.current,
       contentJson: e.getJSON(),
       updatedAt: new Date().toISOString(),
-      // First block only — deriveTitle(e.getText()) walked the ENTIRE doc to read one line.
-      // An EMAIL titles itself from its SUBJECT, not its body: the generic rule would overwrite the
-      // subject with the first line of the message ("Dear Ada,") on the next save beat, so the
-      // library and the ledger's doc_label would show the greeting instead of the subject.
-      title: docRef.current.docType === 'email' && docRef.current.email
-        ? titleForEmail(docRef.current.email)
-        : deriveTitle(e.state.doc.firstChild?.textContent ?? '') || docRef.current.title,
+      // First block only — reading the title from e.getText() walked the ENTIRE doc for one line.
+      // The email-vs-body precedence lives in docTitle.ts, with the reasoning and its tests.
+      title: titleForDocument(docRef.current, e.state.doc.firstChild?.textContent ?? ''),
       scasState: scasRef.current?.state ?? docRef.current.scasState,
       scasGreenAnchors: getGreenAnchors(e.state),
     }
@@ -3692,11 +3688,6 @@ function kdSyncEnabled(): boolean {
     _kdSync = v === null ? !isTouchDevice() : v === '1'
   } catch { _kdSync = false }
   return _kdSync
-}
-
-function deriveTitle(text: string): string {
-  const first = text.trim().split('\n')[0]?.trim() ?? ''
-  return first.slice(0, 80)
 }
 
 
