@@ -34,12 +34,46 @@ import { Toast } from '../components/Toast'
 import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 
 
-const INK = '#5c2d8a'
+// ── The /snapshot palette ─────────────────────────────────────────────────────
+// EVERY colour on this route resolves through a `--iw-snap-*` token defined at :root in BOTH themes
+// (the SNAPSHOT VIEW block in src/styles/index.css, which carries the reasoning). Deliberately NOT
+// `.iw-nightable`: that class exists for a floating panel and forces a dolphin-grey fill on whatever
+// it sits on — here it would paint the three full-height panes light grey over the near-black
+// document pane, which is the half-lit screen this palette was written to fix. Each name below is a
+// `var(…, <day literal>)`, so a missing stylesheet still yields the day design rather than nothing.
+// KEEP THE INDIRECTION: an inline literal here is a night bug by construction, because these panes
+// sit outside every scope that remaps one.
+const INK = 'var(--iw-snap-ink, #5c2d8a)'
+const INK_HOVER = 'var(--iw-snap-ink-hover, #7a3fb5)'
+const ON_INK = 'var(--iw-snap-on-ink, #ffffff)'   // text ON an INK fill — never a literal white
+const CARD = 'var(--iw-snap-card, #ffffff)'
+const PANE_BG = 'var(--iw-snap-pane, #f9f7f4)'
+const SIDE_BG = 'var(--iw-snap-side, #fbfaf6)'
+const TEXT = 'var(--iw-snap-text, #3a3a3a)'
+const MUTED = 'var(--iw-snap-muted, #6f6a7d)'
+const EDGE = 'var(--iw-snap-edge, rgba(92,45,138,0.2))'
+const CARD_EDGE = 'var(--iw-snap-card-edge, rgba(92,45,138,0.4))'
+const CHIP_BG = 'var(--iw-snap-chip-bg, rgba(92,45,138,0.08))'
+const CHIP_BG_ON = 'var(--iw-snap-chip-bg-on, rgba(92,45,138,0.16))'
+const CHIP_EDGE = 'var(--iw-snap-chip-edge, rgba(92,45,138,0.35))'
+const DANGER = 'var(--iw-snap-danger, #b91c1c)'
+const DANGER_BG = 'var(--iw-snap-danger-bg, rgba(185,28,28,0.07))'
+const DANGER_EDGE = 'var(--iw-snap-danger-edge, rgba(185,28,28,0.25))'
+const ADD_FG = 'var(--iw-snap-add-fg, #166534)'
+const ADD_BG = 'var(--iw-snap-add-bg, rgba(22,163,74,0.16))'
+const DEL_FG = 'var(--iw-snap-del-fg, #b91c1c)'
+const DEL_BG = 'var(--iw-snap-del-bg, rgba(185,28,28,0.07))'
+const RULE = 'var(--iw-snap-rule, rgba(92,45,138,0.32))'
+const PAGE_NUM = 'var(--iw-snap-page-num, rgba(92,45,138,0.85))'
+const CARD_SHADOW = 'var(--iw-snap-map-shadow, rgba(80,50,10,0.15))'
+
 const NAV_H = 'clamp(38px, 6vh, 50px)' // shared height for BOTH nav pairs (editor + diff panel)
-const NAV_BG = 'rgba(140, 90, 200, 0.35)'
-const NAV_BG_DIS = 'rgba(140, 90, 200, 0.06)'
-const NAV_FG = 'rgba(92, 45, 138, 0.85)'
-const NAV_FG_DIS = 'rgba(140, 90, 200, 0.25)'
+const NAV_BG = 'var(--iw-snap-nav-bg, rgba(140, 90, 200, 0.35))'
+const NAV_BG_DIS = 'var(--iw-snap-nav-bg-off, rgba(140, 90, 200, 0.06))'
+const NAV_FG = 'var(--iw-snap-nav-fg, rgba(92, 45, 138, 0.85))'
+const NAV_FG_DIS = 'var(--iw-snap-nav-fg-off, rgba(140, 90, 200, 0.25))'
+const NAV_EDGE = 'var(--iw-snap-nav-edge, rgba(140, 90, 200, 0.28))'
+const NAV_EDGE_DIS = 'var(--iw-snap-nav-edge-off, rgba(140, 90, 200, 0.10))'
 
 // ── Nav side ─────────────────────────────────────────────────────────────────
 // Buttons always visible. Each button has a summary panel above it that collapses
@@ -73,7 +107,7 @@ function NavSide({
     width: dim, height: NAV_H, borderRadius: 9,
     background: disabled ? NAV_BG_DIS : NAV_BG,
     color: disabled ? NAV_FG_DIS : NAV_FG,
-    border: `1px solid ${disabled ? 'rgba(140,90,200,0.10)' : 'rgba(140,90,200,0.28)'}`,
+    border: `1px solid ${disabled ? NAV_EDGE_DIS : NAV_EDGE}`,
     cursor: disabled ? 'default' : 'pointer',
     transition: 'background 0.15s',
     userSelect: 'none' as const,
@@ -84,10 +118,14 @@ function NavSide({
 
   // Buttons are the anchor — panels are absolutely positioned so buttons never shift.
   // Ver panel floats ABOVE the ver button; snap panel floats BELOW the snap button.
+  // `aria-disabled` rather than `disabled`: the click is already withheld, and this states the fact
+  // that the lozenge is INACTIVE — which is what licenses its deliberately faint colours in both
+  // themes (WCAG 1.4.3 exempts inactive components, and a contrast sweep must be able to tell an
+  // unavailable control from an illegible one rather than being handed an exemption list).
   const Btn = ({ btn, title, disabled, onBtn }: { btn: string; title: string; disabled: boolean; onBtn: () => void }) => (
     <button type="button" style={{ ...btnStyle(disabled), pointerEvents: 'auto' }}
-      onClick={disabled ? undefined : onBtn} title={title}
-      onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
+      onClick={disabled ? undefined : onBtn} title={title} aria-disabled={disabled || undefined}
+      onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
       onMouseLeave={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
     >{btn}</button>
   )
@@ -161,15 +199,15 @@ function buildDiffNodes(
   let k = 0
   for (let pg = 1; pg <= pages; pg++) {
     out.push(
-      <div key={`pr${k++}`} aria-hidden="true" data-page={pg} style={{ display: 'block', position: 'relative', height: 0, borderTop: '1px dashed rgba(92,45,138,0.32)', margin: pg === 1 ? '2px 0 7px' : '15px 0 7px' }}>
-        <span style={{ position: 'absolute', right: 0, top: 3, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.9rem', fontWeight: 700, color: 'rgba(92,45,138,0.72)', fontFamily: 'Georgia, "Times New Roman", serif' }}>
+      <div key={`pr${k++}`} aria-hidden="true" data-page={pg} style={{ display: 'block', position: 'relative', height: 0, borderTop: `1px dashed ${RULE}`, margin: pg === 1 ? '2px 0 7px' : '15px 0 7px' }}>
+        <span style={{ position: 'absolute', right: 0, top: 3, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.9rem', fontWeight: 700, color: PAGE_NUM, fontFamily: 'Georgia, "Times New Roman", serif' }}>
           <img src="/inkwave-logo-v7.png" alt="" style={{ width: 15, height: 15, opacity: 0.72 }} />{pg}
         </span>
       </div>,
     )
     const onPage = changes.filter(c => c.page === pg)
     if (!onPage.length) {
-      out.push(<div key={`nc${k++}`} style={{ color: '#b3adbb', fontStyle: 'italic', fontSize: '0.78rem', padding: '3px 0 5px 2px' }}>no change this page</div>)
+      out.push(<div key={`nc${k++}`} style={{ color: MUTED, fontStyle: 'italic', fontSize: '0.78rem', padding: '3px 0 5px 2px' }}>no change this page</div>)
       continue
     }
     out.push(
@@ -177,19 +215,19 @@ function buildDiffNodes(
         {onPage.map((c) => {
           const cls = c.del ? 'diff-del' : 'diff-add'
           const style: React.CSSProperties = c.del
-            ? { color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.07)', borderRadius: 2 }
-            : { background: 'rgba(22,163,74,0.16)', color: '#166534', borderRadius: 2 }
+            ? { color: DEL_FG, textDecoration: 'line-through', background: DEL_BG, borderRadius: 2 }
+            : { background: ADD_BG, color: ADD_FG, borderRadius: 2 }
           const core = splitEdges(ops[c.i].text).core || ops[c.i].text.trim()
           return (
-            <li key={c.i} style={{ marginBottom: 5, color: '#3a3a3a' }}>
-              {c.before && <span style={{ color: '#9a94a4' }}>…{c.before} </span>}
+            <li key={c.i} style={{ marginBottom: 5, color: TEXT }}>
+              {c.before && <span style={{ color: MUTED }}>…{c.before} </span>}
               <span className={cls} data-opidx={String(c.i)} style={style}
                 onClick={onChangeClick ? () => onChangeClick(c.i) : undefined}
                 onMouseEnter={onHoverOp ? () => onHoverOp(c.i) : undefined}
                 onMouseLeave={onHoverOp ? () => onHoverOp(null) : undefined}
                 title={onChangeClick ? 'Jump to this change in the document' : undefined}
               >{core}</span>
-              {c.after && <span style={{ color: '#9a94a4' }}> {c.after}…</span>}
+              {c.after && <span style={{ color: MUTED }}> {c.after}…</span>}
             </li>
           )
         })}
@@ -261,8 +299,8 @@ function FullDiffView({
     if (!core) return <span key={i} data-opidx={String(i)}>{op.text}</span> // whitespace/returns → plain, no highlight
     const cls = op.type === 'del' ? 'diff-del' : 'diff-add'
     const style: React.CSSProperties = op.type === 'del'
-      ? { color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.06)' }
-      : { background: 'rgba(22,163,74,0.15)', color: '#166534' }
+      ? { color: DEL_FG, textDecoration: 'line-through', background: DEL_BG }
+      : { background: ADD_BG, color: ADD_FG }
     // Outer span carries no highlight; the INNER core span holds the class + data-opidx so lead/trail
     // whitespace (esp. returns) never gets outlined/filled.
     return (
@@ -349,8 +387,8 @@ function InlineDiffView({
           fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif',
         }}
       >
-        {!prevSnap && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>No previous snapshot to compare against.</p>}
-        {prevSnap && !hasChange && <p style={{ color: '#aaa', fontStyle: 'italic', fontSize: '0.9rem' }}>Content is identical to the previous snapshot.</p>}
+        {!prevSnap && <p style={{ color: MUTED, fontStyle: 'italic', fontSize: '0.9rem' }}>No previous snapshot to compare against.</p>}
+        {prevSnap && !hasChange && <p style={{ color: MUTED, fontStyle: 'italic', fontSize: '0.9rem' }}>Content is identical to the previous snapshot.</p>}
         {/* Lead/trail whitespace = just enough for the TOP diff to reach the reading line (midFrac of the
             panel) and the BOTTOM diff to reach it from below — panel-relative, so it shrinks on smaller
             windows instead of a fixed 24em that dwarfs a half-screen pane. */}
@@ -758,26 +796,29 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
       onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
       title="Click or drag to scroll"
       style={{
-        flex: 1, minHeight: 0, position: 'relative', background: '#9fd9c8', borderRadius: 6, padding: 6, cursor: 'pointer',
+        flex: 1, minHeight: 0, position: 'relative', background: 'var(--iw-snap-map, #9fd9c8)', borderRadius: 6, padding: 6, cursor: 'pointer',
         display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridAutoFlow: 'column',
         gridTemplateRows: `repeat(${height}, 1fr)`, gap: GAP, touchAction: 'none',
       }}
     >
       {here && (
         <div aria-hidden="true" style={{ position: 'absolute', top: here.top, left: here.left, width: here.width, height: 0, zIndex: 6, pointerEvents: 'none' }}>
-          <div style={{ position: 'absolute', left: 5, right: 5, top: -1.5, height: 3, background: '#5c2d8a', borderRadius: 2, boxShadow: '0 0 3px rgba(92,45,138,0.75)' }} />
-          <div style={{ position: 'absolute', left: -3, top: -5, width: 11, height: 11, borderRadius: '50%', background: '#5c2d8a', color: '#fff', fontSize: 8, lineHeight: '11px', textAlign: 'center' }}>▸</div>
-          <div style={{ position: 'absolute', right: -3, top: -5, width: 11, height: 11, borderRadius: '50%', background: '#5c2d8a', color: '#fff', fontSize: 8, lineHeight: '11px', textAlign: 'center' }}>◂</div>
+          <div style={{ position: 'absolute', left: 5, right: 5, top: -1.5, height: 3, background: INK, borderRadius: 2, boxShadow: `0 0 3px ${CARD_EDGE}` }} />
+          <div style={{ position: 'absolute', left: -3, top: -5, width: 11, height: 11, borderRadius: '50%', background: INK, color: ON_INK, fontSize: 8, lineHeight: '11px', textAlign: 'center' }}>▸</div>
+          <div style={{ position: 'absolute', right: -3, top: -5, width: 11, height: 11, borderRadius: '50%', background: INK, color: ON_INK, fontSize: 8, lineHeight: '11px', textAlign: 'center' }}>◂</div>
         </div>
       )}
       {Array.from({ length: total }, (_, p) => (
         p < pages ? (
-          <div key={p} style={{ position: 'relative', background: '#f7f2e8', borderRadius: 2, minHeight: 6, boxShadow: '0 1px 2px rgba(80,50,10,0.15)', overflow: 'hidden' }}>
+          <div key={p} style={{ position: 'relative', background: 'var(--iw-snap-map-page, #f7f2e8)', borderRadius: 2, minHeight: 6, boxShadow: `0 1px 2px ${CARD_SHADOW}`, overflow: 'hidden' }}>
             {/* Text block (marks) inset with page-like margins — top/left/right, and a clear bottom margin
                 that leaves room for the logo + number below it (so they're never buried under a diff tick). */}
             <div style={{ position: 'absolute', top: 5, left: 4, right: 4, bottom: numFont + 9 }}>
               {marks.filter(m => m.page === p).map((m, i) => {
-                const base = m.add ? '#16a34a' : '#dc2626', dark = m.add ? '#0d6b30' : '#8f1414'
+                // `dark` is the HOVER emphasis — it is darker by day and LIGHTER at night, because
+                // emphasis on a dark ground moves the other way. The tokens hold both.
+                const base = m.add ? 'var(--iw-snap-add-tick, #16a34a)' : 'var(--iw-snap-del-tick, #dc2626)'
+                const dark = m.add ? 'var(--iw-snap-add-tick-hi, #0d6b30)' : 'var(--iw-snap-del-tick-hi, #8f1414)'
                 return (
                   <div key={i} title="Jump both panes to this change"
                     onClick={(e) => { e.stopPropagation(); seekToY(yFor(m.page, m.frac)) }}
@@ -791,7 +832,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
               })}
             </div>
             {/* logo + number in the clear bottom margin */}
-            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.1 /* number hugs its wave-seal (Peter, 2026-07-11) */, color: 'rgba(92,45,138,0.66)', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
+            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.1 /* number hugs its wave-seal (Peter, 2026-07-11) */, color: 'var(--iw-snap-map-num, rgba(92,45,138,0.8))', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
               <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 0.85, height: numFont * 0.85, opacity: 0.66 }} />
               {p + 1}
             </div>
@@ -1686,15 +1727,18 @@ function SplitDiffView({
       // FRAGMENT instead — each wrapped line gets its own ring, gaps get nothing, and the browser
       // recomputes fragments on any reflow (zoom included) for free. Ring listed before the fill so
       // it stays on top.
-      `[data-dv="${uid}"] span.diff-del[data-hover] { box-shadow: inset 0 0 0 calc(2px * (1 + var(--iw-align, 0))) rgba(185,28,28,0.95), inset 0 0 0 100vmax rgba(200,30,30,0.30) !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 2px !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-hover] { box-shadow: inset 0 0 0 calc(2px * (1 + var(--iw-align, 0))) rgba(21,128,61,0.95), inset 0 0 0 100vmax rgba(22,163,74,0.32) !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 2px !important; }`,
+      // COLOURS COME FROM THE --iw-snap-* TOKENS, never literals: these rules paint over BOTH panes
+      // and both themes, and a literal here reproduces the exact half-lit screen the palette fixes.
+      // The channel triples are substituted into rgba() so one token drives ring, fill and alpha.
+      `[data-dv="${uid}"] span.diff-del[data-hover] { box-shadow: inset 0 0 0 calc(2px * (1 + var(--iw-align, 0))) rgba(var(--iw-snap-del-ring-rgb, 185,28,28),0.95), inset 0 0 0 100vmax rgba(var(--iw-snap-del-fill-rgb, 200,30,30),0.30) !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 2px !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover] { box-shadow: inset 0 0 0 calc(2px * (1 + var(--iw-align, 0))) rgba(var(--iw-snap-add-ring-rgb, 21,128,61),0.95), inset 0 0 0 100vmax rgba(var(--iw-snap-add-fill-rgb, 22,163,74),0.32) !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 2px !important; }`,
       // active (clicked): darker + ring, both panes — same per-fragment treatment
-      `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(185,28,28,0.22) !important; box-shadow: inset 0 0 0 2px #991b1b !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 3px !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(22,163,74,0.32)  !important; box-shadow: inset 0 0 0 2px #15803d !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 3px !important; }`,
+      `[data-dv="${uid}"] span.diff-del[data-active] { background: rgba(var(--iw-snap-del-fill-rgb, 185,28,28),0.22) !important; box-shadow: inset 0 0 0 2px rgba(var(--iw-snap-del-ring-rgb, 153,27,27),1) !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 3px !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-active] { background: rgba(var(--iw-snap-add-fill-rgb, 22,163,74),0.32)  !important; box-shadow: inset 0 0 0 2px rgba(var(--iw-snap-add-ring-rgb, 21,128,61),1) !important; -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 3px !important; }`,
       // hover + active simultaneously: both are box-shadow now, so the combined rule must restate
       // ring + fill (higher specificity wins over either single-attr rule)
-      `[data-dv="${uid}"] span.diff-del[data-hover][data-active] { background: rgba(185,28,28,0.28) !important; box-shadow: inset 0 0 0 2px #991b1b, inset 0 0 0 100vmax rgba(200,30,30,0.30) !important; }`,
-      `[data-dv="${uid}"] span.diff-add[data-hover][data-active] { background: rgba(22,163,74,0.38)  !important; box-shadow: inset 0 0 0 2px #15803d, inset 0 0 0 100vmax rgba(22,163,74,0.32) !important; }`,
+      `[data-dv="${uid}"] span.diff-del[data-hover][data-active] { background: rgba(var(--iw-snap-del-fill-rgb, 185,28,28),0.28) !important; box-shadow: inset 0 0 0 2px rgba(var(--iw-snap-del-ring-rgb, 153,27,27),1), inset 0 0 0 100vmax rgba(var(--iw-snap-del-fill-rgb, 200,30,30),0.30) !important; }`,
+      `[data-dv="${uid}"] span.diff-add[data-hover][data-active] { background: rgba(var(--iw-snap-add-fill-rgb, 22,163,74),0.38)  !important; box-shadow: inset 0 0 0 2px rgba(var(--iw-snap-add-ring-rgb, 21,128,61),1), inset 0 0 0 100vmax rgba(var(--iw-snap-add-fill-rgb, 22,163,74),0.32) !important; }`,
       // text selection: a darker, opaque-ish shade that OVERWRITES the diff tint on the chars you highlight.
       `[data-dv="${uid}"] ::selection { background: rgba(70,50,110,0.85) !important; color: #fff !important; }`,
       `[data-dv="${uid}"] ::-moz-selection { background: rgba(70,50,110,0.85) !important; color: #fff !important; }`,
@@ -2565,9 +2609,9 @@ function SplitDiffView({
   const toggleBtn = (on: boolean): React.CSSProperties => ({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     height: 'clamp(20px, 3.4vh, 30px)', width: 'clamp(52px, 9vw, 78px)', padding: '0 clamp(5px, 0.8vw, 10px)',
-    background: on ? INK : '#fff', color: on ? '#fff' : INK, border: `1.5px solid ${INK}`, borderRadius: 8,
+    background: on ? INK : CARD, color: on ? ON_INK : INK, border: `1.5px solid ${INK}`, borderRadius: 8,
     fontSize: 'clamp(0.62rem, 1.3vw, 0.8rem)', fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
-    boxShadow: '0 1px 5px rgba(80,50,10,0.12)', flexShrink: 0,
+    boxShadow: `0 1px 5px ${CARD_SHADOW}`, flexShrink: 0,
   })
   const editorPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
@@ -2586,7 +2630,7 @@ function SplitDiffView({
       <div style={vertical
         ? { position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }
         : { position: 'fixed', left: 'var(--snap-split-pct, 28%)', top: 'calc(clamp(38px, 7vh, 48px) + 10px)', transform: 'translateX(calc(-100% + 5px))', zIndex: 46, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-end' }}>
-        {counter && (<div ref={counterRef} style={{ background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(80,50,10,0.15)', pointerEvents: 'none' }}>{counter}</div>)}
+        {counter && (<div ref={counterRef} style={{ background: CARD, border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: `0 2px 8px ${CARD_SHADOW}`, pointerEvents: 'none' }}>{counter}</div>)}
         <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
         <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
@@ -2621,19 +2665,19 @@ function SplitDiffView({
   // Thin snapshot-nav bar (‹ / ›) — a slim pair flanking the DIFF panel, mirroring the big editor nav.
   const thinNav = (side: 'left' | 'right', onClick: () => void, disabled: boolean, label: string, title: string) => (
     <button type="button" title={title} disabled={disabled} onClick={disabled ? undefined : onClick}
-      onMouseEnter={(e) => { if (!disabled) (e.currentTarget as HTMLElement).style.background = 'rgba(140,90,200,0.35)' }}
+      onMouseEnter={(e) => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
       onMouseLeave={(e) => { if (!disabled) (e.currentTarget as HTMLElement).style.background = NAV_BG }}
       style={{
         position: 'absolute', [side]: 6, top: `${midFrac * 100}%`, transform: 'translateY(-50%)', zIndex: 8,
-        width: 15, height: NAV_H, borderRadius: 5, border: `1px solid rgba(140,90,200,${disabled ? 0.1 : 0.28})`,
+        width: 15, height: NAV_H, borderRadius: 5, border: `1px solid ${disabled ? NAV_EDGE_DIS : NAV_EDGE}`,
         background: disabled ? NAV_BG_DIS : NAV_BG, color: disabled ? NAV_FG_DIS : NAV_FG,
         cursor: disabled ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '1rem', fontFamily: 'inherit', letterSpacing: '-0.04em', boxShadow: '0 1px 4px rgba(80,50,10,0.14)',
+        fontSize: '1rem', fontFamily: 'inherit', letterSpacing: '-0.04em', boxShadow: `0 1px 4px ${CARD_SHADOW}`,
       }}
     >{label}</button>
   )
   const diffPaneEl = (sz: React.CSSProperties) => (
-    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, overflow: 'hidden', background: '#f9f7f4', zoom: diffZoom } as React.CSSProperties}>
+    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, overflow: 'hidden', background: PANE_BG, zoom: diffZoom } as React.CSSProperties}>
       {midline}
       <InlineDiffView ops={ops} prevSnap={prevSnap} onChangeClick={handleClickOp} onHoverOp={handleHoverOp} scrollBodyRef={rightScrollRef} midFrac={midFrac} diffPages={diffPages} totalPages={totalPages} />
       {/* Scrub bitmap overlay — inside the zoomed pane, so its local-px canvas scales with the content. */}
@@ -2647,16 +2691,16 @@ function SplitDiffView({
   const sidePaneEl = (sz: React.CSSProperties) => (
     // Phone: the old floating control row + Verify button are gone (round 2), so the minimap and
     // summaries get the full pane height — plain padding all round.
-    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', background: '#fbfaf6', padding: 10, gap: 10, overflow: 'hidden' } as React.CSSProperties}>
-      <div className="iw-snap-scroll" style={{ flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: '#3a3a3a', border: `1.5px solid ${INK}66`, borderRadius: 8, background: '#fff', padding: '9px 11px' }}>
+    <div style={{ ...sz, flexShrink: 0, position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', background: SIDE_BG, padding: 10, gap: 10, overflow: 'hidden' } as React.CSSProperties}>
+      <div className="iw-snap-scroll" style={{ flex: '0 0 44%', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', fontSize: '1rem', lineHeight: 1.5, color: TEXT, border: `1.5px solid ${CARD_EDGE}`, borderRadius: 8, background: CARD, padding: '9px 11px' }}>
         {!summariesOn ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, height: '100%' }}>
             <div style={{ fontSize: '0.92rem', color: INK, fontWeight: 600, textAlign: 'center', maxWidth: '14ch' }}>Plain-language recaps</div>
-            <button type="button" aria-label="About snapshot recaps — turn them on" onClick={onOptInSummaries} className="transition-transform hover:scale-105" style={{ width: 46, height: 46, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: INK, border: `3px solid ${INK}`, cursor: 'pointer', fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontWeight: 700, fontSize: '1.7rem', lineHeight: 1, boxShadow: '0 1px 6px rgba(80,50,10,0.14)', paddingBottom: 2 }}>i</button>
+            <button type="button" aria-label="About snapshot recaps — turn them on" onClick={onOptInSummaries} className="transition-transform hover:scale-105" style={{ width: 46, height: 46, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: CARD, color: INK, border: `3px solid ${INK}`, cursor: 'pointer', fontFamily: 'Georgia, "Times New Roman", serif', fontStyle: 'italic', fontWeight: 700, fontSize: '1.7rem', lineHeight: 1, boxShadow: `0 1px 6px ${CARD_SHADOW}`, paddingBottom: 2 }}>i</button>
           </div>
         ) : summary && summary.trim()
           ? <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>{summary.split('\n').filter(Boolean).map((b, i) => <li key={i} style={{ marginBottom: 7 }}>{b.replace(/^[-•*]\s*/, '')}</li>)}</ul>
-          : <span style={{ color: '#a8a29e', fontStyle: 'italic' }}>No summary for this snapshot.</span>}
+          : <span style={{ color: MUTED, fontStyle: 'italic' }}>No summary for this snapshot.</span>}
       </div>
       {/* mapHost wraps the minimap so the scrub capture (and its overlay) covers exactly its box. */}
       <div ref={mapHostRef} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
@@ -2673,18 +2717,18 @@ function SplitDiffView({
   ) => (
     <div style={{
       gridArea: area, width: '100%', height: '100%', minWidth: 0, minHeight: 0, zIndex: 10,
-      background: draggable ? 'rgba(92,45,138,0.10)' : 'rgba(92,45,138,0.14)',
+      background: draggable ? 'var(--iw-snap-divider, rgba(92,45,138,0.10))' : 'var(--iw-snap-divider-fixed, rgba(92,45,138,0.14))',
       cursor: draggable ? (orient === 'row' ? 'row-resize' : 'col-resize') : 'default',
       display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
     }}
       onMouseDown={draggable ? (e) => { e.preventDefault(); onDown(e.clientX, e.clientY) } : undefined}
       onTouchStart={draggable ? (e) => { e.preventDefault(); onDown(e.touches[0].clientX, e.touches[0].clientY) } : undefined}
-      onMouseEnter={draggable ? (e) => (e.currentTarget.style.background = 'rgba(92,45,138,0.28)') : undefined}
-      onMouseLeave={draggable ? (e) => { if (!isDrag.current) e.currentTarget.style.background = 'rgba(92,45,138,0.10)' } : undefined}
+      onMouseEnter={draggable ? (e) => (e.currentTarget.style.background = 'var(--iw-snap-divider-hover, rgba(92,45,138,0.28))') : undefined}
+      onMouseLeave={draggable ? (e) => { if (!isDrag.current) e.currentTarget.style.background = 'var(--iw-snap-divider, rgba(92,45,138,0.10))' } : undefined}
       title={draggable ? title : undefined}>
       {draggable && (
         <div style={{ display: 'flex', flexDirection: orient === 'row' ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
-          {[0, 1, 2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(92,45,138,0.4)' }} />)}
+          {[0, 1, 2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--iw-snap-divider-grip, rgba(92,45,138,0.4))' }} />)}
         </div>
       )}
     </div>
@@ -2720,7 +2764,7 @@ function SplitDiffView({
             in the real diff surface's cache bucket and rasters at the same scale. */}
         <div style={{
           position: 'relative', flexShrink: 0, width: sweepBox.dw, height: sweepBox.dh,
-          background: '#f9f7f4', overflow: 'hidden', zoom: diffZoom,
+          background: PANE_BG, overflow: 'hidden', zoom: diffZoom,
         } as React.CSSProperties}>
           <InlineDiffView
             ops={sOps} prevSnap={sPrev} onChangeClick={noopOp} onHoverOp={noopHover}
@@ -2759,9 +2803,9 @@ function SplitDiffView({
           <div style={{ gridArea: 'd2', position: 'relative', zIndex: 30, pointerEvents: 'none', minWidth: 0, minHeight: 0 }}>
             <div style={{
               position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-              background: '#fff', border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8,
+              background: CARD, border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8,
               padding: '2px 8px', fontSize: '0.72rem', fontFamily: 'inherit', whiteSpace: 'nowrap',
-              boxShadow: '0 2px 8px rgba(80,50,10,0.15)', letterSpacing: '-0.02em',
+              boxShadow: `0 2px 8px ${CARD_SHADOW}`, letterSpacing: '-0.02em',
             }}>{counter}</div>
           </div>
         )}
@@ -3526,10 +3570,13 @@ export function SnapshotView() {
           2026-07-10 — the whole top bar + controls + Verify gather into a two-row bottom region
           there, and the top of the view becomes pure content). */}
       <div
-        className="z-50 flex items-center bg-white/95 backdrop-blur"
+        className="z-50 flex items-center backdrop-blur"
         style={{
           position: 'fixed', left: 0, right: 0,
-          ...(isPhone ? { bottom: 0, borderTop: `1px solid ${INK}33` } : { top: 0, borderBottom: `1px solid ${INK}33` }),
+          // The bar's own fill is a token, not Tailwind's `bg-white/95`: a utility class cannot carry
+          // two themes, and this bar floats over the near-black document surface at night.
+          background: 'var(--iw-snap-bar, rgba(255,255,255,0.95))',
+          ...(isPhone ? { bottom: 0, borderTop: `1px solid ${EDGE}` } : { top: 0, borderBottom: `1px solid ${EDGE}` }),
           fontSize: 'clamp(0.72rem, 1.5vw, 1.02rem)', height: 'clamp(38px, 7vh, 48px)', gap: 'clamp(4px, 0.8vw, 10px)', padding: '0 clamp(6px, 1vw, 12px)',
         }}
       >
@@ -3542,13 +3589,13 @@ export function SnapshotView() {
         </span>
 
         {snapshot && (
-          <span className="text-stone-600">
+          <span style={{ color: MUTED }}>
             {snapshot.wordCount}w
           </span>
         )}
 
         {allSnapshots.length > 1 && (
-          <span className="text-stone-600 tabular-nums">
+          <span className="tabular-nums" style={{ color: MUTED }}>
             {`v${groupIdx + 1}/${groups.length}`}
           </span>
         )}
@@ -3558,12 +3605,12 @@ export function SnapshotView() {
         {isPhone && (<>
           <button type="button" onClick={cycleSnap} title="Editor snap to diffs — on/off" style={{
             height: 22, padding: '0 6px', borderRadius: 6, flexShrink: 0,
-            background: snapMode !== 'off' ? INK : '#fff', color: snapMode !== 'off' ? '#fff' : INK,
+            background: snapMode !== 'off' ? INK : CARD, color: snapMode !== 'off' ? ON_INK : INK,
             border: `1.5px solid ${INK}`, fontSize: '0.6rem', fontFamily: 'inherit', fontWeight: 600, letterSpacing: '-0.02em',
           }}>{snapMode === 'off' ? 'Off' : 'On'}</button>
           <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both · L ← R · Off" style={{
             height: 22, padding: '0 6px', borderRadius: 6, flexShrink: 0,
-            background: bijMode !== 'off' ? INK : '#fff', color: bijMode !== 'off' ? '#fff' : INK,
+            background: bijMode !== 'off' ? INK : CARD, color: bijMode !== 'off' ? ON_INK : INK,
             border: `1.5px solid ${INK}`, fontSize: '0.6rem', fontFamily: 'inherit', fontWeight: 600, letterSpacing: '-0.02em',
           }}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L←R' : 'Off'}</button>
         </>)}
@@ -3579,10 +3626,10 @@ export function SnapshotView() {
             paint toggles them. Rendered empty on purpose: React holds no text here, so there is
             exactly one writer and no vdom/imperative desync. */}
         <span ref={hdWrapRef} className="flex items-baseline tabular-nums" style={{ fontSize: isPhone ? '0.72rem' : 'clamp(0.8rem, 1.8vw, 1.2rem)', flexShrink: 0, marginRight: isPhone ? 2 : 'clamp(6px, 1.4vw, 16px)', columnGap: isPhone ? 3 : 8, letterSpacing: isPhone ? '-0.03em' : undefined, visibility: 'hidden' }} title="words added / removed vs the previous snapshot">
-          <span ref={hdAddedRef} style={{ color: '#15803d', fontWeight: 800 }} />
-          <span ref={hdRemovedRef} style={{ color: '#b91c1c', fontWeight: 800 }} />
+          <span ref={hdAddedRef} style={{ color: ADD_FG, fontWeight: 800 }} />
+          <span ref={hdRemovedRef} style={{ color: DEL_FG, fontWeight: 800 }} />
         </span>
-        <span ref={hdNoChangeRef} className="text-stone-500 italic" style={{ display: 'none' }}>no change</span>
+        <span ref={hdNoChangeRef} className="italic" style={{ display: 'none', color: MUTED }}>no change</span>
         <button
           type="button"
           onClick={toggleLineMode}
@@ -3590,8 +3637,8 @@ export function SnapshotView() {
           style={{
             fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
             order: isPhone ? 8 : undefined, // phone: bgst Δ + ← edit hold the right end (Peter, round 2)
-            background: lineMode === 'longest' ? 'rgba(92,45,138,0.16)' : 'rgba(92,45,138,0.08)',
-            border: '1px solid rgba(92, 45, 138, 0.35)',
+            background: lineMode === 'longest' ? CHIP_BG_ON : CHIP_BG,
+            border: `1px solid ${CHIP_EDGE}`,
             color: INK,
           }}
           title={lineMode === 'longest'
@@ -3617,9 +3664,12 @@ export function SnapshotView() {
             className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm transition-colors"
             style={{
               fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
-              background: isRegenerating ? 'rgba(92,45,138,0.04)' : 'rgba(92,45,138,0.08)',
-              border: '1px solid rgba(92, 45, 138, 0.35)',
-              color: isRegenerating ? 'rgba(92,45,138,0.4)' : INK,
+              // Disabled while regenerating: the `disabled` attribute already says so semantically,
+              // so the state is carried by the muted label rather than by fading the fill to an
+              // alpha nobody can see on either ground.
+              background: CHIP_BG,
+              border: `1px solid ${CHIP_EDGE}`,
+              color: isRegenerating ? MUTED : INK,
               cursor: isRegenerating ? 'default' : 'pointer',
             }}
             title="Clear and regenerate all AI summaries"
@@ -3648,9 +3698,9 @@ export function SnapshotView() {
             className="flex-shrink-0 px-4 py-1.5 rounded-full font-serif shadow-sm"
             style={{
               fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
-              background: 'rgba(185,28,28,0.07)',
-              border: '1px solid rgba(185,28,28,0.25)',
-              color: '#b91c1c',
+              background: DANGER_BG,
+              border: `1px solid ${DANGER_EDGE}`,
+              color: DANGER,
               cursor: 'pointer',
             }}
             title="Permanently delete this snapshot"
@@ -3665,12 +3715,12 @@ export function SnapshotView() {
           style={{
             fontSize: isPhone ? '0.62rem' : 'clamp(0.6rem, 1.35vw, 0.92rem)', fontWeight: 500, padding: isPhone ? '2px 5px' : 'clamp(2px,0.5vh,6px) clamp(6px,1.2vw,16px)', whiteSpace: 'nowrap', letterSpacing: isPhone ? '-0.02em' : undefined,
             order: isPhone ? 9 : undefined, // phone: rightmost
-            background: 'rgba(92, 45, 138, 0.08)',
-            border: '1px solid rgba(92, 45, 138, 0.35)',
+            background: CHIP_BG,
+            border: `1px solid ${CHIP_EDGE}`,
             color: INK,
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(92,45,138,0.16)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(92,45,138,0.08)')}
+          onMouseEnter={e => (e.currentTarget.style.background = CHIP_BG_ON)}
+          onMouseLeave={e => (e.currentTarget.style.background = CHIP_BG)}
         >
           {isPhone ? 'edit' : 'editor'}
         </button>
@@ -3682,14 +3732,14 @@ export function SnapshotView() {
 
       {/* Split pane fills remaining viewport */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {(status === 'loading' || (status === 'ready' && !libReady)) && <p className="text-center text-stone-400 mt-20">Loading…</p>}
+        {(status === 'loading' || (status === 'ready' && !libReady)) && <p className="text-center mt-20" style={{ color: MUTED }}>Loading…</p>}
         {status === 'missing' && (
-          <p className="text-center text-stone-500 mt-20">
+          <p className="text-center mt-20" style={{ color: MUTED }}>
             That snapshot isn't on this device. Snapshots live in the browser where they were written.
           </p>
         )}
         {status === 'unreadable' && (
-          <p className="text-center text-stone-500 mt-20">
+          <p className="text-center mt-20" style={{ color: MUTED }}>
             Inkwave couldn't read this document's history just now — this doesn't mean it's gone.
             Nothing was changed. Reload to try again.
           </p>
@@ -3759,13 +3809,13 @@ export function SnapshotView() {
         style={{
           position: 'fixed', zIndex: 56,
           bottom: 16, right: 16, padding: '8px 18px',
-          background: '#5c2d8a', color: '#fff',
+          background: INK, color: ON_INK,
           border: 'none', borderRadius: 8,
           fontSize: '0.9rem', fontWeight: 600,
-          cursor: 'pointer', boxShadow: '0 2px 8px rgba(92,45,138,0.35)',
+          cursor: 'pointer', boxShadow: `0 2px 8px ${CARD_SHADOW}`,
         }}
-        onMouseEnter={e => (e.currentTarget.style.background = '#7a3fb5')}
-        onMouseLeave={e => (e.currentTarget.style.background = '#5c2d8a')}
+        onMouseEnter={e => (e.currentTarget.style.background = INK_HOVER)}
+        onMouseLeave={e => (e.currentTarget.style.background = INK)}
         title="Verify this document — the same auto-verify flow as the editor"
       >
         Verify

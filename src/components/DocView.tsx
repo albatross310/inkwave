@@ -16,7 +16,9 @@ function citationInline(attrs: Node['attrs'], key: number): ReactNode {
   if (!keys.length) return null
   const items = keys.map(k => bibProvider.get(k)).filter((x): x is CSLItem => !!x)
   const label = items.length ? simpleInText(items) : `(${keys.join('; ')})`
-  return <span key={key} style={{ color: '#5c2d8a' }}>{label}</span>
+  // The citation token, not a literal: this renders inside /snapshot's doc pane, whose paper is
+  // charcoal at night — the editor's own in-text hooks already resolve through --iw-cite-color.
+  return <span key={key} style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{label}</span>
 }
 
 function applyMarks(text: string, marks: Node['marks'], key: number): ReactNode {

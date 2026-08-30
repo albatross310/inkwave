@@ -55,8 +55,11 @@ type Node = { type?: string; text?: string; marks?: Array<{ type: string }>; att
 
 // Byte-for-byte the styles FullDiffView uses — the two renderers must be indistinguishable in
 // everything except structure, or switching them would read as a visual change rather than a layout one.
-const DEL_STYLE: React.CSSProperties = { color: '#b91c1c', textDecoration: 'line-through', background: 'rgba(185,28,28,0.06)' }
-const ADD_STYLE: React.CSSProperties = { background: 'rgba(22,163,74,0.15)', color: '#166534' }
+// The `--iw-snap-*` tokens (index.css, SNAPSHOT VIEW block) so the doc pane's marks and the diff
+// panel's bullets are ONE palette in both themes — the day values below are the literals this pane
+// has always painted, kept as fallbacks.
+const DEL_STYLE: React.CSSProperties = { color: 'var(--iw-snap-del-fg, #b91c1c)', textDecoration: 'line-through', background: 'var(--iw-snap-del-bg, rgba(185,28,28,0.07))' }
+const ADD_STYLE: React.CSSProperties = { background: 'var(--iw-snap-add-bg, rgba(22,163,74,0.16))', color: 'var(--iw-snap-add-fg, #166534)' }
 
 export interface RichDiffHooks {
   onOpClick?: (opIdx: number) => void
@@ -128,7 +131,7 @@ function citationInline(node: Node, path: number[], ctx: Ctx, key: string): Reac
   if (!keys.length) return null
   const items = keys.map((k) => bibProvider.get(k)).filter((x): x is CSLItem => !!x)
   const label = items.length ? simpleInText(items) : `(${keys.join('; ')})`
-  return <span key={key} style={{ color: '#5c2d8a' }}>{splitLeaf(label, path, ctx, key)}</span>
+  return <span key={key} style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{splitLeaf(label, path, ctx, key)}</span>
 }
 
 function inline(nodes: Node[] | undefined, base: number[], ctx: Ctx): ReactNode {
