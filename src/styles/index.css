@@ -1761,7 +1761,17 @@
                        lane rather than silently left as two sources of one colour.
      --iw-pill-fg      a muted label: a pill's text, a section heading, an unselected control.
      --iw-nightable-border  the outline of an inline-styled control. */
-:root { --iw-panel-fg: #4a4035; --iw-pill-fg: #78716c; --iw-nightable-border: #d1d5db; }
+:root { --iw-panel-fg: #4a4035; --iw-pill-fg: #78716c; --iw-nightable-border: #e7e5e4; }
+/* ⚠ THE BORDER'S DAY VALUE IS THE PLURALITY OF ITS CALL SITES, NOT A FRESH CHOICE (2026-08-30).
+   Declaring a day value for a token that was night-only is NOT a no-op: it kills every component
+   fallback at once, and this token is passed 117 times with 20 DIFFERENT fallbacks. The first cut
+   declared #d1d5db — a cool grey that exactly 2 of the 117 callers had asked for — which silently
+   repainted the other 115 day borders cooler and darker, app-wide, and shipped before anyone
+   measured it. #e7e5e4 is what 41 callers chose, it is the warm stone the parchment identity is
+   built on, and it leaves those 41 byte-identical.
+   THE RULE: a day value is only safe to declare when you have counted what the fallbacks already
+   say. The count is the measurement; the plurality is the answer. src/styles/colourScan.ts's drift
+   report is what makes the disagreement visible rather than a thing you find in a screenshot. */
 
 /* The corner countdown (CountdownOverlay) is PORTALLED to <body>, OUTSIDE any .iw-nightable surface.
    A token defined only inside that scope (like --iw-pill-fg) falls back to its DAY value on the night
