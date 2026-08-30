@@ -20,7 +20,7 @@ import {
 // serves both — and, decisively for this one, the gate can then check the SHIPPED rule rather than
 // a restatement of it. A copy of the expected shape in a test passes for ever while the real rule
 // drifts underneath it; that is the pmToText/textMap trap this repo already carries a guard for.
-import { frameRuleFor, FRAME_RULE_ID } from '@inkwave/reader/framingRule'
+import { frameRuleFor, frameRuleIdFor } from '@inkwave/reader/framingRule'
 import { assertFetchable, decodeHtml, READER_ACCEPT } from '@inkwave/reader/fetchRules'
 
 type HistoryEntry = { id: string; sourceUrl: string; type: string; title: string; at: number; missingRequired: string[]; capture?: CaptureMsg }
@@ -196,7 +196,7 @@ export default defineBackground(() => {
     }
 
     if (m.type === BG_CLEAR_FRAME) {
-      clearFraming().then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }))
+      clearFraming(sender.tab?.id).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }))
       return true
     }
 
@@ -283,14 +283,20 @@ async function allowFraming(rawUrl: string, tabId: number | undefined): Promise<
   // tab is not a reader asking politely; it is a request we cannot account for, and the failure
   // mode of guessing here is a framing rule with no owner.
   if (typeof tabId !== 'number') throw new Error('no tab')
-  await api.updateSessionRules({ removeRuleIds: [FRAME_RULE_ID], addRules: [frameRuleFor(tabId)] })
+  // Replaces only THIS tab's slot, so a second Inkwave window keeps its own live view.
+  await api.updateSessionRules({ removeRuleIds: [frameRuleIdFor(tabId)], addRules: [frameRuleFor(tabId)] })
 }
 
 /** Drop it. Called when the panel closes, when it navigates away from live view, and on unload. */
-async function clearFraming(): Promise<void> {
+async function clearFraming(tabId: number | undefined): Promise<void> {
   const api = dnr()
   if (!api?.updateSessionRules) return
-  await api.updateSessionRules({ removeRuleIds: [FRAME_RULE_ID] })
+  // ⚠ ONLY THIS TAB'S RULE. A bare remove-all here is the bug Peter named before it bit him:
+  // closing the panel in one window would drop live view in every other, silently, with the
+  // refusal card as the only symptom. No tab id ⇒ remove NOTHING, because a release we cannot
+  // attribute must not be allowed to cancel someone else's.
+  if (typeof tabId !== 'number') return
+  await api.updateSessionRules({ removeRuleIds: [frameRuleIdFor(tabId)] })
 }
 
 const READER_FETCH_TIMEOUT_MS = 20_000

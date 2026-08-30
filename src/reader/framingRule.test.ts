@@ -15,7 +15,7 @@
 // the expected shape would pass for ever while the shipped rule drifted underneath it, which is the
 // pmToText/textMap drift trap this repo already documents.
 import { describe, it, expect } from 'vitest'
-import { APP_INITIATORS, frameRuleFor } from './framingRule'
+import { APP_INITIATORS, frameRuleFor, frameRuleIdFor } from './framingRule'
 
 describe('the framing rule is scoped', () => {
   const TAB = 42
@@ -56,6 +56,25 @@ describe('the framing rule is scoped', () => {
     // enforce theirs.
     for (const h of rule.action.responseHeaders) expect(h.operation).toBe('remove')
     expect(rule.action.type).toBe('modifyHeaders')
+  })
+
+  it('TWO TABS DO NOT SHARE A RULE SLOT', () => {
+    // ⚠ THE RACE PETER CAUGHT BEFORE IT BIT HIM. The id used to be one fixed constant, so a second
+    // Inkwave window installing its rule REPLACED the first's, and closing the panel in either
+    // REMOVED it for both — live view would die in the window you were not touching, with the
+    // refusal card as the only symptom and nothing saying why.
+    expect(frameRuleIdFor(1)).not.toBe(frameRuleIdFor(2))
+    expect(frameRuleFor(1).id).toBe(frameRuleIdFor(1))
+    expect(frameRuleFor(2).id).toBe(frameRuleIdFor(2))
+    expect(frameRuleFor(1).id).not.toBe(frameRuleFor(2).id)
+  })
+
+  it('rule ids stay positive integers, as Chrome requires', () => {
+    for (const t of [0, 1, 7, 4242]) {
+      const id = frameRuleIdFor(t)
+      expect(Number.isInteger(id)).toBe(true)
+      expect(id).toBeGreaterThan(0)
+    }
   })
 
   it('KNOWN-NEGATIVE: the assertions can see an unscoped rule', () => {

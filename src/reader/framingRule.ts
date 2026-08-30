@@ -20,10 +20,26 @@
  *  `pnpm dev`; the production app answers on iwzero.me (inkwave.studio 301s there). */
 export const APP_INITIATORS = ['iwzero.me', 'inkwave.studio', 'localhost'] as const
 
-/** One fixed id, so installing a rule for a new page REPLACES the previous one rather than
- *  accumulating: the panel shows a single page at a time, and a second call means the writer
- *  navigated, not that they want both hosts left open. */
-export const FRAME_RULE_ID = 9101
+// ⚠ ONE RULE PER TAB, AND THE ID IS DERIVED FROM THE TAB (2026-08-30 — Peter caught this before it
+// bit him). It was a single fixed id, which is a race the moment a second Inkwave tab exists:
+// installing in tab B REPLACED tab A's rule, and closing the panel in B REMOVED it, so a writer
+// reading in two windows silently lost live view in the one they were not touching. Nothing in the
+// UI would have said why — the panel would simply start showing the refusal card again.
+//
+// Deriving the id from the tab makes per-tab isolation STRUCTURAL rather than a convention two call
+// sites have to remember: `allowFraming` can only ever write its own tab's slot, and `clearFraming`
+// can only ever remove its own. The same shape as DOC_LOCK_PREFIX in storage/tabDoc.ts — one
+// exported derivation, because a second private copy of the formula is how a rename puts a guard
+// quietly to sleep.
+const FRAME_RULE_BASE = 9101
+
+/** The session-rule id belonging to ONE tab. Never call the base directly. */
+export function frameRuleIdFor(tabId: number): number {
+  // Chrome requires a positive integer id. Tab ids are small and non-negative in practice, but a
+  // hostile or absent value must not collide with another tab's slot, so the caller is required to
+  // hand over a real tab id (background.ts refuses when it has none) and this only offsets it.
+  return FRAME_RULE_BASE + tabId
+}
 
 export interface FramingRule {
   id: number
@@ -40,7 +56,7 @@ export interface FramingRule {
 
 export function frameRuleFor(tabId: number): FramingRule {
   return {
-    id: FRAME_RULE_ID,
+    id: frameRuleIdFor(tabId),
     priority: 1,
     action: {
       type: 'modifyHeaders',
