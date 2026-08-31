@@ -14,13 +14,19 @@
 import type { Snapshot } from '../types/document'
 import { opsBetween, displayTextOf } from './diffCache'
 
-/** Shorter than this is too weak to anchor on reliably (matches SnapshotView's SIG_MIN). */
+// ⚠ THESE THREE ARE THE SINGLE SOURCE, and they did not used to be. routes/snapshotAnchor.ts — the
+// DOM half of the same anchor — carried its own `SIG_MIN`, `SIG_LEN` and nearest-occurrence search,
+// and the comments here said "matches SnapshotView's SIG_MIN" and "the same tie-break the DOM search
+// uses": two implementations of one rule, kept in step by hand, and only this copy had tests. The
+// DOM half now imports them. Changing a value here changes both halves, which is the point.
+
+/** Shorter than this is too weak to anchor on reliably. */
 export const ANCHOR_MIN = 12
-/** Chars of surviving text handed back as the replacement signature (matches SIG_LEN). */
+/** Chars of surviving text handed back as the replacement signature. */
 export const ANCHOR_LEN = 80
 
 /** Char offset of `sig` in `text`, choosing the occurrence nearest `ratioBias` of the way through
- *  (the anchor's own neighbourhood — the same tie-break the DOM search uses). -1 if absent. */
+ *  (the anchor's own neighbourhood). -1 if absent. */
 export function offsetOfNearest(text: string, sig: string, ratioBias: number): number {
   const bias = ratioBias * text.length
   let at = -1, best = Infinity
