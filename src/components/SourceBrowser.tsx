@@ -685,8 +685,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // comes back through their own connection rather than waiting for the next navigation.
   const [reloadKey, setReloadKey] = useState(0)
 
+  // Which address the current `doc` describes. Written synchronously so a later effect in the SAME
+  // commit cannot mistake the previous page's blocks for this one's — see the search-chain effect.
+  const docForRef = useRef<string | null>(null)
+
   useEffect(() => {
     let live = true
+    docForRef.current = null
     setDoc(null); setError(null); setVia(null)
     // Our own app is refused in both modes, so do not spend a fetch (or the writer's own
     // connection) asking a server to extract prose from a client-rendered SPA shell.
@@ -707,6 +712,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       try {
         const { doc: d, via: v } = await loadSource(here, { port: st === 'ready' ? windowPort() : null })
         if (!live) return
+        docForRef.current = here
         setDoc(d); setVia(v)
       } catch (e) {
         if (!live) return
@@ -875,8 +881,20 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   //
   // It advances only ONCE per address (the URL itself moves to the next engine), so there is no
   // loop: when the chain is spent the reader shows the ordinary empty-search state.
+  // ⚠ AND IT MUST JUDGE *THIS* ADDRESS'S PAGE, NOT THE ONE BEFORE IT (2026-08-31, found by
+  // `pnpm prove:readerflow`). On the commit where `here` changes, this effect's `doc` is still the
+  // PREVIOUS page's — `setDoc(null)` was queued by the load effect above but closures capture the
+  // render's values, so the fallback read the article the writer had just been looking at. An
+  // article has fewer than five linked blocks by definition, so `searchLooksEmpty` was TRUE for
+  // every search issued from an ordinary page, and the chain advanced before the first engine had
+  // answered. MEASURED: the first engine was fetched and its results thrown away; the writer landed
+  // on the LAST engine in the chain every time, so a chain built to survive one engine going quiet
+  // had already spent itself on arrival — Peter's "not searching anything" if the last one blinks.
+  // It also truncated forward history, because `go` slices the stack at the current index.
+  // A REF, not another state: the load effect runs BEFORE this one in the same commit, so clearing
+  // it there is what makes the stale read unrepresentable rather than merely unlikely.
   useEffect(() => {
-    if (framed || !doc || !isSearch(here)) return
+    if (framed || !doc || docForRef.current !== here || !isSearch(here)) return
     const linked = doc.blocks.filter((b) => 'runs' in b && (b.runs ?? []).some((r) => r.href)).length
     if (!searchLooksEmpty(linked)) return
     const next = nextSearchEngine(here)
