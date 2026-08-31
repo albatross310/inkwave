@@ -28,6 +28,9 @@ const read = (p: string) => readFileSync(resolve(__dirname, '..', '..', p), 'utf
 const CSS = read('src/styles/index.css')
 const SNAPSHOT_VIEW = read('src/routes/SnapshotView.tsx')
 const RICH_DIFF = read('src/components/RichDiffView.tsx')
+// The ?snapThumbs=debug HUD. It used to live inside SnapshotView.tsx and was EXEMPT there; it is
+// now checked like everything else. See the exemption note below for why that is not a loosening.
+const SCRUB_DEBUG = read('src/routes/ScrubDebugOverlay.tsx')
 
 /** Strip block and line comments. See the banner: this is load-bearing, not tidiness. */
 function stripComments(src: string): string {
@@ -120,14 +123,25 @@ describe('/snapshot palette — no un-tokenised colour in the route', () => {
   // — so `const CARD = '#fff'` anywhere in the file would have passed, and CARD is exactly the kind
   // of thing someone adds. Mutation testing found it: `#ffffff` died, `#fff` survived. An allow-list
   // of VALUES exempts every future use of that value; an allow-list of PLACES exempts only the
-  // places that earned it. The three regions below are deliberately theme-neutral, each a dark chip
+  // places that earned it. The two regions below are deliberately theme-neutral, each a dark chip
   // carrying light text in BOTH themes:
   //   · the injected ::selection rules — a dark wash that must overwrite the diff tint on either
   //     ground, so it cannot follow the theme
   //   · the first-open scrub hint — a dark tooltip floating over the water
-  //   · ScrubDebugOverlay — the ?snapThumbs=debug diagnostic, its own fixed scheme, never shown to a
-  //     writer (and its colours are a debugging vocabulary, not a palette)
-  // Adding a fourth is therefore a DECISION recorded here, not a value that quietly slips through.
+  // Adding a third is therefore a DECISION recorded here, not a value that quietly slips through.
+  //
+  // ⚠ A THIRD EXEMPTION USED TO BE HERE AND HAD STOPPED EXEMPTING ANYTHING. `ScrubDebugOverlay` was
+  // cut out by a `cutTopLevel(src, 'function ScrubDebugOverlay')` marker — but its HUD palette had
+  // since been tokenised (`var(--iw-hud-*, …)`), so the cut removed no violation at all. PROVED
+  // before removing it: deleting that cut from the unmoved file left this suite green. It has now
+  // moved to its own file, which is READ AND SCANNED above with no exemption — the overlay is
+  // checked for the first time rather than trusted. The `cutTopLevel` helper went with it; its one
+  // lesson is worth keeping even though its code is gone: BRACE-MATCHING DOES NOT WORK FOR A
+  // FUNCTION, because the first `{` after `function Foo` is the destructured parameter, so the
+  // balance closes at the end of the signature and the whole body sails through.
+  //
+  // The general shape, and it is this repo's own: a marker-based cut is an `indexOf` that answers
+  // "not found" by silently doing nothing. A file boundary cannot.
 
   /** Cut a brace/paren-balanced region starting at `marker` (which must precede the opener). */
   const cutRegion = (src: string, marker: string, open: string, close: string): string => {
@@ -142,19 +156,8 @@ describe('/snapshot palette — no un-tokenised colour in the route', () => {
     }
     return src
   }
-  /** Cut a whole top-level declaration: from `marker` to the next declaration at column 0.
-   *  ⚠ Brace-matching does NOT work for a function — the first `{` after `function Foo` is the
-   *  DESTRUCTURED PARAMETER, so the balance closes at the end of the signature and the body sails
-   *  through. Caught by this guard failing on the overlay's own colours. */
-  const cutTopLevel = (src: string, marker: string): string => {
-    const i = src.indexOf(marker)
-    if (i < 0) return src
-    const rest = src.slice(i + marker.length)
-    const m = /\n(?:function |const |export |\/\/ ──)/.exec(rest)
-    return src.slice(0, i) + (m ? rest.slice(m.index) : '')
-  }
   const cutNeutralRegions = (src: string) =>
-    cutRegion(cutTopLevel(src, 'function ScrubDebugOverlay'), 'showScrubHint && (', '(', ')')
+    cutRegion(src, 'showScrubHint && (', '(', ')')
       .split('\n').filter((l) => !/::(-moz-)?selection/.test(l)).join('\n')
 
   const scan = (src: string, { regions = false } = {}) => {
@@ -209,6 +212,24 @@ describe('/snapshot palette — no un-tokenised colour in the route', () => {
 
   it('RichDiffView.tsx carries no un-tokenised colour', () => {
     expect(scan(RICH_DIFF)).toEqual([])
+  })
+
+  it('ScrubDebugOverlay.tsx carries no un-tokenised colour — checked, no longer exempt', () => {
+    // NO `{ regions: true }`: the HUD gets no exemption at all now. Its palette is deliberately the
+    // same in both themes, and it says so with tokens rather than by being skipped — which is the
+    // difference between an invariance that is STATED and one that is merely unaudited.
+    expect(scan(SCRUB_DEBUG)).toEqual([])
+  })
+
+  it('…and a bare literal in the overlay IS caught, so that pass is not vacuous', () => {
+    // The exemption it replaces had stopped exempting anything and nothing noticed. This is the
+    // re-proof: the new check must be able to fail on the new file.
+    const planted = SCRUB_DEBUG.replace(
+      "bg: 'var(--iw-hud-bg, rgba(0,0,0,0.86))'",
+      "bg: '#101014'",
+    )
+    expect(planted).not.toEqual(SCRUB_DEBUG) // the plant must actually land
+    expect(scan(planted)).toContain('#101014')
   })
 })
 
