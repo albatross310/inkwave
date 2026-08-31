@@ -10,6 +10,10 @@ import { loadLibrary } from '../citations/library'
 import { diffStats, type DiffOp } from '../provenance/diff'
 // The pure layout/diff rules live next door, where they can be tested without mounting this route.
 import { splitEdges, longestChangeOpIdx, stackHeight, bestGrid } from './snapshotLayout'
+// The midline content anchor — 150 lines of DOM measurement behind two questions: what is on the
+// reading line, and where do I scroll to put it back. See snapshotAnchor.ts.
+import { midlineSignature, scrollTopForSignature } from './snapshotAnchor'
+import { ScrubDebugOverlay } from './ScrubDebugOverlay'
 import { opsBetween, peekOpsBetween, preloadDiffWindow, cancelDiffPreload } from '../provenance/diffCache'
 import { survivingNeighbourSig } from '../provenance/anchorMap'
 import { paginateStaticDoc, type StaticPaginationHandle, type StaticPageGeo } from '../editor/staticPagination'
@@ -27,8 +31,8 @@ import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { RichDiffView } from '../components/RichDiffView'
 import { textRenderEnabled } from '../editor/textRenderFlag'
-import { summariseRecord, createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
-import { snapThumbsDebug, snapThumbsEnabled, thumbStats, thumbPaneCounts } from '../editor/snapThumbs'
+import { createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
+import { snapThumbsDebug, snapThumbsEnabled } from '../editor/snapThumbs'
 // THE BREAK-TABLE SWEEP. Imported ONLY here — /snapshot has no editor, so this whole path cannot
 // run while Peter types, by construction rather than by measurement (snapshotBreaks.ts header).
 import { sweepBreakTables, snapBreaksEnabled, type SweepResult } from '../editor/snapshotBreaks'
@@ -155,7 +159,6 @@ function NavSide({
 }
 
 // ── Diff helpers ──────────────────────────────────────────────────────────────
-
 
 
 /**
@@ -394,150 +397,6 @@ function InlineDiffView({
   )
 }
 
-// ── Midline content anchoring ───────────────────────────────────────────────
-// The midline stays on the SAME WORDS across snapshot navigation (not the same
-// scroll fraction). We capture a short text signature of whatever sits on the line,
-// then after the next snapshot renders we find that text again and scroll it to the
-// line — so the document "scrolls around a bit" to keep the words put. Falls back to
-// fractional anchoring when the anchored text was edited away.
-
-const SIG_LEN = 80          // chars of the on-line text used as the anchor signature
-const SIG_MIN = 12          // shorter than this = too weak to anchor reliably
-
-/** Cross-browser caret hit-test → the text node + offset at a viewport point. */
-function caretAtPoint(x: number, y: number): { node: Text; offset: number } | null {
-  // Firefox
-  const anyDoc = document as unknown as {
-    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
-    caretRangeFromPoint?: (x: number, y: number) => Range | null
-  }
-  if (anyDoc.caretPositionFromPoint) {
-    const p = anyDoc.caretPositionFromPoint(x, y)
-    if (p && p.offsetNode.nodeType === Node.TEXT_NODE) return { node: p.offsetNode as Text, offset: p.offset }
-  }
-  if (anyDoc.caretRangeFromPoint) {
-    const r = anyDoc.caretRangeFromPoint(x, y)
-    if (r && r.startContainer.nodeType === Node.TEXT_NODE) return { node: r.startContainer as Text, offset: r.startOffset }
-  }
-  return null
-}
-
-/** Global character offset of (node, offset) within root's textContent. */
-function globalOffsetOf(root: HTMLElement, node: Text, offset: number): number {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  let acc = 0
-  let n = walker.nextNode() as Text | null
-  while (n) {
-    if (n === node) return acc + offset
-    acc += n.data.length
-    n = walker.nextNode() as Text | null
-  }
-  return acc
-}
-
-/** Locate the text node + in-node offset for a global textContent offset. */
-function locateOffset(root: HTMLElement, globalOffset: number): { node: Text; offset: number } | null {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  let acc = 0
-  let n = walker.nextNode() as Text | null
-  while (n) {
-    const len = n.data.length
-    if (acc + len >= globalOffset) return { node: n, offset: globalOffset - acc }
-    acc += len
-    n = walker.nextNode() as Text | null
-  }
-  return null
-}
-
-/** Global char offset of the character at content-y `y`, by BINARY SEARCH over Range rects — no
- *  hit-testing, so nothing that covers the pane can defeat it. Text lays out monotonically down a
- *  block flow, so ~log2(chars) rect reads find the line. (The pane is a handful of giant
- *  [data-opidx] spans, so each locateOffset walk is a few nodes, not a tree.) */
-function offsetAtContentY(el: HTMLElement, y: number): number | null {
-  const full = el.textContent ?? ''
-  if (!full.length) return null
-  const elRect = el.getBoundingClientRect()
-  const zf = elRect.width > 0 && el.offsetWidth > 0 ? elRect.width / el.offsetWidth : 1
-  const range = document.createRange()
-  const topAt = (i: number): number => {
-    const loc = locateOffset(el, i)
-    if (!loc || !loc.node.data.length) return NaN
-    const off = Math.min(loc.offset, loc.node.data.length - 1)
-    try {
-      range.setStart(loc.node, off)
-      range.setEnd(loc.node, Math.min(off + 1, loc.node.data.length))
-      const r = range.getBoundingClientRect()
-      if (!r.height && !r.width) return NaN
-      return (r.top - elRect.top) / zf + el.scrollTop
-    } catch { return NaN }
-  }
-  let lo = 0, hi = full.length - 1
-  for (let g = 0; g < 40 && lo < hi; g++) {
-    const mid = (lo + hi) >> 1
-    const t = topAt(mid)
-    if (Number.isNaN(t)) { lo = mid + 1; continue } // collapsed/hidden run — step past it
-    if (t < y) lo = mid + 1
-    else hi = mid
-  }
-  return lo
-}
-
-/** The text signature currently sitting on the midline (or null if not over text).
- *
- *  The caret hit-test is the fast path, but it reads the TOPMOST element at the point — and at
- *  mount the LoadingVeil covers this pane, so it returned the veil (not a text node) and the
- *  anchor came back null. This effect only re-runs on a snapshot/mode change, so the anchor then
- *  stayed null for the WHOLE SESSION unless the reader happened to scroll: content anchoring was
- *  silently never engaging at load and every reposition fell back to the RATIO (probed 2026-07-17:
- *  23/23 warm layers took `ratio.nosig`). Hence the overlay-immune geometric fallback. */
-function midlineSignature(el: HTMLElement): string | null {
-  const rect = el.getBoundingClientRect()
-  const x = rect.left + rect.width / 2
-  const y = rect.top + el.clientHeight / 2
-  const caret = caretAtPoint(x, y)
-  const globalOffset = caret
-    ? globalOffsetOf(el, caret.node, caret.offset)
-    : offsetAtContentY(el, el.scrollTop + el.clientHeight / 2)
-  if (globalOffset == null) return null
-  const sig = (el.textContent ?? '').slice(globalOffset, globalOffset + SIG_LEN)
-  return sig.trim().length >= SIG_MIN ? sig : null
-}
-
-/** scrollTop that places `sig` on the midline, preferring the occurrence nearest ratioBias. */
-function scrollTopForSignature(el: HTMLElement, sig: string, ratioBias: number): number | null {
-  const full = el.textContent ?? ''
-  const biasChar = ratioBias * full.length
-  const findBest = (needle: string): number => {
-    let idx = -1, best = Infinity, from = 0
-    for (;;) {
-      const i = full.indexOf(needle, from)
-      if (i < 0) break
-      const d = Math.abs(i - biasChar)
-      if (d < best) { best = d; idx = i }
-      from = i + 1
-    }
-    return idx
-  }
-  // Full signature first; if the anchor text was lightly edited, retry a shorter prefix.
-  let at = findBest(sig)
-  if (at < 0) {
-    const short = sig.slice(0, 28)
-    if (short.trim().length < SIG_MIN) return null
-    at = findBest(short)
-    if (at < 0) return null
-  }
-  const loc = locateOffset(el, at)
-  if (!loc) return null
-  const range = document.createRange()
-  const end = Math.min(loc.offset + 1, loc.node.data.length)
-  range.setStart(loc.node, Math.min(loc.offset, loc.node.data.length))
-  range.setEnd(loc.node, end)
-  const rect = range.getBoundingClientRect()
-  if (!rect.height && !rect.top) return null
-  const elRect = el.getBoundingClientRect()
-  const targetTopInContent = rect.top - elRect.top + el.scrollTop
-  return targetTopInContent - el.clientHeight / 2
-}
 
 // ── SplitDiffView ─────────────────────────────────────────────────────────────
 // Two-pane layout: left/top = full annotated document, right/bottom = compact hunk diff.
@@ -547,7 +406,6 @@ function scrollTopForSignature(el: HTMLElement, sig: string, ratioBias: number):
 // Scroll lock: navigating snapshots keeps the same TEXT on the midline (content-anchored).
 // Click-to-midline: clicking any change in the hunk panel scrolls the document pane
 //   so that change's text sits at the midline.
-
 
 
 // A minimap of the whole document: one thin parchment-coloured bar per page, laid out in a column grid
@@ -1000,126 +858,6 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
     </div>
   )
 })
-
-// ── ?snapThumbs=debug overlay ─────────────────────────────────────────────────────────────────
-// The wave-video lesson: an on-device readout beats hours of guessing. One glance must separate
-// the three failure modes: (1) the rAF flipbook never ran (legacy per-notch goTo → live renders a
-// few times a second), (2) it ran but the cache was EMPTY (show() had nothing → frozen pane), or
-// (3) it presented into an INVISIBLE node (the video's transparent-element bug). Read PAINTED.
-//
-// ITS PALETTE IS DELIBERATELY THE SAME IN BOTH THEMES — a black instrument panel, because a HUD
-// that changed colour with the theme would be harder to read a burst off, not easier. It is tokens
-// rather than literals anyway, and the reason is worth the six lines: a bare `#ffd479` in a
-// component is indistinguishable at a glance from one nobody has audited yet, which is exactly how
-// the PDF toolbar sat unthemed for two months looking like a choice. The token STATES the
-// invariance where a literal merely fails to theme. Declared in index.css beside --iw-score-gap,
-// which is the same idea ("paper, both themes").
-const HUD = {
-  bg: 'var(--iw-hud-bg, rgba(0,0,0,0.86))',
-  fg: 'var(--iw-hud-fg, #ffffff)',
-  edge: 'var(--iw-hud-edge, #444444)',
-  head: 'var(--iw-hud-head, #ffd479)',
-  ok: 'var(--iw-hud-ok, #c8ffc8)',
-  bad: 'var(--iw-hud-bad, #ff8080)',
-}
-function ScrubDebugOverlay({ presenter, dbg, docId, snapCount }: {
-  presenter: ScrubPresenter
-  dbg: React.MutableRefObject<{ engaged: boolean; events: number; legacy: number; lands: number; commanded: Set<string> }>
-  docId: string | null
-  snapCount: number // library size — the sweep's denominator
-}) {
-  const [, force] = useState(0)
-  // RECORDED burst (round 10). This overlay repaints on the SAME main thread the scrub saturates,
-  // so anything it draws MID-burst is a stale render of the instrument itself — Peter's mid-scrub
-  // capture came back byte-identical to his idle one, which is why every number we had was really
-  // an at-rest sample. So: while a burst runs, say RECORDING and show nothing; the moment it
-  // settles, serialise the presenter's ring buffer and print THAT. Never trust the live counters.
-  const [burst, setBurst] = useState<ReturnType<typeof summariseRecord> | null>(null)
-  const wasActive = useRef(false)
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const act = presenter.isActive()
-      if (wasActive.current && !act) setBurst(summariseRecord(presenter.record())) // settled → dump
-      wasActive.current = act
-      force((n) => n + 1)
-    }, 200)
-    return () => window.clearInterval(id)
-  }, [presenter])
-  const recording = presenter.isActive()
-  const info = presenter.debugInfo()
-  const d = dbg.current
-  const st = docId ? thumbStats(docId) : { entries: 0, bytes: 0, loaded: false }
-  const bake = docId ? thumbPaneCounts(docId) : { doc: 0, diff: 0, map: 0 }
-  const on = snapThumbsEnabled()
-  const row = (k: string, v: string, bad?: boolean) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: bad ? HUD.bad : HUD.ok }}>
-      <span style={{ opacity: 0.75 }}>{k}</span><span style={{ fontWeight: 700 }}>{v}</span>
-    </div>
-  )
-  return (
-    <div style={{
-      position: 'fixed', top: 6, left: 6, zIndex: 99999, pointerEvents: 'none',
-      background: HUD.bg, color: HUD.fg, font: '11px/1.35 ui-monospace, monospace',
-      padding: '7px 9px', borderRadius: 6, minWidth: 268, border: `1px solid ${HUD.edge}`,
-    }}>
-      {/* THE RECORDED BURST — the only numbers on this overlay that a burst can't lie about. */}
-      <div style={{ fontWeight: 800, marginBottom: 3, color: HUD.head }}>
-        last burst — RECORDED {recording && <span style={{ color: HUD.bad }}>● REC…</span>}
-      </div>
-      {!burst && row('recorded bursts', 'none yet — scrub once', true)}
-      {burst && (<>
-        {row('presents', String(burst.presents), burst.presents === 0)}
-        {row('commanded distinct', String(burst.commandedDistinct))}
-        {row('presented distinct', String(burst.presentedDistinct), burst.presentedDistinct < burst.commandedDistinct)}
-        {row('rate', `${burst.perSec.toFixed(0)}/s over ${burst.spanMs.toFixed(0)}ms`)}
-        {burst.panes.map((p) => row(
-          `${p.kind} hit/thumb/near/none`, `${p.hit}/${p.thumb}/${p.near}/${p.none}  ${(p.exactRate * 100).toFixed(0)}% real`,
-          p.exactRate < 0.5,
-        ))}
-        <div style={{ fontWeight: 800, margin: '4px 0 2px', color: HUD.head }}>registration — content held?</div>
-        {burst.panes.map((p) => row(
-          `${p.kind} centre held`,
-          p.registered < 0 ? 'n/a' : `${(p.registered * 100).toFixed(0)}% of ${p.centreSteps}`,
-          p.registered >= 0 && p.registered < 0.8,
-        ))}
-      </>)}
-      <div style={{ fontWeight: 800, margin: '4px 0 2px', color: HUD.head }}>live (AT REST ONLY — stale mid-burst)</div>
-      {row('flipbook DRIVER', d.engaged ? 'ENGAGED (rAF)' : 'idle', !d.engaged)}
-      {row('wheel events', String(d.events))}
-      {row('legacy goTo (live)', String(d.legacy), d.legacy > 0)}
-      {row('lands (live render)', String(d.lands), d.lands > 1)}
-      {row('commanded distinct', String(d.commanded.size))}
-      {row('show() calls', String(info.shows), info.shows === 0)}
-      {row('presented/commanded', d.commanded.size ? `${(info.shows / d.commanded.size).toFixed(2)}×` : '—',
-        d.commanded.size > 0 && info.shows < d.commanded.size)}
-      <div style={{ fontWeight: 800, margin: '4px 0 2px', color: HUD.head }}>per pane — hit/thumb/near/none</div>
-      {info.panes.map((p) => (
-        <div key={p.kind} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: p.visible ? HUD.ok : HUD.bad }}>
-          <span style={{ opacity: 0.75 }}>{p.kind}{p.visible ? '' : ' ⚠NOT PAINTED'}</span>
-          <span style={{ fontWeight: 700 }}>{p.hitCapture}/{p.hitThumb}/{p.nearest}/{p.none}</span>
-        </div>
-      ))}
-      {info.panes.map((p) => (
-        <div key={p.kind + 'v'} style={{ opacity: 0.6, fontSize: 10 }}>
-          {p.kind}: disp={p.display} op={p.opacity} vis={p.visibility} z={p.zIndex} box={p.rectW}×{p.rectH} cv={p.canvasW}×{p.canvasH}
-        </div>
-      ))}
-      <div style={{ fontWeight: 800, margin: '4px 0 2px', color: HUD.head }}>sweep — versions baked</div>
-      {(['doc', 'diff', 'map'] as const).map((k) => row(
-        k, `${bake[k]}/${snapCount}`, snapCount > 0 && bake[k] < snapCount,
-      ))}
-      {row('bytes/version', bake.doc ? `${(st.bytes / Math.max(1, bake.doc) / 1024).toFixed(1)}KB` : '—')}
-      <div style={{ fontWeight: 800, margin: '4px 0 2px', color: HUD.head }}>store</div>
-      {row('snapThumbs flag', on ? 'ON' : 'OFF', !on)}
-      {row('OPFS thumbs', st.loaded ? `${st.entries} · ${(st.bytes / 1e6).toFixed(1)}MB` : 'index loading…', st.entries === 0)}
-      {/* SHOW THE CAP NEXT TO THE NUMBER. `62.9MB and climbing` read as a runaway and cost a
-          whole investigation — it is DESKTOP_BUDGET exactly: 60 MiB is 62.9 decimal MB, and this
-          row prints bytes/1e6. Filling to the cap and holding there is the eviction rule WORKING.
-          Rendered as used/cap so "at the cap" is legible, and only flagged when genuinely OVER. */}
-      {row('mem bitmaps', `${info.entries} · ${(info.bytes / 1e6).toFixed(1)}/${(info.budget / 1e6).toFixed(1)}MB`, info.bytes > info.budget)}
-    </div>
-  )
-}
 
 function SplitDiffView({
   snapshot, prevSnap, nextSnap, isPhone, isNarrow, lineMode, summary, counter, counterRef, summariesOn, onOptInSummaries, nav, allSnaps,

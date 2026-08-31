@@ -8,7 +8,7 @@
 // a feature the code did not have.
 
 import { describe, it, expect } from 'vitest'
-import { pdfOutputScale } from './PdfViewer'
+import { pdfOutputScale } from './pdfGeometry'
 
 const desktop = (dpr: number) => pdfOutputScale(dpr, false, 800, 1000)
 const touch = (dpr: number) => pdfOutputScale(dpr, true, 800, 1000)

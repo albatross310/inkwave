@@ -10,7 +10,7 @@
 // `computeTextFit` already refuses to go below whole-page fit. The PERSISTED USER ZOOM was the one
 // path around that floor, and `minUserZoom` is what closes it.
 import { describe, it, expect } from 'vitest'
-import { computeTextFit, minUserZoom } from './PdfViewer'
+import { computeTextFit, minUserZoom } from './pdfGeometry'
 
 // The real numbers off Peter's 1440px window with the panel docked right: a 719px scroller, a US
 // Letter page (612pt), a text block from 72 to 540.
