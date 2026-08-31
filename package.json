@@ -25,6 +25,7 @@
     "prove:pdfexport": "node scripts/pdfexport.prove.mjs",
     "prove:jump": "node scripts/textrender-probe/jumpguard.prove.mjs",
     "prove:reader": "node scripts/textrender-probe/reader.prove.mjs",
+    "prove:readerflow": "node scripts/textrender-probe/readerflow.prove.mjs",
     "prove:phonetouch": "node scripts/textrender-probe/phonetouch.prove.mjs",
     "prove:zoomcost": "node scripts/textrender-probe/zoomcost.prove.mjs",
     "prove:readerext": "node scripts/textrender-probe/readerext.prove.mjs",
