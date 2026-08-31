@@ -56,6 +56,19 @@ export type StickyFlagSpec = {
   /** The param value that sets the companion. Default `'demo'`. */
   companionValue?: string
   /**
+   * Where the companion lives. Default `'local'`, alongside the flag itself.
+   *
+   * `'session'` IS THE SECOND HAZARD'S ANSWER, and it exists because the first version of it was a
+   * shipped bug: `?snapThumbs=debug` wrote localStorage, so a diagnostic overlay switched on once
+   * appeared on every later visit forever. sessionStorage still survives the in-session URL
+   * rewrites that make a fresh-from-the-URL read impossible, and is gone on a new browser session.
+   *
+   * It also PURGES any local copy of the companion key on every resolve — not a special case but
+   * what "this companion is session-scoped" MEANS: a stale persistent one from before the rule
+   * must not go on haunting, and only the code that reads the key is in a position to clear it.
+   */
+  companionStorage?: 'local' | 'session'
+  /**
    * The answer when storage throws — private mode, or a browser refusing site data.
    * Default: the flag's own default. NOT always right: a gate on the keystroke path may prefer
    * to fall OFF rather than run where it cannot tell.
@@ -119,6 +132,12 @@ function store(): Store | undefined {
   return typeof localStorage !== 'undefined' ? localStorage : undefined
 }
 
+function sessionStore(): Store | undefined {
+  const fromWindow = win()?.sessionStorage as Store | undefined
+  if (fromWindow) return fromWindow
+  return typeof sessionStorage !== 'undefined' ? sessionStorage : undefined
+}
+
 function overrideOf(name: string | undefined): boolean | undefined {
   if (!name) return undefined
   const w = win() as unknown as Record<string, unknown> | undefined
@@ -145,6 +164,13 @@ function resolve(spec: StickyFlagSpec): Resolved {
   if (!s) return { on: spec.onNoWindow ?? fault, demo: false }
 
   try {
+    // The companion may live in a DIFFERENT store from the flag. A session-scoped one is also
+    // purged from local storage on every resolve: a stale persistent copy written before the rule
+    // existed is exactly the overlay that haunted Peter, and only the code reading the key can
+    // clear it. Inside the try, so a browser refusing site data takes the fault path as before.
+    const cs = spec.companionStorage === 'session' ? sessionStore() : s
+    if (spec.companionKey && spec.companionStorage === 'session') s.removeItem(spec.companionKey)
+
     const raw = spec.param ? search() : null
     const p = raw === null ? null : new URLSearchParams(raw).get(spec.param!)
 
@@ -154,21 +180,21 @@ function resolve(spec: StickyFlagSpec): Resolved {
       if (offValues.includes(p)) {
         if ((spec.offWrite ?? (spec.defaultOn ? 'set0' : 'clear')) === 'set0') s.setItem(spec.key, '0')
         else s.removeItem(spec.key)
-        if (spec.companionKey) s.removeItem(spec.companionKey)
+        if (spec.companionKey) cs?.removeItem(spec.companionKey)
       } else if (spec.companionKey && p === companionValue) {
         s.setItem(spec.key, '1')
-        s.setItem(spec.companionKey, '1')
+        cs?.setItem(spec.companionKey, '1')
       } else if (spec.onParam === 'present' || p === '1') {
         if ((spec.onWrite ?? 'set1') === 'set1') s.setItem(spec.key, '1')
         else s.removeItem(spec.key)
-        if (spec.companionKey) s.removeItem(spec.companionKey)
+        if (spec.companionKey) cs?.removeItem(spec.companionKey)
       }
     }
 
     const stored = s.getItem(spec.key)
     return {
       on: spec.defaultOn ? stored !== '0' : stored === '1',
-      demo: spec.companionKey ? s.getItem(spec.companionKey) === '1' : false,
+      demo: spec.companionKey ? cs?.getItem(spec.companionKey) === '1' : false,
     }
   } catch {
     return off // storage denied — private mode, or site data blocked
@@ -199,7 +225,10 @@ export function stickyFlag(spec: StickyFlagSpec): StickyFlag {
         // "on", so an opt-out that removed the key would silently undo itself.
         const s = store()
         s?.setItem(spec.key, on ? '1' : '0')
-        if (!on && spec.companionKey) s?.removeItem(spec.companionKey)
+        if (!on && spec.companionKey) {
+          const cs = spec.companionStorage === 'session' ? sessionStore() : s
+          cs?.removeItem(spec.companionKey)
+        }
       } catch { /* private mode — the choice survives the session in the cache below */ }
       memo = { on, demo: on ? (memo?.demo ?? false) : false }
     },
