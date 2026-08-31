@@ -49,3 +49,40 @@ describe('emailEnabled — default OFF', () => {
     expect(emailEnabled()).toBe(false)
   })
 })
+
+// ── CHARACTERIZATION (added before the shared-flag-core refactor, run green against the unmoved
+// module). The cases above pin the DEFAULT and the stickiness. These pin the two things a shared
+// core would flatten by accident, because neither is visible from the flag's own answer:
+//   • it enables on mere PRESENCE (`params.has`), so `?email=anything` is on — where `?musicXml`
+//     next door requires an exact '1' and ignores a bare param entirely;
+//   • it is NOT CACHED. Every other flag in this repo resolves once per load into a module
+//     variable; this one re-reads storage on every call, which is why the existing `?email=off`
+//     case above can follow a `?email=1` case in the same file and still see the change.
+describe('emailEnabled — characterization', () => {
+  beforeEach(() => vi.unstubAllGlobals())
+
+  it('a BARE ?email turns it on (presence, not an exact "1")', () => {
+    const store = stubEnv('?email')
+    expect(emailEnabled()).toBe(true)
+    expect(store['inkwave:email']).toBe('1')
+  })
+
+  it('?email=anything also turns it on — presence is the whole rule', () => {
+    stubEnv('?email=yes')
+    expect(emailEnabled()).toBe(true)
+  })
+
+  it('is NOT cached: a mid-session storage change is seen on the next call', () => {
+    const store = stubEnv('')
+    expect(emailEnabled()).toBe(false)
+    store['inkwave:email'] = '1'
+    expect(emailEnabled()).toBe(true)
+    delete store['inkwave:email']
+    expect(emailEnabled()).toBe(false)
+  })
+
+  it('is OFF with no location/localStorage at all (node/prerender)', () => {
+    vi.unstubAllGlobals()
+    expect(emailEnabled()).toBe(false)
+  })
+})

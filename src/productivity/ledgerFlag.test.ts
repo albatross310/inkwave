@@ -75,3 +75,46 @@ describe('off genuinely disables', () => {
     expect(refreshProdLedgerFlag()).toBe(true)
   })
 })
+
+// ── CHARACTERIZATION (added before the shared-flag-core refactor, run green against the unmoved
+// module). This flag is DEFAULT ON and yet falls to FALSE on a storage fault — the opposite of
+// every other default-ON flag in the repo (`music`, `liveFrame`, `textRender`, `prodGraphs`,
+// `prodReport` all fall to their default, i.e. ON). That is not an oversight: session capture sits
+// on the editor's per-keystroke path, so where the others reason "a private window must still get
+// the feature", this one reasons "capture must never run where we cannot tell". A shared core with
+// one fallback rule silently picks one of those two arguments for both.
+describe('prodLedger — characterization', () => {
+  it('is OFF when storage is denied, despite the default being ON', () => {
+    const real = Object.getOwnPropertyDescriptor(window, 'localStorage')!
+    try {
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        value: {
+          getItem: () => { throw new Error('denied') },
+          setItem: () => { throw new Error('denied') },
+          removeItem: () => { throw new Error('denied') },
+        },
+      })
+      expect(refreshProdLedgerFlag()).toBe(false)
+    } finally {
+      Object.defineProperty(window, 'localStorage', real)
+    }
+    _resetProdLedgerFlag()
+    expect(prodLedgerEnabled()).toBe(true) // the known-positive: real storage still reads ON
+  })
+
+  it('has NO window override — __iwProdLedger is inert', () => {
+    ;(window as unknown as { __iwProdLedger?: boolean }).__iwProdLedger = false
+    expect(refreshProdLedgerFlag()).toBe(true)
+    delete (window as unknown as { __iwProdLedger?: boolean }).__iwProdLedger
+  })
+
+  it('a bare ?prodLedger neither enables nor disables — only exact "off"/"1" are read', () => {
+    window.history.replaceState({}, '', '/?prodLedger')
+    expect(refreshProdLedgerFlag()).toBe(true)      // the default, untouched
+    expect(localStorage.getItem(KEY)).toBeNull()    // and nothing was written
+    localStorage.setItem(KEY, '0')
+    _resetProdLedgerFlag()
+    expect(prodLedgerEnabled()).toBe(false)         // a bare param does not re-arm either
+  })
+})

@@ -100,3 +100,75 @@ describe('prodGraphs — DEFAULT ON (graduated 2026-07-18, a panel now)', () => 
     expect(prodGraphsDemo()).toBe(true)
   })
 })
+
+// ── CHARACTERIZATION (added before the shared-flag-core refactor, run green against the unmoved
+// module). Both lanes share ONE `resolve()` here, so the cases above already cover the shape they
+// have in common. What follows pins the places the two lanes DIFFER from each other and from their
+// neighbours — the asymmetries a shared core would quietly even out:
+//   • prodGraphs has window overrides; prodReport has NONE. Same file, same resolver, different
+//     surface, and nothing in the code says so.
+//   • denied storage keeps the DEFAULT (true) here, where the ledger flag next door deliberately
+//     falls to FALSE on the same fault because it sits on the keystroke path.
+//   • `off` clears the demo companion; `demo` implies on even over a stored '0'.
+describe('the productivity flags — characterization', () => {
+  it('prodGraphs honours window.__iwProdGraphs / __iwProdGraphsDemo, both directions', () => {
+    const w = window as unknown as { __iwProdGraphs?: boolean; __iwProdGraphsDemo?: boolean }
+    w.__iwProdGraphs = false
+    expect(prodGraphsEnabled()).toBe(false)   // beats the default-ON
+    w.__iwProdGraphs = true
+    window.history.replaceState({}, '', '/?prodGraphs=off')
+    __resetFlagsForTest()
+    expect(prodGraphsEnabled()).toBe(true)    // beats a stored '0'
+    w.__iwProdGraphsDemo = true
+    expect(prodGraphsDemo()).toBe(true)
+    delete w.__iwProdGraphs
+    delete w.__iwProdGraphsDemo
+  })
+
+  it('prodReport has NO window override — __iwProdReport is inert', () => {
+    ;(window as unknown as { __iwProdReport?: boolean }).__iwProdReport = false
+    expect(prodReportEnabled()).toBe(true)    // the default wins; the global is not consulted
+    delete (window as unknown as { __iwProdReport?: boolean }).__iwProdReport
+  })
+
+  it('?prodGraphs=off clears a previously stored demo', () => {
+    localStorage.setItem('inkwave:prodGraphsDemo', '1')
+    window.history.replaceState({}, '', '/?prodGraphs=off')
+    expect(prodGraphsDemo()).toBe(false)
+    expect(localStorage.getItem('inkwave:prodGraphsDemo')).toBeNull()
+  })
+
+  it('?prodReport=demo turns it on even over a stored opt-out', () => {
+    localStorage.setItem('inkwave:prodReport', '0')
+    window.history.replaceState({}, '', '/?prodReport=demo')
+    expect(prodReportEnabled()).toBe(true)
+    expect(prodReportDemo()).toBe(true)
+  })
+
+  // Denied storage keeps the DEFAULT here. The assertion is deliberately a stored '0' that must be
+  // IGNORED, not a bare default: with real storage that '0' reads OFF, so a `true` answer can only
+  // mean getItem threw — which is what proves the denied branch was genuinely reached rather than
+  // the test agreeing with the default by construction.
+  it('keeps the DEFAULT (on) when storage is denied — unlike the ledger flag next door', () => {
+    const real = Object.getOwnPropertyDescriptor(window, 'localStorage')!
+    localStorage.setItem('inkwave:prodGraphs', '0')
+    localStorage.setItem('inkwave:prodReport', '0')
+    __resetFlagsForTest()
+    expect(prodGraphsEnabled()).toBe(false)  // the known-positive: the '0' really is an opt-out
+    try {
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        value: {
+          getItem: () => { throw new Error('denied') },
+          setItem: () => { throw new Error('denied') },
+          removeItem: () => { throw new Error('denied') },
+        },
+      })
+      __resetFlagsForTest()
+      expect(prodGraphsEnabled()).toBe(true)
+      expect(prodReportEnabled()).toBe(true)
+    } finally {
+      Object.defineProperty(window, 'localStorage', real)
+    }
+  })
+})
