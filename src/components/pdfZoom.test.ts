@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pdfZoomFactor } from './PdfViewer'
+import { pdfZoomFactor } from './zoomGesture'
 
 describe('pdfZoomFactor', () => {
   it('THE MOUSE IS UNCHANGED — a 120px notch still zooms exactly 10%', () => {

@@ -18,32 +18,25 @@ import {
   type PdfDocLike,
 } from './pdfAnnotatedPages'
 import { buildImagePdf } from './minimalPdf'
+// The zoom/fit/anchor arithmetic. It left this file so its four guards can pin it without loading
+// pdf.js; nothing about the rules changed. `computeTextFit` is still THE fit — see the note at the
+// bottom of pdfGeometry.ts for the one caller that predates it.
+import {
+  ZOOM_MIN, ZOOM_MAX, TEXT_FIT_INSET, pdfOutputScale, computeTextFit, minUserZoom,
+  legacyZoomAnchor, legacyFitRule, anchorFraction, anchorScrollDelta, proportionalAnchorScroll,
+} from './pdfGeometry'
 
-/**
- * How many device pixels per CSS pixel to render a PDF page at.
- * FLOOR of 2× regardless of what the display reports — supersampling is what keeps glyphs crisp on
- * a 1× screen, and it is also what makes the viewer immune to browser zoom (Chrome folds zoom into
- * devicePixelRatio, so a window at 67% reports ~1.33 and used to render that soft). Ceilings are
- * unchanged: 3× desktop / 2× touch (iOS's total canvas memory is the scarce resource), and never
- * more than `maxCanvas` px on a side.
- */
-export function pdfOutputScale(dpr: number, isTouch: boolean, vw: number, vh: number, maxCanvas = 4096): number {
-  const want = Math.max(2, Number.isFinite(dpr) && dpr > 0 ? dpr : 1)
-  const ceiling = isTouch ? 2 : 3
-  const byMemory = Math.min(vw > 0 ? maxCanvas / vw : Infinity, vh > 0 ? maxCanvas / vh : Infinity)
-  return Math.max(1, Math.min(want, ceiling, byMemory))
-}
 import { lockAxis, newAxisState } from './axisLock'
 import { HOLD_MS } from './useLongPress'
 import { PdfReaderView } from './PdfReaderView'
 import { anchorInPage, nearestBlock, noteAnchorText } from './pdfReflow'
 import { getPageReflow } from './pdfReflowStore'
 
-// The ⌘/ctrl-wheel step now lives in ./zoomGesture so the source reader can share the exact curve
-// rather than grow a second copy of it. Re-exported: every existing caller and test is unchanged.
+// The ⌘/ctrl-wheel step lives in ./zoomGesture so the source reader can share the exact curve
+// rather than grow a second copy of it. The pass-through re-export it used to carry is gone: its
+// one remaining consumer was pdfZoom.test.ts, which now asks zoomGesture directly.
 import { pdfZoomFactor } from './zoomGesture'
 import { pageFromTops } from './pdfScrollPage'
-export { pdfZoomFactor }
 import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
@@ -120,7 +113,6 @@ const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
   { kind: 'text', label: 'T', title: 'Text note — click on the page to place' },
   { kind: 'erase', label: '⌫', title: 'Eraser — click any annotation to remove it' },
 ]
-const ZOOM_MIN = 0.4, ZOOM_MAX = 4
 
 /** One row of the ⋮ menu. Declared once so the items cannot drift apart. */
 // A menu item is the one control here that CANNOT borrow the `.iw-tap` hit region: the items are a
@@ -132,62 +124,6 @@ const MORE_ITEM: React.CSSProperties = {
   background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit', lineHeight: 1.3,
 }
 const MORE_ITEM_TOUCH: React.CSSProperties = { ...MORE_ITEM, padding: '12px 10px', lineHeight: 1.35 }
-
-/**
- * FIT THE TEXT TO THE WINDOW — the scale at which the page's TEXT BLOCK spans the panel, with a
- * safety inset so glyphs never kiss the edge. Clamped to [page-fit … 2×page-fit] so a stray text
- * bbox can neither zoom out below whole-page fit nor crop wildly; no text layer ⇒ page fit.
- * ONE definition, used by the initial load, the resize re-fit and the ⤢ button — three places that
- * must agree about what "flush" means or the button would land somewhere the resize then moved.
- */
-export function computeTextFit(
-  inputs: { pageW: number; ext: { x0: number; x1: number } | null } | null,
-  clientWidth: number,
-  fallback: number,
-  /** Space reserved to the right for notes — the page must fit BESIDE it, not behind it. */
-  reservedRight = 0,
-): number {
-  if (!inputs) return fallback
-  const containerW = clientWidth - 24 - reservedRight
-  const pageFit = Math.max(ZOOM_MIN, Math.min(3, containerW / inputs.pageW))
-  if (!inputs.ext) return pageFit
-  const w = inputs.ext.x1 - inputs.ext.x0
-  if (!(w > 0)) return pageFit
-  return Math.max(pageFit, Math.min(3, 2 * pageFit, (containerW - 2 * TEXT_FIT_INSET) / w))
-}
-
-/**
- * THE SMALLEST ZOOM WORTH ALLOWING — the one at which the page still fills the panel's width.
- *
- * ⚠ MEASURED, 2026-08-30 (Peter: "PDFs no longer change size, and there's a no man's land space of
- * empty background between the page and left side — page is a bit narrower than web page viewer").
- * `zoom` is a MULTIPLIER on the fit baseline and it is PERSISTED, so one ctrl+wheel — a trackpad
- * pinch will do it — leaves a value like 0.6 in localStorage for every PDF, for ever. At 1440px in
- * a right-hand dock that renders the page 503px wide inside a 719px pane: a 108px strip of dead
- * background either side, and the page narrower than the source reader's 655px column beside it.
- * `computeTextFit` already refuses to go below whole-page fit (`Math.max(pageFit, …)`); the user
- * multiplier was the one path around that floor. This closes it.
- *
- * Zooming OUT still runs the whole useful range — text-flush down to page-flush, ~0.76× here — it
- * simply stops where the page stops filling the width. The floor is a function of the PANE, so it
- * moves with the window; that is why it is computed rather than a constant, and why it can never
- * exceed 1 (the fit baseline is itself ≥ page fit).
- *
- * It clamps the ZOOM VALUE, not the render: clamping only the render would leave `zoom` sitting
- * below the floor, so the first few notches back IN would change nothing on screen — "zoom does
- * nothing", which is the complaint this exists to fix, reintroduced one layer down.
- */
-export function minUserZoom(
-  fit: number,
-  pageW: number,
-  clientWidth: number,
-  reservedRight = 0,
-): number {
-  if (!(fit > 0) || !(pageW > 0) || !(clientWidth > 0)) return ZOOM_MIN
-  const containerW = clientWidth - 24 - reservedRight
-  if (!(containerW > 0)) return ZOOM_MIN
-  return Math.min(1, containerW / (pageW * fit))
-}
 
 
 // A pink pencil-eraser icon (Material "eraser" glyph) for the erase tool.
@@ -223,61 +159,7 @@ interface Pending { text: string; page: number; rects: HighlightRect[]; groups: 
 // Minimal shape of the bits of pdf.js we touch (avoids depending on its exported types here).
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any> } // eslint-disable-line @typescript-eslint/no-explicit-any
 
-// ── Fit-to-text-width (Peter, 2026-07-10) ────────────────────────────────────────────────────────
-// The DEFAULT zoom puts the TEXT's left/right margins at the panel edges (small safety inset), not
-// the page's. Extents come from getTextContent — the same items the text layer renders from — so no
-// render pass is needed before the fit is known. Pages with no text layer (scans) or an implausibly
-// narrow bbox (a lone page number would explode the zoom) return null → caller falls back to
-// page-width fit.
-const TEXT_FIT_INSET = 10 // px of safety either side so glyphs never kiss the panel edge
 
-// The zoom-anchor known-negative. `window.__iwPdfZoomAnchor = 'legacy'` restores the pre-2026-08-30
-// rule — the proportional scroll formula AND the live-zoom overscroll gutter — so
-// scripts/pdfzoom-probe/zoomanchor.prove.mjs can reproduce Peter's snap-back in the SAME build it
-// verifies the fix in. It exists FOR that probe; if the probe goes, this goes.
-const legacyZoomAnchor = (): boolean =>
-  typeof window !== 'undefined' && (window as { __iwPdfZoomAnchor?: string }).__iwPdfZoomAnchor === 'legacy'
-
-// The FIT known-negative, same contract as the one above. `window.__iwPdfFitRule = 'legacy'`
-// restores BOTH halves of the pre-2026-08-30 behaviour — a manual zoom skips every re-fit, and
-// there is no pane-derived zoom floor — so scripts/pdfzoom-probe/geom.prove.mjs can reproduce
-// Peter's "PDFs no longer change size / no man's land of empty background" in the SAME build it
-// verifies the fix in. It exists FOR that probe; if the probe goes, this goes.
-const legacyFitRule = (): boolean =>
-  typeof window !== 'undefined' && (window as { __iwPdfFitRule?: string }).__iwPdfFitRule === 'legacy'
-
-// ── ZOOM ANCHORING: the two rules, as pure functions, so the gate can keep them apart ────────────
-// A browser probe proves this once; a unit test keeps it true. See pdfZoomAnchor.test.ts.
-export interface AnchorBox { left: number; top: number; width: number; height: number }
-
-/** Where the cursor sits inside its page, as a fraction of that page's box. */
-export function anchorFraction(page: AnchorBox, cursor: { x: number; y: number }): { x: number; y: number } {
-  return {
-    x: page.width ? (cursor.x - page.left) / page.width : 0,
-    y: page.height ? (cursor.y - page.top) / page.height : 0,
-  }
-}
-
-/**
- * THE SHIPPED RULE. How far to scroll so that the same fraction of the same page is back under the
- * cursor — a DELTA read off the page's real box after the re-render. Constants in the layout
- * (scroller padding, page margins, the overscroll gutter) cancel, because they are already inside
- * `page.left`; nothing here can mis-scale them.
- */
-export function anchorScrollDelta(page: AnchorBox, f: { x: number; y: number }, cursor: { x: number; y: number }): { dx: number; dy: number } {
-  return {
-    dx: (page.left + f.x * page.width) - cursor.x,
-    dy: (page.top + f.y * page.height) - cursor.y,
-  }
-}
-
-/**
- * THE PRE-2026-08-30 RULE, kept as the known-negative. "Every offset scales with the zoom" — which
- * is false for every constant in the layout, and is what put the words in the wrong place.
- */
-export function proportionalAnchorScroll(scroll: number, axis: number, ratio: number): number {
-  return Math.max(0, (scroll + axis) * ratio - axis)
-}
 async function textExtentsOf(doc: PdfDoc, pageNum: number): Promise<{ x0: number; x1: number; pageW: number } | null> {
   try {
     const page = await doc.getPage(Math.min(Math.max(pageNum, 1), doc.numPages))

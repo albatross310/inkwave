@@ -17,7 +17,7 @@
 // A point at page-local offset P sits at content-x = 12 + G + P, and paints at
 // (12 + G + P) − scrollLeft. Zooming multiplies P by `ratio`; it multiplies NEITHER 12 NOR G.
 import { describe, it, expect } from 'vitest'
-import { anchorFraction, anchorScrollDelta, proportionalAnchorScroll } from './PdfViewer'
+import { anchorFraction, anchorScrollDelta, proportionalAnchorScroll } from './pdfGeometry'
 
 const SCROLLER_PAD = 12
 const GUTTER = 180 // PDF_OVERSCROLL_PX
