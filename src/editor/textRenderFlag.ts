@@ -15,25 +15,24 @@
 // paint path (fillText, the map strip, the page model) into whatever reads it. Keeping the flag
 // separate keeps that cost where it belongs.
 //
-// Sticky, resolved once per load (the `?auth` / snapThumbs pattern — a flag read fresh from the URL
-// dies the moment any route rewrites it). Absent · `?textRender` · `?textRender=1` ⇒ ON;
-// `?textRender=off` ⇒ a STICKY '0' opt-out (removeItem would silently re-enable it under a default-ON
-// reader). entry.client.tsx does the URL→localStorage sync before the app reads anything.
-//
-// The reader is `!== '0'` (absent-means-on), the mirror of the old `=== '1'`. SSR/node/denied storage
-// keeps the default (ON) — nothing off the keystroke path reads this (only the client-only /snapshot
-// route), so there is no load-path reason to fall OFF the way the prod-capture flags do.
+// ─── IT HAS NO `param`, AND THAT IS THE ODD ONE OUT ──────────────────────────────────────────
+// It is the only one of the nine that reads NO URL: entry.client.tsx syncs `?textRender` into
+// localStorage at boot, alongside the other boot-synced flags, before the app reads anything. So
+// the spec below deliberately omits `param` — giving it one would be a second place the URL is
+// interpreted, and the two would drift the first time either changed. Absent · `?textRender` ·
+// `?textRender=1` ⇒ ON; `?textRender=off` ⇒ a sticky '0' (an absence would silently re-enable it
+// under a default-ON reader). SSR/node/denied storage all keep the default (ON): nothing off the
+// keystroke path reads this — only the client-only /snapshot route — so there is no load-path
+// reason to fall OFF the way the prod-capture flags do.
+import { stickyFlag } from '../flags/stickyFlag'
 
-const FLAG = 'inkwave:textRender'
-let _flag: boolean | null = null
+const flag = stickyFlag({
+  key: 'inkwave:textRender',
+  defaultOn: true,
+  override: '__iwTextRender',
+})
 
-export function textRenderEnabled(): boolean {
-  const w = typeof window !== 'undefined' ? (window as unknown as { __iwTextRender?: boolean }) : null
-  if (w && typeof w.__iwTextRender === 'boolean') return w.__iwTextRender
-  if (_flag !== null) return _flag
-  try { _flag = typeof localStorage === 'undefined' ? true : localStorage.getItem(FLAG) !== '0' } catch { _flag = true }
-  return _flag
-}
+export function textRenderEnabled(): boolean { return flag.enabled() }
 
 /** Test seam: forget the cached flag read. */
-export function _resetTextRenderFlag(): void { _flag = null }
+export function _resetTextRenderFlag(): void { flag.reset() }

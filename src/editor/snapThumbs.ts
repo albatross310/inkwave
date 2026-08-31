@@ -14,6 +14,7 @@
 // is unchanged by construction (not merely measured-equal).
 
 import { writeOpfsFile } from '../storage/opfsWrite'
+import { stickyFlag } from '../flags/stickyFlag'
 
 export type ThumbPane = 'doc' | 'diff' | 'map'
 
@@ -27,43 +28,36 @@ const FLAG = 'inkwave:snapThumbs'
 export function thumbScale(pane: ThumbPane): number { return pane === 'map' ? 1 : 0.5 }
 const QUALITY = 0.7
 
-// STICKY URL FLAGS (the `?auth` pattern). /snapshot's local-first nav rewrites the URL on every
-// step (goTo → navigate without our params), so a flag READ FRESH FROM THE URL dies on the first
-// scrub — which silently disabled the whole feature (and the debug overlay) exactly when you
-// started using it. Resolve ONCE per load, persist to localStorage, then read from there.
+// STICKY URL FLAGS (the `?auth` pattern), on the shared core in `flags/stickyFlag.ts`.
+// /snapshot's local-first nav rewrites the URL on every step (goTo → navigate without our params),
+// so a flag READ FRESH FROM THE URL dies on the first scrub — which silently disabled the whole
+// feature (and the debug overlay) exactly when you started using it. Resolve ONCE per load,
+// persist, then read from storage.
 // `?snapThumbs=1` on · `?snapThumbs=debug` on + overlay · `?snapThumbs=off` clears both.
+//
+// THIS FLAG IS WHY THE CORE HAS A `companionStorage` FIELD AT ALL. It carries BOTH hazards of the
+// pattern at once, in opposite directions: the FEATURE must persist (or it dies on the first
+// scrub), and the DEBUG OVERLAY must NOT (a `?snapThumbs=debug` written to localStorage haunted
+// every later /snapshot visit forever, 2026-07-19). One flag, two lifetimes — which is exactly the
+// decision nine hand-written copies of this pattern each had to get right alone.
 const DEBUG_FLAG = 'inkwave:snapThumbsDebug'
-let _flags: { on: boolean; debug: boolean } | null = null
-function flags(): { on: boolean; debug: boolean } {
-  if (_flags) return _flags
-  let on = false, debug = false
-  try {
-    // The DEBUG overlay is SESSION-scoped, not persistent (2026-07-19). A `?snapThumbs=debug` used to
-    // write localStorage and then haunt EVERY later /snapshot visit forever — Peter hit exactly that.
-    // sessionStorage still survives /snapshot's in-session URL rewrites (the round-8 reason it can't
-    // be URL-fresh), but it's gone on a new browser session and never sticks. Purge the old
-    // persistent flag on every load so no stale one lingers.
-    window.localStorage.removeItem(DEBUG_FLAG)
-    const p = new URLSearchParams(window.location.search).get('snapThumbs')
-    if (p === 'off') { window.localStorage.removeItem(FLAG); window.sessionStorage.removeItem(DEBUG_FLAG) }
-    else if (p === 'debug') { window.localStorage.setItem(FLAG, '1'); window.sessionStorage.setItem(DEBUG_FLAG, '1') }
-    else if (p === '1') { window.localStorage.setItem(FLAG, '1'); window.sessionStorage.removeItem(DEBUG_FLAG) }
-    on = window.localStorage.getItem(FLAG) === '1'
-    debug = window.sessionStorage.getItem(DEBUG_FLAG) === '1'
-  } catch { /* no storage → stays off */ }
-  _flags = { on, debug }
-  return _flags
-}
+
+const flag = stickyFlag({
+  key: FLAG,
+  param: 'snapThumbs',
+  defaultOn: false,
+  companionKey: DEBUG_FLAG,
+  companionValue: 'debug',
+  companionStorage: 'session', // survives the URL rewrites; gone on a new session; purges any
+                               // stale persistent copy left by the pre-2026-07-19 bug
+  override: '__iwSnapThumbs',
+})
 
 /** `?snapThumbs=debug` — the on-device diagnostic overlay (the wave-video lesson: SHOW the state,
  *  don't guess it). Implies the feature is on, so one URL turns the whole thing on + visible. */
-export function snapThumbsDebug(): boolean { return flags().debug }
+export function snapThumbsDebug(): boolean { return flag.demo() }
 
-export function snapThumbsEnabled(): boolean {
-  const w = typeof window !== 'undefined' ? (window as unknown as { __iwSnapThumbs?: boolean }) : null
-  if (w && typeof w.__iwSnapThumbs === 'boolean') return w.__iwSnapThumbs
-  return flags().on
-}
+export function snapThumbsEnabled(): boolean { return flag.enabled() }
 
 // ── Pure helpers (unit-tested) ────────────────────────────────────────────────────────────────
 

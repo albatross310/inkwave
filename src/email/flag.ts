@@ -1,22 +1,26 @@
-// The email layer's feature flag — DEFAULT OFF (P1b ships dark).
-//
-// Follows the repo's sticky-flag pattern exactly (`?auth`, src/auth/config.ts): resolve the URL
-// param on every read and persist it, so the flag survives the URL being rewritten by later
-// navigation. Reading the URL fresh WITHOUT persisting is the bug that silently disabled the
-// snapshot thumbnails the moment a scrub rewrote the URL (CLAUDE.md, /snapshot round 8) — the flag
-// died exactly when the feature started being used, and its absence looked like the feature being
-// unnecessary. Persisting is what makes the flag survive that.
+// The email layer's feature flag — DEFAULT OFF (P1b ships dark; send is blocked on Google
+// verification, so the flag has not earned graduation).
 //
 //   ?email / ?email=1   enable (sticky)
 //   ?email=off          disable + clear
 //
 // UNSET ⇒ OFF. SSR/prerender has no localStorage/location → false.
+//
+// Enables on PRESENCE, so `?email=yes` is on too — matching `?auth` and `?lesson`, and differing
+// from `?music`/`?musicXml`/`?prod*`, which want an exact '1'. Persisting is what makes it survive
+// a URL rewrite; the shared core owns that and the round-8 lesson behind it.
+//
+// `cache: false` — it re-reads storage on every call, which is what the shipped module did and
+// what lets a mid-session change be seen. Nothing depends on it here the way `?auth` and
+// `?liveFrame` depend on it, but it is behaviour, so it is preserved rather than quietly tightened.
+import { stickyFlag } from '../flags/stickyFlag'
 
-export function emailEnabled(): boolean {
-  try {
-    const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null
-    if (params?.get('email') === 'off') localStorage.removeItem('inkwave:email')
-    else if (params?.has('email')) localStorage.setItem('inkwave:email', '1')
-    return localStorage.getItem('inkwave:email') === '1'
-  } catch { return false }
-}
+const flag = stickyFlag({
+  key: 'inkwave:email',
+  param: 'email',
+  defaultOn: false,
+  onParam: 'present',
+  cache: false,
+})
+
+export function emailEnabled(): boolean { return flag.enabled() }

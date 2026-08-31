@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { musicEnabled, musicDemo, __resetMusicFlagForTest } from './flag'
+import { musicEnabled, musicDemo, __resetMusicFlagForTest, setMusicEnabledForTest } from './flag'
 
 // The music module GRADUATED to default ON (2026-07-18): finished, so unflagged. This file pins the
 // graduation from BOTH sides — a default that is not really on, or an `?music=off` that does not
@@ -73,6 +73,63 @@ describe('musicEnabled — default ON (graduated)', () => {
         removeItem: () => {},
       },
     })
+    __resetMusicFlagForTest()
+    expect(musicEnabled()).toBe(true)
+  })
+})
+
+// ── CHARACTERIZATION (added before the shared-flag-core refactor, run green against the unmoved
+// module). The cases above pin the graduation itself. These pin the mechanics around it that a
+// shared core would flatten, each measured rather than assumed:
+//   • `?music` requires an EXACT value — a bare param is inert, unlike `?email`/`?lesson`/`?auth`,
+//     which enable on mere presence;
+//   • the resolution is CACHED once per load, unlike `?email`/`?auth`/`?liveFrame`;
+//   • two window overrides, and `setMusicEnabledForTest` writes the cache WITHOUT touching storage.
+describe('musicEnabled — characterization', () => {
+  beforeEach(() => { vi.unstubAllGlobals(); __resetMusicFlagForTest() })
+
+  it('a BARE ?music writes nothing and leaves the default alone', () => {
+    const store = stubWindow('?music')
+    expect(musicEnabled()).toBe(true)     // the default, not the param
+    expect('inkwave:music' in store).toBe(false)
+  })
+
+  it('a bare ?music does NOT re-arm a prior off (only an exact "1" does)', () => {
+    stubWindow('?music', { 'inkwave:music': '0' })
+    expect(musicEnabled()).toBe(false)
+  })
+
+  it('resolves ONCE per load: a mid-session storage change is NOT seen until the reset', () => {
+    const store = stubWindow('')
+    expect(musicEnabled()).toBe(true)
+    store['inkwave:music'] = '0'
+    expect(musicEnabled()).toBe(true)     // cached
+    __resetMusicFlagForTest()
+    expect(musicEnabled()).toBe(false)    // re-resolved
+  })
+
+  it('window.__iwMusic / __iwMusicDemo override storage, both directions', () => {
+    stubWindow('?music=off')
+    expect(musicEnabled()).toBe(false)
+    ;(window as unknown as { __iwMusic?: boolean }).__iwMusic = true
+    expect(musicEnabled()).toBe(true)
+    ;(window as unknown as { __iwMusic?: boolean }).__iwMusic = false
+    expect(musicEnabled()).toBe(false)
+    ;(window as unknown as { __iwMusicDemo?: boolean }).__iwMusicDemo = true
+    expect(musicDemo()).toBe(true)
+  })
+
+  it('setMusicEnabledForTest writes the cache without touching storage, and keeps demo', () => {
+    const store = stubWindow('?music=demo')
+    expect(musicDemo()).toBe(true)
+    setMusicEnabledForTest(false)
+    expect(musicEnabled()).toBe(false)
+    expect(musicDemo()).toBe(true)                 // demo survives the toggle
+    expect(store['inkwave:music']).toBe('1')       // storage untouched by the test seam
+  })
+
+  it('is ON with no window at all — the graduated default survives prerender', () => {
+    vi.unstubAllGlobals()
     __resetMusicFlagForTest()
     expect(musicEnabled()).toBe(true)
   })

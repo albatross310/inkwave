@@ -1,3 +1,5 @@
+import { stickyFlag } from '../flags/stickyFlag'
+
 // Auth is OPTIONAL and only needed for the paid (M6) tier — the free writing + sync tiers never
 // require an Inkwave account. The whole auth layer is gated on the Clerk publishable key: until
 // it's set the login UI is hidden and Clerk is never loaded (zero impact, like OneDrive).
@@ -9,13 +11,24 @@ export const CLERK_PUBLISHABLE_KEY = import.meta.env?.VITE_CLERK_PUBLISHABLE_KEY
 // instance (the startup "whirring"). So auth is OPT-IN: it stays off until requested with `?auth`
 // (sticky — persisted so it survives later loads; `?auth=off` clears it). Wire this to the paid
 // entitlement gate at launch. SSR/prerender has no localStorage/location → returns false.
+//
+// This is the ORIGINAL sticky flag — every other module's header cites "the `?auth` pattern" — and
+// it now runs on the shared core like the rest. `cache: false` is load-bearing, not incidental:
+// AccountControl writes `inkwave:auth` directly on a headless sign-in, long after boot, and a
+// resolve-once cache would freeze the answer at "no" for the rest of the load.
+//
+// Only the FLAG moved. `authEnabled()` and the provider latch below stay here, because neither is
+// a flag: one is the flag AND a build-time key, the other is a fact about what already mounted.
+const authFlag = stickyFlag({
+  key: 'inkwave:auth',
+  param: 'auth',
+  defaultOn: false,
+  onParam: 'present',
+  cache: false,
+})
+
 export function authRequested(): boolean {
-  try {
-    const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null
-    if (params?.get('auth') === 'off') localStorage.removeItem('inkwave:auth')
-    else if (params?.has('auth')) localStorage.setItem('inkwave:auth', '1')
-    return localStorage.getItem('inkwave:auth') === '1'
-  } catch { return false }
+  return authFlag.enabled()
 }
 
 export function authEnabled(): boolean {

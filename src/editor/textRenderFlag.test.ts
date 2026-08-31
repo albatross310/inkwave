@@ -67,4 +67,30 @@ describe('textRenderEnabled — DEFAULT ON', () => {
     })
     expect(textRenderEnabled()).toBe(true)
   })
+
+  // ── CHARACTERIZATION (added before the shared-flag-core refactor, run green against the unmoved
+  // module). This flag READS NO URL AT ALL — entry.client.tsx syncs `?textRender` into localStorage
+  // for it, along with the other boot-synced flags. That makes it the odd one out among nine
+  // otherwise-identical modules, and it is the one difference a shared core is most likely to
+  // "helpfully" close by giving it a param it never had. Pinned by observation, not by comment.
+  it('reads NO URL param: ?textRender=off in the URL does not turn it off by itself', () => {
+    vi.stubGlobal('location', { search: '?textRender=off' })
+    stubStore({})
+    expect(textRenderEnabled()).toBe(true)   // storage is what decides, and storage is empty
+  })
+
+  it('and writes nothing to storage when it reads', () => {
+    const store = stubStore({})
+    expect(textRenderEnabled()).toBe(true)
+    expect(Object.keys(store)).toHaveLength(0)
+  })
+
+  it('caches the read: a later storage change is not seen until the reset', () => {
+    const store = stubStore({})
+    expect(textRenderEnabled()).toBe(true)
+    store['inkwave:textRender'] = '0'
+    expect(textRenderEnabled()).toBe(true)   // cached
+    _resetTextRenderFlag()
+    expect(textRenderEnabled()).toBe(false)  // re-read
+  })
 })
