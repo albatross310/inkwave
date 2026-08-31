@@ -1,4 +1,4 @@
-// The MusicXML PATH's own sub-flag (build spec §C2 step 6 / PART B). DEFAULT OFF.
+// The MusicXML PATH's own sub-flag (build spec v0.1 §C2 step 6 / PART B). DEFAULT OFF.
 //
 // ─── Why a second flag, and why it is not the `flag.ts` mistake ──────────────────────────────
 // `flag.ts` (`?music`) gates the MUSIC MODULE and is owned by the photo lane. This gates one PATH
@@ -17,56 +17,30 @@
 // ⚠️ THIS IS A SEAM, NOT A DESTINATION — reported to the coordinator rather than decided here.
 // §1 makes `source: { type: "photo" | "musicxml" }` a property of ONE Piece, so the end state is a
 // single surface where the student picks how the score comes in, not two flags. Collapsing them
-// means editing the photo lane's `MusicStudio`, which is that lane's call to make. Until then the
-// module's default behaviour is BYTE-UNCHANGED: no `?musicXml` ⇒ `/music` renders exactly what it
-// rendered before this lane existed.
+// means editing the photo lane's `MusicStudio`, which is that lane's call to make.
 //
-// STICKY, resolved ONCE per load (the `?auth` / `?prodGraphs` / `?snapThumbs` pattern): a flag read
-// fresh from the URL dies the moment any local-first navigation rewrites it — which silently
-// disabled snapThumbs exactly when it was being used (CLAUDE.md, snapThumbs round 8, bug 2).
+// ─── THE ONE THING TO NOTICE NEXT TO ITS NEIGHBOUR ───────────────────────────────────────────
+// `?music` next door is DEFAULT ON and records its opt-out as a sticky '0'. This one is DEFAULT
+// OFF, so its `off` is an ABSENCE — and it must be: under a present-means-on reader a '0' would
+// also read as off, so the two are indistinguishable from the flag's own answer and only differ in
+// what is left in storage. The shared core derives both from `defaultOn` rather than leaving two
+// lanes to pick a spelling each.
+import { stickyFlag } from '../flags/stickyFlag'
 
-type Pair = { on: boolean; demo: boolean }
-
-let _flags: Pair | null = null
-
-function resolve(): Pair {
-  let on = false, demo = false
-  try {
-    const p = new URLSearchParams(window.location.search).get('musicXml')
-    if (p === 'off') {
-      window.localStorage.removeItem('inkwave:musicXml')
-      window.localStorage.removeItem('inkwave:musicXmlDemo')
-    } else if (p === 'demo') {
-      window.localStorage.setItem('inkwave:musicXml', '1')
-      window.localStorage.setItem('inkwave:musicXmlDemo', '1')
-    } else if (p === '1') {
-      window.localStorage.setItem('inkwave:musicXml', '1')
-      window.localStorage.removeItem('inkwave:musicXmlDemo')
-    }
-    on = window.localStorage.getItem('inkwave:musicXml') === '1'
-    demo = window.localStorage.getItem('inkwave:musicXmlDemo') === '1'
-  } catch { /* SSR/prerender or private mode → stays off */ }
-  return { on, demo }
-}
-
-function flags(): Pair {
-  if (!_flags) _flags = resolve()
-  return _flags
-}
+const flag = stickyFlag({
+  key: 'inkwave:musicXml',
+  param: 'musicXml',
+  defaultOn: false,
+  companionKey: 'inkwave:musicXmlDemo',
+  override: '__iwMusicXml',
+  companionOverride: '__iwMusicXmlDemo',
+})
 
 /** Whether the MusicXML path is showing. Default OFF. Implies the music module. */
-export function musicXmlEnabled(): boolean {
-  const w = typeof window !== 'undefined' ? (window as unknown as { __iwMusicXml?: boolean }) : null
-  if (w && typeof w.__iwMusicXml === 'boolean') return w.__iwMusicXml
-  return flags().on
-}
+export function musicXmlEnabled(): boolean { return flag.enabled() }
 
 /** `?musicXml=demo` — the labelled synthetic score. Never a real score, never silent. */
-export function musicXmlDemo(): boolean {
-  const w = typeof window !== 'undefined' ? (window as unknown as { __iwMusicXmlDemo?: boolean }) : null
-  if (w && typeof w.__iwMusicXmlDemo === 'boolean') return w.__iwMusicXmlDemo
-  return flags().demo
-}
+export function musicXmlDemo(): boolean { return flag.demo() }
 
 /** Tests only: forget the resolved flags so a suite can re-resolve them. */
-export function __resetMusicXmlFlagForTest(): void { _flags = null }
+export function __resetMusicXmlFlagForTest(): void { flag.reset() }

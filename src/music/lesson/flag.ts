@@ -1,43 +1,28 @@
 // The music lesson layer's feature flag — DEFAULT OFF (the module ships dark).
 //
-// Follows the repo's sticky-flag pattern exactly (`?auth`, `?email`, `?prodGraphs`): resolve the URL
-// param ONCE per load and persist it, so the flag survives the URL being rewritten by later
-// navigation. Reading the URL fresh WITHOUT persisting is the bug that silently disabled the
-// snapshot thumbnails the moment a scrub rewrote the URL (CLAUDE.md, /snapshot round 8, bug 2) —
-// the flag died exactly when the feature started being used, and its absence looked like the
-// feature being unnecessary.
-//
 //   ?lesson / ?lesson=1   enable (sticky)
 //   ?lesson=off           disable + clear
 //
 // UNSET ⇒ OFF. SSR/prerender has no localStorage/location → false.
+//
+// ─── `onParam: 'present'` IS THE ONE NON-DEFAULT, AND IT IS NOT COSMETIC ─────────────────────
+// This flag enables on mere PRESENCE, so `?lesson`, `?lesson=1` and even `?lesson=yes` all turn it
+// on — while `?musicXml` two directories up requires an exact '1' and ignores a bare param
+// entirely. Same URL shape, opposite answers, and until the shared core neither module said so.
+// `off` is still checked FIRST, so `?lesson=off` clears rather than enabling; swap that order and
+// off becomes on, which is why the core fixes the order in one place instead of nine.
+import { stickyFlag } from '../../flags/stickyFlag'
 
-const KEY = 'inkwave:lesson'
-
-let _resolved: boolean | null = null
-
-function resolve(): boolean {
-  try {
-    const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null
-    if (params?.get('lesson') === 'off') localStorage.removeItem(KEY)
-    else if (params?.has('lesson')) localStorage.setItem(KEY, '1')
-    return localStorage.getItem(KEY) === '1'
-  } catch {
-    return false
-  }
-}
+const flag = stickyFlag({
+  key: 'inkwave:lesson',
+  param: 'lesson',
+  defaultOn: false,
+  onParam: 'present',
+  override: '__iwLesson',
+})
 
 /** Whether the lesson layer is available at all. Default OFF. */
-export function lessonEnabled(): boolean {
-  const w = typeof window !== 'undefined'
-    ? (window as unknown as { __iwLesson?: boolean })
-    : null
-  if (w && typeof w.__iwLesson === 'boolean') return w.__iwLesson
-  if (_resolved === null) _resolved = resolve()
-  return _resolved
-}
+export function lessonEnabled(): boolean { return flag.enabled() }
 
 /** Test-only: forget the resolved value so a fresh URL/localStorage state can be read. */
-export function resetLessonFlagForTests(): void {
-  _resolved = null
-}
+export function resetLessonFlagForTests(): void { flag.reset() }

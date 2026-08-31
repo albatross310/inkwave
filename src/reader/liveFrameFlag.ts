@@ -24,16 +24,31 @@
 // `SameSite=Lax` (the default) is never sent and a site you are signed into renders signed out.
 // No header we remove reaches any of that.
 //
-// `?liveFrame=off` turns it off and is sticky; `?liveFrame=1` clears that.
-const KEY = 'inkwave:liveFrame'
+// `?liveFrame=off` (or `=0`) turns it off and is sticky; `?liveFrame=1` clears that.
+//
+// ─── THE THREE SPEC FIELDS THAT ARE NOT DEFAULTS, AND WHY ────────────────────────────────────
+// • `onNoWindow: false` against `onFault: true` — the two environment failures answer OPPOSITELY,
+//   deliberately. Prerender must not bake live framing into static HTML; a writer in a private
+//   window must get the feature rather than a silent downgrade they cannot see.
+// • `cache: false` — SourceBrowser re-reads this per effect precisely because "the extension can
+//   be granted mid-session, and liveFrameEnabled() can be flipped". A resolve-once cache would
+//   freeze the answer at whatever the first read saw.
+// • `onWrite: 'clear'` — `?liveFrame=1` removes the key rather than writing '1'. Under an
+//   absent-means-on reader both read ON, so only storage inspection tells them apart; it is kept
+//   because it is what already shipped, not because it matters to the answer.
+import { stickyFlag } from '../flags/stickyFlag'
+
+const flag = stickyFlag({
+  key: 'inkwave:liveFrame',
+  param: 'liveFrame',
+  defaultOn: true,
+  offValues: ['off', '0'],
+  onWrite: 'clear',
+  onFault: true,
+  onNoWindow: false,
+  cache: false,
+})
 
 export function liveFrameEnabled(): boolean {
-  if (typeof window === 'undefined') return false          // SSR/prerender: never
-  try {
-    const p = new URLSearchParams(window.location.search).get('liveFrame')
-    if (p === 'off' || p === '0') localStorage.setItem(KEY, '0')
-    else if (p === '1') localStorage.removeItem(KEY)
-    return localStorage.getItem(KEY) !== '0'                // absent means ON
-  } catch { return true }                                   // storage refused → the feature, not a
-                                                            // silent downgrade the writer cannot see
+  return flag.enabled()
 }

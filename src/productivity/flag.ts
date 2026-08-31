@@ -31,11 +31,6 @@
 // The heavy modal stays lazily imported, so the STATIC eager set (what prodLoadPath.prove.mjs
 // measures) is unchanged.
 //
-// STICKY URL FLAGS (the `?auth` / `?snapThumbs` pattern, and the round-8 lesson behind it): a flag
-// read fresh from the URL DIES the moment any local-first navigation rewrites it — which silently
-// disabled snapThumbs exactly when it was being used (CLAUDE.md, snapThumbs round 8, bug 2).
-// Resolve ONCE per load, persist, then read from storage. Don't reintroduce that bug.
-//
 //   prodGraphs (default ON)             prodReport (default ON)
 //   ?prodGraphs=off   off (sticky '0')  ?prodReport=off   off (sticky, writes '0')
 //   ?prodGraphs=1     on (clears '0')   ?prodReport=1     on (clears a prior opt-out)
@@ -43,79 +38,49 @@
 //
 // `demo` renders from a LABELLED synthetic fixture ledger — which is why no fixture in this repo may
 // ever contain real writing: demo mode puts fixture data on screen. It is never silent.
-
-type Pair = { on: boolean; demo: boolean }
-
-// `defaultOn` inverts the reader and the off-path: an off-by-default flag is present-means-on
-// (`=== '1'`, `off` → absence); an on-by-default flag is absent-means-on (`!== '0'`, `off` → a
-// STICKY '0', because with the default ON removeItem would silently re-enable it).
-function resolve(param: string, key: string, demoKey: string, defaultOn: boolean): Pair {
-  let on = defaultOn, demo = false
-  try {
-    const p = new URLSearchParams(window.location.search).get(param)
-    if (p === 'off') {
-      if (defaultOn) window.localStorage.setItem(key, '0') // explicit, sticky opt-out
-      else window.localStorage.removeItem(key)
-      window.localStorage.removeItem(demoKey)
-    } else if (p === 'demo') {
-      window.localStorage.setItem(key, '1')
-      window.localStorage.setItem(demoKey, '1')
-    } else if (p === '1') {
-      window.localStorage.setItem(key, '1')
-      window.localStorage.removeItem(demoKey)
-    }
-    on = defaultOn ? window.localStorage.getItem(key) !== '0' : window.localStorage.getItem(key) === '1'
-    demo = window.localStorage.getItem(demoKey) === '1'
-  } catch { /* SSR/prerender or private mode → stays at defaultOn */ }
-  return { on, demo }
-}
+//
+// ─── ONE DIFFERENCE BETWEEN THE TWO LANES, PRESERVED DELIBERATELY ────────────────────────────
+// `prodGraphs` honours `window.__iwProdGraphs` / `__iwProdGraphsDemo`; `prodReport` honours no
+// global at all. Same file, same resolver, different surface — the graphs lane wanted an A/B seam
+// for its probes and the report lane never did. Giving prodReport one here would be adding a live
+// override with no consumer, which is the thing this repo refuses to do; it is left absent and
+// pinned by a test so its absence stays a decision rather than an oversight.
+import { stickyFlag } from '../flags/stickyFlag'
 
 // ─── graphs (P1a-viz) ────────────────────────────────────────────────────────
-let _graphs: Pair | null = null
-function graphFlags(): Pair {
-  // DEFAULT ON — a panel now, not a route (see the header). `?prodGraphs=off` is a sticky '0'.
-  if (!_graphs) _graphs = resolve('prodGraphs', 'inkwave:prodGraphs', 'inkwave:prodGraphsDemo', true)
-  return _graphs
-}
+const graphs = stickyFlag({
+  key: 'inkwave:prodGraphs',
+  param: 'prodGraphs',
+  defaultOn: true,
+  companionKey: 'inkwave:prodGraphsDemo',
+  override: '__iwProdGraphs',
+  companionOverride: '__iwProdGraphsDemo',
+})
 
 /** Whether the productivity charts panel is available at all. Default ON. */
-export function prodGraphsEnabled(): boolean {
-  const w = typeof window !== 'undefined' ? (window as unknown as { __iwProdGraphs?: boolean }) : null
-  if (w && typeof w.__iwProdGraphs === 'boolean') return w.__iwProdGraphs
-  return graphFlags().on
-}
+export function prodGraphsEnabled(): boolean { return graphs.enabled() }
 
 /** `?prodGraphs=demo` — render from the synthetic fixture ledger instead of a real one. */
-export function prodGraphsDemo(): boolean {
-  const w = typeof window !== 'undefined' ? (window as unknown as { __iwProdGraphsDemo?: boolean }) : null
-  if (w && typeof w.__iwProdGraphsDemo === 'boolean') return w.__iwProdGraphsDemo
-  return graphFlags().demo
-}
+export function prodGraphsDemo(): boolean { return graphs.demo() }
 
 // ─── AI report (P1c) ─────────────────────────────────────────────────────────
-let _report: Pair | null = null
-function reportFlags(): Pair {
-  // DEFAULT ON (2026-07-18) — finished, backend-free paste-back report.
-  if (!_report) _report = resolve('prodReport', 'inkwave:prodReport', 'inkwave:prodReportDemo', true)
-  return _report
-}
+const report = stickyFlag({
+  key: 'inkwave:prodReport',
+  param: 'prodReport',
+  defaultOn: true,
+  companionKey: 'inkwave:prodReportDemo',
+})
 
-export function prodReportEnabled(): boolean { return reportFlags().on }
+export function prodReportEnabled(): boolean { return report.enabled() }
 
 /** `?prodReport=demo` — synthetic ledger data, labelled as such in the panel. Never silent. */
-export function prodReportDemo(): boolean { return reportFlags().demo }
+export function prodReportDemo(): boolean { return report.demo() }
 
 /** The escape hatch: `false` writes a STICKY '0' (not an absence), matching `?prodReport=off`. */
-export function setProdReportEnabled(on: boolean): void {
-  try {
-    window.localStorage.setItem('inkwave:prodReport', on ? '1' : '0')
-    if (!on) window.localStorage.removeItem('inkwave:prodReportDemo')
-  } catch { /* private mode — flag stays session-only via _report */ }
-  _report = { on, demo: on ? (_report?.demo ?? false) : false }
-}
+export function setProdReportEnabled(on: boolean): void { report.set(on) }
 
 // ─── test hooks ──────────────────────────────────────────────────────────────
 /** Tests only: forget the resolved flags so a suite can re-resolve them. */
-export function __resetFlagsForTest(): void { _graphs = null; _report = null }
+export function __resetFlagsForTest(): void { graphs.reset(); report.reset() }
 /** Tests only. Kept as the P1c lane's name for it. */
-export function __resetProdReportFlag(): void { _report = null }
+export function __resetProdReportFlag(): void { report.reset() }
