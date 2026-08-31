@@ -26,6 +26,10 @@ import {
   legacyZoomAnchor, legacyFitRule, anchorFraction, anchorScrollDelta, proportionalAnchorScroll,
 } from './pdfGeometry'
 
+// Find-in-PDF's matching rules. They left this file because they had no tests and had already
+// grown two different guards for one hazard — see pdfFind.ts's header.
+import { normText, matchRanges, quoteFragments, spanHitIndices } from './pdfFind'
+
 import { lockAxis, newAxisState } from './axisLock'
 import { HOLD_MS } from './useLongPress'
 import { PdfReaderView } from './PdfReaderView'
@@ -1585,9 +1589,8 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   }
 
   // ── Find in PDF ───────────────────────────────────────────────────────────────
-  const normText = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim()
-  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const searchPattern = (q: string) => new RegExp(normText(q).split(' ').filter(Boolean).map(escapeRe).join('\\s+'), 'gi')
+  // The matching rules live in ./pdfFind, with their tests. What stays here is the part that needs
+  // pdf.js and the DOM: fetching each page's text, drawing the hit rectangles, scrolling to them.
   function clearFindHits() { document.querySelectorAll('.iw-pdf-find-hit').forEach(n => n.remove()) }
 
   // Search every page's text (via getTextContent — no render needed), record one entry per match,
@@ -1601,8 +1604,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     for (let i = 0; i < pagesRef.current.length; i++) {
       const tc = await pagesRef.current[i].page.getTextContent()
       const text = normText((tc.items as Array<{ str?: string }>).map(it => it.str ?? '').join(' '))
-      const re = searchPattern(nq)
-      while (re.exec(text)) { per.push(i); if (re.lastIndex === 0) break }
+      for (let k = matchRanges(text, nq).length; k > 0; k--) per.push(i)
     }
     matchesRef.current = per
     setMatchInfo({ cur: per.length ? 1 : 0, total: per.length })
@@ -1613,10 +1615,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // Find a cited sentence: try the whole quote, then shorter leading fragments. PDF text extraction
   // drops/re-wraps words, so a long exact quote often won't match while a leading fragment reliably does.
   async function findQuote(quote: string) {
-    const words = normText(quote).split(' ').filter(Boolean)
-    if (!words.length) return
-    const tries = [words.length, 8, 6, 4].filter((n, i, a) => n <= words.length && a.indexOf(n) === i)
-    for (const n of tries) if (await runSearch(words.slice(0, n).join(' ')) > 0) return
+    for (const fragment of quoteFragments(quote)) if (await runSearch(fragment) > 0) return
   }
 
   function gotoMatch(i: number, query = searchQuery) {
@@ -1641,23 +1640,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // Returns the first hit's viewport top (for scrolling), or null.
   function flashQueryOnPage(pg: PageRef, query: string): number | null {
     clearFindHits()
-    const nq = normText(query)
-    if (!nq) return null
     const spans = Array.from(pg.textLayer.querySelectorAll('span')) as HTMLElement[]
-    let full = ''
-    const ranges: Array<{ span: HTMLElement; start: number; end: number }> = []
-    for (const s of spans) { const t = s.textContent ?? ''; ranges.push({ span: s, start: full.length, end: full.length + t.length }); full += t + ' ' }
-    const re = searchPattern(nq)
-    const hit = new Set<HTMLElement>()
-    let m: RegExpExecArray | null
-    while ((m = re.exec(full))) {
-      const s = m.index, e = s + m[0].length
-      for (const r of ranges) if (r.end > s && r.start < e) hit.add(r.span)
-      if (re.lastIndex === m.index) re.lastIndex++
-    }
     let firstTop: number | null = null
     const layer = pg.hlLayer.getBoundingClientRect()
-    for (const span of hit) {
+    for (const i of spanHitIndices(spans.map(s => s.textContent ?? ''), query)) {
+      const span = spans[i]
       const r = span.getBoundingClientRect()
       if (firstTop == null || r.top < firstTop) firstTop = r.top
       const div = document.createElement('div')
