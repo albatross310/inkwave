@@ -178,7 +178,7 @@ const READER_FONTS: Array<{ label: string; css: string }> = [
 // next to the module in `reader/address.test.ts`.
 import {
   isInkwaveItself, embeddableUrl, isPlayable, isSearch, queryOf, SEARCH_URL,
-  nextSearchEngine, searchLooksEmpty,
+  nextSearchEngine, searchLooksEmpty, externalHostCount,
   mustUseReader, addressToUrl, stripTracking, unwrapRedirect, likelyRefusesFraming, hostOf,
 } from '../reader/address'
 
@@ -895,8 +895,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // it there is what makes the stale read unrepresentable rather than merely unlikely.
   useEffect(() => {
     if (framed || !doc || docForRef.current !== here || !isSearch(here)) return
-    const linked = doc.blocks.filter((b) => 'runs' in b && (b.runs ?? []).some((r) => r.href)).length
-    if (!searchLooksEmpty(linked)) return
+    // ⚠ COUNT WHERE THE RESULTS GO, not how many links there are. Measured: bing answers a search
+    // with 31 linked blocks and every one points back at bing.com — its own pagination. Counting
+    // links scores that as a healthy search, the chain never falls forward, and the writer gets a
+    // page of an engine's furniture. A RESULT is somewhere else to go.
+    const links: string[] = []
+    for (const b of doc.blocks) for (const r of ('runs' in b ? b.runs ?? [] : [])) if (r.href) links.push(r.href)
+    if (!searchLooksEmpty(externalHostCount(links, here))) return
     const next = nextSearchEngine(here)
     const q = queryOf(here)
     if (!next || !q) return

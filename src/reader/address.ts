@@ -85,10 +85,38 @@ export function nextSearchEngine(url: string): SearchEngine | null {
   return SEARCH_ENGINES[i + 1]
 }
 
-/** Did a search actually return results? An engine that answers 200 with a challenge page is the
- *  case this exists for — it is not an error, and only counting real links can tell them apart. */
-export function searchLooksEmpty(linkedBlocks: number): boolean {
-  return linkedBlocks < 5
+/** Did a search actually return RESULTS — links that LEAVE the engine?
+ *
+ * ⚠ COUNTING LINKS IS NOT COUNTING RESULTS, and the first version of this got it wrong in the way
+ * that matters. MEASURED through the deployed function: bing answers with 31 linked blocks, every
+ * one of them pointing back at bing.com — pagination, "images", "next page". A naive link count
+ * scores that as a healthy search and the chain never falls forward, so the writer sees a page of
+ * an engine's own furniture and no results at all.
+ *
+ * So the signal is the number of DISTINCT EXTERNAL HOSTS. It is what a result IS: somewhere else to
+ * go. It also degrades correctly — an engine serving a challenge page or its own index has zero,
+ * whatever its status code says, and every one of those answers 200.
+ */
+export function searchLooksEmpty(externalHosts: number): boolean {
+  return externalHosts < 3
+}
+
+/** The distinct hosts a search's results point AT, excluding the engine's own. Pure, so the rule
+ *  above can be tested without a browser and the panel cannot grow a second copy of it. */
+export function externalHostCount(links: readonly string[], engineUrl: string): number {
+  let engineHost = ''
+  try { engineHost = new URL(engineUrl).hostname } catch { /* a malformed engine is nobody's host */ }
+  const base = engineHost.replace(/^(www|search|old-search|lite|html)\./, '')
+  const hosts = new Set<string>()
+  for (const href of links) {
+    if (!/^https?:\/\//i.test(href)) continue
+    let h = ''
+    try { h = new URL(href).hostname } catch { continue }
+    // An engine's own redirector counts as the engine, not as a destination.
+    if (h === engineHost || (base && h.endsWith(base))) continue
+    hosts.add(h)
+  }
+  return hosts.size
 }
 export const LEGACY_DDG_SEARCH = 'https://html.duckduckgo.com/html/?q='   // kept: `isSearch` must
                                                                           // still recognise old URLs

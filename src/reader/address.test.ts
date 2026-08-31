@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, LIVE_SEARCH_URL, ECOSIA_SEARCH_URL, searchUrlFor, isInkwaveItself, isSearch, queryOf, SEARCH_ENGINES, SEARCH_REFUSED, nextSearchEngine, searchLooksEmpty } from './address'
+import { addressToUrl, unwrapRedirect, mustUseReader, embeddableUrl, isPlayable, stripTracking, SEARCH_URL, GOOGLE_SEARCH_URL, LIVE_SEARCH_URL, ECOSIA_SEARCH_URL, searchUrlFor, isInkwaveItself, isSearch, queryOf, SEARCH_ENGINES, SEARCH_REFUSED, nextSearchEngine, searchLooksEmpty, externalHostCount } from './address'
 import { APP_INITIATORS } from './framingRule'
 
 describe('addressToUrl', () => {
@@ -275,10 +275,33 @@ describe('the search engine chain', () => {
     }
   })
 
-  it('"looks empty" counts LINKS, not blocks — a challenge page answers 200 with prose', () => {
+  it('"looks empty" counts DESTINATIONS, not links — an engine links to itself', () => {
+    // ⚠ THE FIRST VERSION COUNTED LINKS AND WAS WRONG IN THE WAY THAT MATTERS. Measured through the
+    // deployed function: bing answers with 31 linked blocks, ALL of them bing.com — pagination and
+    // "images". A link count scores that healthy, the chain never falls forward, and the writer
+    // gets a page of an engine's own furniture.
     expect(searchLooksEmpty(0)).toBe(true)
-    expect(searchLooksEmpty(2)).toBe(true)      // measured: marginalia's bad runs, and searx.be
-    expect(searchLooksEmpty(66)).toBe(false)    // measured: searxng.site
-    expect(searchLooksEmpty(90)).toBe(false)    // measured: marginalia's good runs
+    expect(searchLooksEmpty(2)).toBe(true)
+    expect(searchLooksEmpty(20)).toBe(false)
+  })
+
+  it('an engine\'s own links are not results — including its subdomains and redirectors', () => {
+    const bing = 'https://www.bing.com/search?q=x'
+    // The exact shape measured: every link home.
+    expect(externalHostCount(
+      ['https://www.bing.com/search?q=x&first=11', 'https://www.bing.com/images/search?q=x'], bing)).toBe(0)
+    // A redirector on the engine's own domain is still the engine.
+    expect(externalHostCount(['https://r.bing.com/?u=http://plato.stanford.edu'], bing)).toBe(0)
+    // Real destinations count once per host, however many links point at them.
+    expect(externalHostCount([
+      'https://plato.stanford.edu/entries/identity-time/',
+      'https://plato.stanford.edu/entries/identity/',
+      'https://www.jimpryor.net/teaching/notes.html',
+    ], bing)).toBe(2)
+  })
+
+  it('survives junk without throwing — a malformed href must not end the search', () => {
+    expect(externalHostCount(['not-a-url', '', 'javascript:void(0)', 'mailto:a@b.c'], 'https://x.test/?q=')).toBe(0)
+    expect(externalHostCount(['https://ok.example/a'], 'not-a-url')).toBe(1)
   })
 })
