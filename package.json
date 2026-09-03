@@ -35,6 +35,7 @@
     "prove:rescuearms": "node scripts/textrender-probe/rescuearms.prove.mjs",
     "prove:snapnight": "node scripts/textrender-probe/snapnight.prove.mjs",
     "prove:snapswipe": "node scripts/textrender-probe/snapswipe.prove.mjs",
+    "prose-only": "node scripts/prose-only.mjs",
     "prove:framing": "node scripts/framing.prove.mjs",
     "prove:arithmeticlayout": "node scripts/arithmeticLayout.prove.mjs",
     "prove:cssfloor": "node scripts/cssfloor.prove.mjs",

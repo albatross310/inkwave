@@ -1,53 +1,26 @@
-// ARITHMETIC LAYOUT ENGINE (2026-07-14; generalized for equations/figures 2026-07-15 — the designed
-// follow-up to the math-certified fonts work).
+// ARITHMETIC LAYOUT ENGINE — a reflow-free third acquisition path for
+// PaginationExtension.collectLines. Computes a block's line wrapping from the boxes of its
+// measurable elements (text via canvas advances, math via a cached measure) instead of forcing a
+// browser reflow. Output is shape-identical to collectLines, so it feeds the same page-splitter.
 //
-// A THIRD acquisition path for PaginationExtension.collectLines: instead of forcing a full-document
-// browser reflow and reading each block's line geometry with range.getClientRects (path 1) or
-// replaying a per-node block-relative cache (path 2, the round-6/7 LineCache), this path COMPUTES a
-// block's line wrapping from the boxes of its MEASURABLE ELEMENTS — text via canvas advances, math
-// via a cached one-time measure, figures via their dimensions — with NO per-pagination reflow. The
-// output is byte-identical in shape to what collectLines produces (per-line intrinsic tops + block
-// boundaries), so it feeds the SAME computeBreaks page-splitter and the SAME page-break signatures.
+// ⚠ PARKED, DEFAULT OFF (`?arithLayout`), AND IT MUST NOT GRADUATE AS IT STANDS: it does not
+// implement `shouldSnapToBlock`, so it now disagrees with the DOM measure on EVERY break.
+// → docs/archive/pagination-rounds.md#arith-engine
 //
-// THE MEASURABLE-ELEMENT MODEL (the generalization): every flowing element supplies a stable box —
-// an INLINE advance + line-height demand, or a BLOCK height + margins — from a source needing no
-// full-document reflow (computed, or a one-time measure cached by an immutable key). See the boxes
-// (InlineBox/BlockBox) and the element box-SOURCE registry near figureBlockBox(). "Arithmetic-
-// eligible" = "reflow-free-measurable": a block is eligible when every element in it supplies such a
-// box AND the DOM verifier stays stable over it (the inline-atom fit guard, LINE_STABILITY_EPS).
+// THE RULES, each load-bearing:
+//   1. CONSERVATIVE BY CONSTRUCTION — it never approximates, it DEFERS. Any block it cannot prove
+//      goes back to the DOM path, and `blockEligibility` returns the exact reason.
+//   2. CERTIFIED FONTS ONLY (`CERTIFIED_FAMILIES`). Uncertified faces diverge on integer-px advance
+//      quantization, which is fatal: canonical breaks must be cross-device IDENTICAL.
+//   3. RUN ONLY AFTER `document.fonts.ready`, with math boxes present. Else fall back.
+//   4. CITATIONS ARE DOM-ONLY, DELIBERATELY — a React NodeView has no stable reflow-free geometry
+//      (it reflows on bibliography hydration and measures ~9px off even on plain paths).
+//   5. PURE MODULE: no DOM and no ProseMirror imports in the core. The canvas 2d context is
+//      injected as a measure function; element boxes are injected by the caller.
+//   6. A full DOM measure still runs as the idle VERIFIER (`pagCheck` compares signatures).
 //
-// WHY TEXT IS SOUND (round-7 certification): canvas `measureText` reproduces the browser's advance
-// widths to Δ≤0.05px and a greedy break lands on the SAME word boundaries — but ONLY for the
-// certified font palette (CERTIFIED_FAMILIES); uncertified fonts diverge on integer-px advance
-// quantization, fatal because canonical breaks must be CROSS-DEVICE IDENTICAL. So the engine is
-// CONSERVATIVE BY CONSTRUCTION: it refuses any block it can't prove and hands it back to the DOM
-// path. Correctness over cleverness — it never approximates; it defers.
-//
-// ELIGIBILITY (arithmetic vs DEFERRED to DOM measure):
-//   ARITHMETIC-ELIGIBLE:
-//     • a `paragraph` of text runs (bold/italic/underline/family), UNIFORM text size, CERTIFIED
-//       fonts — mid-word mark straddles handled piece-by-piece;
-//     • …the same paragraph MAY ALSO contain inline MATH atoms that carry a box AND FIT the text
-//       line (LINE_STABILITY_EPS) — the common textstyle formula (x², a/b, √, sub/superscripts);
-//     • a block-atom `mathBlock` (or future `figure`) that carries a reflow-free box.
-//   DOM-ONLY (deferred — never guessed):
-//     • a `citation` inline atom — no stable reflow-free geometry (React NodeView; reflows on
-//       bibliography hydration / style switch; ~9px off even on plain paths). Documented as a
-//       FUTURE measurable (cached-measure keyed by citekey+style+hydration-epoch);
-//     • a TALL inline formula that exceeds the line (fraction/∑ with limits) — the getClientRects
-//       verifier becomes order-unstable, so it defers;
-//     • MIXED text sizes in one paragraph (same verifier instability);
-//     • uncertified fonts; lists (`orderedList`/`bulletList`/`taskList`), `horizontalRule`,
-//       `referenceList` — no box supplied.
-//   blockEligibility returns the exact reason, so the wire-in logs a per-doc coverage map.
-//
-// GATE: run this path ONLY after `document.fonts.ready`, text runs in certified+loaded fonts, math
-// boxes present. Else fall back to the DOM measure. A full DOM measure still runs as the idle
-// VERIFIER (pagCheck compares signatures) — any divergence is caught within the re-verify window.
-//
-// Pure module: no DOM, no ProseMirror imports in the core (a canvas 2d context is injected as the
-// measure function; element boxes are injected by the caller). Unit-tested (arithmeticLayout.test.ts)
-// + browser-proven against the real DOM in scripts/arithmeticLayout.prove.mjs (text + math).
+// The model, the round-7 certification numbers, and the full eligibility table:
+// → docs/archive/pagination-rounds.md#arith-engine
 
 // ─── Certified font palette ───────────────────────────────────────────────────────────────────
 // The PRIMARY family name of each css stack the StyleBar can emit (CLAUDE.md math-certified list).
