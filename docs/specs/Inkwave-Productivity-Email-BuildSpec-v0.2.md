@@ -1,8 +1,8 @@
 # Inkwave — Productivity & Email Layers: Build Specification
 
-**Version:** 0.3 (working draft — adds the subdocument workspace, see Part D)
+**Version:** 0.4 (working draft — adds the connected Gmail mailbox, see §B3.1–B3.5)
 **Date:** September 2026
-**Status:** Design spec for three connected layers — (A) Productivity Tracking & Reporting, (B) Email-in-Workflow, and (D) Subdocument Workspaces & Multi-Container Sync — built on Inkwave's existing local-first, zero-retention, provenance architecture. The decisions from v0.1 §C4 remain in force; v0.3 additionally defines a page-sized email surface, ordered page/email subdocuments, overview navigation, and explicit many-to-many membership between subdocuments and `.studio` containers.
+**Status:** Design spec for three connected layers — (A) Productivity Tracking & Reporting, (B) Email-in-Workflow including an optional Gmail mailbox, and (D) Subdocument Workspaces & Multi-Container Sync — built on Inkwave's existing local-first, zero-retention, provenance architecture. The decisions from v0.1 §C4 remain in force; v0.3 defined the subdocument workspace and v0.4 defines separate send-only and connected-mailbox permission tiers, plus Inbox, Drafts, and Sent synchronisation.
 
 ---
 
@@ -247,6 +247,131 @@ Email sending is provider-specific; abstract it behind a single `MailSender` int
 
 **Scope discipline:** "integrate with any provider" = N separate adapters, each with its own auth and verification. **Gmail ships first** (largest single audience, and it unlocks the Phase-3 provenance path); generic SMTP (for breadth) and Graph follow as demand appears.
 
+#### B3.1 Gmail capability tiers — never silently broaden permission
+
+Gmail integration has two explicit connection modes. They share a client adapter but not a consent
+promise:
+
+1. **Send only (default/minimal):** request only `https://www.googleapis.com/auth/gmail.send`.
+   This is the current direct-send feature. It cannot list or read the mailbox.
+2. **Connected mailbox (optional):** a separate writer action requests:
+   - `https://www.googleapis.com/auth/gmail.readonly` to view Inbox and Sent; and
+   - `https://www.googleapis.com/auth/gmail.compose` to create, read, replace, and send Gmail drafts.
+
+Both mailbox scopes are Google **restricted** scopes. `gmail.modify` is deliberately absent from the
+first mailbox build. It may be requested later only when the product actually implements mailbox
+mutations such as mark-read/unread, archive, star, trash, or label changes. The full
+`https://mail.google.com/` scope is forbidden: Inkwave has no reason to bypass Trash and permanently
+delete mail.
+
+- Choosing Send only must leave Inbox/Drafts/Sent disconnected rather than showing dead controls.
+- Choosing Connected mailbox uses Google's incremental authorization and shows the exact added
+  capabilities before opening consent.
+- Existing send-only users are never upgraded automatically, including after deployment.
+- Disconnect clears in-memory tokens and the local Gmail account/index cache. It does not delete
+  Inkwave documents or mail from Gmail.
+- Revoking a scope degrades only the features that require it. A lost mailbox grant must not disable
+  local email writing or provider handoff.
+- Do not add a scope to the OAuth request or Google consent configuration before the corresponding
+  user-facing feature exists and can be demonstrated; minimum-scope review treats future-use scopes
+  as unjustified.
+
+#### B3.2 Mailbox information architecture
+
+The connected mailbox has three primary views:
+
+- **Inbox:** thread-first, newest activity first. Each row shows sender, subject, received time,
+  unread/attachment indicators, and a short Gmail-provided snippet. Opening a thread fetches its
+  messages on demand.
+- **Drafts:** one row per Gmail draft, using Gmail's stable `draft.id`. Opening a draft materialises
+  or reconnects an editable Inkwave email document. The message ID inside a Gmail draft is not an
+  identity because Gmail replaces it whenever the draft is updated.
+- **Sent:** thread/message list carrying the Gmail `SENT` system label. Sent messages are read-only;
+  “use as new draft” creates a new local email identity rather than editing history.
+
+Mailbox lists are provider views, not `.studio` containers and not provenance records. A remote
+message becomes an Inkwave subdoc only through a deliberate action: open a Gmail draft for editing,
+start a reply/forward, or save a received/sent message into a workspace. Merely browsing Inbox must
+not manufacture local documents, snapshots, ledger sessions, or sync memberships.
+
+The page-sized email surface (§D2) is shared by local drafts and connected Gmail drafts. Received and
+sent mail use the same visual language in read-only mode, with sender/date/provider state replacing
+compose controls. Inbox/Drafts/Sent navigation must integrate with overview mode without turning
+every remote row into a mounted editor.
+
+#### B3.3 Fetch, cache, and rendering boundaries
+
+- Inbox and Sent list by Gmail system label. Fetch lightweight metadata/snippets for visible rows;
+  fetch full MIME only when a message/thread is opened.
+- Prefer a thread index for Inbox/Sent so conversation UX does not duplicate a row for every message.
+  Drafts remain draft-resource-first because `draft.id` is the stable writable identity.
+- Full remote bodies are memory-only by default. A small local index may cache provider IDs, thread
+  IDs, labels, headers, snippet, attachment presence, and the last Gmail `historyId` for responsive
+  reopening. “Save to Inkwave” or opening a Gmail draft may persist content locally as an ordinary
+  Inkwave document.
+- HTML mail is untrusted. Render sanitised content in an isolated, non-scriptable surface; never
+  execute scripts, forms, event handlers, embedded objects, or arbitrary styles from a message.
+  Plain text is the baseline and fallback.
+- Remote images are blocked by default because fetching them can disclose the reader's IP address,
+  time, and message-open event. “Load images” is a per-message writer action; no sender allow-list is
+  inferred silently.
+- Attachments load only after an explicit click, retain provider filename/type/size metadata, and are
+  validated before preview. No attachment is copied into a `.studio` document unless the writer asks.
+- Links show their real destination and open outside the message surface. Message content never gains
+  authority to invoke Inkwave actions.
+- Tokens, MIME bodies, and attachment bytes travel directly between the writer's browser and Google.
+  No Inkwave endpoint proxies, logs, stores, or analyses them.
+
+#### B3.4 Foreground synchronisation and conflict rules
+
+The first mailbox build uses foreground synchronisation. It does not use Gmail push notifications,
+because Gmail watch delivery requires Google Cloud Pub/Sub/backend infrastructure and would introduce
+a server-side mailbox event path.
+
+- On connection/open, fetch the current label/thread/draft index and record Gmail's `historyId`.
+- While the mailbox is visible, poll conservatively and use `users.history.list` for incremental
+  changes. When the stored history point is no longer valid, rebuild the remote index; never interpret
+  history expiry or a failed read as an empty mailbox.
+- Pause mailbox polling while the page is hidden/offline and refresh on visibility/reconnect.
+- Coalesce requests, honour Gmail retry/rate-limit guidance, and expose `offline`, `refreshing`,
+  `current`, `permission needed`, and `failed` states. Never show stale data as current merely because
+  it exists in cache.
+
+For Gmail drafts:
+
+- Persist a provider reference on the local email document containing Gmail account identity hash,
+  stable `draft.id`, current message ID, last remote history marker, and the last successfully synced
+  canonical MIME/content hash. Never persist an access token.
+- After a local edit, save locally first, then queue a throttled Gmail draft create/update. A Gmail
+  failure leaves the local draft intact and visibly unsynced.
+- Before replacing a Gmail draft, compare the current remote draft with the last successfully synced
+  hash. If only local changed, upload; if only remote changed, import; if both changed, preserve both
+  by creating a local conflict copy and ask the writer to resolve. Timestamps never decide content.
+- Gmail's draft update replaces the contained message and changes its message ID. Continue tracking
+  by stable `draft.id` and update the recorded message ID after every successful replacement.
+- Sending a connected draft records the exact current Inkwave draft first, then uses `drafts.send`.
+  On success, clear the draft mapping, retain the returned sent message ID/thread ID, and show it in
+  Sent. A response timeout is “send status unknown”, not “failed”: refresh Sent/draft state before
+  offering a retry, preventing duplicate mail.
+- The existing direct `messages.send` path remains available for local drafts that were never synced
+  to Gmail.
+
+#### B3.5 Mailbox OAuth, verification, and launch boundary
+
+- `gmail.readonly` and `gmail.compose` require Google's restricted-scope verification for a public
+  launch. Google may also require a recurring security assessment; the exact assessment depends on
+  Google's review and data-handling classification.
+- Inkwave's design keeps restricted Gmail data out of Inkwave servers. This is both the privacy rule
+  and the narrowest review posture, but it does not remove Google's authority to require verification.
+- Pre-launch development may use the owner/test accounts behind an experimental feature flag and the
+  unverified-app warning/user cap. Public UI must not advertise the mailbox as generally available
+  until the scopes are approved.
+- Use a separate staging OAuth project/client while building or changing restricted scopes, so the
+  working send-only client and its consent surface are not destabilised by unfinished permissions.
+- Verification materials must include the public privacy policy, exact scope justifications, a demo
+  of Inbox/Drafts/Sent, disconnect/deletion behaviour, and proof that Gmail data is not sent through
+  Inkwave infrastructure.
+
 ### B4. Phase 3 — the crown jewel: DKIM capture + key archive + combined verify
 
 This is the differentiated, uniquely on-brand feature; it is explicitly **later**, after people are using the MVP.
@@ -300,6 +425,26 @@ Result: a permanent, portable, self-service proof that *the provider cryptograph
 - "Open in provider" handoff pre-fills the provider compose window for sending.
 - In-product copy accurately states what the MVP provenance proves (content existed by T) and does not claim proof of sending.
 
+### B7. Connected-mailbox acceptance criteria
+
+- Send only remains usable with exactly `gmail.send`; mailbox controls clearly offer a separate
+  connection and never imply existing read access.
+- Connected mailbox requests exactly `gmail.readonly` + `gmail.compose` for Inbox/Sent/Drafts; no
+  `gmail.modify` or full-mail scope appears in this phase.
+- Inbox and Sent list real Gmail threads newest-first and fetch full content only on open.
+- Drafts round-trip To/Cc/Bcc/Subject/body through Gmail's stable draft ID; a remote update cannot
+  silently overwrite an independently changed local draft.
+- Sending a synced draft records locally before `drafts.send`, then resolves the returned sent ID.
+  An unknown response state is reconciled before retry so duplicate sends are not created.
+- Browsing remote mail creates no Inkwave document, provenance snapshot, ledger row, or `.studio`
+  membership until the writer explicitly saves/edits/replies.
+- Message HTML is sanitised and isolated; remote images and attachments require explicit actions.
+- Failed/expired Gmail reads never render as an empty mailbox and never delete cached or local work.
+- Disconnect removes Gmail connection/cache state without deleting local Inkwave documents or Gmail
+  content.
+- No OAuth token, message body, attachment, recipient list, or mailbox index reaches an Inkwave
+  server.
+
 ---
 
 ## PART C — CROSS-CUTTING ARCHITECTURE
@@ -332,6 +477,8 @@ Result: a permanent, portable, self-service proof that *the provider cryptograph
 3. **AI access at launch:** ship **both** the free **paste-back** path and the **backend** path (login; a few free submissions/user/month → **Insignia** subscription). BYO-key is a later optional power-user path. (§A7.2, §C6)
 4. **Trust base:** **self-hosted by Inkwave**, **append-only + provenance-attested with Inkwave's own architecture**, and **public / auditable**; ultimate home is **Inkwave³** (provenance-lite public layer, still to build). (§B4.2)
 5. **First provider adapter:** **Gmail**, then generic SMTP / Graph as demand appears; Proton via Bridge. (§B3)
+6. **Mailbox access is optional and step-up:** retain send-only as the minimal default; Inbox/Sent use
+   `gmail.readonly`, draft sync uses `gmail.compose`, and `gmail.modify` waits for real mutation UX.
 
 **Remaining to build / decide later:** **Inkwave³** (the provenance-lite public read-only layer); the exact free-quota number for the backend path; **Insignia** price point; the security-assessment scope for Gmail's restricted scope.
 
@@ -341,8 +488,12 @@ Result: a permanent, portable, self-service proof that *the provider cryptograph
 2. **P1b:** Email as `doc_type: email` document → counts in ledger; OTS draft-provenance; **Gmail** send (handoff first while verification pending, Gmail API as target).
 3. **P1c:** AI report — the free **paste-back** path (markdown + judged CSV, transparent prompt, content tick-box) **and** the **backend** path (login, free quota → Insignia).
 4. **P2a:** Gmail-API send fully verified; optional **BYO-key** client-side path.
-5. **P2b:** Additional provider adapters (generic SMTP, Graph); Proton via Bridge.
-6. **P3:** DKIM capture + public, provenance-attested **trust base** + combined `inkwave/verify`; begin migrating the registry toward **Inkwave³**.
+5. **P2b-mail-1:** Gmail connection tiers + browser-only mailbox client; metadata/index and failure states.
+6. **P2b-mail-2:** Inbox + Sent thread UX; on-demand safe MIME rendering; remote images off by default.
+7. **P2b-mail-3:** Gmail draft create/update/send, local-first mapping, conflict preservation, and unknown-send reconciliation.
+8. **P2b-mail-4:** Only if the corresponding UX exists, add `gmail.modify` for mark-read/archive/star/labels.
+9. **P2c:** Additional provider adapters (generic SMTP, Graph); Proton via Bridge.
+10. **P3:** DKIM capture + public, provenance-attested **trust base** + combined `inkwave/verify`; begin migrating the registry toward **Inkwave³**.
 
 ### C6. Monetisation & tiers (Insignia)
 
@@ -685,4 +836,4 @@ multi-target fault injection proves that one unreadable destination cannot damag
 
 ---
 
-*End of spec v0.3. Working design artifact for Inkwave; §C4 decisions remain in force and Part D defines the subdocument workspace extension.*
+*End of spec v0.4. Working design artifact for Inkwave; §B3.1–B3.5 define the optional connected Gmail mailbox and Part D defines the subdocument workspace extension.*

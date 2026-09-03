@@ -529,6 +529,27 @@ plus `components/EmailComposePanel.gmail.test.tsx` (authorization → record →
 send on record failure). This stage proves Gmail accepted the submitted bytes; it does not claim
 delivery or DKIM capture.
 
+**Manual acceptance + hardening (2026-09-03).** Direct Gmail send was exercised through the real
+Google account flow and confirmed in the recipient inbox; Peter also confirmed the existing send
+and provider-handoff paths in Safari. The apparent “blank body” was a UX ambiguity — the editable
+body is the ordinary page below the header card — and is assigned to §D2's full-page email surface,
+not a transport defect. The action boundary nevertheless had a real freshness race: the editor
+deliberately lets its React `doc` prop lag typing until the 200ms save beat, so every record/send/
+handoff action now calls the editor's `ensureDocFresh` once and uses that same current document for
+the record and transmitted draft. Snapshot view now renders the snapshot's own frozen To/Cc/Bcc/
+Subject above its historical body; it never reads live headers for an old body.
+
+Two hangs found only in live use now have explicit exits: GIS `error_callback` reports a blocked or
+closed popup and a 120s fallback handles browser hosts that never return either callback; the OTS
+relay aborts after 15s, leaving the already-persisted snapshot unstamped for the normal retry drain
+while Gmail send continues. A stopped dev server also exposed Safari's stale production-worker path:
+dev cleanup now reloads once after unregister/cache deletion, with a per-tab latch preventing a
+retiring worker from creating a reload loop. This touches CacheStorage only — never OPFS/IndexedDB.
+
+**Connected Gmail mailbox is SPEC ONLY (v0.4, §B3.1–B3.5).** Inbox/Sent (`gmail.readonly`) and Gmail
+draft sync (`gmail.compose`) are designed as a separate, explicit restricted-scope connection.
+Nothing in this build requests read/compose/modify access; current Gmail remains `gmail.send` only.
+
 Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (now COMMITTED at `docs/specs/` — Peter, 2026-07-17: "commit the specs"
 into the repo). MVP = compose in Inkwave, count it in the productivity ledger, OTS the draft, hand
 off to the provider to send. Inkwave never sends mail and never touches an inbox.
