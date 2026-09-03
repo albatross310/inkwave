@@ -543,8 +543,9 @@ Two hangs found only in live use now have explicit exits: GIS `error_callback` r
 closed popup and a 120s fallback handles browser hosts that never return either callback; the OTS
 relay aborts after 15s, leaving the already-persisted snapshot unstamped for the normal retry drain
 while Gmail send continues. A stopped dev server also exposed Safari's stale production-worker path:
-dev cleanup now reloads once after unregister/cache deletion, with a per-tab latch preventing a
-retiring worker from creating a reload loop. This touches CacheStorage only — never OPFS/IndexedDB.
+dev now replaces any stale production worker with a one-shot, fetch-less cleanup worker at the same
+root scope. It clears CacheStorage, claims the open tab, unregisters itself, and only then reloads
+through the development server. Documents in OPFS/IndexedDB are never touched.
 
 **Connected Gmail mailbox is SPEC ONLY (v0.4, §B3.1–B3.5).** Inbox/Sent (`gmail.readonly`) and Gmail
 draft sync (`gmail.compose`) are designed as a separate, explicit restricted-scope connection.

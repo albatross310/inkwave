@@ -1,41 +1,40 @@
-// A production service worker can still own the FIRST navigation after a developer returns to
-// localhost. Dev already removes workers/caches, but without a reload that first page remains the
-// stale worker's half-cached response: document data can hydrate while CSS/editor chunks do not.
-// Return whether anything was removed so entry.client can reload exactly once after cleanup.
+// Safari can keep an unregistered production worker alive for the lifetime of its controlled tab.
+// Page-level unregister + reload therefore alternated between the old worker's half-cached shell
+// and the dev server. Replace it with a one-shot worker that claims the tab but has NO fetch handler,
+// clears CacheStorage, unregisters itself, then tells the page to reload through the network.
 
-export async function clearDevServiceWorkerState(
-  serviceWorker?: Pick<ServiceWorkerContainer, 'getRegistrations'>,
-  cacheStorage?: Pick<CacheStorage, 'keys' | 'delete'>,
-): Promise<boolean> {
-  const registrations = serviceWorker ? await serviceWorker.getRegistrations() : []
-  const cacheKeys = cacheStorage ? await cacheStorage.keys() : []
-  if (!registrations.length && !cacheKeys.length) return false
+export const DEV_SW_CLEARED_MESSAGE = 'inkwave-dev-sw-cleared'
 
-  await Promise.all([
-    ...registrations.map((registration) => registration.unregister()),
-    ...cacheKeys.map((key) => cacheStorage!.delete(key)),
-  ])
-  return true
-}
-
-const REPAIR_RELOAD_KEY = 'inkwave:dev-sw-repair-reload'
-
-/** Claim the one automatic reload allowed for this repair. The retiring worker can recreate its
- *  cache while that reload is in flight; the marker makes the second dev boot stay put and finish
- *  cleanup instead of entering a reload loop. */
-export function claimDevServiceWorkerRepairReload(
-  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
-): boolean {
-  try {
-    if (storage.getItem(REPAIR_RELOAD_KEY) === '1') {
-      storage.removeItem(REPAIR_RELOAD_KEY)
-      return false
+export async function repairDevServiceWorker(
+  serviceWorker: ServiceWorkerContainer,
+  cacheStorage: CacheStorage | undefined,
+  buildId: string,
+  reload: () => void,
+): Promise<'clean' | 'replacement-requested'> {
+  const registrations = await serviceWorker.getRegistrations()
+  if (!registrations.length) {
+    // Orphaned CacheStorage cannot control a page, but remove it so a later worker cannot inherit
+    // stale assets. No reload: this page already arrived directly from the dev server.
+    if (cacheStorage) {
+      const keys = await cacheStorage.keys()
+      await Promise.all(keys.map((key) => cacheStorage.delete(key)))
     }
-    storage.setItem(REPAIR_RELOAD_KEY, '1')
-    return true
-  } catch {
-    // Private-mode storage failure: cleanup still happened; require a manual refresh rather than
-    // risking an automatic loop we cannot latch.
-    return false
+    return 'clean'
   }
+
+  const onMessage = (event: MessageEvent) => {
+    if ((event.data as { type?: string } | null)?.type !== DEV_SW_CLEARED_MESSAGE) return
+    serviceWorker.removeEventListener('message', onMessage)
+    reload()
+  }
+  serviceWorker.addEventListener('message', onMessage)
+  try {
+    // Same root scope as the old worker: registering a different script replaces the existing
+    // registration. The build id defeats Safari's update cache during repeated local testing.
+    await serviceWorker.register(`/sw-dev-cleanup.js?v=${encodeURIComponent(buildId)}`, { scope: '/' })
+  } catch (error) {
+    serviceWorker.removeEventListener('message', onMessage)
+    throw error
+  }
+  return 'replacement-requested'
 }

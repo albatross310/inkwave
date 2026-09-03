@@ -1,7 +1,7 @@
 import { startTransition, StrictMode, useEffect, type ReactNode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { HydratedRouter } from 'react-router/dom'
-import { claimDevServiceWorkerRepairReload, clearDevServiceWorkerState } from '../src/pwa/devCleanup'
+import { repairDevServiceWorker } from '../src/pwa/devCleanup'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
 console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:#5c2d8a;font-weight:bold')
@@ -355,16 +355,16 @@ if (import.meta.env.PROD) {
     })
   }
 } else if ('serviceWorker' in navigator) {
-  // The OLD worker can own this first navigation, so removing it is not enough: the current page
-  // may already be its half-cached HTML with missing CSS/editor chunks. Reload ONCE after every
-  // removal has landed. The next load finds no worker/cache and does not loop. CacheStorage only —
-  // never localStorage, IndexedDB or OPFS, so the writer's documents are untouched.
-  void clearDevServiceWorkerState(
+  // Safari can keep an unregistered worker controlling this open tab, so page-level unregister +
+  // reload is not a repair. Replace it with a one-shot, fetch-less cleanup worker; it reloads only
+  // after it owns the tab, has cleared CacheStorage, and has unregistered itself. OPFS/IndexedDB are
+  // never touched. See pwa/devCleanup.ts and public/sw-dev-cleanup.js.
+  void repairDevServiceWorker(
     navigator.serviceWorker,
     'caches' in window ? caches : undefined,
-  ).then((repaired) => {
-    if (repaired && claimDevServiceWorkerRepairReload(sessionStorage)) window.location.reload()
-  }).catch((error) => {
+    __BUILD_ID__,
+    () => window.location.reload(),
+  ).catch((error) => {
     console.warn('[inkwave] dev service-worker cleanup failed:', error)
   })
 }
