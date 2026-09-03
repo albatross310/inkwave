@@ -546,6 +546,13 @@ closed popup and a 120s fallback handles browser hosts that never return either 
 relay aborts after 15s, leaving the already-persisted snapshot unstamped for the normal retry drain
 while Gmail send continues.
 
+**Unknown send state (2026-09-04).** A rejected Gmail HTTP response is an authoritative failure, but
+a thrown browser `fetch` is not: Gmail may have accepted the request before the response connection
+was lost. `SendOutcome` now carries `unknown` for that case. The UI says the local draft is recorded
+and tells the writer to check Gmail Sent before retrying; it no longer asserts “was not sent” and
+therefore does not invite a duplicate. This needs no read scope. The future connected mailbox can
+reconcile the provider state as specified in v0.5 §B3.4/§D2.3.
+
 **Safari hard-refresh report — resolved as Reader mode, not an app defect (2026-09-04).** The
 apparent alternating full editor / unstyled page was reproduced by pressing `Shift-Command-R`:
 Safari assigns that shortcut to toggling Reader. Reader extracts static text, displays the document

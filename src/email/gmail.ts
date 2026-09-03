@@ -183,7 +183,13 @@ export function gmailSender(accessToken: string, fetcher: FetchLike = fetch): Ma
         }
         return { kind: 'sent', providerMessageId: payload.id }
       } catch (error) {
-        return { kind: 'failed', reason: error instanceof Error ? error.message : 'Could not reach Gmail' }
+        // Fetch can reject before Gmail receives the request OR after Gmail accepts it but before
+        // the response reaches this browser. Send-only permission cannot reconcile those cases.
+        // Calling this "failed" invites a duplicate retry, so preserve the uncertainty honestly.
+        return {
+          kind: 'unknown',
+          reason: error instanceof Error ? error.message : 'Gmail did not return a final response',
+        }
       }
     },
   }

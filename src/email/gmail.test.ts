@@ -104,6 +104,14 @@ describe('Gmail send boundary', () => {
       kind: 'failed', reason: 'Gmail API is disabled',
     })
   })
+
+  it('reports an unknown outcome when Gmail may have accepted the request before the response was lost', async () => {
+    const fetcher = vi.fn().mockRejectedValue(new Error('network connection closed'))
+    const outcome = await gmailSender('token', fetcher).send(draft())
+    expect(outcome.kind).toBe('unknown')
+    expect(outcome.reason).toMatch(/network connection closed/i)
+    expect(outcome.providerMessageId).toBeUndefined()
+  })
 })
 
 describe('Gmail authorization boundary', () => {

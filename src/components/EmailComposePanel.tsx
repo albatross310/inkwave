@@ -128,6 +128,8 @@ export function EmailComposePanel({ doc, getCurrentDoc, onDocChange }: Props) {
         setStatus(record.stamped
           ? 'Sent with Gmail. The recorded draft was submitted for Bitcoin timestamping.'
           : 'Sent with Gmail. The draft is recorded locally; timestamping will retry later.')
+      } else if (outcome.kind === 'unknown') {
+        setStatus(`Gmail send status is unknown${outcome.reason ? `: ${outcome.reason}` : ''}. The draft is recorded. Check Gmail Sent before trying again.`)
       } else {
         setStatus(`${outcome.reason ?? 'Gmail did not accept the message'}. The draft is recorded, but was not sent.`)
       }

@@ -116,4 +116,19 @@ describe('EmailComposePanel Gmail integration', () => {
     expect(draftFor).toHaveBeenCalledWith(fresh)
     expect(finalise).toHaveBeenCalledWith(fresh)
   })
+
+  it('does not call a lost Gmail response a failure or invite a blind duplicate retry', async () => {
+    send.mockImplementationOnce(async () => {
+      calls.push('send')
+      return { kind: 'unknown', reason: 'Gmail did not return a final response' }
+    })
+
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
+
+    const status = await screen.findByText(/send status is unknown/i)
+    expect(status.textContent).toMatch(/check (your )?Gmail Sent before trying again/i)
+    expect(status.textContent).not.toMatch(/was not sent/i)
+    expect(calls).toEqual(['authorise', 'record', 'send'])
+  })
 })

@@ -15,12 +15,14 @@ import { normaliseHeaders } from './headers'
 export type HandoffSenderId = 'gmail-handoff' | 'outlook-handoff' | 'mailto'
 export type MailSenderId = HandoffSenderId | 'gmail-api'
 
-/** What a send attempt did. `handed-off` is deliberately NOT `sent` — see the honesty note below. */
+/** What a send attempt did. `handed-off` and `unknown` are deliberately NOT `sent`. */
 export interface SendOutcome {
   // 'handed-off' = we opened the provider's compose window with the draft in it. We do NOT know
   // whether the user sent it, edited it first, or closed the tab. Only an API adapter that controls
   // the bytes may report a true 'sent'. Do not return 'sent' from a handoff path.
-  kind: 'sent' | 'handed-off' | 'failed'
+  // 'unknown' = an API request began, but no authoritative response returned. The provider may
+  // have accepted it, so a blind retry could create a duplicate.
+  kind: 'sent' | 'handed-off' | 'failed' | 'unknown'
   reason?: string
   /** Present only when a provider API accepted the exact message bytes. */
   providerMessageId?: string
