@@ -68,6 +68,12 @@ export const HANDOFF_EXPLAINER =
   'Inkwave never sends mail and never connects to your inbox. Anything you change in your ' +
   "provider's window afterwards is outside the recorded draft."
 
+/** Shown when the Gmail API adapter is configured. Scope and transport are stated at point of use. */
+export const GMAIL_SEND_EXPLAINER =
+  'Send with Gmail asks Google for permission to send email only — never to read your inbox. The ' +
+  'record is created first, then this browser sends the message directly to Gmail; Inkwave does ' +
+  'not receive or store the message or your Google access token. Provider handoff remains available.'
+
 /**
  * The storage claim. Two things this must NOT say, for two different reasons:
  *

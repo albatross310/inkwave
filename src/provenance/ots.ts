@@ -11,18 +11,26 @@
 import type { OtsProofState } from '../types/document'
 
 const OTS_ENDPOINT = '/api/ots'
+/** A calendar outage must not leave record/send controls busy forever. The snapshot already exists
+ *  locally; returning null keeps it unstamped so the normal backlog drain can retry later. */
+export const OTS_REQUEST_TIMEOUT_MS = 15_000
 
 async function callRelay(body: Record<string, unknown>): Promise<OtsProofState | null> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), OTS_REQUEST_TIMEOUT_MS)
   try {
     const res = await fetch(OTS_ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
+      signal: controller.signal,
     })
     if (!res.ok) return null
     return (await res.json()) as OtsProofState
   } catch {
     return null // offline / relay down — caller keeps the prior state
+  } finally {
+    clearTimeout(timeout)
   }
 }
 

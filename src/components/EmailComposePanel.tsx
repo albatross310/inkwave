@@ -11,7 +11,8 @@ import { useState, useRef, useEffect } from 'react'
 import type { InkwaveDocument, EmailHeaders } from '../types/document'
 import { parseAddressList, suspectAddresses, hasRecipient } from '../email/headers'
 import { finaliseEmail, draftFor, canHandOff } from '../email/finalise'
-import { handoffSender, fits, type MailSenderId } from '../email/sender'
+import { handoffSender, fits, type HandoffSenderId } from '../email/sender'
+import { authoriseGmailSend, gmailConfigured, gmailSender, preloadGmail } from '../email/gmail'
 import { titleForEmail } from '../email/newEmail'
 import * as copy from '../email/copy'
 
@@ -20,7 +21,7 @@ interface Props {
   onDocChange: (updated: InkwaveDocument) => void
 }
 
-const PROVIDERS: { id: MailSenderId; label: string }[] = [
+const PROVIDERS: { id: HandoffSenderId; label: string }[] = [
   { id: 'gmail-handoff', label: 'Gmail' },
   { id: 'outlook-handoff', label: 'Outlook' },
   { id: 'mailto', label: 'Mail app' },
@@ -34,6 +35,10 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
   const [busy, setBusy] = useState(false)
   const [handoffOpen, setHandoffOpen] = useState(false)
   const handoffRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    preloadGmail()
+  }, [])
 
   useEffect(() => {
     if (!handoffOpen) return
@@ -74,7 +79,7 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
     }
   }
 
-  const onHandoff = async (id: MailSenderId, label: string) => {
+  const onHandoff = async (id: HandoffSenderId, label: string) => {
     const draft = draftFor(doc)
     if (!draft) return
     // The window must open inside the click's own transient activation — a deferred open is a
@@ -83,6 +88,44 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
     const out = await sender.send(draft)
     setHandoffOpen(false)
     setStatus(out.kind === 'failed' ? (out.reason ?? 'could not open your provider') : null)
+  }
+
+  const onGmailSend = async () => {
+    const draft = draftFor(doc)
+    if (!draft) return
+    setBusy(true)
+    setStatus('Waiting for Google…')
+    try {
+      // Authorization must be the first awaited operation after the click: Google's account chooser
+      // needs the click's transient activation. No message bytes leave until the snapshot below exists.
+      const token = await authoriseGmailSend()
+      if (!token) {
+        setStatus('Google did not grant send-only access. Your draft was not sent.')
+        return
+      }
+
+      setStatus('Recording before send…')
+      const record = await finaliseEmail(doc)
+      if (!record.snapshot) {
+        setStatus(`${record.reason ?? 'Could not record this draft'}. Nothing was sent.`)
+        return
+      }
+      setRecordedAt(record.snapshot.createdAt)
+
+      setStatus('Sending with Gmail…')
+      const outcome = await gmailSender(token).send(draft)
+      if (outcome.kind === 'sent') {
+        setStatus(record.stamped
+          ? 'Sent with Gmail. The recorded draft was submitted for Bitcoin timestamping.'
+          : 'Sent with Gmail. The draft is recorded locally; timestamping will retry later.')
+      } else {
+        setStatus(`${outcome.reason ?? 'Gmail did not accept the message'}. The draft is recorded, but was not sent.`)
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not connect to Google')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const suspect = suspectAddresses(headers)
@@ -169,6 +212,18 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
           {busy ? 'Recording…' : copy.FINALISE_LABEL}
         </button>
 
+        {gmailConfigured() && (
+          <button
+            className="text-xs px-2.5 py-1 rounded border disabled:opacity-40"
+            style={{ color: 'var(--iw-ink, #5c2d8a)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
+            onClick={onGmailSend}
+            disabled={busy || !ready}
+            title={ready ? 'Record this draft, then send it with Gmail' : 'Add a recipient first'}
+          >
+            {busy ? 'Working…' : 'Send with Gmail'}
+          </button>
+        )}
+
         <div className="relative" ref={handoffRef}>
           <button
             className="text-xs px-2.5 py-1 rounded border disabled:opacity-40"
@@ -222,7 +277,7 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
       >
         <p>{recordedAt ? copy.PROVENANCE_RECORDED : copy.PROVENANCE_EXPLAINER}</p>
         <p>{copy.PROVENANCE_LIMIT}</p>
-        <p>{copy.HANDOFF_EXPLAINER}</p>
+        <p>{gmailConfigured() ? copy.GMAIL_SEND_EXPLAINER : copy.HANDOFF_EXPLAINER}</p>
         <p>{copy.STORAGE_CLAIM}</p>
         <p>{copy.LEDGER_NOTE}</p>
         {!hasRecipient(headers) && <p>Add a recipient to hand this draft to your provider.</p>}

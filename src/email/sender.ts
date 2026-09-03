@@ -1,29 +1,29 @@
 // The MailSender seam (§B3) — PURE types + the handoff adapter's URL building.
 //
-// Sending is provider-specific, so every path goes behind ONE interface. Today exactly one adapter
-// exists: `handoff`, which opens the provider's own compose window pre-filled (§B2.3a). The Gmail
-// API adapter (`gmail.send`, Phase 2) is EXPLICITLY NOT BUILT — it needs Google's restricted-scope
-// verification — but it slots in here as another MailSender with no rework of the compose, ledger or
-// provenance paths, which is the whole point of the interface existing this early.
+// Sending is provider-specific, so every path goes behind ONE interface. Handoff adapters open the
+// provider's compose window (§B2.3a); gmail.ts implements the first real API adapter. Both use this
+// seam, so compose, ledger and provenance do not branch by provider.
 //
-// SCOPE DISCIPLINE (§B5): if/when an API adapter lands it requests SEND-ONLY permission. Never
-// inbox-read. Not for provenance, not for anything.
+// SCOPE DISCIPLINE (§B5): the Gmail adapter requests SEND-ONLY permission. Never inbox-read. Not for
+// provenance, not for anything.
 
 import type { EmailHeaders } from '../types/document'
 import { normaliseHeaders } from './headers'
 
 // ─── The interface ───────────────────────────────────────────────────────────
 
-export type MailSenderId = 'gmail-handoff' | 'outlook-handoff' | 'mailto'
+export type HandoffSenderId = 'gmail-handoff' | 'outlook-handoff' | 'mailto'
+export type MailSenderId = HandoffSenderId | 'gmail-api'
 
 /** What a send attempt did. `handed-off` is deliberately NOT `sent` — see the honesty note below. */
 export interface SendOutcome {
   // 'handed-off' = we opened the provider's compose window with the draft in it. We do NOT know
   // whether the user sent it, edited it first, or closed the tab. Only an API adapter that controls
-  // the bytes could ever report a true 'sent', and that is Phase 2. Do not add a 'sent' variant to
-  // the handoff path — it would be a lie the type system currently prevents.
-  kind: 'handed-off' | 'failed'
+  // the bytes may report a true 'sent'. Do not return 'sent' from a handoff path.
+  kind: 'sent' | 'handed-off' | 'failed'
   reason?: string
+  /** Present only when a provider API accepted the exact message bytes. */
+  providerMessageId?: string
 }
 
 export interface MailDraft {
@@ -106,7 +106,7 @@ export function buildMailto(draft: MailDraft): string {
   return `mailto:${to}${query ? '?' + query : ''}`
 }
 
-export function urlFor(id: MailSenderId, draft: MailDraft): string {
+export function urlFor(id: HandoffSenderId, draft: MailDraft): string {
   switch (id) {
     case 'gmail-handoff': return buildGmailUrl(draft)
     case 'outlook-handoff': return buildOutlookUrl(draft)
@@ -114,14 +114,14 @@ export function urlFor(id: MailSenderId, draft: MailDraft): string {
   }
 }
 
-const LIMIT: Record<MailSenderId, number> = {
+const LIMIT: Record<HandoffSenderId, number> = {
   'gmail-handoff': WEB_COMPOSE_MAX,
   'outlook-handoff': WEB_COMPOSE_MAX,
   'mailto': MAILTO_MAX,
 }
 
 /** Does the built URL fit? The pure check behind every adapter's canCarry. */
-export function fits(id: MailSenderId, draft: MailDraft): { ok: boolean; length: number; max: number; reason?: string } {
+export function fits(id: HandoffSenderId, draft: MailDraft): { ok: boolean; length: number; max: number; reason?: string } {
   const length = urlFor(id, draft).length
   const max = LIMIT[id]
   return length <= max
@@ -140,7 +140,7 @@ export function fits(id: MailSenderId, draft: MailDraft): { ok: boolean; length:
  * a deferred open is a popup block).
  */
 export function handoffSender(
-  id: MailSenderId,
+  id: HandoffSenderId,
   label: string,
   open: (url: string) => void,
 ): MailSender {

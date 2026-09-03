@@ -510,6 +510,25 @@ answer until something observes otherwise). Now something does.
 
 ## Email layer — P1b (2026-07-17, `src/email/`, flag `?email`, DEFAULT OFF)
 
+### Gmail API send — P2a implementation (2026-08-31, `feat/gmail-send`)
+
+`src/email/gmail.ts` is the first real `MailSender` adapter. It uses Google Identity Services in
+the browser and requests exactly `https://www.googleapis.com/auth/gmail.send`; the short-lived token
+is kept in memory only. The browser constructs the UTF-8 RFC 5322 message and POSTs it directly to
+`users/me/messages/send`, so neither the token nor message content crosses an Inkwave server.
+
+The visible action deliberately orders its boundaries: Google authorization first (the popup needs
+the click gesture), then `finaliseEmail` creates the durable local snapshot, then Gmail receives the
+message. If the snapshot cannot be created, nothing is sent. The existing Gmail/Outlook/`mailto:`
+handoff stays available as fallback. Configuration is `VITE_GOOGLE_CLIENT_ID`; without it direct
+send is absent rather than a dead control. Google Cloud still needs the Gmail API, OAuth consent
+screen, authorized JavaScript origins, and production verification before public rollout.
+
+The guard set is `email/gmail.test.ts` (scope, MIME bytes, Unicode/long body, API success/failure)
+plus `components/EmailComposePanel.gmail.test.tsx` (authorization → record → send, and refusal to
+send on record failure). This stage proves Gmail accepted the submitted bytes; it does not claim
+delivery or DKIM capture.
+
 Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (now COMMITTED at `docs/specs/` — Peter, 2026-07-17: "commit the specs"
 into the repo). MVP = compose in Inkwave, count it in the productivity ledger, OTS the draft, hand
 off to the provider to send. Inkwave never sends mail and never touches an inbox.
