@@ -58,10 +58,15 @@ Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
 
 **ONE DEVELOPMENT SERVER PER PORT/ORIGIN.** Use `pnpm dev` and its configured `0.0.0.0:5173`;
 do not start another instance with `--host 127.0.0.1`. macOS can keep a specific-address listener
-and a wildcard listener on the same numeric port, splitting one hard refresh across two different
-Vite module graphs. The observed result is an alternating styled editor / unstyled server shell
-with no editable body. `strictPort` prevents the ordinary second-instance case; if a page alternates,
+and a wildcard listener on the same numeric port, which can split one load across two different Vite
+module graphs. `strictPort` prevents the ordinary second-instance case; if responses look mixed,
 check the listeners and stop only the confirmed Inkwave dev PIDs before starting one clean server.
+
+**SAFARI TESTING SHORTCUT:** `Shift-Command-R` toggles Safari Reader — it is NOT a hard refresh.
+Reader deliberately removes Inkwave's application layout and interactive `contenteditable` body,
+and pressing the shortcut again returns to the editor, which looks exactly like an alternating-load
+bug. Use `Option-Command-R` (Reload Page from Origin) for a cache-bypassing Safari reload, or
+`Command-R` for an ordinary reload.
 
 ## Build progress (vs. build-spec 4-week plan)
 

@@ -1,7 +1,6 @@
 import { startTransition, StrictMode, useEffect, type ReactNode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { HydratedRouter } from 'react-router/dom'
-import { repairDevServiceWorker } from '../src/pwa/devCleanup'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
 console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:#5c2d8a;font-weight:bold')
@@ -355,16 +354,6 @@ if (import.meta.env.PROD) {
     })
   }
 } else if ('serviceWorker' in navigator) {
-  // Safari can keep an unregistered worker controlling this open tab, so page-level unregister +
-  // reload is not a repair. Replace it with a one-shot, fetch-less cleanup worker; it reloads only
-  // after it owns the tab, has cleared CacheStorage, and has unregistered itself. OPFS/IndexedDB are
-  // never touched. See pwa/devCleanup.ts and public/sw-dev-cleanup.js.
-  void repairDevServiceWorker(
-    navigator.serviceWorker,
-    'caches' in window ? caches : undefined,
-    __BUILD_ID__,
-    () => window.location.reload(),
-  ).catch((error) => {
-    console.warn('[inkwave] dev service-worker cleanup failed:', error)
-  })
+  navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()))
+  if ('caches' in window) caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)))
 }

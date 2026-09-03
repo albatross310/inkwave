@@ -542,20 +542,17 @@ Subject above its historical body; it never reads live headers for an old body.
 Two hangs found only in live use now have explicit exits: GIS `error_callback` reports a blocked or
 closed popup and a 120s fallback handles browser hosts that never return either callback; the OTS
 relay aborts after 15s, leaving the already-persisted snapshot unstamped for the normal retry drain
-while Gmail send continues. A stopped dev server also exposed Safari's stale production-worker path:
-dev now replaces any stale production worker with a one-shot, fetch-less cleanup worker at the same
-root scope. It clears CacheStorage, claims the open tab, unregisters itself, and only then reloads
-through the development server. Documents in OPFS/IndexedDB are never touched.
+while Gmail send continues.
 
-The reported Safari hard-refresh alternation persisted after that worker repair, so the worker was
-not the cause of this instance. Process inspection found two different React Router/Vite servers
-simultaneously listening on port 5173: one on `127.0.0.1`, one on the wildcard address. A hard
-refresh fetched its HTML/CSS/editor modules across both module graphs, alternating between the full
-editor and an unstyled server shell with no body editor. After stopping only those confirmed
-Inkwave processes and starting one wildcard server, four cache-busted loads all returned two
-stylesheets and one editable ProseMirror. Vite now has `strictPort: true`, and `CLAUDE.md` records
-the remaining macOS-specific rule: never pair a `--host 127.0.0.1` instance with the standard
-wildcard dev server.
+**Safari hard-refresh report — resolved as Reader mode, not an app defect (2026-09-04).** The
+apparent alternating full editor / unstyled page was reproduced by pressing `Shift-Command-R`:
+Safari assigns that shortcut to toggling Reader. Reader extracts static text, displays the document
+title as a large heading, and excludes the interactive `contenteditable` body; pressing the same
+shortcut again exits Reader and restores the editor. The correct reload-from-origin shortcut is
+`Option-Command-R`. Service-worker replacement and forced reload attempts did not change the report
+and were removed once the premise was falsified. Process inspection separately found duplicate dev
+listeners; they were stopped, `strictPort: true` now catches the ordinary duplicate-instance case,
+and `CLAUDE.md` records both development rules.
 
 **Connected Gmail mailbox is SPEC ONLY (v0.4, §B3.1–B3.5).** Inbox/Sent (`gmail.readonly`) and Gmail
 draft sync (`gmail.compose`) are designed as a separate, explicit restricted-scope connection.
