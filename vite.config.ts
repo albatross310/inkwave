@@ -142,6 +142,9 @@ return {
   },
   server: {
     host: true, // bind 0.0.0.0 so the WSL2 dev server is reachable from the Windows browser
+    // A second dev instance serving a different module graph must fail visibly, never drift to
+    // 5174 and leave two "live" URLs for testers or agents to mix up.
+    strictPort: true,
   },
 }
 })

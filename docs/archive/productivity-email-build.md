@@ -547,6 +547,16 @@ dev now replaces any stale production worker with a one-shot, fetch-less cleanup
 root scope. It clears CacheStorage, claims the open tab, unregisters itself, and only then reloads
 through the development server. Documents in OPFS/IndexedDB are never touched.
 
+The reported Safari hard-refresh alternation persisted after that worker repair, so the worker was
+not the cause of this instance. Process inspection found two different React Router/Vite servers
+simultaneously listening on port 5173: one on `127.0.0.1`, one on the wildcard address. A hard
+refresh fetched its HTML/CSS/editor modules across both module graphs, alternating between the full
+editor and an unstyled server shell with no body editor. After stopping only those confirmed
+Inkwave processes and starting one wildcard server, four cache-busted loads all returned two
+stylesheets and one editable ProseMirror. Vite now has `strictPort: true`, and `CLAUDE.md` records
+the remaining macOS-specific rule: never pair a `--host 127.0.0.1` instance with the standard
+wildcard dev server.
+
 **Connected Gmail mailbox is SPEC ONLY (v0.4, §B3.1–B3.5).** Inbox/Sent (`gmail.readonly`) and Gmail
 draft sync (`gmail.compose`) are designed as a separate, explicit restricted-scope connection.
 Nothing in this build requests read/compose/modify access; current Gmail remains `gmail.send` only.

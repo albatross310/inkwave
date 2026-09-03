@@ -56,6 +56,13 @@ Flip `ssr: true` later when the Phase-2 "rooms" model needs per-request renderin
 
 Package manager is **pnpm** (`packageManager: pnpm@10.33.2`), not npm.
 
+**ONE DEVELOPMENT SERVER PER PORT/ORIGIN.** Use `pnpm dev` and its configured `0.0.0.0:5173`;
+do not start another instance with `--host 127.0.0.1`. macOS can keep a specific-address listener
+and a wildcard listener on the same numeric port, splitting one hard refresh across two different
+Vite module graphs. The observed result is an alternating styled editor / unstyled server shell
+with no editable body. `strictPort` prevents the ordinary second-instance case; if a page alternates,
+check the listeners and stop only the confirmed Inkwave dev PIDs before starting one clean server.
+
 ## Build progress (vs. build-spec 4-week plan)
 
 - **Week 1 — Foundation: DONE.** `/edit` route, Tiptap editor, OPFS autosave (200ms
