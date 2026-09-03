@@ -11,13 +11,15 @@ const TAB_TITLES = [
   'Inkwave Zero: every word intentional',
 ]
 
-// The single global stylesheet (Tailwind + the editor/SCAS styles). Importing it here as a
-// side-effect lets the React Router Vite plugin collect it into the document <head> for both
-// the dev server AND the prerendered HTML — so the static landing page is styled by exactly
-// the same CSS as the live editor.
-import '../src/styles/index.css'
+// The single global stylesheet (Tailwind + the editor/SCAS styles). Keep it as an EXPLICIT link in
+// the React-owned head rather than a Vite side-effect injection: if a browser host inserts a node
+// before hydration, React may recover by client-rendering the whole document. A side-effect <style>
+// belongs to the discarded server head and disappears in that recovery; <Links> recreates this
+// declared stylesheet in the replacement head, so the editor cannot mount completely unstyled.
+import stylesheetHref from '../src/styles/index.css?url'
 
 export const links: LinksFunction = () => [
+  { rel: 'stylesheet', href: stylesheetHref },
   // NO SVG favicon: our logo SVG uses userSpaceOnUse gradients that Firefox can't rasterise at tab size —
   // and Firefox, having "preferred" the SVG, then shows its generic page icon WITHOUT falling back to the
   // PNGs. Rasterised PNG/ICO render reliably in every browser (a 128px PNG is crisp at tab size). The ?v
