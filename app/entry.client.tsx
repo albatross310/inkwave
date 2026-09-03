@@ -1,6 +1,7 @@
 import { startTransition, StrictMode, useEffect, type ReactNode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { HydratedRouter } from 'react-router/dom'
+import { claimDevServiceWorkerRepairReload, clearDevServiceWorkerState } from '../src/pwa/devCleanup'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
 console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:#5c2d8a;font-weight:bold')
@@ -354,6 +355,16 @@ if (import.meta.env.PROD) {
     })
   }
 } else if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister()))
-  if ('caches' in window) caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)))
+  // The OLD worker can own this first navigation, so removing it is not enough: the current page
+  // may already be its half-cached HTML with missing CSS/editor chunks. Reload ONCE after every
+  // removal has landed. The next load finds no worker/cache and does not loop. CacheStorage only —
+  // never localStorage, IndexedDB or OPFS, so the writer's documents are untouched.
+  void clearDevServiceWorkerState(
+    navigator.serviceWorker,
+    'caches' in window ? caches : undefined,
+  ).then((repaired) => {
+    if (repaired && claimDevServiceWorkerRepairReload(sessionStorage)) window.location.reload()
+  }).catch((error) => {
+    console.warn('[inkwave] dev service-worker cleanup failed:', error)
+  })
 }
