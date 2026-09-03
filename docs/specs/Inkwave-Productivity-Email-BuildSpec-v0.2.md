@@ -1,17 +1,18 @@
 # Inkwave — Productivity & Email Layers: Build Specification
 
-**Version:** 0.2 (MVP-focused working draft — key decisions resolved, see §C4)
-**Date:** July 2026
-**Status:** Design spec for two new layers — (A) Productivity Tracking & Reporting, (B) Email-in-Workflow — built on Inkwave's existing local-first, zero-retention, provenance architecture. The open decisions from v0.1 §C4 are now resolved: Gmail-first sending; recoverable encryption with a zero-knowledge opt-in; two AI paths (free paste-back + backend freemium → **Insignia**); and a self-hosted, publicly-auditable, provenance-tracked DKIM trust base (ultimately on **Inkwave³**).
+**Version:** 0.3 (working draft — adds the subdocument workspace, see Part D)
+**Date:** September 2026
+**Status:** Design spec for three connected layers — (A) Productivity Tracking & Reporting, (B) Email-in-Workflow, and (D) Subdocument Workspaces & Multi-Container Sync — built on Inkwave's existing local-first, zero-retention, provenance architecture. The decisions from v0.1 §C4 remain in force; v0.3 additionally defines a page-sized email surface, ordered page/email subdocuments, overview navigation, and explicit many-to-many membership between subdocuments and `.studio` containers.
 
 ---
 
 ## 0. Framing and phasing
 
-Inkwave today is a rich-text writing tool with a provenance spine (client-side edit history, hashing, and OpenTimestamps/Bitcoin anchoring), storing everything in the user's own documents (zero cloud retention). These two new layers extend that identity in two directions:
+Inkwave today is a rich-text writing tool with a provenance spine (client-side edit history, hashing, and OpenTimestamps/Bitcoin anchoring), storing everything in the user's own documents (zero cloud retention). These layers extend that identity in three directions:
 
 - **Productivity layer** turns the provenance/session telemetry Inkwave *already collects* into a daily/weekly/monthly reflection on how the user worked — a Pomodoro rhythm, a work tracker, and an AI-written report. This converts Inkwave from an occasional-use "authorship insurance" tool into a daily companion.
 - **Email layer** brings email *composition* into Inkwave so that (i) email writing counts toward the productivity stats, and (ii) emails inherit Inkwave's provenance. The actual sending happens through the user's existing provider (Gmail/Outlook/etc.), so Inkwave never becomes an email host.
+- **Subdocument workspace** lets pages and emails live in an ordered horizontal sequence, either inside one `.studio` container or shared deliberately across several containers. It adds spatial navigation without turning a browser tab into the unit of authorship or weakening the existing per-document provenance boundary.
 
 The guiding staging decision (set by product owner):
 
@@ -352,4 +353,336 @@ Result: a permanent, portable, self-service proof that *the provider cryptograph
 
 ---
 
-*End of spec v0.2. Working design artifact for Inkwave; §C4 decisions resolved, remaining items flagged inline.*
+## PART D — SUBDOCUMENT WORKSPACES & MULTI-CONTAINER SYNC
+
+### D1. Product intent and terminology
+
+The workspace replaces the assumption that one browser view contains exactly one long piece of
+writing. A writer may keep several related units beside one another — an essay page, a note, a draft
+email, a reply, or another page — and move through them as a spatial sequence. This is not a second
+document system: every unit remains an ordinary Inkwave document and retains the same editing,
+ledger, provenance, and local-save behaviour it has today.
+
+- **Subdocument (subdoc):** one independently editable unit in a workspace. A subdoc has a stable
+  `subdoc_id`, a `doc_type` (including `email`, `note`, or `essay`), its own content and optional
+  type-specific fields. “Subdoc” describes placement; it does not mean the content has weaker
+  identity or provenance.
+- **Workspace:** an ordered presentation of subdocs. It owns order, the active item, and workspace
+  display metadata; it does not own the meaning of the subdoc's prose.
+- **`.studio` container:** the portable and syncable file that carries a workspace manifest plus one
+  or more subdoc bundles. A one-subdoc `.studio` is simply the smallest workspace container.
+- **Membership:** the explicit statement that a subdoc is carried by a particular container. A
+  subdoc may have one or many memberships. For example, a project email may belong to both
+  “September email” and “Project Kookaburra”.
+- **Sync target:** a writer-authorised destination for one container (local folder, OneDrive,
+  Google Drive, or another existing adapter). Provider credentials and file handles never travel
+  inside the `.studio` file.
+
+The distinction between membership and copying is load-bearing: adding one subdoc to two containers
+does not create two unrelated drafts. Both memberships name the same stable `subdoc_id`, and editing
+it schedules both containers to receive the new revision.
+
+### D2. Full-page email surface
+
+An email must no longer look like a small panel placed on top of an unrelated paper page. When the
+active subdoc has `doc_type: email`, the email itself is the page-sized writing surface.
+
+- The surface uses the same resolved page dimensions as an ordinary page, but its header, body,
+  record/send controls, status, and concise provenance disclosure form one continuous box.
+- The editable body begins immediately beneath the email header/actions inside that box. There is no
+  second paper surface visibly continuing behind or beneath it.
+- To, Cc, Bcc, Subject, body, send state, and recorded-at state remain part of the active email
+  subdoc's document state; layout does not create a parallel email store.
+- Long emails continue vertically within their email surface using the existing page/scroll rules.
+  The workspace's horizontal navigation must never steal an ordinary vertical reading gesture.
+- The long-form provenance explanation is available from an inline disclosure/help control. The
+  surface always retains a short, visible statement of the honesty boundary: recording proves the
+  draft existed by the shown time; it does not prove delivery or reading.
+- The full-page layout must work before Gmail is configured. Record and provider-handoff remain
+  available; direct Gmail send appears only when configured.
+
+### D3. Spatial sequence and navigation
+
+#### D3.1 Presentation model
+
+- The active subdoc is centred at a readable page size. Its immediate previous and next neighbours
+  may be visible at the sides as non-editable previews when space permits.
+- Only the active subdoc owns a live Tiptap editor, signing session, autosave loop, and document
+  write lock. Neighbours are inert previews. This preserves the one-live-editor/write-owner rule and
+  prevents a zoomed-out workspace from mounting many expensive editors at once.
+- Left and right arrow controls are always available when a neighbour exists. They have accessible
+  labels containing the neighbour's type/title and are usable by keyboard and touch.
+- Moving between subdocs saves/flushes the outgoing active subdoc before transferring edit ownership.
+  A save failure blocks the switch and reports the failure; it is never interpreted as an empty
+  subdoc.
+- Navigation changes the active subdoc in the workspace. It must not mutate browser history and must
+  not require a page reload.
+
+#### D3.2 Trackpad, wheel, touch, and keyboard contract
+
+- **Two-finger horizontal trackpad gesture:** while the pointer is inside the workspace, a deliberate
+  horizontal gesture moves one item left/right and suppresses the browser's back/forward navigation.
+  Interception is armed only inside the workspace and only after horizontal intent wins over vertical
+  intent by a tested threshold. Vertical scrolling remains native.
+- The gesture is latched: one physical swipe advances at most one subdoc until the gesture settles.
+  Small diagonal movements do nothing; they must neither switch documents nor block vertical scroll.
+- At the first/last subdoc, a deliberate horizontal workspace gesture is consumed and gives a gentle
+  edge response rather than escaping into browser history.
+- **Shift + wheel/trackpad scroll:** maps the dominant scroll delta to previous/next subdoc, using the
+  same intent threshold, latch, and edge behaviour.
+- **Touch:** a two-finger horizontal swipe performs workspace navigation. A one-finger gesture keeps
+  its existing caret, selection, and vertical-scroll behaviour. The two-finger rule prevents normal
+  text selection from becoming document navigation.
+- **Buttons and keyboard:** the visible arrows are the baseline access path. When focus is not inside
+  an editable field, Left/Right Arrow may navigate; inside an editor or header field, text-editing
+  keys always win. A later settings surface may offer additional remappable shortcuts.
+- Browser back/forward is suppressed only for a gesture that the workspace has positively claimed.
+  Global interception outside the workspace is forbidden.
+
+#### D3.3 Overview (“manage all”) mode
+
+- Default shortcut: **Command/Ctrl + Shift + Space**. A visible toolbar control provides the same
+  action, so the feature is not discoverable only by hotkey. Escape returns to the active subdoc.
+- Overview zooms out to show lightweight thumbnails for the ordered subdocs. Thumbnails are static
+  previews; no hidden editors or signing sessions are mounted.
+- The writer can select, open, reorder, rename, create, remove-from-workspace, and manage membership
+  from overview. Destructive operations remain explicit and confirm-gated.
+- Overview distinguishes type (email/page/etc.), unsaved/unsynced state, and membership destinations
+  without exposing recipient addresses or body snippets by default. An email thumbnail may show its
+  subject; addresses require deliberate expansion.
+- Reordering changes only workspace presentation metadata. It does not alter a subdoc's content hash,
+  receipt chain, timestamps, or intrinsic identity.
+- The active item remains stable across entering/exiting overview, reload, and sync round-trip.
+
+### D4. Creation and membership choices
+
+Creating a subdoc is a two-part decision: what to create, and where it should live.
+
+1. Choose type: page/note, essay, email, or another supported `doc_type`.
+2. Choose placement:
+   - **Add to this `.studio`:** include it in the current container and sequence.
+   - **Create a separate `.studio`:** create a new one-subdoc container. The current workspace may
+     optionally retain a linked placement pointing to that same subdoc.
+   - **Add to existing `.studio` document(s):** choose one or more existing containers. This is the
+     path for a project email that also belongs in a monthly email container.
+
+The choice must be changeable later. Membership management supports adding a container, removing a
+container, and making a new standalone container without changing `subdoc_id`. “Remove from this
+workspace” is not “delete the subdoc everywhere”. Permanent deletion is a separate action that lists
+all affected memberships and requires confirmation.
+
+If a new subdoc is added to multiple containers, the UI shows each destination before creation. It
+must never silently add a second sync destination based on title, type, recipient, project name, or
+other inferred intent.
+
+### D5. Data and archive model
+
+#### D5.1 Stable identities
+
+```ts
+type SubdocId = string
+type StudioContainerId = string
+
+interface WorkspaceItem {
+  subdoc_id: SubdocId
+  position: string          // stable fractional/order key; display order, never content identity
+  added_at: string
+}
+
+interface StudioWorkspaceManifest {
+  v: 1
+  container_id: StudioContainerId
+  title: string
+  items: WorkspaceItem[]
+  active_subdoc_id?: SubdocId
+  updated_at: string        // display/sync hint only; never conflict authority
+}
+
+interface SubdocMembership {
+  container_id: StudioContainerId
+  subdoc_id: SubdocId
+  role: 'embedded' | 'linked'
+  added_at: string
+}
+```
+
+- `subdoc_id` identifies the authored unit everywhere. It is not derived from title, container,
+  position, or content hash.
+- `container_id` identifies the portable `.studio` container and survives rename/move/provider sync.
+- `position` is container-specific. The same subdoc may appear at different positions in different
+  containers without becoming different content.
+- `active_subdoc_id` is a convenience for reopening a workspace. It is not provenance and must not
+  override an explicit open request.
+- Membership is many-to-many. The local membership index is derived from successfully read manifests;
+  an unreadable manifest is an error, never an empty membership list.
+
+#### D5.2 `.studio` container format
+
+- The workspace archive is the new `.studio` baseline. Its `subdocs` map embeds each subdoc as an
+  independently verifiable document bundle rather than inventing a second provenance format.
+- Pre-launch `.studio` files may continue to open where the new reader accepts their shape naturally,
+  but backward compatibility is best-effort only: do not add legacy-specific migrations, branching
+  save paths, format shims, or acceptance requirements. If an old file cannot be read safely, report
+  that explicitly and leave it untouched.
+- A linked item may reference a separately carried subdoc, but portable export must offer an explicit
+  **self-contained** mode that embeds linked items so the recipient does not receive a broken
+  workspace.
+- The manifest contains no OAuth tokens, provider account identifiers, filesystem handles, or local
+  absolute paths.
+
+Conceptual outer shape (names are normative; byte encoding remains an implementation decision):
+
+```ts
+interface StudioWorkspaceArchiveV2 {
+  v: 2
+  manifest: StudioWorkspaceManifest
+  subdocs: Record<SubdocId, ExportBundleV1>
+  exported_at: string
+}
+```
+
+#### D5.3 Local canonical state
+
+- Each subdoc has one canonical local working copy, regardless of the number of container memberships.
+  Containers are export/sync projections of that canonical state, not competing autosave stores.
+- Workspace manifests are stored independently from subdoc bodies so reordering does not rewrite the
+  live editor content or create a provenance snapshot.
+- A subdoc edit first commits locally. Only after that succeeds are all affected containers queued.
+  The UI may report partial sync success, but must never report the edit as lost because one projection
+  failed.
+- Assets remain referenced/deduplicated under the existing asset rules. A container projection includes
+  the assets required by its embedded subdocs according to the existing explicit-export versus sync
+  policy; membership must not duplicate large media into local working state.
+
+### D6. Multi-container sync semantics
+
+- Editing a subdoc schedules every **embedded** membership for sync. A linked placement schedules the
+  subdoc's owning container, not an unauthorised rewrite of the linking container's content payload.
+- Containers sync independently and expose per-target state: `local`, `queued`, `syncing`, `synced`,
+  `failed`, or `conflict`. “Synced” is never a single boolean when multiple destinations exist.
+- A failure in one target does not cancel or roll back successful writes to other targets. The failed
+  target remains queued/retryable with its last confirmed revision visible.
+- Before overwriting a container, the adapter re-reads the remote archive and merges grow-only
+  provenance history. A failed remote read aborts that target's write. It is never treated as an empty
+  archive.
+- Same-subdoc reconciliation uses ancestry/content hashes and the existing conflict classifier, never
+  `updated_at`. If one revision contains the other's ancestry, the descendant wins and histories
+  union. If neither contains the other, the result is `diverged`: preserve both by forking one to a
+  new `subdoc_id`, place both visibly in overview, and overwrite nothing until the writer resolves it.
+- Workspace-order conflicts are separate from content conflicts. Merge non-overlapping membership
+  additions/removals; if both sides reorder the same items incompatibly, preserve both orders as a
+  visible conflict instead of choosing by timestamp.
+- Sync fan-out is coalesced by `(container_id, subdoc_id, revision_hash)` so one keystroke does not
+  produce N immediate cloud writes. Closing/navigating flushes the latest queued revision.
+- Removing a membership updates only that container after local confirmation. It cannot delete the
+  canonical subdoc or remove it from other containers.
+- No adapter may broaden scope automatically. Every new container/target association requires an
+  explicit writer action.
+
+### D7. Provenance, email, and productivity boundaries
+
+- Content provenance remains per subdoc. Each subdoc keeps its own snapshots, receipt chain, OTS
+  state, and type-specific hashes. Placing it in another container does not create authorship evidence
+  and does not reset its chain.
+- Workspace order, active item, thumbnail appearance, and membership are organisational metadata and
+  are not included in the existing content/bundle hash. The UI must not imply that OTS proves project
+  membership or workspace ordering.
+- A later manifest-provenance version may anchor container composition, but it must be a new explicit
+  hash/version and must not change verification of existing subdoc snapshots.
+- Sending an email records the active email subdoc's exact headers/body. Other subdocs in the same
+  container are not included in the email snapshot or sent to Gmail.
+- The productivity ledger records activity against the active `subdoc_id`, `doc_type`, and label. A
+  subdoc with two memberships generates one writing session, not one row per container. Container IDs
+  may be attached as local report dimensions, but must not duplicate time or word counts.
+- Overview/reordering time is workspace management, not writing. It may count as generic app activity
+  only if a later product feature explicitly needs it.
+
+### D8. Privacy, accessibility, and performance
+
+- Multi-container membership can reveal project relationships. Membership metadata remains writer-held
+  and is included only in containers the writer explicitly chose.
+- Overview hides email recipients and body snippets by default, including from screen-capture-friendly
+  thumbnails. The writer may opt to reveal them.
+- Navigation and overview are fully operable without gestures. Buttons have ≥44px touch targets,
+  visible focus, and meaningful accessible names; reduced-motion mode replaces slide/edge motion with
+  an immediate state change.
+- Horizontal transitions never animate a live editor at full document cost. The active editor and at
+  most two cached static previews are rendered; large workspaces virtualise all remaining thumbnails.
+- A workspace with hundreds of items must not load every subdoc body or snapshot archive on open.
+  The manifest and lightweight metadata index load first; content loads on activation/preview demand.
+- Gesture listeners are non-passive only while interception could occur and are detached outside the
+  workspace, following the same performance discipline as the existing zoom wheel handling.
+
+### D9. Failure states and destructive-action rules
+
+- Failed subdoc read ⇒ show storage unavailable for that item; do not mint a blank replacement.
+- Failed manifest read ⇒ do not present an empty workspace or save over the container.
+- Missing linked subdoc ⇒ show a recoverable missing-item card and offer locate/remove-link actions;
+  do not silently delete the manifest entry.
+- Failed outgoing flush ⇒ remain on the current subdoc and preserve the attempted destination.
+- Partial multi-sync ⇒ show which containers succeeded and which need attention.
+- Diverged subdoc ⇒ preserve both revisions under distinct IDs and require a writer resolution.
+- Delete-everywhere ⇒ list all memberships, snapshots, and sync targets affected; require an explicit
+  confirmation. Default removal is from the current workspace only.
+- No background cleanup may delete orphan-looking subdocs, manifests, or provenance. “Unreferenced”
+  can result from an unreadable container and is not proof of abandonment.
+
+### D10. Phased build order
+
+1. **W1 — Surface:** make an email the page-sized surface; consolidate header, editor body, actions,
+   status, and concise disclosures. No archive change.
+2. **W2 — Local sequence:** introduce workspace manifest/index, active-subdoc switching, arrow controls,
+   two-finger/Shift-scroll navigation, outgoing flush, and static neighbour previews.
+3. **W3 — Overview:** add the manage-all shortcut/button, virtualised thumbnails, activation, reorder,
+   creation, and remove-from-workspace. Still one container per subdoc by default.
+4. **W4 — Workspace container:** add multi-subdoc `.studio` import/export with independently
+   verifiable subdoc bundles, membership management, and self-contained export.
+5. **W5 — Sync fan-out:** add explicit many-to-many memberships, per-container queues/status, safe remote
+   re-read/merge, partial-failure recovery, and divergent-revision forking.
+6. **W6 — Certification:** full regression/mutation tests, real-browser gesture probes on macOS trackpad
+   and touch hardware, large-workspace performance certification, and multi-provider sync fault injection.
+
+W1–W3 can ship behind a feature flag before the archive/sync expansion. W4 must not become the default
+writer until round-trip export and failure-on-read guards pass. W5 must not ship until
+multi-target fault injection proves that one unreadable destination cannot damage another.
+
+### D11. Acceptance criteria
+
+#### Surface and navigation
+
+- An email renders as one page-sized box with its body inside it and no second paper visibly behind it.
+- Page and email subdocs can coexist in one ordered workspace and retain their distinct `doc_type`.
+- Arrow buttons, two-finger horizontal gesture, Shift+scroll, and overview activation reach the same
+  deterministic next/previous item.
+- Vertical scroll, editor selection, pinch zoom, and ordinary browser navigation outside the workspace
+  remain unaffected.
+- Only the active subdoc owns a live editor, signing session, autosave loop, and write lock.
+- Command/Ctrl+Shift+Space opens overview; Escape returns to the same active subdoc.
+
+#### Persistence and portability
+
+- Sequence, active item, titles/types, and stable IDs survive reload.
+- A multi-subdoc `.studio` round-trips page and email subdocs, snapshots, receipts, citations, required
+  assets, and workspace order.
+- A self-contained export opens on another device with no missing linked item.
+
+#### Membership and sync
+
+- Creation offers current, new standalone, and one-or-many existing container destinations.
+- One email can belong to a monthly-email container and a project container while retaining one
+  `subdoc_id` and one writing/provenance history.
+- Editing that email queues both authorised embedded containers and reports their status separately.
+- One target failing leaves the local edit and other successful target intact and visibly retryable.
+- An unreadable remote container causes no overwrite; divergent revisions are both preserved.
+- Removing from one workspace leaves other memberships and the canonical subdoc intact.
+
+#### Honesty and privacy
+
+- OTS claims only the active subdoc content/version, never workspace membership or order.
+- Productivity totals count one active writing session once even when the subdoc has many memberships.
+- Overview hides email recipients/body previews by default.
+- No archive contains credentials, OAuth tokens, file handles, or local absolute paths.
+
+---
+
+*End of spec v0.3. Working design artifact for Inkwave; §C4 decisions remain in force and Part D defines the subdocument workspace extension.*
