@@ -23,6 +23,27 @@ Four things here are worth reading before changing anything in `src/productivity
 
 ---
 
+## Email application surface — W1 (2026-09-04, `feat/gmail-send`)
+
+Part D's first build slice is live. New email documents now replace the parchment with one A4/Letter-
+sized application box containing the frozen-or-editable headers, actions/status, the real Tiptap body,
+and provenance/send disclosure. Snapshot email bodies use the same frame, so an historical message is
+one recorded-email object rather than a header card followed by apparently unrelated prose.
+
+The reusable seam is `ApplicationSurface` plus `Scroll`'s `presentation` mode. Email is only the first
+consumer: contextual mode and later music/application tools can reuse the frame without cloning the
+editor. There remains exactly one `EditorContent`, autosave path, SCAS layer, and schema. Application
+mode changes presentation only: the canonical pagination extension stays in the shared extension list
+but emits zero-size break markers rather than visible page gaps; snapshot pagination follows the same
+rule so navigation geometry remains available.
+
+The browser probe measured one editable body inside the message slot, no `inkwave-gapped` class, zero
+paper top padding, and equal 794px surface/paper widths plus equal 1123px heights. The full gate passed:
+237 test files, 3,055 tests passed (2 skipped), typecheck, and production build. W2 contextual studio,
+multi-message batches, subdoc sequencing, overview, containers, and sync fan-out remain spec only.
+
+---
+
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT ON since 2026-07-18)
 
 `src/productivity/report/` — spec §A7.1 Path 1: Inkwave compiles a payload, the WRITER runs it in

@@ -851,6 +851,12 @@ interface StudioWorkspaceArchiveV2 {
 
 ### D10. Phased build order
 
+**Implementation status (2026-09-04):** W1 is implemented on `feat/gmail-send`: live email drafts
+and historical email snapshots use the same reusable application-surface primitive, the message body
+lives inside the box, application presentation suppresses visual page gaps without forking the editor,
+and the detailed sending/provenance explanation is collapsed behind a concise visible statement.
+W2–W7 remain specification only.
+
 1. **W1 — Isolated surface:** make the default email one page-sized box; consolidate header, editor
    body, actions, status, and concise disclosures. No archive change.
 2. **W2 — Contextual studio:** retain the writing page as an explicit alternate presentation; place

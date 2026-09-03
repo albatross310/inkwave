@@ -7,7 +7,7 @@
 // THEMING (CLAUDE.md, mandatory): the outer container carries `iw-nightable`, and every custom
 // colour is a theme token with a day fallback — no hard-coded hex.
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
 import type { InkwaveDocument, EmailHeaders } from '../types/document'
 import { parseAddressList, suspectAddresses, hasRecipient } from '../email/headers'
 import { finaliseEmail, draftFor, canHandOff } from '../email/finalise'
@@ -15,6 +15,7 @@ import { handoffSender, fits, type HandoffSenderId } from '../email/sender'
 import { authoriseGmailSend, gmailConfigured, gmailSender, preloadGmail } from '../email/gmail'
 import { titleForEmail } from '../email/newEmail'
 import * as copy from '../email/copy'
+import { ApplicationSurface, type ApplicationSurfaceMode } from './ApplicationSurface'
 
 interface Props {
   doc: InkwaveDocument
@@ -22,6 +23,9 @@ interface Props {
    *  deliberately lag typing by one autosave beat; actions must never inherit that performance lag. */
   getCurrentDoc: () => InkwaveDocument
   onDocChange: (updated: InkwaveDocument) => void
+  /** Presentation only. The same email subdoc/data path serves both modes. */
+  surfaceMode?: ApplicationSurfaceMode
+  children?: ReactNode
 }
 
 const PROVIDERS: { id: HandoffSenderId; label: string }[] = [
@@ -30,7 +34,13 @@ const PROVIDERS: { id: HandoffSenderId; label: string }[] = [
   { id: 'mailto', label: 'Mail app' },
 ]
 
-export function EmailComposePanel({ doc, getCurrentDoc, onDocChange }: Props) {
+export function EmailComposePanel({
+  doc,
+  getCurrentDoc,
+  onDocChange,
+  surfaceMode = 'isolated',
+  children,
+}: Props) {
   const headers = doc.email
   const [showCc, setShowCc] = useState(() => !!(headers?.cc?.length || headers?.bcc?.length))
   const [status, setStatus] = useState<string | null>(null)
@@ -151,7 +161,7 @@ export function EmailComposePanel({ doc, getCurrentDoc, onDocChange }: Props) {
   const borderStyle = { borderColor: 'var(--iw-nightable-border, #e7e5e4)' }
 
   return (
-    <div className="iw-nightable bg-white rounded-lg shadow-sm mb-3 text-stone-800" style={borderStyle}>
+    <ApplicationSurface app="email" label="Email draft" mode={surfaceMode} nightable>
       {/* ── Headers ───────────────────────────────────────────────────────── */}
       <div className={row} style={borderStyle}>
         <span className={labelCls} style={labelStyle}>To</span>
@@ -281,19 +291,31 @@ export function EmailComposePanel({ doc, getCurrentDoc, onDocChange }: Props) {
         )}
       </div>
 
+      <div className="iw-application-surface__body iw-email-message-body" aria-label="Message body">
+        {children}
+      </div>
+
       {/* The claim and its limit, at the SAME weight — §B2.2 requires the limit to be stated
           in-product, and a limit the reader must hunt for is a limit the product is hiding. */}
       <div
-        className="px-3 pb-2.5 text-xs leading-relaxed space-y-1"
+        className="iw-application-surface__disclosure text-xs leading-relaxed"
         style={{ color: 'var(--iw-pill-fg, #78716c)' }}
       >
-        <p>{recordedAt ? copy.PROVENANCE_RECORDED : copy.PROVENANCE_EXPLAINER}</p>
-        <p>{copy.PROVENANCE_LIMIT}</p>
-        <p>{gmailConfigured() ? copy.GMAIL_SEND_EXPLAINER : copy.HANDOFF_EXPLAINER}</p>
-        <p>{copy.STORAGE_CLAIM}</p>
-        <p>{copy.LEDGER_NOTE}</p>
-        {!hasRecipient(headers) && <p>Add a recipient to hand this draft to your provider.</p>}
+        <p>{copy.PROVENANCE_BRIEF}</p>
+        {!hasRecipient(headers) && <p className="mt-1">Add a recipient to hand this draft to your provider.</p>}
+        <details className="mt-1.5">
+          <summary className="cursor-pointer" style={{ color: 'var(--iw-ink, #5c2d8a)' }}>
+            How recording and sending work
+          </summary>
+          <div className="mt-1.5 space-y-1">
+            <p>{recordedAt ? copy.PROVENANCE_RECORDED : copy.PROVENANCE_EXPLAINER}</p>
+            <p>{copy.PROVENANCE_LIMIT}</p>
+            <p>{gmailConfigured() ? copy.GMAIL_SEND_EXPLAINER : copy.HANDOFF_EXPLAINER}</p>
+            <p>{copy.STORAGE_CLAIM}</p>
+            <p>{copy.LEDGER_NOTE}</p>
+          </div>
+        </details>
       </div>
-    </div>
+    </ApplicationSurface>
   )
 }

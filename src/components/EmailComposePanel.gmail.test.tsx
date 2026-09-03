@@ -62,6 +62,20 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('EmailComposePanel Gmail integration', () => {
+  it('places the editable message inside the default isolated application surface', () => {
+    render(
+      <EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}}>
+        <div data-testid="message-editor">Editable body</div>
+      </EmailComposePanel>,
+    )
+
+    const surface = screen.getByRole('region', { name: 'Email draft' })
+    expect(surface.getAttribute('data-iw-surface-mode')).toBe('isolated')
+    expect(surface.contains(screen.getByTestId('message-editor'))).toBe(true)
+    expect(screen.getByLabelText('Message body').contains(screen.getByTestId('message-editor'))).toBe(true)
+    expect(screen.getByText(/Recording proves this exact draft existed by this time/)).toBeTruthy()
+  })
+
   it('authorises, records, and only then sends', async () => {
     render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))

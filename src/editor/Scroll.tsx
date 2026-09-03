@@ -196,6 +196,7 @@ export function Scroll({
   containerRef,
   phone = false,
   fill = false,
+  presentation = 'document',
   revealed = true,
   fadingOut = false,
   covered = false,
@@ -206,6 +207,9 @@ export function Scroll({
   phone?: boolean // touch device: paper fills the screen, no background (see isTouchDevice())
   fill?: boolean  // the live editor: make the surface a fixed, full-region scroll container (desktop).
                   // Off for the snapshot view, where the surface must stay in-flow inside its split pane.
+  /** `application` keeps the canonical page box/zoom machinery but lets a reusable tool surface
+      replace the parchment itself. Email is the first consumer; future tools use the same seam. */
+  presentation?: 'document' | 'application'
   revealed?: boolean
   /** The live editor while the OPAQUE loading shell still covers it: its water must not paint —
       the two wave copies are never pixel-identical mid-boot (the editor's fixed pseudos anchor to
@@ -220,6 +224,7 @@ export function Scroll({
                      // The editor flips it once; the loading shell passes false so page + text appear
                      // together, atomically, instead of paper-then-text.
 }) {
+  const application = presentation === 'application'
   // The (fixed) background waves don't scroll with the page. As you scroll we only sway them
   // HORIZONTALLY — alternating rows opposite ways (see the opposite --wave-x in styles/index.css) —
   // with no vertical movement. rAF-throttled.
@@ -1655,8 +1660,8 @@ export function Scroll({
           // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card
           // rendered inside doesn't feed its pixels into the shadow — drop-shadow re-rasterises
           // the whole parchment on every reel frame.
-          borderRadius: phone ? 0 : '8px',
-          boxShadow: phone || gapped ? 'none' : '0 8px 32px rgba(80,50,10,0.22), 0 2px 6px rgba(80,50,10,0.18)',
+          borderRadius: phone || application ? 0 : '8px',
+          boxShadow: phone || gapped || application ? 'none' : '0 8px 32px rgba(80,50,10,0.22), 0 2px 6px rgba(80,50,10,0.18)',
           // One-paint load: hide the entire parchment (waves only) until the editor settles, then
           // fade page + text in together. visibility (not display) keeps layout + font/pagination
           // measurement running underneath.
@@ -1674,17 +1679,23 @@ export function Scroll({
             one on phones where screen real estate is tight. */}
         <div
           ref={sheetRef}
-          className="scroll-paper relative pt-8 pb-24"
+          className={application ? 'scroll-paper relative iw-application-paper' : 'scroll-paper relative pt-8 pb-24'}
           style={{
-            borderRadius: phone ? 0 : '8px',
-            paddingLeft:  phone ? '1.25rem' : `${sideMarginPx}px`,
-            paddingRight: phone ? '1.25rem' : `${sideMarginPx}px`,
-            paddingTop:   `${topMarginPx}px`,
-            paddingBottom:`${btmMarginPx}px`,
+            borderRadius: phone || application ? 0 : '8px',
+            paddingLeft:  application ? 0 : phone ? '1.25rem' : `${sideMarginPx}px`,
+            paddingRight: application ? 0 : phone ? '1.25rem' : `${sideMarginPx}px`,
+            paddingTop:   application ? 0 : `${topMarginPx}px`,
+            paddingBottom:application ? 0 : `${btmMarginPx}px`,
+            '--iw-page-side-margin': phone ? '1.25rem' : `${sideMarginPx}px`,
+            '--iw-page-top-margin': `${topMarginPx}px`,
+            '--iw-page-bottom-margin': `${btmMarginPx}px`,
+            '--iw-page-height': phone || getPaperSize() === 'scroll'
+              ? '100dvh'
+              : paperCssSize(getPaperSize() === 'letter' ? 'letter' : 'a4', getOrientation()).height,
             '--para-spacing': `${paraSpacingEm}em`,
           } as React.CSSProperties}
         >
-          <PageGuides sheetRef={sheetRef} />
+          {!application && <PageGuides sheetRef={sheetRef} />}
           <div
             className="mx-auto w-full relative"
             style={{

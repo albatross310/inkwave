@@ -1045,6 +1045,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const compliance = useComplianceProvider()
+  const isolatedEmail = emailEnabled() && doc.docType === 'email'
 
   const editorRef = useRef<ReturnType<typeof useEditor>>(null)
 
@@ -1086,6 +1087,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       getDoc: () => docRef.current,
       getHintState: () => hintStateRef.current,
       getScasLookup: () => scasRef.current!.lookup(),
+      presentation: isolatedEmail ? 'application' : 'document',
     }),
     content: doc.contentJson,
     // DOUBLE-MOUNT NOTE (2026-07-11): this component must mount in a default-lane render — NOT a
@@ -1097,6 +1099,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       attributes: {
         class: 'tiptap-editor',
         'data-placeholder': 'Begin writing…',
+        'aria-label': doc.docType === 'email' ? 'Message body editor' : 'Document body editor',
         spellcheck: 'false',
       },
       // ── Task #28: keydown-synchronous typing (flag: inkwave:kdSync; desktop default ON,
@@ -3027,6 +3030,30 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     </>
   )
 
+  // ONE editor body, placed either directly on document paper or inside a reusable application
+  // surface. Do not fork this subtree for email: the same EditorContent, gutters, SCAS popover,
+  // autosave and provenance path must serve every presentation.
+  const editorBody = (
+    <>
+      <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
+      {editor && (
+        <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />
+      )}
+      {editor && (
+        <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="right" />
+      )}
+      {editor && (
+        <ThesaurusPopover
+          editor={editor}
+          paragraphIndex={currentParagraphIndex}
+          containerEl={containerRef as RefObject<HTMLDivElement>}
+          onHintChange={handleHintChange}
+          isLockedLemma={(lemma) => scasRef.current!.lookup().locked.has(lemma)}
+          firstNudgeAt={(word) => scasRef.current!.firstNudgeAt(word)}
+        />
+      )}
+    </>
+  )
   return (
     <ComplianceContext.Provider value={compliance}>
       {/* Phone reveal chrome choreography — see chromeDone above (.iw-chrome-hold / .iw-chrome-in). */}
@@ -3082,10 +3109,16 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             </button>
           </div>
         )}
-        <Scroll paperRef={paperRef} containerRef={containerRef} phone={isTouch} fill revealed={settled} covered={isTouch ? !waveRest : !settled}>
-          {/* Email header block (§B2.1), behind the default-OFF flag. The BODY below is the
-              ordinary editor — which is what makes an email an ordinary document. */}
-          {emailEnabled() && doc.docType === 'email' && (
+        <Scroll
+          paperRef={paperRef}
+          containerRef={containerRef}
+          phone={isTouch}
+          fill
+          presentation={isolatedEmail ? 'application' : 'document'}
+          revealed={settled}
+          covered={isTouch ? !waveRest : !settled}
+        >
+          {isolatedEmail ? (
             <EmailComposePanel
               doc={doc}
               getCurrentDoc={ensureDocFresh}
@@ -3097,25 +3130,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 // snapshot/finalise work that reads it sees the new headers immediately.
                 commitDoc(updated)
               }}
-            />
-          )}
-          <div style={{ '--inkwave-lh': lineHeight } as React.CSSProperties}><EditorContent editor={editor} /></div>
-          {editor && (
-            <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="left" />
-          )}
-          {editor && (
-            <CaretGutter editor={editor} containerEl={containerRef as RefObject<HTMLDivElement>} side="right" />
-          )}
-          {editor && (
-            <ThesaurusPopover
-              editor={editor}
-              paragraphIndex={currentParagraphIndex}
-              containerEl={containerRef as RefObject<HTMLDivElement>}
-              onHintChange={handleHintChange}
-              isLockedLemma={(lemma) => scasRef.current!.lookup().locked.has(lemma)}
-              firstNudgeAt={(word) => scasRef.current!.firstNudgeAt(word)}
-            />
-          )}
+            >
+              {editorBody}
+            </EmailComposePanel>
+          ) : editorBody}
         </Scroll>
 
         {/* The faint desktop countdown. Renders NOTHING unless a block is running and the flag is

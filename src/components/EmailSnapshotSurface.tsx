@@ -2,13 +2,12 @@
 // live document's current headers: /snapshot is a historical view, and showing today's recipient
 // beside yesterday's anchored body would be a provenance lie.
 
+import type { ReactNode } from 'react'
 import type { Snapshot } from '../types/document'
+import { ApplicationSurface } from './ApplicationSurface'
 
-const CARD = 'var(--iw-snap-card, #ffffff)'
 const TEXT = 'var(--iw-snap-text, #3a3a3a)'
 const MUTED = 'var(--iw-snap-muted, #6f6a7d)'
-const EDGE = 'var(--iw-snap-card-edge, rgba(92,45,138,0.4))'
-const INK = 'var(--iw-snap-ink, #5c2d8a)'
 
 function HeaderRow({ label, value }: { label: string; value: string }) {
   return (
@@ -19,29 +18,33 @@ function HeaderRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-export function EmailSnapshotHeader({ snapshot }: { snapshot: Pick<Snapshot, 'email'> }) {
+export function EmailSnapshotSurface({
+  snapshot,
+  children,
+}: {
+  snapshot: Pick<Snapshot, 'email'>
+  children: ReactNode
+}) {
   const headers = snapshot.email
-  if (!headers) return null
+  if (!headers) return <>{children}</>
   const to = headers.to.join(', ')
   const cc = headers.cc?.join(', ') ?? ''
   const bcc = headers.bcc?.join(', ') ?? ''
   return (
-    <section
-      aria-label="Email headers recorded in this snapshot"
-      style={{
-        margin: '0 0 1.5rem', padding: '0.75rem 1rem', background: CARD, color: TEXT,
-        border: `1px solid ${EDGE}`, borderRadius: '0.75rem', fontFamily: 'inherit', fontSize: '0.92rem',
-      }}
+    <ApplicationSurface
+      app="email"
+      label="Recorded email"
+      ariaLabel="Email recorded in this snapshot"
     >
-      <div style={{ color: INK, fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-        Recorded email
-      </div>
-      <dl style={{ margin: '0.35rem 0 0' }}>
+      <dl className="iw-email-snapshot-headers" style={{ margin: 0 }}>
         <HeaderRow label="To" value={to || '(no recipient)'} />
         {cc && <HeaderRow label="Cc" value={cc} />}
         {bcc && <HeaderRow label="Bcc" value={bcc} />}
         <HeaderRow label="Subject" value={headers.subject || '(no subject)'} />
       </dl>
-    </section>
+      <div className="iw-application-surface__body iw-email-message-body" aria-label="Recorded message body">
+        {children}
+      </div>
+    </ApplicationSurface>
   )
 }

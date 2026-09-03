@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Snapshot } from '../types/document'
 import { readSnapshotArchive, groupByVersion, patchSnapshotDiffSummary, patchSnapshotVersionSummary, clearAllSnapshotSummaries, deleteSnapshot } from '../provenance/snapshots'
@@ -30,7 +30,7 @@ import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { RichDiffView } from '../components/RichDiffView'
-import { EmailSnapshotHeader } from '../components/EmailSnapshotHeader'
+import { EmailSnapshotSurface } from '../components/EmailSnapshotSurface'
 import { textRenderEnabled } from '../editor/textRenderFlag'
 import { createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
 import { snapThumbsDebug, snapThumbsEnabled } from '../editor/snapThumbs'
@@ -267,12 +267,13 @@ function FullDiffView({
   // Header provenance is frozen independently from the body and folded into emailHash/bundleHash.
   // Render the SNAPSHOT copy here, outside the ProseMirror body, so moving through history cannot
   // accidentally show the live document's current recipient or subject beside an older body.
-  const emailHeader = <EmailSnapshotHeader snapshot={snapshot} />
+  const wrapSnapshot = (body: ReactNode) => (
+    <EmailSnapshotSurface snapshot={snapshot}>{body}</EmailSnapshotSurface>
+  )
   if (!ops) {
     return (
       <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
-        {emailHeader}
-        <DocView doc={snapshot.contentJson} />
+        {wrapSnapshot(<DocView doc={snapshot.contentJson} />)}
       </div>
     )
   }
@@ -289,8 +290,7 @@ function FullDiffView({
   if (textRenderEnabled()) {
     return (
       <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
-        {emailHeader}
-        <RichDiffView doc={snapshot.contentJson} ops={ops} hooks={{ onOpClick, onHoverOp }} />
+        {wrapSnapshot(<RichDiffView doc={snapshot.contentJson} ops={ops} hooks={{ onOpClick, onHoverOp }} />)}
       </div>
     )
   }
@@ -322,8 +322,7 @@ function FullDiffView({
   })
   return (
     <div className="tiptap-editor ProseMirror" style={{ whiteSpace: 'pre-wrap' }}>
-      {emailHeader}
-      {spans}
+      {wrapSnapshot(spans)}
     </div>
   )
 }
@@ -791,6 +790,7 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
       pagRef.current = paginateStaticDoc({
         scroller: L,
         cacheKey: `${snap.id}|${ops ? 'diff' : 'doc'}`,
+        presentation: snap.email ? 'application' : 'document',
         // Repaints (pane resize, zoom) publish geometry only while this layer drives the view.
         onRepaint: (pages) => { if (!disposed && activeRef.current) hooks.onGeo([...pages]) },
       })
@@ -861,7 +861,7 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
       >
         {/* The layer key (snap.id) gives each snapshot a private subtree, so the static paginator's
             DOM surgery (gap insertion splits text nodes) can never desync React's reconciliation. */}
-        <Scroll phone={isPhone}><div><FullDiffView ops={ops} snapshot={snap} onOpClick={ops ? hooks.onOpClick : undefined} onHoverOp={hooks.onHoverOp} /></div></Scroll>
+        <Scroll phone={isPhone} presentation={snap.email ? 'application' : 'document'}><div><FullDiffView ops={ops} snapshot={snap} onOpClick={ops ? hooks.onOpClick : undefined} onHoverOp={hooks.onHoverOp} /></div></Scroll>
       </div>
     </div>
   )

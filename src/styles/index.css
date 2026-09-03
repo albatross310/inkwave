@@ -1127,6 +1127,67 @@
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
   }
 
+  /* ── Reusable application surface ─────────────────────────────────────────
+     A focused tool replaces the paper; it is not a panel sitting ON a document. Scroll keeps the
+     canonical page width, zoom and loading choreography, while this frame supplies the visible
+     object. Email is the first consumer; music/future tools reuse the same mode classes and slots. */
+  .scroll-paper.iw-application-paper {
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  .iw-application-surface {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: var(--iw-page-height, calc(100dvh - 2.5rem));
+    background: var(--iw-application-bg, #ffffff);
+    color: var(--iw-application-fg, #292524);
+    border: 1px solid var(--iw-application-edge, #cbb8f2);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px var(--iw-application-shadow, rgba(80, 50, 10, 0.18));
+  }
+  .iw-application-surface--contextual {
+    min-height: 0;
+  }
+  .iw-application-surface__label {
+    padding: 1.5rem var(--iw-page-side-margin, 3rem) 0.8rem;
+    color: var(--iw-ink, #5c2d8a);
+    font-family: 'EB Garamond', 'IM Fell DW Pica', Georgia, serif;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .iw-email-snapshot-headers {
+    padding: 0 var(--iw-page-side-margin, 3rem) 1rem;
+  }
+  .iw-application-surface__body {
+    position: relative;
+    flex: 1;
+    padding: 1.5rem var(--iw-page-side-margin, 3rem) var(--iw-page-bottom-margin, 4rem);
+    border-top: 1px solid var(--iw-application-hair, rgba(92, 45, 138, 0.18));
+  }
+  .iw-application-surface__body .ProseMirror {
+    min-height: 28rem;
+  }
+  .iw-application-surface__disclosure {
+    padding: 0.8rem var(--iw-page-side-margin, 3rem) 1.25rem;
+    border-top: 1px solid var(--iw-application-hair, rgba(92, 45, 138, 0.18));
+  }
+  .inkwave-editor-surface.is-phone .iw-application-surface {
+    min-height: 100dvh;
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .inkwave-editor-surface.is-phone .iw-application-surface__label,
+  .inkwave-editor-surface.is-phone .iw-application-surface__body,
+  .inkwave-editor-surface.is-phone .iw-application-surface__disclosure {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+
   /* Tiptap editor content styles */
   /* ProseMirror is the contenteditable div — tiptap-editor is a class
      we add to it directly via editorProps, so selectors target it directly. */
@@ -2124,6 +2185,29 @@
 :root[data-theme="night"] .iw-nightable select,
 :root[data-theme="night"] .iw-nightable textarea { background-color: #3c444e !important; color: #eef1f5 !important; border-color: #5c6672 !important; }
 :root[data-theme="night"] .iw-nightable input::placeholder { color: #9aa3af !important; }
+
+/* Application surfaces are page-sized authored objects, not floating chrome panels. They still
+   carry .iw-nightable so their controls inherit the shared input/button palette, but the frame
+   itself takes the calmer page surface in night mode. */
+:root {
+  --iw-application-bg: #ffffff;
+  --iw-application-fg: #292524;
+  --iw-application-edge: #cbb8f2;
+  --iw-application-hair: rgba(92, 45, 138, 0.18);
+  --iw-application-shadow: rgba(80, 50, 10, 0.18);
+}
+:root[data-theme="night"] {
+  --iw-application-bg: #2c2e35;
+  --iw-application-fg: #eceef2;
+  --iw-application-edge: #7c8794;
+  --iw-application-hair: rgba(215, 200, 248, 0.22);
+  --iw-application-shadow: rgba(0, 0, 0, 0.55);
+}
+:root[data-theme="night"] .iw-application-surface {
+  background-color: var(--iw-application-bg) !important;
+  color: var(--iw-application-fg) !important;
+  border-color: var(--iw-application-edge) !important;
+}
 
 /* ── SNAPSHOT VIEW (/snapshot) — ONE palette for the whole route ─────────────────────────────────
    WHY THESE ARE :root TOKENS AND NOT `.iw-nightable`. That class is for a FLOATING PANEL: it forces

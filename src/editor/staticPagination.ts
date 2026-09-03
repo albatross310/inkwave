@@ -456,6 +456,8 @@ export function paginateStaticDoc(opts: {
   scroller: HTMLElement
   /** Stable identity of the rendered content (snapshot id + view kind) — keys the spec cache. */
   cacheKey: string
+  /** Application surfaces are continuous authored objects, not stacks of document-paper sheets. */
+  presentation?: 'document' | 'application'
   /** Called with fresh page regions whenever repaint() re-reads geometry (zoom/width reflow). */
   onRepaint?: (pages: StaticPageGeo[]) => void
 }): StaticPaginationHandle | null {
@@ -465,7 +467,9 @@ export function paginateStaticDoc(opts: {
   const root = scroller.querySelector('.tiptap-editor') as HTMLElement | null
   if (!surface || !sheet || !root) return null
 
-  const gapped = gappedPagesEnabled()
+  // Keep the canonical break model and geometry handle for snapshot navigation, but application
+  // surfaces use its zero-size markers: no visual page gaps may be inserted inside the tool frame.
+  const gapped = opts.presentation === 'application' ? false : gappedPagesEnabled()
   const paper = getPaperSize()
   // Mirror the extension's marker-mode bails: continuous 'scroll' paper and multi-column layouts
   // have no page identity ungapped (PageGuides falls back to its uniform canonical model).

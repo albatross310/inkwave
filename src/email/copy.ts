@@ -24,6 +24,10 @@
 /** The one-line label beside the finalise action. */
 export const FINALISE_LABEL = 'Record this draft'
 
+/** Always-visible honesty line on the focused email surface; the longer explanation is disclosed. */
+export const PROVENANCE_BRIEF =
+  'Recording proves this exact draft existed by this time — not that it was sent, delivered, or read.'
+
 /**
  * The primary explanation, shown before the user finalises. States the claim and its limit in the
  * same breath — the limit is never a footnote or a tooltip, because a limit the reader has to go

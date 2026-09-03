@@ -48,6 +48,12 @@ const redHighlightOf = (exts: ReturnType<typeof buildEditorExtensions>) => {
   return e as { name: string; options: Record<string, unknown> }
 }
 
+const paginationOf = (exts: ReturnType<typeof buildEditorExtensions>) => {
+  const e = exts.find(x => x.name === 'pagination')
+  expect(e, 'pagination must be in the list at all').toBeDefined()
+  return e as { name: string; options: Record<string, unknown> }
+}
+
 describe('buildEditorExtensions — the editor half (F7)', () => {
   it('THE EDITOR PATH: all three closures arrive on RedHighlightExtension, by identity', () => {
     const deps = makeDeps()
@@ -118,5 +124,14 @@ describe('buildEditorExtensions — the editor half (F7)', () => {
     const b = buildEditorExtensions(makeDeps())
     expect(a).not.toBe(b)
     expect(a[0]).toBeDefined()
+  })
+
+  it('keeps application content continuous without forking the editor extension list', () => {
+    const deps = makeDeps()
+    const documentExtensions = buildEditorExtensions(deps)
+    const applicationExtensions = buildEditorExtensions({ ...deps, presentation: 'application' })
+
+    expect(applicationExtensions.map(e => e.name)).toEqual(documentExtensions.map(e => e.name))
+    expect(paginationOf(applicationExtensions).options.gapped).toBe(false)
   })
 })

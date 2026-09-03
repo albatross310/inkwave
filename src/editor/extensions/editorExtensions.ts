@@ -67,13 +67,20 @@ import { gappedPagesEnabled, paginationEnabled } from '../pageView'
  * The live editor's plugin closures. Omitted for schema-only builds (no editor, no plugins) —
  * see the header: these reach ONLY RedHighlightExtension's ProseMirror plugins, never the schema.
  */
-export type EditorExtensionDeps = RedHighlightOptions
+export type EditorPresentation = 'document' | 'application'
+
+export type EditorExtensionDeps = RedHighlightOptions & {
+  /** Application surfaces keep the shared editor/schema but use continuous content instead of
+      inserting document-page gaps inside the tool frame. */
+  presentation?: EditorPresentation
+}
 
 /**
  * The app's extension list. Pass `deps` to build the editor's; omit them to build a list whose
  * SCHEMA is identical (see `editorSchema.ts`) but whose plugins are never installed.
  */
 export function buildEditorExtensions(deps?: EditorExtensionDeps): Extensions {
+  const application = deps?.presentation === 'application'
   return [
     StarterKit,
     Highlight.configure({ multicolor: true }),
@@ -83,7 +90,7 @@ export function buildEditorExtensions(deps?: EditorExtensionDeps): Extensions {
     // the tall gap widgets + sheet panels, ungapped gets zero-size break markers the PageGuides
     // rules + the print stylesheet break at. Same breaks either way, so toggling the switch
     // never moves content across pages.
-    PaginationExtension.configure({ enabled: paginationEnabled(), gapped: gappedPagesEnabled() }),
+    PaginationExtension.configure({ enabled: paginationEnabled(), gapped: !application && gappedPagesEnabled() }),
     ScasSlotMark,
     CommentMark,
     InsertionMark,

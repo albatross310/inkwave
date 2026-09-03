@@ -76,6 +76,11 @@ describe('the EMAIL lane\'s in-product copy (src/email/copy.ts) makes no forbidd
 })
 
 describe('the copy makes the claims §B2.2 REQUIRES it to make', () => {
+  it('the always-visible brief states the claim and its limit in one line', () => {
+    expect(copy.PROVENANCE_BRIEF).toMatch(/existed by/i)
+    expect(copy.PROVENANCE_BRIEF).toMatch(/not that it was sent, delivered, or read/i)
+  })
+
   it('the explainer states the actual claim — content existed by a time, verifiable independently', () => {
     expect(copy.PROVENANCE_EXPLAINER).toMatch(/existed by/i)
     expect(copy.PROVENANCE_EXPLAINER).toMatch(/verif/i)
