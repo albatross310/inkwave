@@ -18,6 +18,9 @@ import * as copy from '../email/copy'
 
 interface Props {
   doc: InkwaveDocument
+  /** Rebuild the document from the live editor before any record/send boundary. The `doc` prop may
+   *  deliberately lag typing by one autosave beat; actions must never inherit that performance lag. */
+  getCurrentDoc: () => InkwaveDocument
   onDocChange: (updated: InkwaveDocument) => void
 }
 
@@ -27,7 +30,7 @@ const PROVIDERS: { id: HandoffSenderId; label: string }[] = [
   { id: 'mailto', label: 'Mail app' },
 ]
 
-export function EmailComposePanel({ doc, onDocChange }: Props) {
+export function EmailComposePanel({ doc, getCurrentDoc, onDocChange }: Props) {
   const headers = doc.email
   const [showCc, setShowCc] = useState(() => !!(headers?.cc?.length || headers?.bcc?.length))
   const [status, setStatus] = useState<string | null>(null)
@@ -67,7 +70,7 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
     setBusy(true)
     setStatus(null)
     try {
-      const r = await finaliseEmail(doc)
+      const r = await finaliseEmail(getCurrentDoc())
       if (!r.snapshot) {
         setStatus(r.reason ?? 'could not record this draft')
       } else {
@@ -80,7 +83,7 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
   }
 
   const onHandoff = async (id: HandoffSenderId, label: string) => {
-    const draft = draftFor(doc)
+    const draft = draftFor(getCurrentDoc())
     if (!draft) return
     // The window must open inside the click's own transient activation — a deferred open is a
     // popup block (the same rule the GIS popups live under; see CLAUDE.md).
@@ -91,8 +94,6 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
   }
 
   const onGmailSend = async () => {
-    const draft = draftFor(doc)
-    if (!draft) return
     setBusy(true)
     setStatus('Waiting for Google…')
     try {
@@ -104,8 +105,17 @@ export function EmailComposePanel({ doc, onDocChange }: Props) {
         return
       }
 
+      // One read owns BOTH boundaries. The editor keeps its React `doc` prop intentionally stale
+      // for up to one autosave beat while typing; rebuild after the popup returns so the recorded
+      // bytes and the Gmail bytes are the same latest body, even if the writer typed during auth.
+      const current = getCurrentDoc()
+      const draft = draftFor(current)
+      if (!draft) {
+        setStatus('This is no longer an email draft. Nothing was sent.')
+        return
+      }
       setStatus('Recording before send…')
-      const record = await finaliseEmail(doc)
+      const record = await finaliseEmail(current)
       if (!record.snapshot) {
         setStatus(`${record.reason ?? 'Could not record this draft'}. Nothing was sent.`)
         return

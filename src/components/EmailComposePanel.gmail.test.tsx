@@ -10,6 +10,7 @@ const calls: string[] = []
 const authorise = vi.fn()
 const finalise = vi.fn()
 const send = vi.fn()
+const draftFor = vi.fn()
 
 vi.mock('../email/gmail', () => ({
   gmailConfigured: () => true,
@@ -19,7 +20,7 @@ vi.mock('../email/gmail', () => ({
 }))
 
 vi.mock('../email/finalise', () => ({
-  draftFor: () => ({ headers: { to: ['ada@example.com'], cc: [], bcc: [], subject: 'S' }, body: 'Body' }),
+  draftFor: (...args: unknown[]) => draftFor(...args),
   canHandOff: () => true,
   finaliseEmail: (...args: unknown[]) => finalise(...args),
 }))
@@ -45,6 +46,9 @@ beforeEach(() => {
     calls.push('authorise')
     return 'token'
   })
+  draftFor.mockReset().mockReturnValue({
+    headers: { to: ['ada@example.com'], cc: [], bcc: [], subject: 'S' }, body: 'Body',
+  })
   finalise.mockReset().mockImplementation(async () => {
     calls.push('record')
     return { snapshot: { id: 'snap-1', createdAt: '2026-08-31T00:01:00+10:00' }, stamped: true }
@@ -59,7 +63,7 @@ afterEach(cleanup)
 
 describe('EmailComposePanel Gmail integration', () => {
   it('authorises, records, and only then sends', async () => {
-    render(<EmailComposePanel doc={doc} onDocChange={() => {}} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     await screen.findByText(/Sent with Gmail/)
@@ -73,7 +77,7 @@ describe('EmailComposePanel Gmail integration', () => {
       return { snapshot: null, stamped: false, reason: 'storage unavailable' }
     })
 
-    render(<EmailComposePanel doc={doc} onDocChange={() => {}} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     await waitFor(() => expect(screen.getByText(/Nothing was sent/)).toBeTruthy())
@@ -87,12 +91,29 @@ describe('EmailComposePanel Gmail integration', () => {
       throw new Error('Google’s authorization window was closed. Your draft was not sent.')
     })
 
-    render(<EmailComposePanel doc={doc} onDocChange={() => {}} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     await screen.findByText(/authorization window was closed.*not sent/i)
     expect(calls).toEqual(['authorise'])
     expect(finalise).not.toHaveBeenCalled()
     expect(send).not.toHaveBeenCalled()
+  })
+
+  it('records and sends one fresh post-authorization document, not the stale render prop', async () => {
+    const fresh = {
+      ...doc,
+      updatedAt: '2026-09-03T18:55:00+10:00',
+      contentJson: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Latest typed body' }] }] },
+    } as InkwaveDocument
+    const getCurrentDoc = vi.fn(() => fresh)
+
+    render(<EmailComposePanel doc={doc} getCurrentDoc={getCurrentDoc} onDocChange={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
+
+    await screen.findByText(/Sent with Gmail/)
+    expect(getCurrentDoc).toHaveBeenCalledOnce()
+    expect(draftFor).toHaveBeenCalledWith(fresh)
+    expect(finalise).toHaveBeenCalledWith(fresh)
   })
 })

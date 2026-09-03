@@ -3088,6 +3088,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           {emailEnabled() && doc.docType === 'email' && (
             <EmailComposePanel
               doc={doc}
+              getCurrentDoc={ensureDocFresh}
               onDocChange={(updated) => {
                 // A header edit is a document edit, and NOTHING else saves it: scheduleSave is
                 // driven by the editor's own update handler, which a header field never fires. Left

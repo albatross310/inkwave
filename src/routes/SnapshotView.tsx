@@ -30,6 +30,7 @@ import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { RichDiffView } from '../components/RichDiffView'
+import { EmailSnapshotHeader } from '../components/EmailSnapshotHeader'
 import { textRenderEnabled } from '../editor/textRenderFlag'
 import { createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
 import { snapThumbsDebug, snapThumbsEnabled } from '../editor/snapThumbs'
@@ -263,9 +264,14 @@ function FullDiffView({
   onOpClick?: (opIdx: number) => void
   onHoverOp?: (opIdx: number | null) => void
 }) {
+  // Header provenance is frozen independently from the body and folded into emailHash/bundleHash.
+  // Render the SNAPSHOT copy here, outside the ProseMirror body, so moving through history cannot
+  // accidentally show the live document's current recipient or subject beside an older body.
+  const emailHeader = <EmailSnapshotHeader snapshot={snapshot} />
   if (!ops) {
     return (
       <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
+        {emailHeader}
         <DocView doc={snapshot.contentJson} />
       </div>
     )
@@ -283,6 +289,7 @@ function FullDiffView({
   if (textRenderEnabled()) {
     return (
       <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
+        {emailHeader}
         <RichDiffView doc={snapshot.contentJson} ops={ops} hooks={{ onOpClick, onHoverOp }} />
       </div>
     )
@@ -315,6 +322,7 @@ function FullDiffView({
   })
   return (
     <div className="tiptap-editor ProseMirror" style={{ whiteSpace: 'pre-wrap' }}>
+      {emailHeader}
       {spans}
     </div>
   )
