@@ -537,7 +537,9 @@ not a transport defect. The action boundary nevertheless had a real freshness ra
 deliberately lets its React `doc` prop lag typing until the 200ms save beat, so every record/send/
 handoff action now calls the editor's `ensureDocFresh` once and uses that same current document for
 the record and transmitted draft. Snapshot view now renders the snapshot's own frozen To/Cc/Bcc/
-Subject above its historical body; it never reads live headers for an old body.
+Subject above its historical body; it never reads live headers for an old body. Peter confirmed the
+four manual acceptance checks on 2026-09-04: frozen To/Subject, historical body, snapshot navigation,
+and return to the live editor all passed.
 
 Two hangs found only in live use now have explicit exits: GIS `error_callback` reports a blocked or
 closed popup and a 120s fallback handles browser hosts that never return either callback; the OTS
@@ -554,9 +556,18 @@ and were removed once the premise was falsified. Process inspection separately f
 listeners; they were stopped, `strictPort: true` now catches the ordinary duplicate-instance case,
 and `CLAUDE.md` records both development rules.
 
-**Connected Gmail mailbox is SPEC ONLY (v0.4, §B3.1–B3.5).** Inbox/Sent (`gmail.readonly`) and Gmail
+**Connected Gmail mailbox is SPEC ONLY (v0.5, §B3.1–B3.5).** Inbox/Sent (`gmail.readonly`) and Gmail
 draft sync (`gmail.compose`) are designed as a separate, explicit restricted-scope connection.
 Nothing in this build requests read/compose/modify access; current Gmail remains `gmail.send` only.
+
+**Dual email surfaces and multi-message sending are SPEC ONLY (v0.5, §D2).** New email work will
+default to an isolated page-sized email surface. The present writing-page arrangement survives as a
+purposeful contextual studio: one or more complete message boxes (body inside each box) can sit among
+journal prose and annotations, support recipient variants, and send as a reviewed batch. Every box
+remains its own email subdoc; surrounding notes are excluded from sent bytes by structure. Batch
+preflight records all selected messages before the first transmission and preserves per-message
+`sent` / `failed before acceptance` / `status unknown` results. No part of that UI or data model is
+implemented in the current Gmail-send build.
 
 Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (now COMMITTED at `docs/specs/` — Peter, 2026-07-17: "commit the specs"
 into the repo). MVP = compose in Inkwave, count it in the productivity ledger, OTS the draft, hand

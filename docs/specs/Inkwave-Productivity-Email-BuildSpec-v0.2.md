@@ -1,8 +1,8 @@
 # Inkwave — Productivity & Email Layers: Build Specification
 
-**Version:** 0.4 (working draft — adds the connected Gmail mailbox, see §B3.1–B3.5)
+**Version:** 0.5 (working draft — adds dual email surfaces and multi-message composition, see §D2)
 **Date:** September 2026
-**Status:** Design spec for three connected layers — (A) Productivity Tracking & Reporting, (B) Email-in-Workflow including an optional Gmail mailbox, and (D) Subdocument Workspaces & Multi-Container Sync — built on Inkwave's existing local-first, zero-retention, provenance architecture. The decisions from v0.1 §C4 remain in force; v0.3 defined the subdocument workspace and v0.4 defines separate send-only and connected-mailbox permission tiers, plus Inbox, Drafts, and Sent synchronisation.
+**Status:** Design spec for three connected layers — (A) Productivity Tracking & Reporting, (B) Email-in-Workflow including an optional Gmail mailbox, and (D) Subdocument Workspaces & Multi-Container Sync — built on Inkwave's existing local-first, zero-retention, provenance architecture. The decisions from v0.1 §C4 remain in force; v0.3 defined the subdocument workspace, v0.4 defined separate send-only and connected-mailbox permission tiers plus Inbox/Drafts/Sent synchronisation, and v0.5 defines isolated and contextual email surfaces with safe multi-message sending.
 
 ---
 
@@ -535,8 +535,14 @@ it schedules both containers to receive the new revision.
 
 ### D2. Full-page email surface
 
-An email must no longer look like a small panel placed on top of an unrelated paper page. When the
-active subdoc has `doc_type: email`, the email itself is the page-sized writing surface.
+Email has two deliberate presentations over the same underlying email subdocs. The presentation is
+not inferred from message count, title, recipient, or content; the writer can switch it explicitly.
+
+#### D2.1 Isolated email — the default
+
+An email must no longer look like a small panel placed on top of an unrelated paper page. New email
+work opens in **isolated mode** by default: when the active subdoc has `doc_type: email`, the email
+itself is the page-sized writing surface.
 
 - The surface uses the same resolved page dimensions as an ordinary page, but its header, body,
   record/send controls, status, and concise provenance disclosure form one continuous box.
@@ -551,6 +557,68 @@ active subdoc has `doc_type: email`, the email itself is the page-sized writing 
   draft existed by the shown time; it does not prove delivery or reading.
 - The full-page layout must work before Gmail is configured. Record and provider-handoff remain
   available; direct Gmail send appears only when configured.
+
+Isolated mode is the shortest path from writing to sending. It is also the shared default pattern
+for focused Inkwave tools: the active thing occupies the page, while a richer contextual workspace
+remains available when the writer needs to think around several related things.
+
+#### D2.2 Contextual email studio — journal, compare, annotate, batch
+
+The current paper-style composition remains as an explicit **contextual studio mode** rather than a
+legacy layout. Its purpose is different from an ordinary mail client: the writer can place one or
+more complete email boxes inside a larger writing page and keep thinking material around them.
+
+- Every email box contains its own To/Cc/Bcc/Subject, message body, record/send controls, and status.
+  The body is always visibly inside the box; the ambiguity where the body looked like unrelated
+  prose beneath the header panel is forbidden in both live and snapshot views.
+- Prose, headings, journal entries, planning notes, and annotations may appear before, between, or
+  after message boxes. That contextual material is never included in outgoing email bytes unless
+  the writer explicitly moves/copies it into a message body.
+- Review comments may appear inline over a message body, but comment text, reviewer identity,
+  selection metadata, and studio annotations never leave with the email. Unresolved tracked
+  suggestions block record/send until the writer accepts or discards them; Inkwave never silently
+  chooses which version becomes the outgoing body.
+- A contextual page may hold several related emails: variants for different recipients, a sequence
+  of follow-ups, or a monthly/project correspondence journal. “Duplicate as new email” creates a new
+  stable email identity prefilled from the source; the copies diverge independently thereafter.
+- Each email box is backed by its own email subdoc and stable `subdoc_id`. Contextual studio mode is
+  a workspace presentation of those subdocs, not an `emails[]` field or a second mail/provenance
+  store. Switching a message between isolated and contextual presentation neither copies it nor
+  changes its hash, history, memberships, or send state.
+- The surrounding journal/page content has its own document identity. Saving or snapshotting that
+  context may prove the journal existed, but it does not claim that any embedded message was sent.
+- Only the actively edited message mounts a live message editor/signing session. Other boxes use
+  faithful static previews until selected, preserving the one-live-editor/write-owner rule.
+
+This isolated/contextual pair is the reusable Inkwave application pattern: focused tools default to
+their own page-sized surface, while studio mode composes several tool objects with ordinary writing.
+Future music and other Inkwave tools should reuse the pattern rather than inventing separate shells.
+
+#### D2.3 Batch send contract
+
+Contextual studio mode may send several messages in one deliberate operation. “Send all” means one
+reviewed batch action with per-message results; it never means an invisible loop over everything in
+the container.
+
+1. The writer selects messages (or explicitly chooses all unsent messages). The confirmation lists
+   every recipient set and subject, calls out Bcc, and excludes already-sent items by default.
+2. Inkwave validates every selected message and creates its local frozen snapshot **before any**
+   message is transmitted. If any selected item cannot be read or recorded, the batch does not begin;
+   nothing is treated as empty and nothing is sent partially during preflight.
+3. One provider authorisation may serve the batch, but each email is submitted as its own provider
+   message. Sending is paced/queued rather than burst concurrently so provider rate limits and
+   message-specific failures remain intelligible.
+4. Once transmission begins, results are per email: `sent`, `failed before acceptance`, or
+   `status unknown`. A later failure cannot roll back an earlier accepted message, and the UI must
+   never collapse a mixed batch into a single green “sent” state.
+5. `status unknown` is used whenever the provider may have accepted the bytes but the response was
+   lost. Send-only mode tells the writer to check Sent before retrying; connected-mailbox mode
+   reconciles the provider state first. Blind retry is forbidden because it can duplicate mail.
+6. A sent message becomes read-only history in place. “Edit as new draft” creates a new subdoc ID;
+   it does not rewrite the recorded/sent item. Failed, unsent items remain editable and locally safe.
+7. Batch membership/order and surrounding annotations are not part of any individual email's sent
+   bytes or OTS claim. Each email retains its own snapshot, outcome, and provider message ID when one
+   is returned.
 
 ### D3. Spatial sequence and navigation
 
@@ -742,6 +810,9 @@ interface StudioWorkspaceArchiveV2 {
   hash/version and must not change verification of existing subdoc snapshots.
 - Sending an email records the active email subdoc's exact headers/body. Other subdocs in the same
   container are not included in the email snapshot or sent to Gmail.
+- Contextual studio annotations and journal prose are excluded from each message by structure, not
+  by a best-effort text filter. Batch sending still records and transmits each selected email subdoc
+  independently; there is no batch-wide email body or provenance claim.
 - The productivity ledger records activity against the active `subdoc_id`, `doc_type`, and label. A
   subdoc with two memberships generates one writing session, not one row per container. Container IDs
   may be attached as local report dimensions, but must not duplicate time or word counts.
@@ -780,21 +851,24 @@ interface StudioWorkspaceArchiveV2 {
 
 ### D10. Phased build order
 
-1. **W1 — Surface:** make an email the page-sized surface; consolidate header, editor body, actions,
-   status, and concise disclosures. No archive change.
-2. **W2 — Local sequence:** introduce workspace manifest/index, active-subdoc switching, arrow controls,
+1. **W1 — Isolated surface:** make the default email one page-sized box; consolidate header, editor
+   body, actions, status, and concise disclosures. No archive change.
+2. **W2 — Contextual studio:** retain the writing page as an explicit alternate presentation; place
+   complete email subdocs with their bodies inside boxes, distinguish never-sent journal material,
+   support duplicate-as-new, and add selection/preflight/per-item batch outcomes.
+3. **W3 — Local sequence:** introduce workspace manifest/index, active-subdoc switching, arrow controls,
    two-finger/Shift-scroll navigation, outgoing flush, and static neighbour previews.
-3. **W3 — Overview:** add the manage-all shortcut/button, virtualised thumbnails, activation, reorder,
+4. **W4 — Overview:** add the manage-all shortcut/button, virtualised thumbnails, activation, reorder,
    creation, and remove-from-workspace. Still one container per subdoc by default.
-4. **W4 — Workspace container:** add multi-subdoc `.studio` import/export with independently
+5. **W5 — Workspace container:** add multi-subdoc `.studio` import/export with independently
    verifiable subdoc bundles, membership management, and self-contained export.
-5. **W5 — Sync fan-out:** add explicit many-to-many memberships, per-container queues/status, safe remote
+6. **W6 — Sync fan-out:** add explicit many-to-many memberships, per-container queues/status, safe remote
    re-read/merge, partial-failure recovery, and divergent-revision forking.
-6. **W6 — Certification:** full regression/mutation tests, real-browser gesture probes on macOS trackpad
+7. **W7 — Certification:** full regression/mutation tests, real-browser gesture probes on macOS trackpad
    and touch hardware, large-workspace performance certification, and multi-provider sync fault injection.
 
-W1–W3 can ship behind a feature flag before the archive/sync expansion. W4 must not become the default
-writer until round-trip export and failure-on-read guards pass. W5 must not ship until
+W1–W4 can ship behind a feature flag before the archive/sync expansion. W5 must not become the default
+writer until round-trip export and failure-on-read guards pass. W6 must not ship until
 multi-target fault injection proves that one unreadable destination cannot damage another.
 
 ### D11. Acceptance criteria
@@ -802,6 +876,14 @@ multi-target fault injection proves that one unreadable destination cannot damag
 #### Surface and navigation
 
 - An email renders as one page-sized box with its body inside it and no second paper visibly behind it.
+- New email work defaults to isolated mode; switching to contextual studio mode preserves the same
+  email identity, bytes, history, memberships, and send state.
+- Contextual studio mode keeps every message body inside its email box and allows clearly separate
+  journal/annotation prose around one or more boxes. That surrounding material never enters sent bytes.
+- Duplicating a message creates a new stable email identity; editing one variant cannot mutate another.
+- A batch confirmation names every recipient set and subject. All items record locally before the
+  first send, and mixed `sent`/`failed`/`status unknown` outcomes remain visible per message.
+- Unknown send status cannot be blindly retried; sent items cannot be edited in place.
 - Page and email subdocs can coexist in one ordered workspace and retain their distinct `doc_type`.
 - Arrow buttons, two-finger horizontal gesture, Shift+scroll, and overview activation reach the same
   deterministic next/previous item.
@@ -836,4 +918,4 @@ multi-target fault injection proves that one unreadable destination cannot damag
 
 ---
 
-*End of spec v0.4. Working design artifact for Inkwave; §B3.1–B3.5 define the optional connected Gmail mailbox and Part D defines the subdocument workspace extension.*
+*End of spec v0.5. Working design artifact for Inkwave; §B3.1–B3.5 define the optional connected Gmail mailbox and Part D defines isolated/contextual application surfaces, safe multi-message composition, and the subdocument workspace extension.*
