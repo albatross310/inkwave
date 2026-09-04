@@ -1,23 +1,16 @@
 // ─── Piece persistence — through the DOCUMENT, not beside it ─────────────────
 //
-// §1: "The whole thing … is bundled in a single `.studio` file (the Inkwave document container),
-// stored in the user's own storage."
+// ⚠ A PIECE IS AN ORDINARY DOCUMENT (`piece.id === doc.id`). This file used to write a SECOND
+// container at `music/<id>/piece.json`, and the cost was concrete: no edit history, no provenance
+// hashing, no session capture and no cloud sync, because those happen to DOCUMENTS. `savePiece`/
+// `loadPiece` are thin wrappers over the real store, and the old location holds only data to
+// migrate OUT. Do not grow a parallel container — and note that `listPieceIds` is DELETED rather
+// than moved: answering "which piece?" by scanning every document on disk is the whole-file-scan
+// class CLAUDE.md forbids, and a Piece-as-document does not have the question.
 //
-// THIS FILE USED TO BREAK THAT, AND THIS IS THE FIX. It wrote `music/<pieceId>/piece.json` — a
-// SECOND document container beside `documents/<id>/current.json`. §1 says not to have one, and the
-// cost was concrete: a Piece got no edit history, no provenance hashing, no session capture and no
-// cloud sync, because those happen to DOCUMENTS. Now `savePiece`/`loadPiece` are thin wrappers over
-// the real document store, `piece.id === doc.id`, and the only thing left in the old location is
-// data to migrate OUT of it (see `migrateLegacyPieces`).
-//
-// WHAT `listPieceIds` BECAME: nothing. It is DELETED, and the deletion is the point rather than a
-// tidy-up. It existed to answer "which piece am I looking at?" by listing a private store and taking
-// `[0]` — a question a Piece-as-document does not have, because the answer is "the document you have
-// open". Keeping it would have meant walking and parsing every document on disk to filter by
-// docType, which is precisely the whole-file-scan-on-load class CLAUDE.md forbids.
-//
-// ⚠️ STORAGE POSTURE: documents are written to OPFS in the clear. There is no at-rest encryption in
-// this build (verified in the code — see types.ts). Do not write copy claiming there is.
+// ⚠️ STORAGE POSTURE: documents are written to OPFS in the clear. There is NO at-rest encryption in
+// this build. Do not write copy claiming there is.
+// → docs/archive/music-module-build.md#piecestore
 
 import { v4 as uuidv4 } from 'uuid'
 import { readDocument, saveDocument } from '../storage/opfs'
@@ -27,9 +20,9 @@ import type { AssetRef, Piece } from './types'
 
 const ROOT = 'music'
 
-// The asset path is UNCHANGED by this migration, and deliberately: `piece.id === doc.id`, so
-// `music/<id>/assets/<ref>` names the same bytes it always did. A Piece written before today keeps
-// its pages without a single byte moving — only the JSON that describes them relocates.
+// The asset path is UNCHANGED by the migration, deliberately: `piece.id === doc.id`, so
+// `music/<id>/assets/<ref>` names the same bytes it always did and an older Piece keeps its pages
+// without one byte moving — only the JSON describing them relocates.
 function assetPath(pieceId: string, ref: AssetRef): string[] { return [ROOT, pieceId, 'assets', ref] }
 function legacyPiecePath(pieceId: string): string[] { return [ROOT, pieceId, 'piece.json'] }
 
@@ -59,23 +52,14 @@ async function removeFile(path: string[]): Promise<void> {
 /**
  * Save a Piece by saving its DOCUMENT.
  *
- * ⚠️ **NEVER WRITE TO A TARGET YOU HAVE NOT JUST READ, AND NEVER TREAT A FAILED READ AS AN ABSENT
- * ONE** — `DocRead`'s rule (storage/opfs.ts), and the first version of this function broke it. It
- * read `loadDocument(id) ?? newPieceDocument()`, so a read that ERRORED (a private window, a quota
- * fault, a transient OPFS failure) collapsed to `absent`, minted a FRESH EMPTY document, and
- * blind-overwrote the student's real Piece with it. That is the incident that type exists to
- * prevent, reproduced in eleven characters — I wrote it without noticing, which is the whole
- * argument for the union: the compiler is what caught it, not care.
+ * ⚠️ NEVER WRITE TO A TARGET YOU HAVE NOT JUST READ, AND NEVER TREAT A FAILED READ AS AN ABSENT ONE
+ * — `DocRead`'s rule, which the first version of this function broke in eleven characters
+ * (`loadDocument(id) ?? newPieceDocument()` minted a blank over a real Piece on any read error).
+ * THROWS on a failed read AND a failed write: a silent save failure is data loss.
  *
- * THROWS on a failed read AND on a failed write. A silent save failure is data loss; the editor's
- * autosave follows the same rule ("NEVER swallow a failed autosave"), because a student who keeps
- * annotating a piece that stopped persisting loses the lesson.
- *
- * THE TITLE IS `withPieceTitle`'S JOB, not this function's. It used to be done here and inline
- * (`title: piece.title || doc.title`) while `withPieceTitle` — which documents itself as "the one
- * function that keeps them so" — sat with zero callers and DIFFERENT semantics for a blank title.
- * Two rules for one question, the live one undocumented. There is now one rule and it is the one
- * with the comment on it.
+ * ⚠ THE TITLE IS `withPieceTitle`'S JOB, never inlined here — an inline copy and that function had
+ * DIFFERENT semantics for a blank title, with the live one undocumented.
+ * → docs/archive/music-module-build.md#store-read-before-write
  */
 export async function savePiece(piece: Piece): Promise<void> {
   const read = await readDocument(piece.id)
@@ -86,8 +70,8 @@ export async function savePiece(piece: Piece): Promise<void> {
   const doc = read.kind === 'found' ? read.doc : newPieceDocument({ title: piece.title })
   await saveDocument(withPieceTitle({
     ...doc,
-    // `piece.id` is authoritative: the caller holds the Piece, and a fresh document minted above
-    // carries its own uuid, which would orphan every asset already written under `piece.id`.
+    // `piece.id` is authoritative: a freshly minted document carries its own uuid, which would
+    // orphan every asset already written under `piece.id`.
     id: piece.id,
     docType: 'music',
     piece: { ...piece, updated_at: new Date().toISOString() },
@@ -95,38 +79,30 @@ export async function savePiece(piece: Piece): Promise<void> {
 }
 
 /**
- * Load a Piece from its document.
- *
- * `null` means **the document is genuinely not there** — safe to create one. A failed READ THROWS
- * rather than returning null, for the same reason `savePiece` refuses to write on one: if a read
- * error read as "no piece", the studio would open an empty Piece over the top of a real one and the
- * student would annotate into the replacement. Absence and ignorance are different answers.
+ * Load a Piece from its document. `null` means the document is genuinely NOT THERE — safe to create
+ * one. ⚠ A failed READ THROWS: if a read error read as "no piece", the studio would open an empty
+ * Piece over a real one and the student would annotate into the replacement. Absence and ignorance
+ * are different answers. → docs/archive/music-module-build.md#store-read-before-write
  */
 export async function loadPiece(pieceId: string): Promise<Piece | null> {
   const read = await readDocument(pieceId)
   if (read.kind === 'error') throw read.error
   if (read.kind === 'absent') return null
-  // `isPieceDocument` is THE definition of "is this a Piece?" — this function used to inline its own
-  // copy of it, which is how a predicate documented as "the ONE definition" ends up with no callers.
+  // ⚠ `isPieceDocument` is THE definition of "is this a Piece?" — inlining a copy is how a predicate
+  // documented as "the ONE definition" ends up with no callers.
   return isPieceDocument(read.doc) ? read.doc.piece ?? null : null
 }
 
 // ─── The legacy migration ────────────────────────────────────────────────────
 
 /**
- * Move a Piece out of the old parallel container and into its document.
+ * Move a Piece out of the old parallel container and into its document. IDEMPOTENT AND ONE-WAY —
+ * ⚠ the DELETE is what makes it a migration rather than a fork with two writers, since two copies of
+ * one Piece produce "my annotation came back after I deleted it".
  *
- * IDEMPOTENT AND ONE-WAY. It reads `music/<id>/piece.json`, writes the Piece onto the document, then
- * DELETES the old file — so a second run finds nothing and does nothing. The delete is what makes it
- * a migration rather than a fork with two writers: leaving the old file would mean two copies of one
- * Piece, and the next bug is "my annotation came back after I deleted it".
- *
- * THE DOCUMENT WINS A TIE, deliberately. If a document already has a Piece, the legacy file is stale
- * by construction — it can only have been written by a build that predates this one, while the
- * document's copy is what every write since has gone to. Overwriting live data with an older
- * snapshot is the 2026-07-05 truncation incident's shape, and this is the cheap way not to repeat it.
- *
- * @returns the ids migrated.
+ * ⚠ THE DOCUMENT WINS A TIE: a legacy file beside a document that already has a Piece is stale by
+ * construction, and overwriting live data with an older snapshot is the 2026-07-05 truncation
+ * incident's shape. → docs/archive/music-module-build.md#store-migration
  */
 export async function migrateLegacyPiece(pieceId: string): Promise<boolean> {
   const f = await readFile(legacyPiecePath(pieceId))
@@ -149,8 +125,8 @@ export async function migrateLegacyPiece(pieceId: string): Promise<boolean> {
 }
 
 /**
- * Every id that still has a legacy piece file. The ONLY reason this walks the old directory: to
- * empty it. It is not a piece index and must not become one.
+ * Every id that still has a legacy piece file. ⚠ The ONLY reason this walks the old directory is to
+ * EMPTY it. It is not a piece index and must not become one.
  */
 export async function legacyPieceIds(): Promise<string[]> {
   try {
@@ -179,17 +155,14 @@ export async function migrateLegacyPieces(): Promise<string[]> {
 
 // ─── Assets ──────────────────────────────────────────────────────────────────
 //
-// Page images stay OUT of the document JSON and are referenced by `AssetRef` — the same treatment
-// the app already gives PDFs. Inlining base64 would put a decode of every page on the open path,
-// which is the exact class of bug that cost this app ~10s per load (CLAUDE.md: `blobToBase64`, the
-// heartbeat, the OTS sweep).
+// Page images stay OUT of the document JSON, referenced by `AssetRef` — the treatment PDFs already
+// get. Inlining base64 puts a decode of every page on the open path, the class of bug that cost this
+// app ~10s per load.
 //
-// ⚠️ TO BE TAKEN FROM THE MEDIA LANE, NOT KEPT. Its ruling and this lane's agree — "a photo LIVES IN
-// a document, it does not BECOME one" — so `importMedia`/`mediaStore` owns getting bytes in, and
-// "turn this photo into a piece" READS an asset it already put there. That lane is not in this tree
-// yet (`toolbarContract.SLOT_LIVE.media` is still `() => false`, "awaiting the media-import lane"),
-// so these primitives stand in. When it lands, DELETE these and take its store — two importers is
-// the fork this whole file exists to atone for.
+// ⚠️ TO BE TAKEN FROM THE MEDIA LANE, NOT KEPT. That lane owns getting bytes in, and "turn this photo
+// into a piece" READS an asset it already put there. These primitives stand in until it lands; when
+// it does, DELETE them — two importers is the fork this whole file exists to atone for.
+// → docs/archive/music-module-build.md#store-assets
 
 export async function putAsset(pieceId: string, blob: Blob, ext = 'png'): Promise<AssetRef> {
   const ref = `${uuidv4()}.${ext}`
@@ -202,11 +175,9 @@ export async function getAsset(pieceId: string, ref: AssetRef): Promise<Blob | n
 }
 
 /**
- * An object URL for a stored asset, plus its revoker.
- *
- * The caller MUST revoke. An object URL pins its blob for the document's lifetime, and a Piece is a
- * stack of multi-megabyte page images — leaking these is how a review session that flips through
- * pages ends up holding every page it ever showed.
+ * An object URL for a stored asset, plus its revoker. ⚠ THE CALLER MUST REVOKE: an object URL pins
+ * its blob for the document's lifetime, and a Piece is a stack of multi-megabyte page images, so
+ * leaking these is how flipping through pages ends up holding every page it ever showed.
  */
 export async function assetUrl(pieceId: string, ref: AssetRef): Promise<{ url: string; revoke: () => void } | null> {
   const blob = await getAsset(pieceId, ref)
