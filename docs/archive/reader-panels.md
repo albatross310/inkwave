@@ -610,3 +610,484 @@ The surviving rule is the one beside the skip, with the historical hazard folded
 clause; the flag guard now says DEFAULT ON and states the rule that actually governs that line
 (read the flag per effect, never from a cached resolve — `liveFrameFlag.ts` sets `cache: false`
 for exactly this reason).
+
+---
+
+# <a id="address"></a>`reader/address.ts` — what a typed string means, and which mode can serve it
+
+Pure functions over URLs: no React, no DOM, no fetch, no module state. They were declared inside
+`SourceBrowser.tsx` and exported from it, and `components/address.test.ts` — 28 tests — already
+imported them from there, so the module boundary this file draws was one the tests had assumed for
+some time without it existing.
+
+Keeping them out of the component matters for one reason beyond tidiness: these rules decide whether
+a search becomes Google-in-a-frame or a reader fetch, and that decision is read from THREE places in
+the panel (the address bar, `go()`, and the framing effect). A second copy of it is how the address
+bar and the navigator start disagreeing about what the same string means — which is why `canFrameRef`
+exists in the component. One definition, three readers.
+
+## <a id="addr-google-stale"></a>⚠ A BANNER THAT OUTLIVED ITS OWN MEASUREMENT — found and merged 2026-09-05
+
+`GOOGLE_SEARCH_URL` carried an 18-line banner concluding:
+
+> So the rule is not "Google or DuckDuckGo", it is "which mode can serve a search at all":
+>   with framing  → GOOGLE, in the LIVE frame, where its own JavaScript runs and it is really Google.
+>   without       → DuckDuckGo's no-JS HTML endpoint, in the READER…
+
+**Every clause of that conclusion is contradicted by this same file, ~100 lines further down, and by
+a test.** `searchUrlFor`'s own docblock records the later measurement — google.com/search frames
+successfully and then REDIRECTS ITSELF to `/sorry/index`, its anti-abuse page, which Peter hit
+immediately ("google search aren't [working]") — and `address.test.ts` carries
+*"GOOGLE_SEARCH_URL is not used as a search endpoint by any path"*, asserting `searchUrlFor(true)`
+and `searchUrlFor(false)` are both something else. The no-framing half is stale too: the reader's
+engine has not been DuckDuckGo since 2026-08-31.
+
+The constant is still right to exist — `isSearch` and the copy both reason about Google — and its
+test is a real guard against a regression re-pointing search at it. What was wrong was a banner
+stating a routing rule the code does not implement, in the most emphatic voice in the file. The
+DURABLE half of it survives as the rule at the constant, because it is what stops the idea being
+retried:
+
+* **READING: Google can never be read here.** google.com/search fetched server-side returns ONE block
+  and the words "click here" — its results are JavaScript-rendered. No extension changes that:
+  fetching from the writer's own address changes WHO ASKS, not what comes back.
+* **FRAMING: the header is strippable, and the old note that said otherwise was right for a web page
+  and wrong once the extension shipped** (2026-08-30). Every engine sends `X-Frame-Options` or
+  `frame-ancestors 'self'`; an extension strips those before the browser reads them. PROVED headed,
+  `pnpm prove:framing`: REFUSED → framed.
+* **And Google still declines to serve a search inside a frame anyway** — that is its policy, not a
+  header we can strip.
+
+## <a id="addr-search-chain"></a>The reader's engine is the one our SERVER can reach — and it is a CHAIN
+
+⚠ THE READER'S SEARCH ENGINE IS THE ONE OUR SERVER CAN ACTUALLY REACH (2026-08-31). It was
+html.duckduckgo.com, and Peter reported "not searching anything" five times in one evening. Measured
+through the DEPLOYED /api/reader, same query, same minute:
+
+    html.duckduckgo.com   502  0 blocks      lite.duckduckgo.com  502  0 blocks
+    www.mojeek.com        502  0 blocks      search.marginalia.nu 200  119 blocks / 69 links
+
+**Search engines refuse a data centre and serve a person.** So the READER path — the one that runs
+with no extension installed — had never worked and could never have worked; it was a fallback to a
+wall. Every "it's broken" was that, and I kept fixing the routing that led to it instead of the
+destination.
+
+Marginalia is not a compromise for this app: it deliberately indexes non-commercial, long-form,
+text-heavy pages. Measured on "identity over time philosophy" it returns the SEP entry, a philosophy
+department's event page and a course's lecture notes — which is what an honours student is looking
+for, and closer to it than a commercial engine's first page.
+
+⚠ A CHAIN, NOT AN ENGINE — because a single one is measurably not enough. Called four times in a row
+through the deployed /api/reader with one query, old-search.marginalia.nu answered
+**170 / 170 / 3 / 3** blocks: it works and then intermittently returns nothing. A search box that is
+empty half the time is what Peter reported five times, and pinning one engine — however well it
+scored once — reproduces that. The shipped chain: Marginalia (170 blocks / 90 linked at best) then
+SearXNG (104 / 66, and steady across the runs where marginalia collapsed to 3).
+
+`SEARCH_REFUSED` records what a server cannot READ (502, or a challenge page with no results) so
+nobody re-adds them from memory. It is NOT a blocklist for the live frame — duckduckgo.com frames
+beautifully, and `LIVE_SEARCH_URL` is the real duckduckgo.com used exactly where the extension can
+frame it (5,993 characters, 34 result links, its own styling). Two endpoints because they answer two
+different questions: "what can a server fetch and read" and "what can this browser display".
+
+`LEGACY_DDG_SEARCH` is kept so `isSearch` still recognises old URLs.
+
+## <a id="addr-external-hosts"></a>⚠ COUNTING LINKS IS NOT COUNTING RESULTS
+
+The first version of `searchLooksEmpty` got this wrong in the way that matters. MEASURED through the
+deployed function: bing answers with 31 linked blocks, **every one of them pointing back at
+bing.com** — pagination, "images", "next page". A naive link count scores that as a healthy search
+and the chain never falls forward, so the writer sees a page of an engine's own furniture and no
+results at all.
+
+So the signal is the number of DISTINCT EXTERNAL HOSTS. It is what a result IS: somewhere else to go.
+It also degrades correctly — an engine serving a challenge page or its own index has zero, whatever
+its status code says, and every one of those answers 200. `externalHostCount` is pure so the rule can
+be tested without a browser and the panel cannot grow a second copy of it; an engine's own redirector
+counts as the engine, not as a destination.
+
+## <a id="addr-ecosia"></a>Ecosia was asked for and is refused ON MEASUREMENT
+
+Peter, 2026-08-30: *"lets use ecosia instead of duckduckgo. its more sexy"*. It is a
+reasonable-sounding idea, so record why it cannot work or the next reader will try it again. Measured
+both paths, headed, with the shipped framing rule:
+
+* READ (server or extension fetch): **403**, 2 blocks, 0 links — Cloudflare refuses the fetch.
+* FRAMED, with the extension stripping the framing headers: it frames, and then renders
+  **"Just a moment…"** — a Cloudflare interstitial. 147 characters, 0 result links.
+
+Shipping it would put a challenge page where the results go. It is not a header we can strip and not
+a path an extension changes: **Cloudflare is judging the CLIENT, and we are not one it trusts.**
+
+The same measuring run found the answer he actually wanted, though: with framing, the real
+`duckduckgo.com` frames and renders in full. So the ENGINE does not follow the capability — Google
+still cannot serve a framed search — but the ENDPOINT does: the pretty one where it works, the plain
+one a server fetch can read where it does not.
+
+## <a id="addr-inkwave-itself"></a>⚠ INKWAVE MAY NOT OPEN INKWAVE
+
+2026-08-30 — Peter loaded `https://iwzero.me` in the panel. Today it shows the browser's broken-page
+icon, because the app sends `x-frame-options: DENY` and `frame-ancestors 'none'`. **That is not what
+makes this a refusal**: the extension's rule STRIPS both, so once it is installed this would very
+likely start working — and working is the problem.
+
+A framed Inkwave boots a SECOND full editor inside the first: a second Tiptap, a second OPFS client, a
+second provenance session — and a second claimant on the SAME document lock (`storage/tabDoc.ts`
+`claimDocLock`). This repo has already lived through one tab holding two document locks: StrictMode's
+double-invoke did it by accident and the writer-facing symptom was "This document is open in another
+window" on a plain refresh. Framing ourselves reproduces that on purpose. And the inner copy has a
+reader panel of its own, so it recurses.
+
+MODE-INDEPENDENT deliberately: reader mode is no better, because the app is a client-rendered SPA and
+extracting its shell yields a page with no prose in it.
+
+The origins come from `APP_INITIATORS` (reader/framingRule.ts) — the SAME list the extension scopes
+its rule to. A private copy would be how a rename puts a guard quietly to sleep.
+
+## <a id="addr-playable"></a>Playable media — why ChatGPT can frame YouTube and a web app cannot
+
+Peter, 2026-08-28: *"if gpt can play youtube then surely we can?"* — with a screenshot of ChatGPT
+showing youtube.com in a panel, tabs and all.
+
+**THE DIFFERENCE IS NOT EFFORT, IT IS WHAT KIND OF PROGRAM EACH ONE IS.** `X-Frame-Options` and
+`frame-ancestors` govern EMBEDDING ONE PAGE INSIDE ANOTHER PAGE, and that is the only thing a web app
+can do: `<iframe>` (and `<embed>`/`<object>`) are the entire vocabulary, and all of them are covered.
+That restriction is not an oversight we can route around — it is what stops a page wrapping your bank
+in an invisible frame, so no browser offers an escape hatch. ChatGPT's panel is not an iframe: it is a
+NATIVE app hosting a real browser view (Electron/WKWebView), which is a TOP-LEVEL browsing context,
+and the header simply does not apply to it. The day Inkwave ships as a desktop app it gets the same
+thing for free; as a web page it never can.
+
+**BUT VIDEOS ARE A DIFFERENT MATTER, and here the answer is simply yes.** YouTube publishes an
+endpoint whose whole purpose is to be embedded, and it sends NO framing restriction at all (checked:
+`/embed/` returns 200 with no X-Frame-Options and no frame-ancestors, unlike `/watch`). So a YouTube
+link is rewritten to it and plays. Same for Vimeo. `-nocookie` is the same player without YouTube
+setting tracking cookies for a video the reader opened from inside their own document; it frames
+identically (checked).
+
+## <a id="addr-hygiene"></a>Tracking parameters, DuckDuckGo's redirector, and the known-refusers list
+
+**TRACKING PARAMS.** Peter, 2026-08-28, seeing `?utm_source=chatgpt.com` in the address bar: they are
+added by whoever gave you the link, not by us — but a reader is a place you READ, and carrying
+someone's campaign tag into every request and every citation is noise at best. Stripped on navigation;
+nothing else about the URL changes.
+
+**THE REDIRECTOR.** DuckDuckGo wraps every result in `/l/?uddg=<encoded>`. Unwrap it, so clicking a
+result goes to the SITE — otherwise every navigation from a search lands on a redirector, which the
+reader then has nothing to extract from.
+
+**`KNOWN_NO_FRAME`.** Hosts known to send X-Frame-Options / frame-ancestors. NOT a security control and
+never exhaustive — the load deadline is what catches the general case; this just skips the wait for
+the ones we have already met (Peter hit abc.net.au and youtube.com within a minute of each other).
+
+---
+
+# <a id="pagesource"></a>`reader/pageSource.ts` — where the reader's fetch actually happens
+
+## <a id="ps-why-extension"></a>The writer's own browser first, our server second
+
+Peter, 2026-08-28: *"is it possible for us to run the window from the user's IP?"* The reason the
+question came up is MEASURED and is not going to be argued away by tuning a user-agent string:
+against the DEPLOYED endpoint, duckduckgo, lite-ddg and mojeek answer "fetch failed", searx.be answers
+"Verifying your browser…", priv.au serves a captcha and marginalia returns 5 blocks and ZERO links,
+while wikipedia and plato.stanford.edu are served normally. **A search engine will serve a person and
+refuse a data centre. The extension IS a person's browser.**
+
+⚠ WHAT THE EXTENSION PATH ACTUALLY BUYS, STATED PRECISELY, because the UI quotes this module:
+
+* the request leaves the WRITER'S OWN ADDRESS, not a Vercel IP. That is Peter's question and it is
+  unambiguously true.
+* our server never learns the URL, because it is not in the path at all. Strictly stronger than the
+  "sees the address for an instant, logs nothing" posture the server endpoint documents.
+* cookies: an extension-worker fetch is cross-site by initiator, so a site's SameSite=Lax/Strict
+  cookies are NOT sent. Some session state travels, some does not, and which is the site's choice.
+  **UNVERIFIED per-site, so the UI claims the ADDRESS and says nothing about being signed in.**
+
+## <a id="ps-one-extractor"></a>ONE extractor, two fetchers — and still no HTML reaches the renderer
+
+`extract.mjs` was split out of `api/_reader-core.mjs` for exactly this and is imported here — the same
+function turns HTML into blocks whichever machine fetched it. A client-side second copy would drift
+the first time either side was tuned, and both feed one renderer (the pmToText/textMap lesson, one
+directory along). `pageSource.test.ts` pins that the extension path's output is byte-identical to
+calling the extractor directly.
+
+⚠ AND STILL NO HTML REACHES THE RENDERER. The extension hands back an HTML STRING — the one thing
+`api/_reader-core.mjs`'s header says must never cross — and it is consumed in this module by the
+extractor, which returns `{kind, text, href}`. Nothing downstream of `loadSource` has ever seen
+markup, so injection stays **unrepresentable rather than filtered**. The string does exist in this
+origin's memory for the length of one call; it is never assigned to innerHTML, never parsed by
+DOMParser, never inserted. (DOMParser would be the tempting "better" extractor and it is the one thing
+this must not become: `new DOMParser().parseFromString(html, 'text/html')` builds real elements — img
+src fires no request in a detached document today, but that is a browser behaviour, not a guarantee we
+control, and the tolerant scanner needs no such promise.)
+
+The extractor is untyped Node-free ESM, so its shape is asserted at the boundary here and nowhere else.
+
+## <a id="ps-ask"></a>ASK, DO NOT WAIT TO BE TOLD
+
+`ask()` is one request, one reply, correlated and deadlined — the shape all the exchanges share.
+
+An "the extension is here" announcement is a ONE-SHOT ASYNC SIGNAL and this repo has the scar tissue:
+a listener attached after it fired waits for ever, silently, and a feature that is merely disabled is
+indistinguishable from a feature nobody built. So the page asks; `null` back means the deadline
+passed, which is an ANSWER and not a hang.
+
+The uuid is not decoration either: without it, a late reply to an EARLIER question satisfies a later
+one, and the reader believes an extension that has since gone away. And the subscription happens
+BEFORE the post, because the content script may answer synchronously.
+
+`ExtensionState` has three members and the middle one is the point: `blocked` (installed and
+answering, but not granted permission to fetch) must never be silently treated as `absent` — it is one
+click away from `ready` and the UI can say so. `absent` covers "not installed" and "not answering"
+together, because from here they are indistinguishable and the writer's remedy is the same.
+
+The `Port` bridge is injected so these rules can be tested without a browser or an extension — which,
+given nobody can load an unpacked extension inside `pnpm test`, is the difference between a guard and
+a hope. The real bridge delivers only messages from THIS window and THIS origin, the same two checks
+`citations/extensionChannel.ts` makes.
+
+## <a id="ps-memo"></a>The session's answer, asked once
+
+The probe costs a round trip, and re-running it per navigation would put its deadline in front of
+every link the reader follows. So it is memoised for the page's lifetime — with two rules that are
+easy to get wrong and expensive to get wrong:
+
+* **NEVER CACHE THE SSR ANSWER.** There is no window during prerender, so an eager module-scope probe
+  would bake 'absent' into the build's first paint and the extension would be invisible until a
+  reload. `typeof window === 'undefined'` returns without writing the memo.
+* **`refresh` EXISTS BECAUSE THE ANSWER CHANGES.** Granting the permission happens in the extension's
+  popup, which cannot tell the page anything; the reader re-asks when the window regains focus, which
+  is exactly when the writer has come back from doing it.
+
+`_resetExtensionMemo` is exported rather than reached into, so the memo stays module-private and a
+test cannot accidentally depend on its shape.
+
+## <a id="ps-fallback"></a>⚠ THE FALLBACK IS FOR A FAILED FETCH, NOT FOR A DISAPPOINTING PAGE
+
+If the extension fetched the page and the extractor found no prose in it, that IS the answer: falling
+back would send the address to our server for a second opinion the writer did not ask for, **on the
+one path whose whole point is that our server is not in it.** A JS-rendered app has no article in its
+HTML from anyone's IP. The reader offers Live mode for that, as it already did.
+
+The caller is TOLD which machine fetched, because a privacy posture nobody can see is a privacy
+posture nobody has.
+
+Two smaller rules on the same surface. `openExtensionPopup` returns false when it could not — INCLUDING
+when it did not answer at all — and the caller MUST still show the writer how to do it by hand:
+`action.openPopup()` is a recent API and may simply refuse, and a button whose only fallback is
+silence is the dead button this reader has already been bitten by twice. And `releaseFraming` is
+fire-and-forget BY DESIGN: it runs from the panel's teardown, and on a tab close there is no later turn
+in which an ack could arrive — waiting would make the common path the one that never completes. The
+rule is session-scoped in the worker precisely so a lost release cannot leave framing open past the
+browser session.
+
+`allowFramingVia` answering true means A RULE WAS INSTALLED — it does not mean the page will render,
+and the caller must not tell the writer otherwise. Measured in a real browser
+(docs/SEARCH-AND-THE-EXTENSION.md): abc.net.au and youtube's own watch page render properly, facebook
+still refuses in its BODY where there is no header to strip, google served a CAPTCHA, and ANY logged-in
+site renders SIGNED OUT because `SameSite=Lax` — the default a cookie gets when it says nothing — is
+dropped in a third-party frame. That last one is the browser's own rule and no header we remove
+touches it.
+
+## <a id="ps-pdf-routes"></a>Fetching a PDF: two routes, and the server is deliberately not a third
+
+Peter: *"also can we have a downloads."* Bringing a browsed PDF into the citation library needs its
+BYTES, and where they can come from is not a preference — it is decided by two rules, one of which is
+OURS:
+
+* **THE EXTENSION CAN FETCH ANYTHING.** It holds `<all_urls>`, neither CORS nor our CSP applies to it,
+  and the request leaves the writer's own address like every other reader fetch.
+* **THE PAGE CAN FETCH ALMOST NOTHING, AND THE REASON IS OUR OWN CSP, NOT CORS.** Measured in a real
+  browser: `middleware.ts` sets `connect-src 'self' <named hosts>`, so a cross-origin request from
+  here is refused BY US before CORS is consulted. See `pdfRouteFor` for why that header stands and the
+  feature bends instead.
+
+So `pdfRouteFor` decides FIRST and the panel draws accordingly — there is no doomed attempt whose only
+product is a console error and a wasted press. What this must never do is FAIL SILENTLY:
+`savePdfSource.ts` turns each code into a sentence, and the panel offers the extension at exactly the
+wall it would remove.
+
+⚠ THE SERVER IS DELIBERATELY NOT A THIRD ROUTE. `api/pdf.mjs?proxy=` was removed on 2026-07-08 for
+being slow, often blocked, and the one PDF path that passed a writer's reading through our machine.
+Re-adding it here would undo that decision quietly, inside a feature about convenience.
+
+⚠ `no route` IS AN ANSWER, NOT A BUG. When the extension is absent AND the host refuses cross-origin
+reads there is genuinely nothing this origin can do, and saying so — with the extension offered beside
+it — is the honest end of the path. Guessing, retrying, or quietly storing an error page is not.
+
+And a refusal the WRITER can act on must survive the fallback: `needs-permission`, `too large` and
+`not a pdf` are verdicts about THIS FILE, and reporting the direct fetch's generic CORS failure over
+the top of one of them would send the writer looking in the wrong place. Everything else on the direct
+arm is the browser refusing to let us READ the reply — an opaque CORS failure with no detail, which is
+exactly the wall the extension removes.
+
+---
+
+# <a id="extensionprotocol"></a>`reader/extensionProtocol.ts` — the reader↔extension wire
+
+## <a id="ep-one-channel"></a>One channel, and the names live in `src/`
+
+⚠ ONE CHANNEL, NOT A SECOND ONE. The bridge already exists: the app talks to
+`extension-src/entrypoints/content-inkwave.ts` with `window.postMessage`
+(`citations/extensionChannel.ts` is the other end of it), and that content script talks to the
+background worker with `runtime.sendMessage`. `cite/visitSource` → `inkwave:watchPanel` is the
+precedent this follows verbatim. A parallel port would be a second thing to keep in sync with the
+first.
+
+⚠ AND THE NAMES LIVE IN `src/`, BECAUSE THE EXTENSION IMPORTS FROM `src/` AND NEVER THE REVERSE (the
+`@inkwave/citations` alias in `extension-src/wxt.config.ts`). A copy of these strings on the extension
+side is how a rename becomes a feature that silently stops answering — which, on this channel, is
+**indistinguishable from the extension not being installed.**
+
+## <a id="ep-shape-guards"></a>What the shape guards are actually for
+
+The page listens on `window`, so anything in this origin could post one of these. That is the same
+trust boundary `citations/extensionChannel.ts` already sits on, and it is not the interesting one: a
+script running in this origin already holds the writer's thesis and their signing session. What these
+guards are for is the ordinary case — a message from some other library that happens to share a field
+name must never be read as an answer to OUR question, and an answer to an EARLIER question must never
+satisfy a later one (hence the uuid, checked in the guard and not by the caller).
+
+`NEEDS_PERMISSION` is the one error the UI must ACT on rather than merely report: the extension is
+installed but has not been granted permission to fetch, which one click in its popup fixes. Everything
+else on this path is an ordinary failure and falls back to the server.
+
+`EXT_MAX_BYTES` is lower than the server core's 4MB because every byte crosses `runtime.sendMessage`
+AND `window.postMessage` as a JSON string, and a page that large has no article in it anyway.
+
+## <a id="ep-grant"></a>⚠ THE GRANT CANNOT HAPPEN IN THE APP
+
+`permissions.request()` is honoured only from a user gesture inside an EXTENSION PAGE — not from a web
+page, not from a content script (which has no `permissions` API at all), not from the background
+worker. So the most the reader can do at the moment the permission would help is ask the extension to
+open its own popup, where the real button lives. `ok:false` is an ordinary answer — `action.openPopup()`
+is recent and may refuse — and the UI must therefore carry the manual instruction whether or not this
+succeeds, rather than depending on it.
+
+## <a id="ep-framing"></a>Live view: letting a page be framed at all, and the honest half
+
+Peter, 2026-08-30: *"build the extension."* Reader mode extracts an article's TEXT; live view shows the
+page itself, and most of the web refuses to be framed — `X-Frame-Options` and CSP `frame-ancestors` are
+enforced by the BROWSER, so no web app can opt out of another site's refusal. An extension can, by
+removing those response headers before the browser reads them.
+
+MEASURED (headed Chromium, with a canary rule proving the ruleset live and a control run proving
+refusals detectable — docs/SEARCH-AND-THE-EXTENSION.md): google, youtube/watch, abc.net.au and facebook
+all go REFUSED → framed. abc.net.au renders 14,921 chars of real page; youtube renders its actual watch
+page. No framebusting script fired on any of them.
+
+⚠ AND THE HONEST HALF, MEASURED IN THE SAME RUN: `SameSite=Lax` — which is what a cookie gets when it
+does not say otherwise — and `Strict` are BOTH dropped in a third-party frame; only `SameSite=None`
+survives. So a logged-in site frames and renders SIGNED OUT, and no header we remove can change that:
+it is the browser's third-party context rule, not a header. Facebook additionally refuses in the BODY,
+where there is nothing to strip. **The UI must say this, because a signed-out page with no explanation
+reads as Inkwave being broken.**
+
+⚠ WHY THIS IS SCOPED AND NOT A STANDING RULESET. Removing framing protection browser-wide would make
+every site the writer visits clickjackable — a citation tool turning into a hazard on pages it has
+nothing to do with. So the rule is (a) SESSION-scoped, added when the reader opens a live page and
+removed when it closes, (b) restricted by `initiatorDomains` to Inkwave's own origins, so it can only
+ever apply to a frame THIS APP created, and (c) restricted to `sub_frame`. A rule that outlives the
+panel is the bug this shape exists to prevent.
+
+The rule's own shape — and `APP_INITIATORS` — live in `./framingRule.ts`, next to the scoping argument
+they exist to enforce. `extensionProtocol.ts` stays the WIRE: names and shape guards only.
+
+## <a id="ep-file-message"></a>Fetching a FILE is a second message, and the bytes are base64
+
+⚠ WHY THIS IS A SECOND MESSAGE AND NOT A FLAG ON `reader/fetch`. That exchange is DEFINED to return
+text: `decodeHtml` (fetchRules.ts) throws `not html` on anything else, deliberately — "the reader has a
+separate answer for a PDF", as its own comment already said. Widening it would make one message whose
+reply is sometimes a string and sometimes bytes, and every existing caller would have to learn the
+difference. A separate pair keeps `FetchPageResult` exactly as narrow as it is, and keeps a page fetch
+**structurally incapable** of returning a binary blob.
+
+⚠ AND WHY THE BYTES ARE BASE64. `runtime.sendMessage` serialises as JSON — it is NOT structured clone —
+so an ArrayBuffer cannot cross the content-script↔worker hop intact. base64 is the honest cost of that
+boundary, and it is why `PDF_MAX_BYTES` exists at all. The page decodes it with `base64ToBlob`
+(citations/pdfStore.ts), the same native data-URL decode every other binary path here uses — **never a
+hand-rolled atob loop, which was a 20M-iteration main-thread stall the last time somebody wrote one.**
+
+`FetchFileResult.mime` is what the SERVER said — kept for the record and for the diagnosis in a
+refusal, and never what decides whether the bytes are stored.
+
+---
+
+# <a id="pdfaddress"></a>`reader/pdfAddress.ts` — a PDF found while browsing becomes a source
+
+## <a id="pa-the-ask"></a>The ask, and the observability boundary that decides the feature's shape
+
+Peter, 2026-08-30: *"also can we have a downloads"* — said while browsing in the source panel. Taken
+literally that is a downloads folder, which is not a thing this app has or should grow. He reads papers
+in order to CITE them, so the valuable reading of the ask is the one that closes that loop: the PDF he
+is looking at becomes a source, with its bytes where every other source PDF's bytes already live (OPFS
+`library/pdfs/`), so it opens in the PDF viewer he already has and appears beside its citation. The
+literal reading is answered too, and separately — the live frame's `sandbox` was missing
+`allow-downloads`, so an ordinary download link inside a framed page did nothing at all, silently.
+
+⚠ WHAT IS OBSERVABLE, AND IT DECIDES THE SHAPE OF THE WHOLE FEATURE. A cross-origin iframe tells the
+embedder NOTHING: not what was clicked, not that a navigation happened, not what came back. So
+"intercept the PDF he clicks in the live frame" is not a thing that can be built — by us or by anyone,
+in any browser. What the panel CAN see is its own address (`here`), which every link followed in READER
+mode passes through. That is the seam this feature stands on, and it is why the affordance is attached
+to the address rather than to a click.
+
+## <a id="pa-magic-bytes"></a>⚠ THE CONTENT-TYPE HEADER IS NOT THE AUTHORITY — THE BYTES ARE
+
+A publisher's "download PDF" link that has quietly become a login wall answers 200 with
+`content-type: application/pdf` and an HTML body often enough to matter. Storing that under a `.pdf`
+name gives the writer a source that opens to nothing, months later, with no way to tell what happened.
+`looksLikePdfBytes` is the gate that must pass before anything is written, and it reads the file's own
+magic (`%PDF-`).
+
+`looksLikePdfAddress` is deliberately conservative — it decides whether the panel offers to SAVE, and a
+false positive turns a readable article into a card that cannot fetch anything. It is also never the
+last word, since the bytes are checked before a single one is stored, so the worst a wrong answer can
+do is offer an action that then declines with a reason. Two shapes cover essentially every real case: a
+path ending `.pdf`, and the extension-less repository forms — arXiv's `/pdf/2301.12345`, and the
+`?…format=pdf` / `?…type=pdf` a journal platform hangs off an article id. **The parameter check is by
+NAME as well as value**: a bare `?q=pdf` is somebody searching for the word, and answering that with a
+save card is the panel telling the writer it found a file when it found a search.
+
+`PDF_MAX_BYTES` is 20MB: far above any paper, and also the practical ceiling of the wire this travels
+on when the extension fetches it. The bytes cross `runtime.sendMessage` (JSON, so base64) and then
+`window.postMessage`, which makes a 20MB file a ~27MB string in flight. That is a real cost paid once
+on an explicit press, and it is the reason the cap is a number rather than "as big as OPFS will take".
+An oversized file is REFUSED and NAMED, never truncated — the media importer's rule, for the same
+reason: a silently-degraded import is a file the writer believes they have.
+
+## <a id="pa-citekey"></a>A citekey for a PDF nobody has told us the author of
+
+⚠ IT IS A LABEL, NOT A CLAIM. `makeCitekey` (citations/cslMap.ts) builds `author + year + word` out of
+metadata; here there is none — a URL and a filename is genuinely all we know. So the key is derived
+from the filename, which is at least the publisher's own name for the thing and is what the writer will
+recognise in the panel. `addToLibrary` de-collides it (`freeCitekey`), and the entry is saved with
+author and year EMPTY on purpose, so the citation panel shows it as needing them rather than inventing
+an attribution the file never carried. An all-digit key (arXiv ids, DOI suffixes) is prefixed with the
+host so the library does not fill with keys that read as page numbers.
+
+Title case is not attempted either: a stem like `2301.12345v1` is not a title and dressing it up as one
+would be worse than leaving it plain.
+
+## <a id="pa-csp-wall"></a>⚠ THE WALL IS OUR OWN CSP, NOT CORS — measured, and it refuted the first design
+
+MEASURED IN A REAL BROWSER (`pnpm prove:reader`, 2026-08-30). The plan was "try the extension, fall
+back to a direct fetch" — reasonable, and WRONG, because the wall is not CORS. It is our OWN
+Content-Security-Policy: `middleware.ts` sets `connect-src 'self' <a named list of hosts>`, so a
+cross-origin request from this origin is refused BY US, before CORS is ever consulted:
+
+    Refused to connect because it violates the document's Content Security Policy
+
+That header is not a nuisance to route around. This origin holds the writer's thesis and their signing
+session, and the allow-list is what stops anything running here from talking to an arbitrary host.
+Widening it to `https:` to make a convenience feature work would be trading the document's own
+containment for a saved click — so the CSP stands, and the FEATURE bends.
+
+The consequence has to be visible in the UI rather than discovered by pressing: with no extension, a
+cross-origin PDF has NO route, and the card must say so up front instead of drawing a button that will
+always fail. **"Do not draw a button that does nothing" is this panel's own rule, and a button that
+reliably explains a wall is still a button that never does the thing it is labelled with.**
+
+`direct` is NOT dead code and is not decoration: `'self'` is in the CSP, so a PDF served from Inkwave's
+own origin genuinely fetches — and that is the case the browser probe exercises, since no probe can
+load an unpacked extension.
