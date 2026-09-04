@@ -40,6 +40,12 @@ describe('application surface resizing', () => {
     expect(screenAdjustedSurfaceWidth(0)).toBe(900)
   })
 
+  it('lets another application provide its own reference width without copying the mechanism', () => {
+    const profile = { screenWidthPx: 1920, surfaceWidthPx: 1200 }
+    expect(screenAdjustedSurfaceWidth(1440, profile)).toBe(900)
+    expect(surfaceWidthScale(990, 1440, profile)).toBe(1.1)
+  })
+
   it('stores a resize relative to the screen baseline rather than the browser window', () => {
     expect(surfaceWidthScale(990, 1728)).toBe(1.1)
     expect(Math.round(screenAdjustedSurfaceWidth(1512) * surfaceWidthScale(990, 1728))).toBe(867)

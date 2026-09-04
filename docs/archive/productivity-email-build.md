@@ -76,6 +76,9 @@ Application presentation remains separate from the document paper's magnify stat
 isolated-surface wrapper reuses the same fit ratio and 24px water boundary. Below the natural width it
 transform-shrinks the fixed layout and size-compensates its wrapper; at scale 1 there is no transform.
 Document presentation keeps the existing fixed-paper transform unchanged.
+The calibration and centred fit/resize wrapper are shared `ApplicationSurface` behaviour. A future
+tool can provide a different reference surface/display width profile without copying email code;
+contextual surfaces continue to bypass isolated fitting.
 
 ---
 

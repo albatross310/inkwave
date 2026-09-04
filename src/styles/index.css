@@ -1158,7 +1158,7 @@
     transform: scale(var(--iw-application-fit-scale, 1));
     transform-origin: top left;
   }
-  [data-iw-application="email"].iw-application-surface--isolated {
+  .iw-application-surface--isolated {
     width: var(--iw-application-default-width, 900px);
     margin-inline: auto;
   }
@@ -1260,7 +1260,7 @@
     width: 100% !important;
     height: auto !important;
   }
-  .inkwave-editor-surface.is-phone [data-iw-application="email"].iw-application-surface--isolated {
+  .inkwave-editor-surface.is-phone .iw-application-surface--isolated {
     width: 100% !important;
     max-width: 100%;
     transform: none !important;

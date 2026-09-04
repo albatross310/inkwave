@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { fitScaleForWidth, WATER_MARGIN_PX } from '../editor/magnify'
 import {
+  DEFAULT_APPLICATION_SURFACE_WIDTH_PROFILE,
   screenAdjustedSurfaceWidth,
   surfaceMinHeight,
   surfaceWidthLimits,
   surfaceWidthScale,
   symmetricSurfaceWidth,
+  type ApplicationSurfaceWidthProfile,
   type ApplicationSurfaceResizeEdge,
 } from './applicationSurfaceResize'
 
@@ -22,6 +24,8 @@ interface ApplicationSurfaceProps {
   mode?: ApplicationSurfaceMode
   nightable?: boolean
   resizable?: boolean
+  /** App-specific natural width on a reference display; fitting/resizing remain shared. */
+  widthProfile?: ApplicationSurfaceWidthProfile
   children: ReactNode
 }
 
@@ -39,8 +43,11 @@ export function ApplicationSurface({
   mode = 'isolated',
   nightable = false,
   resizable = false,
+  widthProfile = DEFAULT_APPLICATION_SURFACE_WIDTH_PROFILE,
   children,
 }: ApplicationSurfaceProps) {
+  const profileScreenWidthPx = widthProfile.screenWidthPx
+  const profileSurfaceWidthPx = widthProfile.surfaceWidthPx
   const surfaceRef = useRef<HTMLElement>(null)
   const fitBoxRef = useRef<HTMLDivElement>(null)
   const fitScaleRef = useRef(1)
@@ -63,7 +70,10 @@ export function ApplicationSurface({
 
     const naturalWidth = surface.offsetWidth
       || Number.parseFloat(surface.style.width)
-      || screenAdjustedSurfaceWidth(window.screen.width)
+      || screenAdjustedSurfaceWidth(window.screen.width, {
+        screenWidthPx: profileScreenWidthPx,
+        surfaceWidthPx: profileSurfaceWidthPx,
+      })
     const availableWidth = Math.max(60, container.clientWidth - 2 * WATER_MARGIN_PX)
     const scale = Math.min(1, fitScaleForWidth(availableWidth, naturalWidth))
     fitScaleRef.current = scale
@@ -71,17 +81,20 @@ export function ApplicationSurface({
     fitBox.style.height = `${surface.offsetHeight * scale}px`
     surface.style.setProperty('--iw-application-fit-scale', String(scale))
     surface.classList.toggle('iw-application-surface--fit-capped', scale < 1)
-  }, [])
+  }, [profileScreenWidthPx, profileSurfaceWidthPx])
 
   const persistWidth = useCallback((width: number) => {
     if (!surfaceRef.current) return
     const pixels = Math.round(width)
     surfaceRef.current.style.width = `${pixels}px`
     try {
-      localStorage.setItem(storedSizeKey(app, mode, 'widthScale'), String(surfaceWidthScale(pixels, window.screen.width)))
+      localStorage.setItem(storedSizeKey(app, mode, 'widthScale'), String(surfaceWidthScale(pixels, window.screen.width, {
+        screenWidthPx: profileScreenWidthPx,
+        surfaceWidthPx: profileSurfaceWidthPx,
+      })))
     } catch { /* private mode */ }
     syncFit()
-  }, [app, mode, syncFit])
+  }, [app, mode, profileScreenWidthPx, profileSurfaceWidthPx, syncFit])
 
   const persistHeight = useCallback((height: number) => {
     if (!surfaceRef.current) return
@@ -101,7 +114,10 @@ export function ApplicationSurface({
   useLayoutEffect(() => {
     if (mode !== 'isolated' || !surfaceRef.current) return
     const syncToScreen = () => {
-      const baseWidth = screenAdjustedSurfaceWidth(window.screen.width)
+      const baseWidth = screenAdjustedSurfaceWidth(window.screen.width, {
+        screenWidthPx: profileScreenWidthPx,
+        surfaceWidthPx: profileSurfaceWidthPx,
+      })
       surfaceRef.current?.style.setProperty('--iw-application-default-width', `${baseWidth}px`)
       if (resizable) {
         try {
@@ -122,7 +138,7 @@ export function ApplicationSurface({
       } catch { /* private mode */ }
     }
     return () => window.removeEventListener('resize', syncToScreen)
-  }, [app, mode, resizable, syncFit])
+  }, [app, mode, profileScreenWidthPx, profileSurfaceWidthPx, resizable, syncFit])
 
   useLayoutEffect(() => {
     const surface = surfaceRef.current

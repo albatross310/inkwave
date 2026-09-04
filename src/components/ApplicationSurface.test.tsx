@@ -51,10 +51,27 @@ describe('ApplicationSurface', () => {
   })
 
   it('gives isolated email a screen-calibrated pixel default while keeping contextual tools independent', () => {
-    const block = css.match(/\[data-iw-application="email"\]\.iw-application-surface--isolated\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
+    const block = css.match(/\.iw-application-surface--isolated\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
     expect(block).toContain('width: var(--iw-application-default-width, 900px)')
     expect(block).not.toContain('max-width: calc(100% - 48px)')
     expect(block).toContain('margin-inline: auto')
+  })
+
+  it('accepts a different natural-width profile for another isolated tool', () => {
+    Object.defineProperty(window.screen, 'width', { configurable: true, value: 1440 })
+    render(
+      <ApplicationSurface
+        app="music"
+        label="Music work"
+        widthProfile={{ screenWidthPx: 1920, surfaceWidthPx: 1200 }}
+      >
+        <p>Score</p>
+      </ApplicationSurface>,
+    )
+
+    const surface = screen.getByRole('region', { name: 'Music work' })
+    expect(surface.style.getPropertyValue('--iw-application-default-width')).toBe('900px')
+    expect(surface.parentElement?.classList.contains('iw-application-fit-box')).toBe(true)
   })
 
   it('uses the main editor fit ratio only when an isolated surface no longer fits', () => {

@@ -586,6 +586,10 @@ itself is the writing surface.
   follows the main editor's continuous fit-to-width behaviour: fixed internal layout, centred
   transform shrink, and a size-compensated wrapper. Widening the window restores it to scale 1.
   Phone remains a native full-width layout rather than a transformed desktop surface.
+- The screen calibration, centred size-compensated fit wrapper, local resize persistence, handles,
+  and keyboard/reset behaviour belong to the reusable `ApplicationSurface`, not to email. Each
+  future application supplies only its reference surface/display width profile and its contents;
+  contextual mode bypasses isolated fitting without duplicating the mechanism.
 - The isolated box is resizable. Dragging either side changes both sides by the same amount around a
   fixed horizontal centre, so the box never walks left or right as its width changes. A resized width
   is stored as a multiplier of the screen-calibrated pixel baseline—not the window width—so moving to
