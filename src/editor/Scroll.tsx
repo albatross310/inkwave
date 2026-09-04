@@ -1004,7 +1004,9 @@ export function Scroll({
     let pdfTop = 0
     const writeWave = () => {
       // ONE rounded value for both consumers: the surface var and the twinkle fields' LITERAL
-      // transforms (`swayFields` — no var inheritance into the instance leaves; see the firebreak).
+      // transforms (`swayFields`). ⚠ `--wave-x` MUST NEVER INVALIDATE THE PAGE SUBTREE — index.css
+      // firebreaks it to 0px under the page roots, and a NEW `var(--wave-x)` consumer must not sit
+      // beneath them. Without that, desktop scroll frames were p50 417ms; with it, 50ms.
       const wx = Number((waveBaseRef.current + (el.scrollTop + pdfTop) * WAVE_SWAY).toFixed(1))
       el.style.setProperty('--wave-x', `${wx}px`)
       swayFields(el, wx)
