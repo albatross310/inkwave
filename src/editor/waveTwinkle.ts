@@ -108,6 +108,7 @@ function prepareHost(host: HTMLElement): HostState {
   const intro = WAVE_SCENE.intro.map((mark) => {
     const el = makeMark(mark.kind, mark.x, mark.y, mark.angle, mark.size)
     el.dataset.sceneId = mark.id
+    el.dataset.waveOffset = String(mark.offsetY)
     fields[mark.group].appendChild(el)
     return { mark, el }
   })
@@ -115,6 +116,7 @@ function prepareHost(host: HTMLElement): HostState {
     const el = makeMark('dash', mark.x, mark.y, mark.angle, mark.size)
     el.classList.add('iw-scene-scroll')
     el.dataset.sceneId = mark.id
+    el.dataset.waveOffset = String(mark.offsetY)
     fields[mark.group].appendChild(el)
     return { mark, el }
   })

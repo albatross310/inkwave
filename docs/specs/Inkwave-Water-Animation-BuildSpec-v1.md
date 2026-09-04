@@ -32,6 +32,10 @@ For a dash, the generated coordinate is its centre point—never its left edge. 
 axes on that coordinate before applying the tangent rotation; otherwise the visible dash samples a
 different part of the curve by half its own width.
 
+Every dash sits below its associated thick wave, never on or above it. Its centre has a fixed-seed
+pseudorandom vertical offset in the inclusive `10–20px` band. The offset is stored in the scene table,
+so the gaps vary across marks but never jitter, regenerate, or change between loads.
+
 The fixed scene field is anchored `-280px` from the viewport origin: exactly two complete 140px wave
 tiles. It must never be horizontally centred on the viewport, because a centred origin changes the
 field's tile phase with viewport width and makes the stored tangent disagree with the painted SVG.

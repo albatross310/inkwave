@@ -646,6 +646,9 @@ enforces ≥180px horizontal separation per wave band; every dash stores the exa
 The browser mounts the whole table synchronously before the atomic gate opens. A dash's generated x/y
 is its CENTRE: render it with `translate(-50%, -50%)` before its rotation. Treating x as CSS `left`
 puts the rendered centre half a dash-width away from the sampled tangent and visibly detaches it.
+Every dash's centre is also a generated `10–20px` BELOW the thick wave (`offsetY`, positive screen-y),
+fixed-seed and stored per mark. A uniform gap looks mechanical; an on-wave or negative offset is a
+regression.
 
 Intro objects have exactly one finite opacity window and never reappear. Every object owns opacity
 only; the two group fields own all spatial motion and use the SAME named CSS drift + additive coast

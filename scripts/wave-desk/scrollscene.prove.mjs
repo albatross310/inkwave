@@ -92,6 +92,8 @@ const geometry = await page.evaluate(() => {
   }
   let maxAngleError = 0, maxYError = 0, count = 0
   let phaseAligned = true, centreAnchored = true
+  const offsets = new Set()
+  let below = true
   for (const field of document.querySelectorAll('.iw-twk-field')) {
     const fieldLeft = parseFloat(field.style.left)
     phaseAligned &&= Math.abs(mod(fieldLeft, 140)) < 1e-8
@@ -100,16 +102,20 @@ const geometry = await page.evaluate(() => {
       const x = parseFloat(dash.style.left), y = parseFloat(dash.style.top)
       const match = /rotate\(([-.\d]+)deg\)/.exec(dash.style.transform)
       const actualAngle = match ? Number(match[1]) : NaN
+      const offsetY = Number(dash.dataset.waveOffset)
       centreAnchored &&= dash.style.transform.startsWith('translate(-50%, -50%)')
+      below &&= offsetY >= 10 && offsetY <= 20
+      offsets.add(offsetY)
       const expected = curve(mod(fieldLeft + x, 140))
       maxAngleError = Math.max(maxAngleError, Math.abs(actualAngle - expected.angle))
-      maxYError = Math.max(maxYError, Math.abs(mod(y, 140) - (expected.y + yOffset)))
+      maxYError = Math.max(maxYError, Math.abs(mod(y, 140) - (expected.y + yOffset + offsetY)))
       count++
     }
   }
-  return { count, phaseAligned, centreAnchored, maxAngleError, maxYError }
+  return { count, phaseAligned, centreAnchored, below, offsetCount: offsets.size, maxAngleError, maxYError }
 })
-const parallel = geometry.count > 0 && geometry.phaseAligned && geometry.centreAnchored
+const parallel = geometry.count > 0 && geometry.phaseAligned && geometry.centreAnchored && geometry.below
+  && geometry.offsetCount > 20
   && geometry.maxAngleError <= 0.011 && geometry.maxYError <= 0.011
 
 // Put the pointer inside the text column so Ctrl-wheel resolves to editor-font zoom, not water zoom.
@@ -141,7 +147,7 @@ const zoomStable = beforeZoom.opacity.every((value, index) => Math.abs(value - a
 console.log(`── ${ENGINE} deterministic scroll scene ──`)
 console.log(`genuine scroll changed marks : ${changed ? '✓' : '✗'}`)
 console.log(`+2240px repeated scene       : ${periodic ? '✓' : '✗'}`)
-console.log(`dashes parallel to SVG waves : ${parallel ? '✓' : '✗'} (${geometry.count} dashes, angle error ${geometry.maxAngleError.toFixed(3)}°, y error ${geometry.maxYError.toFixed(3)}px)`)
+console.log(`dashes below + parallel       : ${parallel ? '✓' : '✗'} (${geometry.count} dashes, ${geometry.offsetCount} gaps, angle error ${geometry.maxAngleError.toFixed(3)}°, y error ${geometry.maxYError.toFixed(3)}px)`)
 console.log(`editor zoom committed        : ${zoomed ? '✓' : '✗'} (${beforeZoom.zoom || '1'} → ${afterZoom.zoom || '1'})`)
 console.log(`zoom left marks unchanged    : ${zoomStable ? '✓' : '✗'} (scrollTop ${beforeZoom.top} → ${afterZoom.top})`)
 

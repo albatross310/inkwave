@@ -27,6 +27,14 @@ function tangentAngle(x: number): number {
   return Number((Math.atan(slope) * 180 / Math.PI).toFixed(2))
 }
 
+function waveY(group: 'a' | 'b', row: number, x: number): number {
+  const phase = ((x % 140) + 140) % 140
+  const second = phase >= 70
+  const t = (second ? phase - 70 : phase) / 70
+  const local = second ? 22 + 36 * t - 36 * t * t : 22 - 36 * t + 36 * t * t
+  return Number((row * 140 + local + (group === 'b' ? 70 : 0)).toFixed(2))
+}
+
 describe('the checked-in water scene', () => {
   it('is a complete fixed structure with no runtime random or server-fed coordinates', () => {
     expect(WAVE_SCENE.intro).toHaveLength(120)
@@ -69,6 +77,19 @@ describe('the checked-in water scene', () => {
     expect(Math.abs(WAVE_SCENE_LEFT_PX % WAVE_TILE_PX)).toBe(0)
     const source = readFileSync(resolve(__dirname, 'waveTwinkle.ts'), 'utf8')
     expect(source).not.toContain("field.style.left = '50%'")
+  })
+
+  it('places every dash a deterministic varied distance below its thick wave', () => {
+    const dashes: Array<WaveIntroMark | WaveScrollMark> = all
+      .filter((mark) => !('kind' in mark) || mark.kind === 'dash')
+    const offsets = new Set<number>()
+    for (const mark of dashes) {
+      expect(mark.offsetY, mark.id).toBeGreaterThanOrEqual(10)
+      expect(mark.offsetY, mark.id).toBeLessThanOrEqual(20)
+      expect(mark.y, mark.id).toBeCloseTo(waveY(mark.group, mark.row, mark.x) + mark.offsetY, 2)
+      offsets.add(mark.offsetY)
+    }
+    expect(offsets.size).toBeGreaterThan(20)
   })
 
   it('gives every intro object exactly one finite appearance window', () => {
