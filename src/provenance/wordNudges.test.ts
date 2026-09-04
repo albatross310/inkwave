@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { WordNudgeEmitter, KickEmitter } from './wordNudges'
+import { WordNudgeEmitter } from './wordNudges'
 import type { WordNudgeEvent } from '../types/document'
 
 const event = (overrides: Partial<WordNudgeEvent> = {}): WordNudgeEvent => ({
@@ -58,11 +58,5 @@ describe('WordNudgeEmitter', () => {
     emitter.emit(event())
     expect(a).not.toHaveBeenCalled()
     expect(b).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('KickEmitter backward-compat alias', () => {
-  it('is the same class as WordNudgeEmitter', () => {
-    expect(KickEmitter).toBe(WordNudgeEmitter)
   })
 })

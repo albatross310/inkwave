@@ -14,9 +14,6 @@ export interface WordPoint { t: number; words: number }
 export interface SnapshotMark { t: number; words: number; trigger: string }
 export interface NudgeMark { t: number; old: string; replacement?: string; response: string; setVersion: number }
 
-// Backward-compat alias
-export type KickMark = NudgeMark
-
 export interface ProvenanceStats {
   finalWords: number
   addedWords: number // ≥ lower bound (snapshot diffs)
