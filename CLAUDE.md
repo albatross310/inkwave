@@ -617,8 +617,9 @@ measure the artifact per block, not the coincidence.
 Muted indigo→teal gradient, two 140px SVG wave tiles drifting at 72px/s, a precomputed pool of
 glitters and wave-marks, and an S-curve slow-down at reveal. The day palette is deliberately more
 serious than the former saturated cyan: `--iw-water-gradient` is the single background source
-(`#302438` → reflective indigo `#41425b` by 18% → blue-teal `#3b606a` by 88% → `#3b6f75`), with blue-grey
-wave marks and parchment-white glints. The early indigo reflection keeps the surface glossy, while
+(`#302438` → reflective indigo `#41425b` by 18% → blue-teal `#3b606a` by 88% → `#3b6f75`), with one
+flat warm-ivory `#f3edcf` shared by wave marks, specks and sparkles. The wave SVGs contain no vertical
+colour gradient; line weight and opacity alone provide depth. The early indigo reflection keeps the surface glossy, while
 holding the blue-teal arrival until 88% lets the indigo influence extend roughly a third farther into
 the teal. Before the atomic water reveal, day mode paints pure white (not parchment or a partial
 gradient). Keep every day-water consumer on the shared token; do not reintroduce per-surface gradient
@@ -641,6 +642,9 @@ wave phase, and removes both the old per-envelope relocation work and duplicate 
 Shared field start times are sticky across `Animation.ready`: WebKit can replace a start time written
 while play-pending on warm refreshes, so `pinToTrackClock()` writes immediately and re-asserts after
 ready. Only the shared blink wrappers get `will-change: transform`; individual marks are opacity-only.
+Editor zoom must not regenerate the speck/dash pool: its wave-space geometry is zoom-independent,
+and changing it at `inkwave:zoom-settled` made stationary marks visibly teleport after zoom. Only a
+genuine viewport resize may rebuild the pool to restore offscreen coverage.
 
 Twinkle art decodes asynchronously. A sparkle/dash set whose decode completes after coast→rest must
 re-check the host's latest request before attaching: stopped sparkles are discarded, while desktop

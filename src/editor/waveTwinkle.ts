@@ -120,7 +120,7 @@ const wrap140 = (x: number) => ((x % 140) + 140) % 140
 // every unique SVG-image URI — traced at ~4.3s of boot at ~600 URIs (Firefox's SVG image path is
 // cheap, hence the engine asymmetry). A 2D-canvas raster of the same strokes encodes to a tiny
 // PNG whose decode is a threaded, document-less image decode. One shared canvas, reused. Art is
-// rastered ONLY at pool build time (boot / resize / zoom reseed) — never during playback.
+// rastered ONLY at pool build time (boot / genuine viewport resize) — never during playback or zoom.
 let _rasterCv: HTMLCanvasElement | null = null
 function rasterURI(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): string {
   const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1))
@@ -1009,20 +1009,6 @@ function remount(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): vo
   mountSet(host, h, kind)
 }
 
-// Dashes recalculate on zoom settle (positions, art, schedules AND the static subset).
-function regenDashes(): void {
-  if (!defs || !hosts.size) return
-  pruneHosts()
-  // At rest no PHONE surface mounts dashes — don't rasterise a full pool for nothing.
-  let mounted = false
-  for (const h of hosts.values()) if (h.dashes) { mounted = true; break }
-  if (!mounted) return
-  const rnd = mulberry32((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0)
-  defs.dashes = genList(rnd, 'dashes')
-  ensureSchedules()
-  for (const [host, h] of hosts) if (h.dashes) remount(host, h, 'dashes')
-}
-
 function regenAll(): void {
   if (!defs || !hosts.size) return
   generate()
@@ -1150,7 +1136,6 @@ export function syncTwinkles(
     // Boot: the atomic gate's recalc creates the tiles' CSS drift — align the pool's clock to
     // its literal startTime in the same first-visible frame.
     window.addEventListener('inkwave:water-ready', alignTracks)
-    window.addEventListener('inkwave:zoom-settled', regenDashes)
     let rt: ReturnType<typeof setTimeout> | undefined
     window.addEventListener('resize', () => {
       if (rt) clearTimeout(rt)
@@ -1189,7 +1174,7 @@ export function syncTwinkles(
         }
       }
     }
-    // Surviving rest elements (and zoom-reseeded ones) get THIS load's tracks only once the new
+    // Surviving rest elements get THIS load's tracks only once the new
     // load's clock exists — creating them on a provisional clock and re-timing later teleported
     // every visible mark at once (the live backward tick). The wrappers fade out (taking the old
     // rest texture with them, gently), the tracks land aligned, then the layer eases back in.

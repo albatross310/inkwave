@@ -59,4 +59,11 @@ describe('monistic load marks', () => {
     expect(source).not.toContain('trackAnims.set(el, [ao, at])')
     expect(source).toContain('void a.ready.then(apply)')
   })
+
+  it('does not regenerate specks when editor zoom settles', () => {
+    const source = readFileSync(resolve(__dirname, 'waveTwinkle.ts'), 'utf8')
+    expect(source).not.toContain("addEventListener('inkwave:zoom-settled'")
+    expect(source).not.toContain('function regenDashes')
+    expect(source).toContain("addEventListener('resize'")
+  })
 })
