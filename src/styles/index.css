@@ -3,9 +3,14 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --iw-water-base: #3f827e;
+    --iw-water-gradient: linear-gradient(98.5deg, #40506f 0%, #3f827e 100%);
+  }
+
   html {
-    /* Aquamarine behind everything (matches the water gradient's right end; shows on overscroll). */
-    background-color: #00bfa8;
+    /* Deep teal behind everything (matches the water gradient's right end; shows on overscroll). */
+    background-color: var(--iw-water-base, #3f827e);
     color: #1a1a1a;
     /* Stop iOS Safari auto-inflating text, which desyncs the canvas-based width
        measurements the popover's in-place spacing relies on. */
@@ -19,14 +24,14 @@
      the top of the viewport; the bottom leaves room for the floating footer toolbar. */
   .inkwave-editor-surface {
     position: relative;
-    /* Own stacking context so the z-index:-1 wave ::before paints ABOVE this aqua base (not behind
+    /* Own stacking context so the z-index:-1 wave ::before paints ABOVE this water base (not behind
        it) yet stays below content. Without this the waves vanish behind the opaque background. */
     isolation: isolate;
     min-height: 100vh;
-    /* The water: vivid cyan → aquamarine, left to right with a 15% downward declension
+    /* The water: deep ink-blue → muted teal, left to right with a 15% downward declension
        (atan(0.15) ≈ 8.5° past horizontal). background-color stays as the fallback/average. */
-    background-color: #00bfa8;
-    background-image: linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
+    background-color: var(--iw-water-base, #3f827e);
+    background-image: var(--iw-water-gradient);
     background-attachment: fixed;
     /* ~half a line of breathing space above the parchment; sides 1rem; bottom leaves room for
        the floating footer toolbar. The top value is the single knob for page position. */
@@ -35,17 +40,17 @@
 
   /* Phone keeps BODY scroll (so the address bar hides and the on-screen keyboard behaves); make room
      for the PDF panel with padding. */
-  /* Phone: the BAND between pages reads aquamarine (the brand backdrop, waves omitted) while the
+  /* Phone: the BAND between pages reads as the deep water backdrop (waves omitted) while the
      root/body stay parchment — that root colour is what iOS paints in unrasterised checkerboard
      tiles during fast flicks, and it must read as paper, not blue (Peter, 2026-07-09). */
   .inkwave-editor-surface.is-phone .inkwave-page-gap-band {
     /* OVER-bleed: the band centres on its PARENT, which can sit off viewport-centre by paddings/
        safe-areas — a 200vw sweep hides any such offset (the surface clips horizontal excess).
        Fixes the white strip at the gap's side (Peter's screenshot, 2026-07-10). */
-    /* Same water as desktop — hardcoded to the identical gradient (bands are full-bleed 100vw,
-       so the left→right sweep matches the desktop surface). */
-    background-color: #00bfa8;
-    background-image: linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
+    /* Same shared water as desktop (bands are full-bleed 100vw, so the left→right sweep matches
+       the desktop surface). */
+    background-color: var(--iw-water-base, #3f827e);
+    background-image: var(--iw-water-gradient);
     /* Full-bleed: the band lives inside the sheet's side padding — without this it stops short of
        the screen edges (parchment strips either side). */
     left: 50%;
@@ -115,7 +120,7 @@
   .inkwave-editor-surface.iw-fill:not(.is-phone).iw-wave-anim,
   .inkwave-editor-surface.iw-fill:not(.is-phone).iw-wave-coast { transition: none; }
 
-  /* Scrollbar bleed fix WITHOUT a transparent surface: the fill surface keeps its OPAQUE aqua base +
+  /* Scrollbar bleed fix WITHOUT a transparent surface: the fill surface keeps its OPAQUE water base +
      fixed ::before waves, so it scrolls on the compositor (a transparent surface over a separate fixed
      waves layer forced slow MAIN-THREAD scrolling — classic fixed-background jitter, worst during the
      busy first seconds after load). To keep the fixed ::before (a descendant Chromium paints over the
@@ -177,13 +182,13 @@
      SVG data URIs, 28px, hotspot at the lens centre (11,11); keyword fallbacks for engines that
      reject SVG cursors. */
   .iw-zooming-water, .iw-zooming-water * {
-    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e6fbff' fill-opacity='0.9' stroke='%230b7285' stroke-width='2'/%3E%3Ctext x='11' y='14.6' font-family='Georgia,serif' font-size='12' font-weight='bold' fill='%2300b4d8' text-anchor='middle'%3E%CF%89%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%230b7285' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%230b7285'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e5eceb' fill-opacity='0.9' stroke='%2340506f' stroke-width='2'/%3E%3Ctext x='11' y='14.6' font-family='Georgia,serif' font-size='12' font-weight='bold' fill='%233f827e' text-anchor='middle'%3E%CF%89%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%2340506f' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%2340506f'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
   }
   .iw-zooming-text, .iw-zooming-text * {
     cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23fdf9f0' fill-opacity='0.92' stroke='%23837a6e' stroke-width='2'/%3E%3Ctext x='11' y='15' font-family='Georgia,serif' font-style='italic' font-size='12' font-weight='bold' fill='%23837a6e' text-anchor='middle'%3Ei%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%23837a6e' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%23837a6e'/%3E%3Cpath d='M19.5 7 h5 M22 4.5 v5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-in !important;
   }
   .iw-zoom-out.iw-zooming-water, .iw-zoom-out.iw-zooming-water * {
-    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e6fbff' fill-opacity='0.9' stroke='%230b7285' stroke-width='2'/%3E%3Ctext x='11' y='14.6' font-family='Georgia,serif' font-size='12' font-weight='bold' fill='%2300b4d8' text-anchor='middle'%3E%CF%89%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%230b7285' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%230b7285'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23e5eceb' fill-opacity='0.9' stroke='%2340506f' stroke-width='2'/%3E%3Ctext x='11' y='14.6' font-family='Georgia,serif' font-size='12' font-weight='bold' fill='%233f827e' text-anchor='middle'%3E%CF%89%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%2340506f' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%2340506f'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
   }
   .iw-zoom-out.iw-zooming-text, .iw-zoom-out.iw-zooming-text * {
     cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='11' cy='11' r='8' fill='%23fdf9f0' fill-opacity='0.92' stroke='%23837a6e' stroke-width='2'/%3E%3Ctext x='11' y='15' font-family='Georgia,serif' font-style='italic' font-size='12' font-weight='bold' fill='%23837a6e' text-anchor='middle'%3Ei%3C/text%3E%3Cline x1='16.7' y1='16.7' x2='24' y2='24' stroke='%23837a6e' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='7' r='5' fill='%23837a6e'/%3E%3Cpath d='M19.5 7 h5' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 11 11, zoom-out !important;
@@ -231,20 +236,20 @@
   .iw-boot-water {
     /* The wave tile PAIR as vars, so the loading animation can split the pair across ::before/::after
        (opposite drift directions) without duplicating image data per theme — night just re-points these.
-       Tile anatomy (Peter, 2026-07-09): THICK seashell line on TOP, thin white line BELOW it. The
+       Tile anatomy (Peter, 2026-07-09): THICK blue-grey line on TOP, a paler thin line BELOW it. The
        Q/T construction keeps endpoints + slopes identical at x=0/140 — the 140px seamless loop.
        The short accent dashes that used to be baked in here are DYNAMIC now: stochastic, twinkling
        layers generated per load by src/editor/waveTwinkle.ts (see the twinkle block below). */
-    --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='ra' x1='0' y1='-14' x2='0' y2='58' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='url(%23ra)' stroke-width='2.95'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3C/svg%3E");
-    --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='rb' x1='0' y1='56' x2='0' y2='128' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23FFF5EE' stop-opacity='0.85'/%3E%3Cstop offset='1' stop-color='%23FFF5EE' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='url(%23rb)' stroke-width='2.95'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%23ffffff' stroke-opacity='0.42' stroke-width='1.4'/%3E%3C/svg%3E");
+    --iw-wave-a: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='ra' x1='0' y1='-14' x2='0' y2='58' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23b7c9c8' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23b7c9c8' stop-opacity='0.64'/%3E%3Cstop offset='1' stop-color='%23b7c9c8' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 22 Q35 4 70 22 T140 22' fill='none' stroke='url(%23ra)' stroke-width='2.95'/%3E%3Cpath d='M0 50 Q35 32 70 50 T140 50' fill='none' stroke='%23d5dede' stroke-opacity='0.28' stroke-width='1.4'/%3E%3C/svg%3E");
+    --iw-wave-b: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cdefs%3E%3ClinearGradient id='rb' x1='0' y1='56' x2='0' y2='128' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%23b7c9c8' stop-opacity='0'/%3E%3Cstop offset='0.5' stop-color='%23b7c9c8' stop-opacity='0.64'/%3E%3Cstop offset='1' stop-color='%23b7c9c8' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0 92 Q35 74 70 92 T140 92' fill='none' stroke='url(%23rb)' stroke-width='2.95'/%3E%3Cpath d='M0 120 Q35 102 70 120 T140 120' fill='none' stroke='%23d5dede' stroke-opacity='0.28' stroke-width='1.4'/%3E%3C/svg%3E");
   }
   .inkwave-editor-surface::before {
     content: '';
     position: fixed; /* viewport-anchored → doesn't scroll with the page */
     inset: 0;
-    z-index: -1; /* behind content (over the aqua base) — must NOT raise content above the toolbar */
+    z-index: -1; /* behind content (over the water base) — must NOT raise content above the toolbar */
     pointer-events: none;
-    /* TWO layers, each a 140×140 tile holding a PAIR (thick seashell line on TOP, thin white line
+    /* TWO layers, each a 140×140 tile holding a PAIR (thick blue-grey line on TOP, paler thin line
        below) that moves as one. Layer A carries every other pair; layer B the pairs between them —
        given opposite --wave-x so consecutive pairs (every second thick line) sway opposite ways.
        Horizontal only, no vertical movement. */
@@ -376,8 +381,8 @@
     position: fixed;
     inset: 0;
     overflow: hidden;
-    background-color: #00bfa8;
-    background-image: linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
+    background-color: var(--iw-water-base, #3f827e);
+    background-image: var(--iw-water-gradient);
     background-attachment: scroll;
     background-size: 100vw 100lvh;
     background-repeat: no-repeat;
@@ -392,7 +397,7 @@
   }
 
   /* PHONE LOADING WAVES (Peter's spec, 2026-07-09). During load ONLY, the phone shell shows the SAME
-     aqua water + drifting waves as desktop; at ready the waves decelerate over 2s (desktop stays 3s)
+     deep water + drifting waves as desktop; at ready the waves decelerate over 2s (desktop stays 3s)
      and the parchment pops atomically as they reach rest (TiptapEditor delays the reveal by the coast
      duration — see 'inkwave:reveal-imminent'). The 3-class selectors deliberately beat the 2-class
      .is-phone parchment + ::before display:none overrides below, so the moment BOTH wave classes drop
@@ -401,8 +406,8 @@
   .inkwave-editor-surface.is-phone.iw-wave-anim,
   .inkwave-editor-surface.is-phone.iw-wave-coast {
     /* Same water as the desktop surface (the phone base is parchment — checkerboard fix above). */
-    background-color: #00bfa8;
-    background-image: linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
+    background-color: var(--iw-water-base, #3f827e);
+    background-image: var(--iw-water-gradient);
     /* PIN THE SHELL BOX TO THE VIEWPORT (2026-07-11 — THE real iOS "goes white"). Phone surfaces
        are IN-FLOW (`.iw-fill:not(.is-phone)` is the only fixed rule — phone is body-scroll), so
        the moment the covered editor mounted before the shell in the DOM, the shell's BOX was
@@ -682,7 +687,7 @@
   }
 
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
-     goes fully transparent, so the real (fixed) aqua+waves background shows through everywhere; the
+     goes fully transparent, so the real fixed water-and-waves background shows through everywhere; the
      parchment is painted by real per-page panels (.inkwave-sheet) in a background layer behind the
      text. The gaps between panels are therefore genuinely transparent — the waves there match the
      surroundings exactly because it's the same fixed background layer. */
@@ -1762,7 +1767,7 @@
    move every break in the document. A box-shadow paints outside the border box and takes part in
    no layout at all — `getBoundingClientRect` is byte-identical with and without it, which is what
    the probe asserts.
-   DAY IS DELIBERATELY UNCHANGED: cream paper on aqua water already reads as a page, and its
+   DAY remains cream paper on deep water, which already reads as a page, and its
    8px/32px drop shadow draws the boundary. Only the night page had lost its edge, and adding a hard
    ring to a design nobody complained about is not a fix. The token still carries a day value so the
    pair is declared in one place and a future light palette has somewhere to put its own edge.
@@ -2571,8 +2576,8 @@ html.iw-no-swipe-nav { overscroll-behavior-x: contain; }
 .iw-boot-water {
   position: fixed;
   inset: 0;
-  background-color: #00bfa8;
-  background-image: var(--iw-wave-a), var(--iw-wave-b), linear-gradient(98.5deg, #00b4d8 0%, #00bfa8 100%);
+  background-color: var(--iw-water-base, #3f827e);
+  background-image: var(--iw-wave-a), var(--iw-wave-b), var(--iw-water-gradient);
   background-size: 140px 140px, 140px 140px, 100% 100%;
   background-repeat: repeat, repeat, no-repeat;
 }
