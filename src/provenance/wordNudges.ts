@@ -19,7 +19,3 @@ export class WordNudgeEmitter {
     for (const fn of this.listeners) fn(event)
   }
 }
-
-// Backward-compat aliases (used by tests and legacy import paths)
-export { WordNudgeEmitter as KickEmitter }
-export type { WordNudgeListener as KickListener }

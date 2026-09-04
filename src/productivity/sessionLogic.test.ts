@@ -6,6 +6,7 @@ import {
   reflectionDue,
   unreflectedRows,
   DEFAULT_IDLE_MS,
+  buildPostHocRow,
   buildRow,
   isIdleBoundary,
   isRecordable,
@@ -241,9 +242,44 @@ describe('reflectionDue / unreflectedRows — the end-of-longer-session gate', (
     expect(reflectionDue([yesterday], [], TODAY)).toBe(false)
   })
 
-  it('post-hoc rows (0 measured active minutes) never make a reflection due', () => {
-    // A remembered block carries 0 active_minutes, so it cannot inflate the gate — else "add time you
-    // forgot" would pop the reflection at you (§A5: never nag).
-    expect(reflectionDue([row({ entered: 'post-hoc', active_minutes: 0 })], [], TODAY)).toBe(false)
+  // ── §A6.1 ON THE RECALL PROMPT — and the guard that could not fail ────────────────────────────
+  // This block replaces one that read `row({ entered: 'post-hoc', active_minutes: 0 })` and said
+  // "a remembered block carries 0 active_minutes, so it cannot inflate the gate". That premise is
+  // FALSE, and sessionLogic's own buildPostHocRow comment says so: the WORDS are zero, "the minutes
+  // live in `active_minutes` and are kept out of the measured bars by `entered`, never by being
+  // blank". The fixture hand-set the one field that made the assertion true, so it passed on a build
+  // where a real 45-minute block DID open the prompt and DID get printed back as focused minutes.
+  //
+  // R6, exactly: the pass condition was satisfiable by the broken mechanism. So the rows below come
+  // from the REAL builder — the shape the writer actually creates — and never from a literal.
+  const remembered = (minutes: number) =>
+    buildPostHocRow({ minutes, docType: 'reading' },
+      { sessionId: `p-${minutes}`, at: Date.parse(`${TODAY}T14:00:00+10:00`), offsetMin: 600 })
+
+  it('KNOWN-POSITIVE: a real remembered block DOES carry its minutes (the old fixture did not)', () => {
+    // Without this, every assertion below could be a property of an accidentally-empty row.
+    expect(remembered(45).active_minutes).toBe(45)
+    expect(remembered(45).entered).toBe('post-hoc')
+  })
+
+  it('remembered minutes never make a reflection due', () => {
+    // Else "add the time you forgot" pops a recall prompt about work we never watched (§A5: never nag).
+    expect(reflectionDue([remembered(45)], [], TODAY)).toBe(false)
+  })
+
+  it('remembered minutes are never handed to the prompt, which calls them FOCUSED minutes', () => {
+    expect(unreflectedRows([remembered(45)], [], TODAY)).toHaveLength(0)
+  })
+
+  it('…and a measured row beside one still comes through — the filter is on PROVENANCE, not on rows', () => {
+    const measured = row({ active_minutes: 40 })
+    expect(unreflectedRows([measured, remembered(45)], [], TODAY)).toEqual([measured])
+    expect(reflectionDue([measured, remembered(45)], [], TODAY)).toBe(true)
+  })
+
+  it('THE FIXTURE DISCRIMINATES: the merged rule would answer differently', () => {
+    // 45 remembered minutes clear REFLECT_AFTER_ACTIVE_MS on their own, so a gate that summed all
+    // rows would say `true` here. If it could not, the three assertions above would be free.
+    expect(shouldOfferReflection(remembered(45).active_minutes * 60_000)).toBe(true)
   })
 })

@@ -22,6 +22,8 @@
 // The model, the round-7 certification numbers, and the full eligibility table:
 // → docs/archive/pagination-rounds.md#arith-engine
 
+import { MARGIN_BOTTOM } from './pageSettings'
+
 // ─── Certified font palette ───────────────────────────────────────────────────────────────────
 // The PRIMARY family name of each css stack the StyleBar can emit (CLAUDE.md math-certified list).
 // Certification is by PRIMARY family: the stack '\'EB Garamond\', Georgia, serif' is eligible
@@ -752,7 +754,11 @@ export function figureBlockBox(opts: {
 // AND THE UNIT TESTS WERE STRUCTURALLY BLIND TO IT: arithmeticLayout.test.ts gives every line its own
 // block with `blocks[i].start === lines[i].pos`, so snapping to the block start yields the IDENTICAL
 // number and the assertions pass under both rules. A test can only see a rule it varies.
-export const MARGIN_BOTTOM_PX = 72
+// ⚠ R2: ONE bottom margin. This is `pageSettings.MARGIN_BOTTOM` under this module's own name, not a
+// second copy of it — the port must measure the page the editor measures, and a private 72 here
+// would diverge on EVERY break the day the real one moves. Rule 5's "pure module" is about DOM and
+// ProseMirror; pageSettings is neither, and its top level runs no code.
+export const MARGIN_BOTTOM_PX = MARGIN_BOTTOM
 
 export interface SplitLine { top: number; blockIdx: number; pos: number } // pos = the line's own doc position (lazy posAtCoords in the live path)
 export interface SplitBlock { start: number } // block-start doc position; >0 so orphan-snap is enabled
