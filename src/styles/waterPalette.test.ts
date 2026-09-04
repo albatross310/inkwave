@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 const repo = resolve(__dirname, '../..')
 const css = readFileSync(resolve(repo, 'src/styles/index.css'), 'utf8')
 const root = readFileSync(resolve(repo, 'app/root.tsx'), 'utf8')
+const entry = readFileSync(resolve(repo, 'app/entry.client.tsx'), 'utf8')
 const twinkles = readFileSync(resolve(repo, 'src/editor/waveTwinkle.ts'), 'utf8')
 
 describe('day water palette', () => {
@@ -29,6 +30,9 @@ describe('day water palette', () => {
     expect(css).toMatch(/:root:not\(\.iw-water-ready\),\s*:root:not\(\.iw-water-ready\) body \{ background-color: #fff; \}/)
     expect(css).toMatch(/:root:not\(\.iw-water-ready\) \.inkwave-editor-surface \{\s*background-color: #fff;/)
     expect(css).toMatch(/:root\[data-theme="night"\]:not\(\.iw-water-ready\) body,\s*:root\[data-theme="night"\]:not\(\.iw-water-ready\) \.inkwave-editor-surface \{/)
+    expect(entry).toContain('const WATER_GATE_TIMEOUT_MS = 30_000')
+    expect(entry).not.toContain('setTimeout(ready, 1500)')
+    expect(entry).toContain("ready('complete')")
   })
 
   it('uses restrained blue-grey wave marks and page-toned glints', () => {

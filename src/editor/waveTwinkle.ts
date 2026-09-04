@@ -4,26 +4,25 @@
 // different workflow to whatever has to load so it doesn't get interrupted."
 //
 // THE LOAD UNIT. Everything the loading animation will ever do is computed BEFORE playback:
-//   • A pool of instances — sparks (glitters) and dashes (wave marks) — with positions drawn
-//     through the never-strike-twice sampler (memPick), canvas-rastered art (never SVG URIs —
-//     Chromium's per-URI IsolatedSVGDocumentHost cost is measured ~4.3s at ~600 URIs), and a
-//     per-instance SCHEDULE: a cycle of blink envelopes (dash: 0.3s S rise / 0.4s hold / 0.3s S
-//     fall), each at a fresh lattice slot.
-//   • Playback = WAAPI animations started once (an opacity track + a transform track per
-//     instance, both looping over the ~46.7s cycle) + the tiles' CSS drift. NOTHING runs per
+//   • A pool of instances — sparks (glitters) and dashes (wave marks) — with ONE permanent
+//     wave-relative position drawn through the never-strike-twice sampler (memPick),
+//     canvas-rastered art (never SVG URIs — Chromium's per-URI IsolatedSVGDocumentHost cost is
+//     measured ~4.3s at ~600 URIs), and a cycle of opacity envelopes (dash: 0.3s S rise / 0.4s
+//     hold / 0.3s S fall).
+//   • Playback = one WAAPI opacity track per instance + one shared transform track per populated
+//     wave field, looping over the ~23.3s cycle, plus the tiles' CSS drift. NOTHING runs per
 //     frame on the main thread during the load — no rAF driver, no respawns, no style writes —
 //     so main-thread starvation is PHYSICALLY INCAPABLE of touching the animation (that's the
 //     "different workflow": the compositor thread).
 //
 // HOW AN INSTANCE RIDES ITS WAVE WITH ZERO MAINTENANCE. The tile pattern drifts at exactly
 // 72 px/s (140px per 1.944s loop). A blink instance's transform track bakes that motion in:
-// during each lit envelope the track moves linearly at the drift velocity, holding the instance
-// at a CONSTANT wave-space position (its art phase, wrap140 — so the mark always lies on its
-// crest/midline); between envelopes (opacity 0) the track glides invisibly to the next slot.
-// Slots are drawn on the instance's own 140px lattice (same phase ⇒ the SAME art stays exactly
-// valid) through the shared band memory — a strike never lands where one recently sat, and the
-// rotation only repeats after the full cycle (~47s ≫ any load). The track loops seamlessly:
-// its duration is a multiple of the 1.944s tile loop and its value is periodic by construction.
+// The field's single transform runs continuously across the WHOLE cycle at the drift velocity,
+// holding every instance at a CONSTANT wave-space position (its art phase, wrap140 — so the mark
+// always lies on its crest/midline).
+// Reappearance changes opacity only: no per-envelope relocation, y-jitter or hidden glide. The
+// cycle is a whole number of 140px tile loops and every opacity track is dark at its seam, so the
+// transform's periodic reset is invisible.
 //
 // ONE CLOCK, SET ONCE. Wave-space validity needs the tracks' startTime ≡ the tile drift's
 // startTime (mod 1944ms). alignTracks() reads the tile animation's literal startTime (at the
@@ -42,10 +41,9 @@
 // crests too. At rest everything is handed to the scroll-time system in one commit.
 //
 // THE SCROLL-TIME SYSTEM (post-reveal, unchanged in spirit): static texture between scrolls;
-// scroll velocity drives dash blink playbackRate (driven WAAPI); relocations are raster-free
-// 140px-lattice moves through the same never-twice memory (2026-07-11 scroll-jank round: the
-// full-art respawn re-rastered PNGs on the scroll path — deleted); sway = literal field
-// transforms via swayFields() (the --wave-x inheritance firebreak — see index.css).
+// scroll velocity drives dash blink playbackRate (driven WAAPI), but a dash keeps the same
+// wave-relative position when it reappears; sway = literal field transforms via swayFields()
+// (the --wave-x inheritance firebreak — see index.css).
 
 // ─── Colour knobs (one const each, per Peter's spec) ─────────────────────────────────────────
 export const SPARK_COLOR = '#f7f2e8' // parchment-white sparkle strokes/satellites (day)
@@ -84,8 +82,6 @@ import { notePerf } from './perflog'
 type Group = 'a' | 'b'
 type Mode = 'anim' | 'coast' | 'off'
 
-interface Slot { m: number; dy: number } // lattice offset (×140px, wave space) + y jitter for one envelope
-
 interface Inst {
   kind: 'spark' | 'dash'
   role: 'blink' | 'rest' // blink: precomputed envelope track during load; rest: the static texture
@@ -102,7 +98,7 @@ interface Inst {
   delay: number // blink phase (s) within the period
   onS: number
   staticOn: boolean // lit at rest? (rest role: always true; blink role: scroll-time state)
-  slots?: Slot[] // blink role: one lattice slot per envelope, cycle-long, never-twice sampled
+  envelopes?: number // blink role: whole envelopes in the shared cycle; position never changes
 }
 
 // ─── PRNG — mulberry32 (tiny, seedable; seeded from Date.now — app code, that's fine) ─────────
@@ -154,8 +150,7 @@ function midYd(wx: number): number { // midline slope dy/dx — ≡ the thick li
 }
 
 // ─── Non-repeating strike sampler ─────────────────────────────────────────────────────────────
-// Every position draw — pool build (base positions, every envelope slot) and scroll-time
-// relocation — goes through memPick(): candidates come from the caller's distribution, but are
+// Every permanent pool position goes through memPick(): candidates come from the caller's distribution, but are
 // rejection-sampled against a per-band ring of past strikes (min wave-space edge distance
 // MEM_EPS). The ring is a sliding window sized under the band's ε-capacity; it persists to
 // localStorage so strikes don't repeat across page loads either. After MEM_TRIES failed draws
@@ -218,33 +213,6 @@ function memPick<T>(kind: 'spark' | 'dash', group: Group, row: number, hw: numbe
     const nx = wrapW(xOf(c))
     let dMin = Infinity
     for (const p of seen) dMin = Math.min(dMin, ringDist(nx, p[0]) - hw - p[1])
-    if (dMin >= MEM_EPS) { best = c; break }
-    if (dMin > bestD) { bestD = dMin; best = c }
-  }
-  const picked = best!
-  seen.push([Math.round(wrapW(xOf(picked))), hw])
-  const cap = memRing(kind)
-  if (seen.length > cap) seen.splice(0, seen.length - cap)
-  mem!.set(key, seen)
-  memSave()
-  return picked
-}
-
-// Light sampler for SCHEDULE slots (thousands of draws in the one build pass): same never-twice
-// semantics, but few tries against only the band ring's most recent strikes — the full scan on a
-// saturated ring measured ~110ms of the pre-gate pass for marginal extra spacing.
-function memPickLight<T>(kind: 'spark' | 'dash', group: Group, row: number, hw: number, draw: () => T, xOf: (c: T) => number): T {
-  memLoad()
-  const key = `${kind}:${group}:${row}`
-  const seen = mem!.get(key) ?? []
-  const tail = seen.slice(-14)
-  let best: T | null = null
-  let bestD = -Infinity
-  for (let i = 0; i < 8; i++) {
-    const c = draw()
-    const nx = wrapW(xOf(c))
-    let dMin = Infinity
-    for (const p of tail) dMin = Math.min(dMin, ringDist(nx, p[0]) - hw - p[1])
     if (dMin >= MEM_EPS) { best = c; break }
     if (dMin > bestD) { bestD = dMin; best = c }
   }
@@ -375,64 +343,25 @@ function genSpark(rnd: () => number, group: Group, row: number, strip: number): 
   }
 }
 
-// ─── The precomputed schedule — one cycle of envelopes per blink instance ─────────────────────
-// Quantize the instance's period so the ~46.7s cycle holds a WHOLE number of envelopes (the
-// track loops seamlessly), then draw one lattice slot per envelope through the never-twice
-// memory. A slot is a whole-140px offset on the instance's own lattice — same wave-space phase,
-// so the instance's rastered art stays exactly valid at every slot — chosen so the lit window
-// lands inside the viewport wherever the drift is at that moment.
-function buildSchedule(rnd: () => number, d: Inst, vw: number): void {
+// ─── The precomputed schedule — opacity only, at one permanent position ───────────────────────
+// Quantize the instance's period so the shared cycle holds a WHOLE number of envelopes and keep
+// enough dark time on both sides of the seam for the long drift transform's periodic reset. The
+// instance never changes x/y when it disappears and comes back.
+function buildSchedule(rnd: () => number, d: Inst): void {
   const E = Math.max(1, Math.round(CYCLE_S / d.period))
   const P = CYCLE_S / E // quantized period (±1% of the drawn one)
   d.period = P
   d.delay = 0.02 + rnd() * Math.max(0.02, P - d.onS - 0.06) // the whole envelope fits inside one period
-  const cx0 = d.x + d.w / 2 // the instance's art phase anchor (wave-space ≡ wrap140(cx0))
-  const dir = d.group === 'a' ? -1 : 1 // tile drift direction (a rows drift left)
-  const edge = 90 // keep the whole lit excursion (72px travel + box) on screen
-  const lensJit = () => { // per-envelope y jitter: dashes ±2.5px; sparks re-drawn inside the lens
-    if (d.kind === 'dash') return (rnd() - 0.5) * 5
-    const t = wrap140(cx0) / 70
-    const depth = 36 * Math.max(0.05, t * (1 - t)) // arc↔chord lens depth at the spark's phase
-    const cy0 = d.y + d.h / 2 - 140 * d.row
-    return arcY(CREST[d.group], t) + (0.12 + 0.73 * rnd()) * depth - cy0
-  }
-  d.slots = []
-  const recent: number[] = [] // the instance's own recent slots — NEVER redrawn back-to-back
-  for (let k = 0; k < E; k++) {
-    const tMid = d.delay + k * P + d.onS / 2 // cycle time at the envelope's midpoint
-    // Screen centre during the envelope: cx0 + 140m + dir·72·τ. Draw a viewport target, snap to
-    // the instance's lattice, and let the shared band memory reject recent strikes (identity =
-    // the slot's wave-space x, stable under the drift). The instance's own last few slots are
-    // excluded OUTRIGHT — the band ring's farthest-candidate fallback could otherwise hand a
-    // saturated draw straight back to the previous spot (the one visible "same place again").
-    const mOf = (u: number) => Math.round((u - dir * DRIFT_PX_S * tMid - cx0) / 140)
-    const slot = memPickLight(d.kind === 'dash' ? 'dash' : 'spark', d.group, d.row, d.hw, () => {
-      for (let tries = 0; tries < 8; tries++) {
-        const m = mOf(edge + rnd() * Math.max(40, vw - 2 * edge))
-        if (!recent.includes(m)) return m
-      }
-      // Exhausted (≈0.4% of draws): scan the viewport's slot range for the first non-recent m —
-      // the fallback must honour the exclusion too, or it hands back the previous spot (the one
-      // measured leak: 1-4 same-slot repeats per pool).
-      const mLo = Math.min(mOf(edge), mOf(vw - edge))
-      const mHi = Math.max(mOf(edge), mOf(vw - edge))
-      for (let m = mLo; m <= mHi; m++) if (!recent.includes(m)) return m
-      return mOf(edge + rnd() * Math.max(40, vw - 2 * edge)) // range ≤ exclusion window (tiny phones)
-    }, (m) => cx0 + 140 * m)
-    d.slots.push({ m: slot, dy: lensJit() })
-    recent.push(slot)
-    if (recent.length > Math.min(4, Math.max(1, Math.floor(vw / 140) - 2))) recent.shift()
-  }
+  d.envelopes = E
 }
 
 // ─── Track keyframes — the whole load playback, precomputed ──────────────────────────────────
 // Opacity track: E envelopes (dash: S rise / hold / S fall; spark: snap glint), dark elsewhere.
-// Transform track: during each lit window the instance moves at EXACTLY the drift velocity
-// (constant wave-space position — it rides its crest); between envelopes it glides, invisibly,
-// to the next slot. Both loop over the same cycle; startTime ≡ the tile clock (alignTracks).
+// Transform track: one straight drift for the whole cycle — no hidden relocations. Both loop over
+// the same cycle; startTime ≡ the tile clock (alignTracks).
 function opacityTrack(d: Inst): Keyframe[] {
   const kf: Keyframe[] = [{ offset: 0, opacity: 0 }]
-  const E = d.slots!.length
+  const E = d.envelopes!
   const ramp = d.kind === 'dash' ? DASH_S : 0.03
   const ease = d.kind === 'dash' ? 'cubic-bezier(0.4, 0, 0.2, 1)' : undefined
   for (let k = 0; k < E; k++) {
@@ -446,40 +375,13 @@ function opacityTrack(d: Inst): Keyframe[] {
   kf.push({ offset: 1, opacity: 0 })
   return kf
 }
-function transformTrack(d: Inst): Keyframe[] {
-  const E = d.slots!.length
-  const dir = d.group === 'a' ? -1 : 1
-  // Track value at the lit window's start/end for envelope k: x(τ) = 140m − dir·... in field
-  // space the instance must sit at (art phase + 140m) − tile pose ⇒ x(τ) = 140m + dir·72·τ with
-  // the sign matching the drift (a: pattern moves left ⇒ x decreases through the window).
-  const at = (k: number, tt: number) => {
-    const s = d.slots![k]
-    return { x: 140 * s.m + dir * DRIFT_PX_S * tt, dy: s.dy }
-  }
-  const kf: Keyframe[] = []
-  const pts: { t: number; x: number; dy: number }[] = []
-  for (let k = 0; k < E; k++) {
-    const t0 = d.delay + k * d.period
-    const a = at(k, t0), b = at(k, t0 + d.onS)
-    pts.push({ t: t0, x: a.x, dy: a.dy }, { t: t0 + d.onS, x: b.x, dy: b.dy })
-  }
-  // Seamless wrap: the glide from the last envelope's end to the first envelope's start (next
-  // cycle) crosses the loop boundary — interpolate its value at offset 0/1.
-  const last = pts[pts.length - 1]
-  const first = pts[0]
-  const span = CYCLE_S - last.t + first.t
-  const f = span > 0 ? (CYCLE_S - last.t) / span : 0
-  const x0 = last.x + (first.x - last.x) * f
-  const dy0 = last.dy + (first.dy - last.dy) * f
-  kf.push({ offset: 0, transform: `translate3d(${x0.toFixed(2)}px, ${dy0.toFixed(2)}px, 0)` })
-  for (const p of pts) {
-    kf.push({
-      offset: Math.min(0.9999, Math.max(0.0001, p.t / CYCLE_S)),
-      transform: `translate3d(${p.x.toFixed(2)}px, ${p.dy.toFixed(2)}px, 0)`,
-    })
-  }
-  kf.push({ offset: 1, transform: `translate3d(${x0.toFixed(2)}px, ${dy0.toFixed(2)}px, 0)` })
-  return kf
+export function monisticTransformTrack(group: Group): Keyframe[] {
+  const dir = group === 'a' ? -1 : 1
+  const x = dir * DRIFT_PX_S * CYCLE_S
+  return [
+    { offset: 0, transform: 'translate3d(0px, 0px, 0)' },
+    { offset: 1, transform: `translate3d(${x.toFixed(2)}px, 0px, 0)` },
+  ]
 }
 
 // ─── Module state — ONE shared pool per page: every surface mounts the SAME instances, so the
@@ -515,7 +417,8 @@ export function pendingTwinkleMountDecision(state: {
 let defs: { sparks: Inst[]; dashes: Inst[] } | null = null
 let stripW = 0
 const hosts = new Map<HTMLElement, HostState>()
-const trackAnims = new Map<HTMLElement, Animation[]>() // blink els → [opacity, transform] tracks
+const trackAnims = new Map<HTMLElement, Animation[]>() // blink els → opacity-only track
+const blinkDrift = new Map<HTMLElement, Animation>() // blink wrapper → one shared drift transform
 const restDrift = new Map<HTMLElement, Animation>() // rest wrappers → tile-clocked WAAPI drift
 let waterMode: Mode = 'anim'
 let lastWaveX = 0 // the sway value at/after the rest handoff (mirrors the surface's --wave-x)
@@ -526,6 +429,19 @@ let lastWaveX = 0 // the sway value at/after the rest handoff (mirrors the surfa
 // different window of the pool. alignTracks is idempotent per load (alignedForLoad).
 let trackT0: number | null = null
 let alignedForLoad = false
+function pinToTrackClock(a: Animation): void {
+  const t0 = trackT0
+  if (t0 == null) return
+  const apply = () => {
+    if (trackT0 !== t0 || waterMode === 'off' || a.playState === 'idle') return
+    try { if (a.startTime !== t0) a.startTime = t0 } catch { /* detached or cancelled */ }
+  }
+  apply()
+  // WebKit may replace a startTime written while the animation is play-pending. Re-assert after
+  // ready, exactly as Scroll's sibling-wave adoption does; otherwise a warm refresh can begin a
+  // shared mark field a fraction of a frame away from its wave.
+  void a.ready.then(apply).catch(() => { /* cancelled — a newer mode owns it */ })
+}
 function findDrift(): Animation | undefined {
   for (const host of hosts.keys()) {
     const surface = host.parentElement
@@ -555,8 +471,8 @@ function alignTracks(): void {
     // field (Peter's live "backward tick just before the slowdown", 2026-07-12: +24-62px phase
     // steps on the screencast, ~40ms before reveal-imminent — the batch landed as the editor
     // mount drained, right before the settle gate fired).
-    for (const anims of trackAnims.values())
-      for (const a of anims) { try { a.startTime = trackT0 } catch { /* pending — natural start */ } }
+    for (const anims of trackAnims.values()) for (const a of anims) pinToTrackClock(a)
+    for (const a of blinkDrift.values()) pinToTrackClock(a)
     for (const r of clockWaiters.splice(0)) r()
   }
   if (typeof drift.startTime === 'number') apply()
@@ -698,7 +614,6 @@ function step(ts: number): void {
   lastStep = ts
   if (ts - lastRecycle > 500) { lastRecycle = ts; recycle() }
   if (!hosts.size) return // every host gone — park; ensureDriver re-arms
-  respawnDashes() // per-envelope raster-free relocation (never-twice) while scroll-twinkling
   const target = ts - scrollTs < SCROLL_STALE_MS ? scrollTargetV : 0
   rate += (target - rate) * Math.min(1, dt / 140) // short smoothing — the rate never steps
   const eff = rate
@@ -786,70 +701,6 @@ function recycle(): void {
   syncDashLiveliness() // arm/idle blink animations as dashes cross the viewport
 }
 
-// ─── Scroll-time relocation — raster-free 140px-lattice moves through the never-twice memory ──
-// While dashes scroll-twinkle ('driven'), each completed envelope relocates the dash to another
-// lattice slot with the same wave-space phase (art stays exactly valid — two style writes, no
-// raster, no encode; full art regenerates only at zoom-settled/resize reseeds). Runs in the
-// dark window between envelopes, so the move is invisible.
-const dashCycle = new WeakMap<Inst, number>() // last dark-window index acted on, per instance
-let liveRnd: (() => number) | null = null
-let respawnCursor = 0 // round-robin start index — the budget must not starve the tail
-function respawnDashes(): void {
-  if (!defs || !hosts.size || blinkMode !== 'driven') return
-  const hs = Array.from(hosts.values())
-  const vw = window.innerWidth
-  const clockBase = vt / 1000
-  let budget = 4 // bound the per-frame work; deferred ones take the next envelope
-  const list = defs.dashes
-  const n = list.length
-  for (let k = 0; k < n && budget > 0; k++) {
-    const i = (respawnCursor + k) % n
-    const d = list[i]
-    let live = false
-    for (const h of hs) { const el = h.dashes?.els[i]; if (el && dashAnims.has(el)) { live = true; break } }
-    if (!live) continue
-    const clock = clockBase + d.delay
-    const dark = Math.floor((clock - d.onS - 0.06) / d.period)
-    const prev = dashCycle.get(d)
-    if (prev === undefined) { dashCycle.set(d, dark); continue }
-    if (dark <= prev) continue
-    // Relocate only while (near-)invisible: the inter-envelope dark window.
-    const phase = ((clock % d.period) + d.period) % d.period
-    if (phase < d.onS + 0.05 && phase > 0.1) continue
-    dashCycle.set(d, dark)
-    if (!liveRnd) liveRnd = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0)
-    const rnd = liveRnd
-    const wx = wrap140(d.x + d.w / 2)
-    const cells = Math.max(1, Math.floor(stripW / 140))
-    const k0 = Math.ceil((-PAD - wx) / 140)
-    // Never redraw the CURRENT slot (a saturated band ring can fall back to it): draw from the
-    // other cells−1 lattice slots.
-    const curK = Math.round((d.x + d.w / 2 - wx) / 140) - k0
-    const cx = memPick('dash', d.group, d.row, d.hw, () => {
-      let kk = Math.floor(rnd() * Math.max(1, cells - 1))
-      if (cells > 1 && kk >= ((curK % cells) + cells) % cells) kk++
-      return (k0 + kk) * 140 + wx
-    }, (c) => c)
-    let nx = cx - d.w / 2
-    const ny = 140 * d.row + midY(CREST[d.group], wx) + (rnd() - 0.5) * 5 - d.h / 2 // fresh jitter, same phase
-    // Fold into current viewport coverage (multiples of stripW ≡ 0 mod 140).
-    const x0 = currentFieldX(d.group)
-    const sx = nx + d.w / 2 + x0
-    if (sx < -PAD) nx += stripW * Math.ceil((-PAD - sx) / stripW)
-    else if (sx > vw + PAD) nx -= stripW * Math.ceil((sx - vw - PAD) / stripW)
-    d.x = nx
-    d.y = ny
-    for (const h of hs) {
-      const el = h.dashes?.els[i]
-      if (!el) continue
-      el.style.left = `${d.x}px`
-      el.style.top = `${d.y}px`
-    }
-    budget--
-  }
-  respawnCursor = (respawnCursor + 1) % Math.max(1, n)
-}
-
 // ─── Viewport liveliness cap (REST) ───────────────────────────────────────────────────────────
 // Only dashes whose screen position is inside the viewport (+100px margin) carry a live driven
 // blink; offscreen ones idle with no animation. Phase never suffers: startDrivenBlink re-derives
@@ -859,6 +710,7 @@ function syncDashLiveliness(): void {
   const vw = window.innerWidth
   const hs = Array.from(hosts.values())
   defs.dashes.forEach((d, i) => {
+    if (d.role !== 'rest') return // load-only blink objects stay hidden once rest begins
     const sx = d.x + currentFieldX(d.group)
     const visible = sx > -100 - d.w && sx < vw + 100
     for (const h of hs) {
@@ -879,15 +731,16 @@ function pruneHosts(): void {
   for (const [host, h] of hosts) {
     if (host.isConnected) continue
     for (const nodes of [h.sparks, h.dashes]) {
-      for (const el of nodes?.els ?? []) {
+      if (!nodes) continue
+      for (const el of nodes.els) {
         dashAnims.get(el)?.cancel()
         dashAnims.delete(el)
-        for (const a of trackAnims.get(el) ?? []) a.cancel()
-        trackAnims.delete(el)
       }
+      stopLoadPlayback(nodes)
       for (const g of ['a', 'b'] as Group[]) {
-        const w = nodes?.rest[g]
-        if (w) { restDrift.get(w)?.cancel(); restDrift.delete(w) }
+        const w = nodes.rest[g]
+        restDrift.get(w)?.cancel()
+        restDrift.delete(w)
       }
     }
     hosts.delete(host)
@@ -908,17 +761,42 @@ function instEl(d: Inst): HTMLElement {
   return el
 }
 
-// Mount a blink instance's precomputed playback: the opacity envelope track + the slot/drift
-// transform track, aligned to the load clock when it's known (else alignTracks batches later).
+// Mount one object's precomputed opacity playback. Position is never animated on the object.
 function startTracks(el: HTMLElement, d: Inst): void {
-  if (!d.slots) return
+  if (!d.envelopes) return
   const dur = CYCLE_S * 1000
   const ao = el.animate(opacityTrack(d), { duration: dur, iterations: Infinity })
-  const at = el.animate(transformTrack(d), { duration: dur, iterations: Infinity })
-  if (trackT0 != null && alignedForLoad) {
-    try { ao.startTime = trackT0; at.startTime = trackT0 } catch { /* pending — aligned later */ }
+  trackAnims.set(el, [ao])
+  if (alignedForLoad) pinToTrackClock(ao)
+}
+
+// Every object in one group keeps its own x/y forever; this wrapper supplies their one shared
+// wave-locked translation. The long cycle covers exactly 12 tiles and resets only while every
+// child opacity track is dark at its cycle seam.
+function startBlinkDrifts(nodes: SetNodes): void {
+  const dur = CYCLE_S * 1000
+  for (const g of ['a', 'b'] as Group[]) {
+    const wrap = nodes.blink[g]
+    if (!wrap.childElementCount || blinkDrift.has(wrap)) continue
+    const a = wrap.animate(monisticTransformTrack(g), { duration: dur, iterations: Infinity })
+    blinkDrift.set(wrap, a)
+    if (alignedForLoad) pinToTrackClock(a)
   }
-  trackAnims.set(el, [ao, at])
+}
+
+function stopLoadPlayback(nodes: SetNodes): void {
+  for (const el of nodes.els) {
+    for (const a of trackAnims.get(el) ?? []) a.cancel()
+    trackAnims.delete(el)
+  }
+  for (const g of ['a', 'b'] as Group[]) {
+    blinkDrift.get(nodes.blink[g])?.cancel()
+    blinkDrift.delete(nodes.blink[g])
+  }
+}
+
+function showBlinkLayer(nodes: SetNodes, show: boolean): void {
+  for (const g of ['a', 'b'] as Group[]) nodes.blink[g].style.display = show ? '' : 'none'
 }
 
 const decoded = new WeakSet<Inst[]>()
@@ -954,7 +832,7 @@ function genList(rnd: () => number, kind: 'sparks' | 'dashes'): Inst[] {
       // Dashes now use group 'a' ONLY — one band, thick-line-parallel. Sparks (glitters) keep both
       // crests; only the wave-MARK field collapses to one band.
       const g: Group = 'a'
-      const nB = Math.floor(vw / DASH_ROW_PX + rnd()) // blinking marks (visible-density parity)
+      const nB = Math.floor(vw / DASH_ROW_PX + rnd()) // viewport-budgeted: keep load track count bounded
       for (let i = 0; i < nB; i++) out.push(genDash(rnd, g, r, stripW, 'blink'))
       const nR = Math.floor(stripW / STATIC_ROW_PX + rnd()) // the resting texture, strip-wide
       for (let i = 0; i < nR; i++) out.push(genDash(rnd, g, r, stripW, 'rest'))
@@ -975,10 +853,9 @@ const poolSeed = (salt: number): number => {
 
 function ensureSchedules(): void {
   if (!defs) return
-  const vw = window.innerWidth
   const rnd = mulberry32(poolSeed(0x51ed270b))
   for (const list of [defs.sparks, defs.dashes])
-    for (const d of list) if (d.role === 'blink' && !d.slots) buildSchedule(rnd, d, vw)
+    for (const d of list) if (d.role === 'blink' && !d.envelopes) buildSchedule(rnd, d)
 }
 
 function generate(): void {
@@ -1017,12 +894,17 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
   // Build the DOM + playback SYNCHRONOUSLY (detached — WAAPI runs on detached elements), so the
   // ~130ms of track creation overlaps the async art-decode wait instead of serializing after it.
   const nodes = buildSet(kind === 'sparks' ? 'iw-twk-sparks' : 'iw-twk-dashes', list)
-  const startAll = () => nodes.els.forEach((el, i) => {
-    if (list[i].role === 'blink' && !trackAnims.has(el)) startTracks(el, list[i])
-  })
+  const startAll = () => {
+    showBlinkLayer(nodes, true)
+    startBlinkDrifts(nodes)
+    nodes.els.forEach((el, i) => {
+      if (list[i].role === 'blink' && !trackAnims.has(el)) startTracks(el, list[i])
+    })
+  }
   const gateOpen = document.documentElement.classList.contains('iw-water-ready')
   if (waterMode === 'off') {
     for (const g of ['a', 'b'] as Group[]) setFieldRest(nodes.fields[g], g, lastWaveX)
+    showBlinkLayer(nodes, false)
   } else if (!announced && !gateOpen) {
     // The GATE host (its mount is what twinkles-ready waits on): tracks must exist before the
     // first visible frame — create them now, in the one synchronous pass. Everything is hidden
@@ -1057,7 +939,10 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
       else setTimeout(slice, 40)
     }
     fadeWrapsOut(nodes)
-    void clockReady().then(scheduleSlice) // tracks are born aligned — never re-clocked while visible
+    void clockReady().then(() => {
+      startBlinkDrifts(nodes)
+      scheduleSlice()
+    }) // tracks are born aligned — never re-clocked while visible
 
   }
   void decodeAll(list).then(() => {
@@ -1070,14 +955,15 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
       mode: waterMode,
     })
     if (decision === 'discard') {
-      for (const el of nodes.els) { trackAnims.get(el)?.forEach((a) => a.cancel()); trackAnims.delete(el) }
+      stopLoadPlayback(nodes)
       return
     }
     // Decode can finish AFTER coast→rest. Those load animations live on detached elements, so
     // enterRest cannot see them through h.sparks/h.dashes. Never attach a late desktop dash set
     // with its infinite load tracks still running; it must arrive as the static resting texture.
     if (decision === 'attach-static') {
-      for (const el of nodes.els) { trackAnims.get(el)?.forEach((a) => a.cancel()); trackAnims.delete(el) }
+      stopLoadPlayback(nodes)
+      showBlinkLayer(nodes, false)
     }
     host.appendChild(nodes.set)
     h[kind] = nodes
@@ -1111,9 +997,8 @@ function remount(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): vo
     for (const el of old.els) {
       dashAnims.get(el)?.cancel()
       dashAnims.delete(el)
-      for (const a of trackAnims.get(el) ?? []) a.cancel()
-      trackAnims.delete(el)
     }
+    stopLoadPlayback(old)
     for (const g of ['a', 'b'] as Group[]) {
       restDrift.get(old.rest[g])?.cancel()
       restDrift.delete(old.rest[g])
@@ -1245,10 +1130,8 @@ function enterRest(): void {
         restDrift.get(rw)?.cancel()
         restDrift.delete(rw)
       }
-      for (const el of nodes.els) {
-        for (const a of trackAnims.get(el) ?? []) a.cancel()
-        trackAnims.delete(el)
-      }
+      stopLoadPlayback(nodes)
+      showBlinkLayer(nodes, false)
     }
   }
   blinkMode = 'static'
@@ -1298,6 +1181,7 @@ export function syncTwinkles(
     for (const [, hs] of hosts) {
       for (const nodes of [hs.sparks, hs.dashes]) {
         if (!nodes) continue
+        showBlinkLayer(nodes, true)
         for (const g of ['a', 'b'] as Group[]) {
           nodes.fields[g].style.transform = '' // the sway transform yields to the CSS choreography
           restDrift.get(nodes.rest[g])?.cancel()
@@ -1318,6 +1202,7 @@ export function syncTwinkles(
         for (const nodes2 of [hs2.sparks, hs2.dashes]) {
           if (!nodes2) continue
           const list2 = nodes2 === hs2.sparks ? defs!.sparks : defs!.dashes
+          startBlinkDrifts(nodes2)
           nodes2.els.forEach((el, i) => {
             const d = list2[i]
             if (d?.role === 'blink' && !trackAnims.has(el)) startTracks(el, d)
@@ -1333,13 +1218,13 @@ export function syncTwinkles(
 
   // Mount / remove the requested sets on THIS host.
   if (want.sparks && !h.sparks) mountSet(host, h, 'sparks')
-  else if (!want.sparks && h.sparks) { for (const el of h.sparks.els) { trackAnims.get(el)?.forEach((a) => a.cancel()); trackAnims.delete(el) } h.sparks.set.remove(); h.sparks = undefined; h.tok.sparks++ }
+  else if (!want.sparks && h.sparks) { stopLoadPlayback(h.sparks); h.sparks.set.remove(); h.sparks = undefined; h.tok.sparks++ }
   if (want.dashes && !h.dashes) mountSet(host, h, 'dashes')
   else if (!want.dashes && h.dashes) {
     for (const el of h.dashes.els) {
       dashAnims.get(el)?.cancel(); dashAnims.delete(el)
-      trackAnims.get(el)?.forEach((a) => a.cancel()); trackAnims.delete(el)
     }
+    stopLoadPlayback(h.dashes)
     for (const g of ['a', 'b'] as Group[]) { restDrift.get(h.dashes.rest[g])?.cancel(); restDrift.delete(h.dashes.rest[g]) }
     h.dashes.set.remove(); h.dashes = undefined; h.tok.dashes++
   }

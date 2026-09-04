@@ -658,6 +658,11 @@
        ANIMATION — it overrides this transition, unaffected. */
     transition: opacity 0.5s ease;
   }
+  /* Only the six populated blink wrappers move now (three per overlapping load surface). Promote
+     those shared fields explicitly; individual specks animate opacity only and must not each earn
+     a transform layer. This is the Safari raster-wobble boundary. */
+  .inkwave-editor-surface.iw-wave-anim .iw-twk-blink,
+  .inkwave-editor-surface.iw-wave-coast .iw-twk-blink { will-change: transform; }
   @keyframes iw-twk-fade-out { from { opacity: 1; } to { opacity: 0; } }
   @keyframes iw-twk-fade-in { from { opacity: 0; } to { opacity: 1; } }
   .inkwave-editor-surface.iw-wave-anim .iw-twk-rest { opacity: 0; }

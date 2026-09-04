@@ -66,8 +66,8 @@ applyTheme()
 // STATE **AND** EVENT, deliberately (2026-07-17, the second round of Peter's iPhone bug). The
 // video's barrier first keyed on `inkwave:twinkles-ready`, which was post-hydration but is NOT
 // guaranteed to arrive: the twinkle pool announces only once BOTH its sets generate, while the
-// water gate opens anyway on its own 1500ms timeout — so a load where the pool never announced
-// left the barrier waiting for a signal that was never coming, forever (PROBED). A signal you
+// the old water gate could open on a timeout even when the pool never announced, leaving the
+// barrier waiting for a signal that was never coming, forever (PROBED). A signal you
 // wait on must be one that ALWAYS fires, and it must be ASKABLE ("has it already happened?") so a
 // late subscriber can never wait for a past event. React always commits, so this always fires.
 function HydrationBeacon(): null {
@@ -140,18 +140,18 @@ function armWaveVideoWait(): void {
 }
 
 // ─── Atomic water reveal ───
-// The water (aqua gradient + wave tiles + ALL twinkle instances) is gated behind .iw-water-ready
+// The water (shared gradient + wave tiles + ALL twinkle instances) is gated behind .iw-water-ready
 // and appears in ONE paint. TWO conditions open the gate (2026-07-10, Peter: "glimmers and short
 // lines … need to start atomically even if it takes longer"):
 //   1. every wave-tile data-URI has decoded;
 //   2. the twinkle field has generated + decoded + MOUNTED (hidden — the not-ready CSS keeps
 //      .iw-wave-twinkles display:none) — waveTwinkle.ts announces via 'inkwave:twinkles-ready'
 //      (+ the __iwTwinklesReady flag for the fired-before-we-listened race).
-// Until both, the page holds the neutral parchment; then colour, waves and twinkles land in the
+// Until both, day mode holds pure white; then colour, waves and twinkles land in the
 // same style recalc. The old single-condition gate let the twinkle layers mount LATER, mid-drift —
 // on Firefox that late mount re-rastered the wave layers (a blank flash at a consistent moment)
-// and the field popped in non-atomically. A generous timeout still opens the gate if anything
-// wedges (a decode failure must never hold the page hostage). On gate-open we dispatch
+// and the field popped in non-atomically. Only the loud 30s failure backstop opens an incomplete
+// gate; healthy loads wait for both conditions. On gate-open we dispatch
 // 'inkwave:water-ready': THAT style recalc creates the wave pseudos' CSS drift animations, and
 // waveTwinkle aligns its precomputed pool's playback clock to the drift's literal startTime in
 // the same first-visible frame (alignTracks — once per load).
@@ -160,10 +160,15 @@ function armWaveVideoWait(): void {
 // load gates identically now (the tiles are data URIs, so "warm" never made decoding faster
 // anyway — the wait is hydration-bound either way, and atomicity wins per Peter's directive).
 {
+  const WATER_GATE_TIMEOUT_MS = 30_000
   let stamped = false
-  const ready = () => {
+  const ready = (reason: 'complete' | 'no-surface' | 'timeout') => {
     if (stamped) return
     stamped = true
+    ;(window as unknown as { __iwWaterGate?: { reason: string; at: number } }).__iwWaterGate = {
+      reason,
+      at: performance.now(),
+    }
     document.documentElement.classList.add('iw-water-ready')
     // ASKABLE, like __iwTwinklesReady: `inkwave:water-ready` is one-shot, and the class is not a
     // safe proxy for "it happened" (a hydration recovery can strip it). A late subscriber must be
@@ -205,7 +210,7 @@ function armWaveVideoWait(): void {
     stamped = true // already stamped (bfcache restore / re-eval) — nothing to gate, guard armed
   } else {
     const surface = document.querySelector('.inkwave-editor-surface')
-    if (!surface) ready() // no water on this page — nothing to gate
+    if (!surface) ready('no-surface') // no water on this page — nothing to gate
     else {
       // Condition 1 — the wave tiles. Decode every tile var the water uses (the sparkle tile
       // taught us: any wave layer the gate does NOT decode pops in a few frames late).
@@ -217,7 +222,7 @@ function armWaveVideoWait(): void {
       }
       const tiles = Promise.all(urls.map((u) => { const img = new Image(); img.src = u; return img.decode() })).catch(() => {})
       // Condition 2 — the twinkle field, but only where one will mount: the live-editor (iw-fill)
-      // surface's host div. /about, /verify etc. have no twinkles and must not wait 1.5s for them.
+      // surface's host div. /about, /verify etc. have no twinkles and must not wait for them.
       const host = document.querySelector('.inkwave-editor-surface.iw-fill .iw-wave-twinkles')
       const twinkles = !host || (window as unknown as { __iwTwinklesReady?: boolean }).__iwTwinklesReady
         ? Promise.resolve()
@@ -230,8 +235,11 @@ function armWaveVideoWait(): void {
       let videoFlag = false
       try { const v = localStorage.getItem('inkwave:waveVideo'); videoFlag = v === '1' || v === 'debug' } catch { /* private mode */ }
       if (videoFlag) { armWaveVideoWait(); void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo()).catch(() => {}) }
-      const t = setTimeout(ready, 1500) // generous — twinkles wait through hydration; never hostage
-      void Promise.all([tiles, twinkles]).then(() => { clearTimeout(t); ready() })
+      const t = setTimeout(() => {
+        console.error(`[inkwave] atomic water gate exceeded ${WATER_GATE_TIMEOUT_MS / 1000}s; releasing incomplete water`)
+        ready('timeout')
+      }, WATER_GATE_TIMEOUT_MS)
+      void Promise.all([tiles, twinkles]).then(() => { clearTimeout(t); ready('complete') })
     }
   }
 }

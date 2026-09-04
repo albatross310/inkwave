@@ -5,9 +5,9 @@
 //
 // THE SEAM, EXACTLY. Two systems, two clocks:
 //   • waves = CSS background drift (iw-wave-drift-l/r), 140px per 1944ms = 72px/s;
-//   • marks = WAAPI transform tracks that bake that same velocity in, so a mark rides its crest
-//     ONLY IF its clock agrees with the tile's.
-// waveTwinkle.alignTracks() reconciles them ONCE per load:
+//   • marks = one WAAPI transform per populated blink field, carrying fixed-position objects at
+//     that same velocity, so every mark rides its crest ONLY IF the field clock agrees with the tile's.
+// waveTwinkle.alignTracks() reconciles the shared fields ONCE per load:
 //     trackT0 = drift.startTime - LOOP_MS * floor(random * CYCLE_LOOPS)
 // so the invariant is a CONGRUENCE: every track.startTime ≡ drift.startTime (mod 1944ms).
 // Any deviation is literally visible lag: skew_ms * 0.072 = px off the crest.
@@ -69,11 +69,14 @@ await ctx.addInitScript(({ spike, perturb, LOOP_MS }) => {
       if (a && typeof a.startTime === 'number')
         drifts.push({ cls: s.className, startTime: a.startTime, playState: a.playState })
     }
-    // Mark tracks = WAAPI animations on .iw-twk-i sprites (no animationName: they are script-made).
+    // Spatial mark tracks = the shared transform on each `.iw-twk-blink` wrapper. Child sprite
+    // tracks are opacity-only and cannot say whether a mark rides its wave.
     const marks = []
-    for (const el of document.querySelectorAll('.iw-twk-i')) {
+    for (const el of document.querySelectorAll('.iw-twk-blink, .iw-twk-blink > *')) {
       for (const a of el.getAnimations()) {
         if (a.animationName) continue // CSS animation, not a script track
+        const frames = a.effect?.getKeyframes?.() || []
+        if (!frames.some((f) => typeof f.transform === 'string')) continue
         if (typeof a.startTime === 'number') marks.push(a.startTime)
       }
     }
@@ -95,8 +98,9 @@ await ctx.addInitScript(({ spike, perturb, LOOP_MS }) => {
   }
   // Perturb one track by a known amount — the fire test.
   if (perturb) window.addEventListener('inkwave:reveal-imminent', () => {
-    const el = document.querySelector('.iw-twk-i')
-    const a = el && el.getAnimations().find((x) => !x.animationName)
+    const el = document.querySelector('.iw-twk-blink')
+    const a = el && el.getAnimations().find((x) => !x.animationName
+      && (x.effect?.getKeyframes?.() || []).some((f) => typeof f.transform === 'string'))
     if (a && typeof a.startTime === 'number') { a.startTime = a.startTime - perturb; w.__iwPhase.perturbed = true }
   }, { once: true })
 }, { spike, perturb, LOOP_MS })

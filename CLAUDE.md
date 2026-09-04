@@ -627,6 +627,21 @@ playback is COMPOSITOR-ONLY — no per-frame JS, so main-thread starvation canno
 two control events cross from the app into it: START (implicit, the prerendered `.iw-wave-anim`
 class) and SETTLE (`inkwave:reveal-imminent`).
 
+The atomic gate must not release healthy water on a short wall-clock cap. Warm same-tab reloads can
+take longer than 1.5s to hydrate and mount the twinkle field; the former 1.5s escape hatch therefore
+painted gradient/waves first and late specks second. The only fallback is now a loud 30s failure
+backstop, and `window.__iwWaterGate.reason` records `complete`, `no-surface`, or `timeout` for probes.
+
+Each twinkle/mark owns one permanent wave-relative position for its lifetime. Reappearance changes
+opacity only: never relocate, re-jitter or glide an invisible object between envelopes. Individual
+objects have opacity tracks only; one shared transform on each populated blink field carries the
+whole group in a straight drift across a whole-number-of-tiles cycle, and every opacity track is dark
+at the cycle seam. This keeps the mark monistic, makes a return incapable of landing on a different
+wave phase, and removes both the old per-envelope relocation work and duplicate per-object transforms.
+Shared field start times are sticky across `Animation.ready`: WebKit can replace a start time written
+while play-pending on warm refreshes, so `pinToTrackClock()` writes immediately and re-asserts after
+ready. Only the shared blink wrappers get `will-change: transform`; individual marks are opacity-only.
+
 Twinkle art decodes asynchronously. A sparkle/dash set whose decode completes after coast→rest must
 re-check the host's latest request before attaching: stopped sparkles are discarded, while desktop
 dashes that remain requested attach with every infinite load track cancelled. Pending detached
@@ -687,8 +702,9 @@ animations are not reachable through the mounted-host maps, so `enterRest()` alo
   are gone *because* playback cannot be starved.
 - **A twinkle field wakes only on SUSTAINED scroll** (two reports within 200ms) — a single
   caret-reveal nudge must not read as full-rate velocity.
-- **Dash respawns must never rasterise** — relocate on the 140px lattice; `toDataURL` on the scroll
-  path cost ~150ms/frame.
+- **Dashes never respawn when they blink** — reappearance is opacity-only at the same permanent
+  wave-relative position. The retired raster respawn cost ~150ms/frame; its lattice replacement
+  preserved phase but still broke object continuity and has now also been removed.
 - **NAMED OPEN QUESTION — a known-redundant write on the sway path, deliberately NOT removed
   (2026-08-30).** `writeWave()` sets `--wave-x` and calls `swayFields()` on every rAF of every
   scroll. During a ZOOM HOLD the value is provably unchanged — the base is rebased equal-and-opposite
@@ -1521,9 +1537,9 @@ bodies.
   walk; @property inherits:false was cleaner but WebKit never re-resolves a pseudo's explicit
   `--wave-x: inherit` — frozen sway) and (b) twinkle fields take LITERAL transforms per sway frame
   (`swayFields`) instead of consuming the var (kept ~300 instance leaves in the invalidation set).
-  Dash respawns NEVER rasterise now (the 140-lattice relocation runs everywhere — toDataURL on the
-  scroll path was the second ablation cell, ~150ms/frame; the boot respawn gate became moot and was
-  deleted). A new var(--wave-x) consumer must not sit under the firebreak roots.
+  Dashes no longer respawn at all: both the old `toDataURL` redraw (~150ms/frame) and its later
+  lattice-relocation replacement are gone. A new var(--wave-x) consumer must not sit under the
+  firebreak roots.
 - **Zoom step-cache precompute waits for GENUINE idle (2026-07-11).** Each precompute step is a
   full-document hypothetical reflow (~100-200ms of layout on a long doc); it used to start 350ms
   after the mount measure — ~18 consecutive long frames exactly while the reveal/coast and the

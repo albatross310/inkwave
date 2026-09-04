@@ -389,3 +389,34 @@ Chrome: occasional blue flash; white lines briefly lagging their wave. Probes pa
 are real-device/raster-scheduling class issues the emulated probes don't catch. Next wave round
 starts HERE, not from "all green"; candidate tools: on-device capture, WebKit raster ahead-of-time
 hints, reduced phone pool density.
+
+## 2026-09-04 — monistic mark audit
+
+Peter reported that specks and sparkles visibly fell off their waves when they disappeared and
+returned, plus continuing jitter. The clock hypothesis was re-tested first rather than assumed:
+`markskew.prove.mjs` armed its 28.8px known-negative, then measured 0.00px mark-vs-own-wave and
+0.00px cross-surface skew across 12/12 Chromium loads. The clocks were aligned; they did not explain
+the perceptual jump.
+
+The actual mechanism moved each invisible object to a new lattice slot and y-jitter before its next
+opacity envelope. Even though the destination preserved wave phase mathematically, the returning
+thing was no longer one spatial object. The replacement is deliberately simpler: every object keeps
+one permanent wave-relative x/y and alternates opacity only. One shared two-keyframe transform per
+populated blink field carries the group with the wave; per-envelope slot selection, invisible glides,
+and rest-time respawns are gone. The cycle covers exactly 12 wave tiles and every opacity track is
+dark at the transform seam. The phase probes were updated to measure those shared spatial transforms
+instead of the now-irrelevant child opacity clocks, and fail if a field grows past two transform
+keyframes. Final measurement: the old mechanism exposed roughly 155 script-made child tracks per
+load (opacity plus a transform on every object); the new mechanism keeps roughly 80 opacity tracks
+and only 6 spatial field transforms across the two overlapping surfaces. The updated probe measured
+all 6 at exactly two keyframes and 0.00px skew on 12/12 loads.
+
+The refresh-only atomicity failure was separate and concrete. `entry.client.tsx` still had a 1500ms
+escape hatch that opened `.iw-water-ready` whether or not the twinkle field had mounted. The new
+same-tab, no-screenshot `reloadgate.prove.mjs` reproduced why that fails: WebKit's first load needed
+1530ms for `twinkles-ready`, only 30ms beyond the old cap. The gate therefore had to paint gradient
+and waves alone before the marks arrived. The short cap is gone; a loud 30s failure backstop remains,
+and `window.__iwWaterGate.reason` makes `complete` vs `timeout` observable. Post-fix evidence:
+Chromium 8/8 and WebKit 4/4 same-tab navigation/reloads opened `complete`, twinkles-ready and
+water-ready landed in the same measured millisecond, the visible surface was complete on frame 0,
+and shared-field skew stayed 0.00px.

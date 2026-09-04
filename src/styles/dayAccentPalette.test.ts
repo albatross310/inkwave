@@ -11,7 +11,14 @@ function productFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(join(REPO, dir))) {
     const rel = `${dir}/${name}`
     const path = join(REPO, rel)
-    if (statSync(path).isDirectory()) {
+    let directory = false
+    try {
+      directory = statSync(path).isDirectory()
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+    if (directory) {
       if (!['.output', 'build', 'node_modules', '__snapshots__'].includes(name)) productFiles(rel, out)
       continue
     }
@@ -19,6 +26,17 @@ function productFiles(dir: string, out: string[] = []): string[] {
     out.push(rel)
   }
   return out
+}
+
+function productText(file: string): string {
+  try {
+    return readFileSync(join(REPO, file), 'utf8')
+  } catch (error) {
+    // Some boundary tests briefly create product-shaped fixtures in src and remove them again.
+    // A fixture disappearing between directory enumeration and this read is not palette evidence.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    throw error
+  }
 }
 
 describe('day accent palette', () => {
@@ -36,7 +54,7 @@ describe('day accent palette', () => {
 
   it('does not let the former university-purple family return to product code', () => {
     const offenders = ROOTS.flatMap((root) => productFiles(root))
-      .filter((file) => LEGACY_UQ_PURPLE.test(stripComments(readFileSync(join(REPO, file), 'utf8'))))
+      .filter((file) => LEGACY_UQ_PURPLE.test(stripComments(productText(file))))
     expect(offenders).toEqual([])
   })
 })

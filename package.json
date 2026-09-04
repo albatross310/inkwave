@@ -83,6 +83,7 @@
     "prove:toolbar": "node scripts/toolbar.prove.mjs",
     "prove:composited": "node scripts/wave-desk/composited.prove.mjs",
     "prove:markphase": "node scripts/wave-desk/markphase.prove.mjs",
+    "prove:reloadgate": "node scripts/wave-desk/reloadgate.prove.mjs",
     "prove:barrier": "node scripts/wave-video/barrier.prove.mjs",
     "prove:loopgate": "node scripts/wave-video/loopgate.prove.mjs",
     "prove:markskew": "node scripts/wave-video/markskew.prove.mjs",

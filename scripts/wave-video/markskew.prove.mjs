@@ -21,13 +21,15 @@
 //
 // WHAT IS MEASURED: the congruence the whole design rests on (waveTwinkle.ts: "trackT0 ≡ the tile
 // drift animation's startTime (mod 1944ms) — that congruence is ALL the wave-space maths needs").
+// Since the monistic-object simplification, position lives on the `.iw-twk-blink` wrapper's ONE
+// shared transform; child `.iw-twk-i` animations are opacity-only and are deliberately ignored.
 // skew = (trackStartTime − driftStartTime) mod 1944 → the distance to the nearest crest. Zero ⇒ the
 // mark rides its wave. Non-zero ⇒ it is off by skew × 72px/s, which is what "out of sync" LOOKS like.
 //
 // THE INSTRUMENT PROVES ITSELF FIRST (this lane's own probe history is the argument — the tile-scale
 // probe produced THREE fictions before a measurement): a known-negative de-clocks one track by a
 // chosen amount and the reader must report exactly that.
-import { chromium, firefox } from '@playwright/test'
+import { chromium, firefox, webkit } from '@playwright/test'
 import { spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -86,18 +88,21 @@ function sampler() {
       out.surfaces.push(rec)
       const host = surf.querySelector('.iw-wave-twinkles')
       if (!host) continue
-      for (const el of host.querySelectorAll('.iw-twk-blink > *')) {
+      for (const el of host.querySelectorAll('.iw-twk-blink, .iw-twk-blink > *')) {
         for (const a of el.getAnimations()) {
           // A mark track is a WAAPI animation with NO animationName — that is what separates the
-          // precomputed blink/transform tracks from the coast's CSS fades on the same subtree.
+          // script-made field transform from the coast's named CSS fades on the same subtree.
           if (a.animationName) continue
+          const frames = a.effect?.getKeyframes?.() || []
+          const transformFrames = frames.filter((f) => typeof f.transform === 'string')
+          if (!transformFrames.length) continue // child opacity clock is not spatial phase
           if (typeof a.startTime !== 'number') continue
           // `si` is LOAD-BEARING: a mark is drawn over ITS OWN surface's wave, so that is the only
           // wave it can be in or out of sync with. The previous cut compared every track to
           // surfaces[0]'s drift and reported 13.2px of "mark skew" that was really the CROSS-SURFACE
           // difference — it recorded fill/covered per track and then ignored them. The house disease,
           // in the instrument.
-          out.tracks.push({ st: a.startTime, si, fill: rec.fill, covered: rec.covered })
+          out.tracks.push({ st: a.startTime, si, fill: rec.fill, covered: rec.covered, transformFrames: transformFrames.length })
         }
       }
     }
@@ -107,9 +112,22 @@ function sampler() {
       // KNOWN-NEGATIVE, injected in the SAME frame we read, so the reader is scored against a skew
       // we chose. Injecting from node would race the coast exactly as the first cut's reader did.
       if (w.__injectSkew) out.tracks[0].st += w.__injectSkew
-      // Keep the sample with the MOST surfaces (ties → the latest), because the claim under test is
-      // about what happens once BOTH surfaces are drifting.
-      const better = !w.__worst || out.surfaces.length >= w.__worst.surfaces.length
+      // Keep the sample with the MOST surfaces, then the WORST spatial phase within that complete
+      // state. The old ties→latest rule could overwrite a one-frame wobble with the later aligned
+      // frame and call the load clean — exactly the transient Peter is reporting on Safari refresh.
+      const LOOP = 1944
+      const phase = (a, b) => {
+        const d = ((a - b) % LOOP + LOOP) % LOOP
+        return Math.min(d, LOOP - d)
+      }
+      const ownWorst = Math.max(0, ...out.tracks
+        .filter((t) => typeof out.surfaces[t.si]?.drifts['iw-wave-drift-l'] === 'number')
+        .map((t) => phase(t.st, out.surfaces[t.si].drifts['iw-wave-drift-l'])))
+      const driftLs = out.surfaces.map((s) => s.drifts['iw-wave-drift-l']).filter((x) => typeof x === 'number')
+      const crossWorst = driftLs.length ? Math.max(...driftLs.map((st) => phase(st, driftLs[0]))) : 0
+      out.phaseScore = Math.max(ownWorst, crossWorst)
+      const better = !w.__worst || out.surfaces.length > w.__worst.surfaces.length
+        || (out.surfaces.length === w.__worst.surfaces.length && out.phaseScore > w.__worst.phaseScore)
       if (better) w.__worst = out
       w.__skew = w.__worst
     }
@@ -175,13 +193,16 @@ function summarise(r) {
     crossMaxPx: +((Math.max(...cross) / 1000) * PX_PER_S).toFixed(2),
     p50px: +sorted[Math.floor(sorted.length / 2)].toFixed(2),
     maxpx: +sorted[sorted.length - 1].toFixed(2),
+    maxTransformFrames: Math.max(...own.map((t) => t.transformFrames)),
   }
 }
 
 const port = await freePort()
 const srv = spawn('node', [join(HERE, 'server.mjs'), BUILD, String(port)], { stdio: 'ignore' })
 await new Promise((r) => setTimeout(r, 700))
-const browser = await ({ chromium, firefox })[ENGINE].launch({ headless: true })
+const browserType = ({ chromium, firefox, webkit })[ENGINE]
+if (!browserType) throw new Error(`unknown PROBE_ENGINE=${ENGINE}; expected chromium, firefox, or webkit`)
+const browser = await browserType.launch({ headless: true })
 let bad = false
 try {
   // ── ARM THE INSTRUMENT FIRST ──
@@ -198,13 +219,14 @@ try {
 
   if (!bad) {
     console.log(`\n─── ${ENGINE}: mark-vs-wave skew, ${LOADS} clean loads (1280x800, CSS water) ───`)
-    console.log('load  trk/scored  surf  L/R  L-vs-R ms  cross-surf ms   cross px   MARK p50   MARK max')
+    console.log('load  field/scored surf  L/R  kf  L-vs-R ms  cross-surf ms   cross px   MARK p50   MARK max')
     const maxes = [], crosses = []
     for (let i = 0; i < LOADS; i++) {
       const s = summarise(await oneLoad(browser, port))
       if (!s) { console.log(`${i}     VOID — no sample`); continue }
       maxes.push(s.maxpx); crosses.push(s.crossMaxPx)
-      console.log(`${i}     ${String(s.tracks + '/' + s.scored).padEnd(11)} ${String(s.surfaces).padEnd(5)} ${s.driftLCount}/${s.driftRCount}  ${JSON.stringify(s.lrSkewMs).padEnd(10)} ${JSON.stringify(s.crossSurfaceMs).padEnd(15)} ${String(s.crossMaxPx).padEnd(10)} ${String(s.p50px).padEnd(10)} ${s.maxpx}`)
+      console.log(`${i}     ${String(s.tracks + '/' + s.scored).padEnd(12)} ${String(s.surfaces).padEnd(5)} ${s.driftLCount}/${s.driftRCount}  ${String(s.maxTransformFrames).padEnd(3)} ${JSON.stringify(s.lrSkewMs).padEnd(10)} ${JSON.stringify(s.crossSurfaceMs).padEnd(15)} ${String(s.crossMaxPx).padEnd(10)} ${String(s.p50px).padEnd(10)} ${s.maxpx}`)
+      if (s.maxTransformFrames !== 2) bad = true
     }
     if (!maxes.length) { console.log('VOID: every load failed to sample'); bad = true }
     else {
@@ -224,6 +246,9 @@ try {
       console.log(xworst <= SKEW_TOL_PX
         ? '  → the two drifting surfaces are phase-identical (the sibling adopt holds).'
         : `  → the two surfaces' WAVES differ by up to ${xworst.toFixed(1)}px — the sibling adopt is NOT holding.`)
+      console.log(bad
+        ? '  → transform shape REGRESSED: a shared field no longer has exactly two keyframes.'
+        : '  → every shared field uses exactly two transform keyframes; objects animate opacity only.')
       if (worst > SKEW_TOL_PX || xworst > SKEW_TOL_PX) bad = true
     }
   }
