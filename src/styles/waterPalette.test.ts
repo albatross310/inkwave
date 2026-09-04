@@ -36,9 +36,12 @@ describe('day water palette', () => {
   })
 
   it('uses one warm-ivory hue for day waves, specks, and sparkles', () => {
-    expect(css).toContain("stop-color='%23f3edcf'")
-    expect(css).toContain("stroke='%23f3edcf'")
+    const dayWaveTiles = css.slice(css.indexOf('--iw-wave-a:'), css.indexOf('  .inkwave-editor-surface::before'))
+    expect(dayWaveTiles.match(/stroke='%23f3edcf'/g)).toHaveLength(4)
     expect(css).not.toMatch(/%23(?:b7c9c8|d5dede)/)
+    expect(dayWaveTiles).not.toContain('%3ClinearGradient')
+    expect(dayWaveTiles).not.toContain("stroke='url(")
+    expect(dayWaveTiles.match(/stroke-opacity='0\.48'/g)).toHaveLength(2)
     expect(twinkles).toContain("SPARK_COLOR = '#f3edcf'")
     expect(twinkles).toContain("SPARK_CORE = '#f3edcf'")
     expect(twinkles).toContain("DASH_COLOR = '#f3edcf'")
