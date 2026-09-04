@@ -44,4 +44,10 @@ describe('ApplicationSurface', () => {
     expect(block).not.toContain('--iw-page-height')
     expect(block).not.toContain('100dvh')
   })
+
+  it('makes isolated email 25% narrower on desktop while keeping contextual tools independent', () => {
+    const block = css.match(/\[data-iw-application="email"\]\.iw-application-surface--isolated\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
+    expect(block).toContain('width: 75%')
+    expect(block).toContain('margin-inline: auto')
+  })
 })

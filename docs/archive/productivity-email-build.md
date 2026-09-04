@@ -25,7 +25,7 @@ Four things here are worth reading before changing anything in `src/productivity
 
 ## Email application surface — W1 (2026-09-04, `feat/gmail-send`)
 
-Part D's first build slice is live. New email documents now replace the parchment with one page-width,
+Part D's first build slice is live. New email documents now replace the parchment with one centred,
 content-height application box containing the frozen-or-editable headers, actions/status, the real Tiptap body,
 and provenance/send disclosure. Snapshot email bodies use the same frame, so an historical message is
 one recorded-email object rather than a header card followed by apparently unrelated prose.
@@ -57,6 +57,9 @@ signature/key, and versioned evidence bundle have been successfully verified and
 `internalDate` and the Bitcoin no-later-than anchor remain separately labelled; an API success alone
 does not become permanent public proof, and delivery/read/Bcc remain outside the claim without their
 own evidence.
+
+The isolated email box is now 75% of the resolved page width on desktop and centred; phone remains
+full-width, and contextual application surfaces do not inherit the email-specific width.
 
 ---
 
@@ -605,7 +608,7 @@ draft sync (`gmail.compose`) are designed as a separate, explicit restricted-sco
 Nothing in this build requests read/compose/modify access; current Gmail remains `gmail.send` only.
 
 **Dual email surfaces and multi-message sending are SPEC ONLY (v0.5, §D2).** New email work will
-default to an isolated page-width, content-height email surface. The present writing-page arrangement survives as a
+default to a centred, content-height email surface. The present writing-page arrangement survives as a
 purposeful contextual studio: one or more complete message boxes (body inside each box) can sit among
 journal prose and annotations, support recipient variants, and send as a reviewed batch. Every box
 remains its own email subdoc; surrounding notes are excluded from sent bytes by structure. Batch

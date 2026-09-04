@@ -1147,6 +1147,10 @@
     border-radius: 16px;
     box-shadow: 0 8px 32px var(--iw-application-shadow, rgba(80, 50, 10, 0.18));
   }
+  [data-iw-application="email"].iw-application-surface--isolated {
+    width: 75%;
+    margin-inline: auto;
+  }
   .iw-application-surface__label {
     padding: 1.5rem var(--iw-application-inset) 0.8rem;
     color: var(--iw-ink, #5c2d8a);
@@ -1178,6 +1182,9 @@
     border-right: 0;
     border-radius: 0;
     box-shadow: none;
+  }
+  .inkwave-editor-surface.is-phone [data-iw-application="email"].iw-application-surface--isolated {
+    width: 100%;
   }
   /* Tiptap editor content styles */
   /* ProseMirror is the contenteditable div — tiptap-editor is a class

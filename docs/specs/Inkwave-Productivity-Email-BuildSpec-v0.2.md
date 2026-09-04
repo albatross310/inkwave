@@ -294,7 +294,7 @@ message becomes an Inkwave subdoc only through a deliberate action: open a Gmail
 start a reply/forward, or save a received/sent message into a workspace. Merely browsing Inbox must
 not manufacture local documents, snapshots, ledger sessions, or sync memberships.
 
-The page-width, content-height email surface (§D2) is shared by local drafts and connected Gmail
+The centred, content-height email surface (§D2) is shared by local drafts and connected Gmail
 drafts. Received and sent mail use the same visual language in read-only mode, with
 sender/date/provider state replacing compose controls. Inbox/Drafts/Sent navigation must integrate
 with overview mode without turning every remote row into a mounted editor.
@@ -571,8 +571,9 @@ An email must no longer look like a small panel placed on top of an unrelated pa
 work opens in **isolated mode** by default: when the active subdoc has `doc_type: email`, the email
 itself is the writing surface.
 
-- The surface uses the same resolved page width as an ordinary page and grows to its content height;
-  it must not manufacture an empty page-height tail after a short message. Its header, body,
+- On desktop the isolated email is centred at 75% of the resolved ordinary-page width; on phone it
+  remains full-width. It grows to its content height and must not manufacture an empty page-height
+  tail after a short message. Its header, body,
   record/send controls, status, and concise provenance disclosure form one continuous box.
 - The editable body begins immediately beneath the email header/actions inside that box. There is no
   second paper surface visibly continuing behind or beneath it.
@@ -619,7 +620,7 @@ more complete email boxes inside a larger writing page and keep thinking materia
   faithful static previews until selected, preserving the one-live-editor/write-owner rule.
 
 This isolated/contextual pair is the reusable Inkwave application pattern: focused tools default to
-their own page-width, content-height surface, while studio mode composes several tool objects with
+their own centred, content-height surface, while studio mode composes several tool objects with
 ordinary writing. Future music and other Inkwave tools should reuse the pattern rather than inventing
 separate shells.
 
@@ -886,7 +887,8 @@ lives inside the box, application presentation suppresses visual page gaps witho
 and the detailed sending/provenance explanation is collapsed behind a concise visible statement.
 W2–W7 remain specification only.
 
-1. **W1 — Isolated surface:** make the default email one page-width box that ends after its content;
+1. **W1 — Isolated surface:** make the default email one centred box, 75% of page width on desktop
+   and full-width on phone, that ends after its content;
    consolidate header, editor body, actions, status, and concise disclosures. No archive change.
 2. **W2 — Contextual studio:** retain the writing page as an explicit alternate presentation; place
    complete email subdocs with their bodies inside boxes, distinguish never-sent journal material,
@@ -910,8 +912,9 @@ multi-target fault injection proves that one unreadable destination cannot damag
 
 #### Surface and navigation
 
-- An email renders as one page-width box that grows with its content, with its body inside it, no
-  forced blank page-height tail, and no second paper visibly behind it.
+- An email renders as one centred box at 75% of page width on desktop (full-width on phone) that grows
+  with its content, with its body inside it, no forced blank page-height tail, and no second paper
+  visibly behind it.
 - New email work defaults to isolated mode; switching to contextual studio mode preserves the same
   email identity, bytes, history, memberships, and send state.
 - Contextual studio mode keeps every message body inside its email box and allows clearly separate
