@@ -499,3 +499,90 @@ silently wrong — mixed-size PDFs are rare and a refusal would be worse than a 
 The images arrive as blob: URLs, not data: URLs. A 200-page data: document is tens of megabytes
 of base64 built on the main thread, which is the exact stall CLAUDE.md records for the old
 hand-rolled btoa in the PDF store.
+
+---
+
+## `components/pdfReflow.ts` — reflowing a PDF page into paragraphs
+
+<a id="pdfreflow-why"></a>
+### Why it exists, and why the two directions live in one file
+
+Peter asked two things that turn out to be one thing: "do we have a way of altering the line
+spacing on the pdf to make it wider? Or to change the font", and later "build the reader view for
+pdfs". A fixed PDF layout structurally CANNOT do the first — every glyph is at a coordinate the
+publisher chose — so the answer to both is to stop drawing the page and re-set the TEXT.
+
+This module is PURE and knows nothing about pdf.js: it takes the text items already placed in
+viewport coordinates (the same items `textExtentsOf` and the pdf.js TextLayer read) and answers
+three questions:
+
+1. which characters form which paragraph → `buildPageReflow`
+2. where in the reflowed text is this phrase → `anchorInPage` (page view → reader view)
+3. which page rectangles does this text range cover → `rectsForRange` (reader view → page view)
+
+(2) and (3) are the SAME mapping read in opposite directions, which is why they live in one file:
+two implementations of "where is this text on the page" is exactly how the two views would drift
+apart, and a highlight that moves when you switch views is worse than one that admits it is lost.
+
+⚠ NOTHING HERE MAY GUESS. `anchorInPage` returns null rather than a plausible offset, because a
+null is reported to the reader ("this mark could not be placed") while a wrong offset silently
+colours words they never marked — the refusal `src/reader/marks.ts` was written around.
+
+<a id="pdfreflow-lines"></a>
+### Lines by vertical OVERLAP, and why banding is two passes
+
+The line rule is vertical OVERLAP, not equality of `y`: a superscript, a smaller footnote marker
+and an italic run all sit at slightly different tops on the same printed line, and requiring
+equal tops shatters every line that has one into two paragraphs.
+
+TWO PASSES, and the separation matters. Banding by y then sorting each band by x is a TOTAL
+order; a single sort whose comparator asks "do these overlap vertically?" is not transitive
+(A overlaps B, B overlaps C, A misses C), so `Array.sort` may return any of several orders for
+the same page — a reflow that is not a function of its input, which every anchor here depends
+on being.
+
+<a id="pdfreflow-paragraph-breaks"></a>
+### The four paragraph-break signals, and why (c) is the shyest
+
+- (a) a vertical gap much bigger than the leading — the blank line between paragraphs;
+- (b) a first-line INDENT — the other convention, used when there is no blank line;
+- (c) the previous line stopped well short of the right margin, so the paragraph ended there;
+- (d) the glyph size changed — a heading, a pull-quote, a footnote block.
+
+⚠ (c) IS DELIBERATELY THE SHYEST OF THE FOUR, and it is a FRACTION OF THE MEASURE, not a
+number of ems. It is a BACKSTOP for text that separates paragraphs by neither extra leading
+nor indent — rare, because a document doing neither gives its own reader no way to see a
+paragraph either. Ragged-right prose ends its lines a whole long word (≈5 ems) short as a
+matter of course, so an em-based threshold either misses paragraph ends or shatters every
+ragged paragraph into one block per line — MEASURED: at four ems the fixture in
+pdfReflow.test.ts ('KNOWN-NEGATIVE: ordinary ragged-right lines…') split into two. Under
+two thirds of the measure is a line that stopped early on purpose.
+
+<a id="pdfreflow-anchor"></a>
+### The anchor is a literal slice, and null is an answer
+
+THE RETURNED `text` IS A LITERAL SLICE OF THE BLOCK, never the caller's string. That is what lets
+`locateMark` (src/reader/marks.ts) re-find it later with a plain indexOf: the normalisation and
+de-hyphenation happen ONCE, here, at creation, instead of being re-guessed on every load.
+
+Returns null when the phrase is not in this page's text — the refusal. A selection that spans two
+pages, or lands on a scanned image with no text layer, has no honest anchor and gets none.
+
+<a id="pdfreflow-rects"></a>
+### `rectsForRange` — derived, never a second source of truth
+
+The page rectangles covered by [start,end) of a block, NORMALISED to the page box — exactly the
+shape `redrawOverlays` already draws. This is what makes a highlight made in the reader view show
+up in the page view: the rect is not a second source of truth, it is derived from the same segs.
+
+Within one item the x position is interpolated by character count. That is the same approximation
+the pdf.js text layer makes when it stretches a span to the item's measured width, so a selection
+in either view lands on the same glyphs.
+
+<a id="pdfreflow-nearest-block"></a>
+### `nearestBlock` — a text box anchors to the nearest paragraph
+
+Peter: "yes anchor text boxes at nearest text." A note dropped at page coordinates has no meaning
+in a reflowed column (the coordinates describe a layout that is no longer being drawn), so the
+note is attached to the paragraph it was nearest and travels with it. Paragraph-level placement,
+which he accepted; the alternative is a note that floats in the margin of nothing.

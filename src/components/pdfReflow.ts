@@ -1,23 +1,17 @@
 // REFLOWING A PDF PAGE INTO PARAGRAPHS — the geometry half of the PDF reader view.
 //
-// Peter asked two things that turn out to be one thing: "do we have a way of altering the line
-// spacing on the pdf to make it wider? Or to change the font", and later "build the reader view for
-// pdfs". A fixed PDF layout structurally CANNOT do the first — every glyph is at a coordinate the
-// publisher chose — so the answer to both is to stop drawing the page and re-set the TEXT.
+// A fixed PDF layout structurally cannot change line spacing or font (every glyph is at a
+// coordinate the publisher chose), so the reader view stops drawing the page and re-sets the TEXT.
+// PURE, and it knows nothing about pdf.js: given placed text items it answers which characters form
+// which paragraph (buildPageReflow), where in the reflowed text a phrase is (anchorInPage) and
+// which page rectangles a range covers (rectsForRange).
 //
-// This module is PURE and knows nothing about pdf.js: it takes the text items already placed in
-// viewport coordinates (the same items `textExtentsOf` and the pdf.js TextLayer read) and answers
-// three questions:
-//   1. which characters form which paragraph          → buildPageReflow
-//   2. where in the reflowed text is this phrase       → anchorInPage   (page view → reader view)
-//   3. which page rectangles does this text range cover→ rectsForRange  (reader view → page view)
-// (2) and (3) are the SAME mapping read in opposite directions, which is why they live in one file:
-// two implementations of "where is this text on the page" is exactly how the two views would drift
-// apart, and a highlight that moves when you switch views is worse than one that admits it is lost.
-//
-// ⚠ NOTHING HERE MAY GUESS. `anchorInPage` returns null rather than a plausible offset, because a
-// null is reported to the reader ("this mark could not be placed") while a wrong offset silently
-// colours words they never marked — the refusal `src/reader/marks.ts` was written around.
+// ⚠ (2) AND (3) ARE ONE MAPPING READ IN OPPOSITE DIRECTIONS, which is why they share a file: two
+// implementations of "where is this text on the page" is how the two views drift, and a highlight
+// that MOVES when you switch views is worse than one that admits it is lost.
+// ⚠ NOTHING HERE MAY GUESS. `anchorInPage` returns null rather than a plausible offset: a null is
+// reported to the reader, a wrong offset silently colours words they never marked.
+// → docs/archive/panels-and-popovers.md#pdfreflow-why
 
 import type { HighlightRect } from '../citations/pdfHighlights'
 
@@ -53,21 +47,18 @@ function median(xs: number[]): number {
 /**
  * Group placed items into lines, then lines into paragraphs.
  *
- * The line rule is vertical OVERLAP, not equality of `y`: a superscript, a smaller footnote marker
- * and an italic run all sit at slightly different tops on the same printed line, and requiring
- * equal tops shatters every line that has one into two paragraphs.
+ * ⚠ THE LINE RULE IS VERTICAL OVERLAP, NOT EQUALITY OF `y`: a superscript, a footnote marker and an
+ * italic run sit at slightly different tops on one printed line, and equal-tops shatters it.
  */
 export function buildPageReflow(items: PlacedItem[], pageW: number, pageH: number): PageReflow {
   const keep: number[] = []
   for (let i = 0; i < items.length; i++) if (items[i].str && items[i].str.trim() !== '') keep.push(i)
   if (!keep.length) return { blocks: [], items, pageW, pageH }
 
-  // ── items → lines ────────────────────────────────────────────────────────────────────────────
-  // TWO PASSES, and the separation matters. Banding by y then sorting each band by x is a TOTAL
-  // order; a single sort whose comparator asks "do these overlap vertically?" is not transitive
-  // (A overlaps B, B overlaps C, A misses C), so Array.sort may return any of several orders for
-  // the same page — a reflow that is not a function of its input, which every anchor here depends
-  // on being.
+  // ── items → lines ──────────────────────────────────────────────────────────
+  // ⚠ TWO PASSES: band by y, then sort each band by x — a TOTAL order. A single comparator asking
+  // "do these overlap vertically?" is NOT transitive, so Array.sort may return any of several orders
+  // for one page — a reflow that is not a function of its input, which every anchor depends on.
   const byY = [...keep].sort((a, b) => items[a].y - items[b].y || items[a].x - items[b].x)
   const bands: number[][] = []
   let bandTop = 0, bandBot = 0
@@ -137,19 +128,14 @@ export function buildPageReflow(items: PlacedItem[], pageW: number, pageH: numbe
     let brk = !prev
     if (prev) {
       const gap = l.top - prev.bottom
-      // (a) a vertical gap much bigger than the leading — the blank line between paragraphs;
-      // (b) a first-line INDENT — the other convention, used when there is no blank line;
-      // (c) the previous line stopped well short of the right margin, so the paragraph ended there;
-      // (d) the glyph size changed — a heading, a pull-quote, a footnote block.
+      // (a) a vertical gap much bigger than the leading; (b) a first-line INDENT; (c) the previous
+      // line stopped well short of the right margin; (d) the glyph size changed.
       //
-      // ⚠ (c) IS DELIBERATELY THE SHYEST OF THE FOUR, and it is a FRACTION OF THE MEASURE, not a
-      // number of ems. It is a BACKSTOP for text that separates paragraphs by neither extra leading
-      // nor indent — rare, because a document doing neither gives its own reader no way to see a
-      // paragraph either. Ragged-right prose ends its lines a whole long word (≈5 ems) short as a
-      // matter of course, so an em-based threshold either misses paragraph ends or shatters every
-      // ragged paragraph into one block per line — MEASURED: at four ems the fixture in
-      // pdfReflow.test.ts ('KNOWN-NEGATIVE: ordinary ragged-right lines…') split into two. Under
-      // two thirds of the measure is a line that stopped early on purpose.
+      // ⚠ (c) IS THE SHYEST OF THE FOUR AND IS A FRACTION OF THE MEASURE, never a number of ems.
+      // Ragged-right prose ends lines ≈5 ems short as a matter of course, so an em threshold either
+      // misses paragraph ends or shatters every ragged paragraph — MEASURED: at four ems the
+      // known-negative fixture in pdfReflow.test.ts split in two.
+      // → docs/archive/panels-and-popovers.md#pdfreflow-paragraph-breaks
       if (gap > H * 0.65) brk = true
       else if (l.left > bodyLeft + bodySize * 0.9) brk = true
       else if (prev.right - bodyLeft < (rightEdge - bodyLeft) * 0.62) brk = true
@@ -197,12 +183,11 @@ function escapeRe(s: string): string { return s.replace(/[.*+?^${}()|[\]\\]/g, '
 /**
  * Find `text` in one page's reflowed blocks and return the anchor to store on the mark.
  *
- * THE RETURNED `text` IS A LITERAL SLICE OF THE BLOCK, never the caller's string. That is what lets
- * `locateMark` (src/reader/marks.ts) re-find it later with a plain indexOf: the normalisation and
- * de-hyphenation happen ONCE, here, at creation, instead of being re-guessed on every load.
- *
- * Returns null when the phrase is not in this page's text — the refusal. A selection that spans two
- * pages, or lands on a scanned image with no text layer, has no honest anchor and gets none.
+ * ⚠ THE RETURNED `text` IS A LITERAL SLICE OF THE BLOCK, never the caller's string — that is what
+ * lets `locateMark` re-find it with a plain indexOf, because normalisation and de-hyphenation
+ * happen ONCE, here, rather than being re-guessed on every load.
+ * ⚠ NULL IS AN ANSWER: a selection spanning two pages, or landing on a scanned image with no text
+ * layer, has no honest anchor and gets none.
  */
 export function anchorInPage(
   blocks: ReflowBlock[],
@@ -243,13 +228,12 @@ export function anchorInPage(
 // ── reader view → page view ──────────────────────────────────────────────────────────────────────
 
 /**
- * The page rectangles covered by [start,end) of a block, NORMALISED to the page box — exactly the
- * shape `redrawOverlays` already draws. This is what makes a highlight made in the reader view show
- * up in the page view: the rect is not a second source of truth, it is derived from the same segs.
+ * The page rectangles covered by [start,end) of a block, NORMALISED to the page box — the shape
+ * `redrawOverlays` already draws.
  *
- * Within one item the x position is interpolated by character count. That is the same approximation
- * the pdf.js text layer makes when it stretches a span to the item's measured width, so a selection
- * in either view lands on the same glyphs.
+ * ⚠ DERIVED FROM THE SAME SEGS, never a second source of truth; that is what makes a reader-view
+ * highlight show up in the page view. Within one item x is interpolated by character count — the
+ * same approximation the pdf.js text layer makes, so both views land on the same glyphs.
  */
 export function rectsForRange(r: PageReflow, block: number, start: number, end: number): HighlightRect[] {
   const b = r.blocks[block]
@@ -299,10 +283,9 @@ export function blockBox(r: PageReflow, block: number): HighlightRect | null {
 /**
  * The block nearest a normalised page point — how a TEXT BOX gets an anchor.
  *
- * Peter: "yes anchor text boxes at nearest text." A note dropped at page coordinates has no meaning
- * in a reflowed column (the coordinates describe a layout that is no longer being drawn), so the
- * note is attached to the paragraph it was nearest and travels with it. Paragraph-level placement,
- * which he accepted; the alternative is a note that floats in the margin of nothing.
+ * Peter: "yes anchor text boxes at nearest text." Page coordinates describe a layout that is no
+ * longer being drawn, so the note attaches to the paragraph it was nearest and travels with it.
+ * Paragraph-level placement, which he accepted; the alternative floats in the margin of nothing.
  */
 export function nearestBlock(r: PageReflow, xn: number, yn: number): number | null {
   let best: number | null = null, bestD = Infinity
