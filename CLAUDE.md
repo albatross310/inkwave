@@ -68,6 +68,11 @@ and pressing the shortcut again returns to the editor, which looks exactly like 
 bug. Use `Option-Command-R` (Reload Page from Origin) for a cache-bypassing Safari reload, or
 `Command-R` for an ordinary reload.
 
+**BROWSER-TEST REPORTING:** Do not attach or display browser screenshots, screenshot snippets, or
+other visual test captures in chat unless Peter explicitly asks to see one. Prefer concise text
+measurements and findings. Visual captures may be used privately for diagnosis when necessary, but
+keep them out of the conversation by default so earlier chat remains readable.
+
 ## Build progress (vs. build-spec 4-week plan)
 
 - **Week 1 — Foundation: DONE.** `/edit` route, Tiptap editor, OPFS autosave (200ms

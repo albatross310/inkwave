@@ -21,3 +21,10 @@
   Inkwave DOM or CSS artifact. Stop controlling/release the tab before asking the user to assess the
   final visuals. Do not change Inkwave code for that cursor unless it reproduces with browser
   control inactive.
+
+## Browser-test reporting
+
+- Do not attach or display browser screenshots, screenshot snippets, or other visual test captures
+  in chat unless Peter explicitly asks to see one. Prefer concise text measurements and findings.
+  Visual captures may be used privately for diagnosis when necessary, but keep them out of the
+  conversation by default so earlier chat remains readable.
