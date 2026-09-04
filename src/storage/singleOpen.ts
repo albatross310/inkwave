@@ -1,31 +1,20 @@
 // SINGLE-OPEN COORDINATION — the same-device handshake behind "This document is open in another
-// window" and its three actions (Switch to it / Open a copy / Take over here).
+// window" and its three actions (Switch to it / Open a copy / Take over here). The layer ABOVE
+// tabDoc.ts's Web Lock: a second tab is offered a choice rather than silently opened elsewhere.
 //
-// WHAT IT IS FOR (Peter, verbatim): "make it so that a device can't open the same document anywhere
-// on the same device at all if it's already opened somewhere else." Two tabs editing one document
-// diverge and then one blind-overwrites the other's OPFS copy (`saveDocument` is a whole-file replace
-// with no union — the 2026-07-15 loss vector). tabDoc.ts already keeps ONE live tab per document via
-// a Web Lock; this module is the layer ABOVE it: when a second tab finds the lock held, it does not
-// silently open something else — it offers the writer a choice, and makes the "Take over here" choice
-// SAFE.
-//
-// THE ONE INVARIANT THIS FILE EXISTS TO UPHOLD: on a take-over, the LOSING tab stops writing BEFORE
-// the WINNING tab starts. Get that wrong and the take-over reproduces the exact blind overwrite the
-// whole single-open mechanism prevents. The ordering is enforced by an ACK, not asserted in prose:
+// ⚠ THE ONE INVARIANT: on a take-over the LOSING tab stops writing BEFORE the WINNING tab starts,
+// enforced by an ACK rather than asserted:
 //   holder receives take-over → flush pending body → FREEZE writes → post 'surrendered'
 //   taker posts take-over → AWAIT 'surrendered' → steal the lock → only now open + write
-// The freeze is set before the ack is sent, and the taker does not write until the ack arrives, so
-// the two writers can never overlap. See storage/opfs.ts `freezeDocWrites` for the byte-level stop.
+// (storage/opfs.ts `freezeDocWrites` is the byte-level stop.)
 //
-// DEGRADE, NEVER DEAD-END. BroadcastChannel is universal on shipping engines, but if it is absent the
-// take-over still works by STEALING the Web Lock — the loser's request promise rejects (tabDoc.ts
-// `onDocLockLost`) and it freezes. That path has no ack to order it, so it is best-effort: it is the
-// rescue of a possibly-dead holder, not the common case. Two live tabs on an engine with neither Web
-// Locks nor BroadcastChannel fall back to tabDoc's existing behaviour — never a hard block.
+// ⚠ DEGRADE, NEVER DEAD-END. With no BroadcastChannel the take-over still STEALS the lock and the
+// loser freezes on the rejection — best-effort, a rescue of a possibly-dead holder. An engine with
+// neither primitive falls back to tabDoc's behaviour; never a hard block.
 //
-// TESTABILITY: every side effect that touches OPFS, the lock, or the DOM is injected (see `Wiring`),
-// so the handshake ordering is provable at the unit level with a synchronous in-memory bus and spies
-// — no browser, no real Web Locks. Production binds the real primitives in `defaultWiring()`.
+// Every side effect is injected (`Wiring`), so the ordering is provable at the unit level with an
+// in-memory bus — no browser, no real Web Locks.
+// → docs/archive/storage-and-sync.md#so-ack-ordering
 
 import { flushPendingSave, freezeDocWrites } from './opfs'
 import { stealDocLock, onDocLockLost } from './tabDoc'
@@ -62,11 +51,9 @@ export interface Wiring {
   ackTimeoutMs: number
   /**
    * After an ack TIMEOUT, how long the taker keeps listening (post-steal, before it reads the body)
-   * for a LATE `surrendered` ack. Closes the narrow race where a LIVE holder is still inside its
-   * flush when the ack timer fires: a slow-flusher posts `surrendered` once its flush completes and
-   * it freezes, so waiting for it means the caller reads AFTER the holder's freeze — no late-write
-   * overwrite. A genuinely dead holder never posts, the grace expires, and the rescue proceeds. Kept
-   * short: it only ever delays the (rare) dead-holder-with-a-bus rescue.
+   * for a LATE `surrendered`. ⚠ It closes the race where a LIVE holder is still inside its flush when
+   * the timer fires — waiting means the caller reads AFTER that holder's freeze. A dead holder never
+   * posts and the grace expires. → docs/archive/storage-and-sync.md#so-ack-timeout-grace
    */
   graceMs: number
   /** setTimeout seam; returns a cancel fn. */
@@ -115,15 +102,12 @@ export function defaultWiring(): Wiring {
  * and freezes on a lock steal even when no bus delivered a take-over. Returns an uninstaller; call it
  * when the tab stops holding `id` (document switch, unmount).
  *
- * THE SURRENDER SEQUENCE IS THE WHOLE CORRECTNESS STORY, and the two flavours are deliberately
- * different:
- *   · GRACEFUL (a 'take-over' message): flush the last body FIRST (while writes are still allowed),
- *     THEN freeze, THEN ack. The taker waits for the ack, so this preserves the holder's final
- *     keystrokes with zero overwrite risk.
- *   · FORCED (the lock was stolen with no handshake — a rescue of a dead/hung tab): freeze ONLY, do
- *     NOT flush. The taker already owns the document and may already be writing; a late flush from us
- *     would be the overwrite we forbid. Losing the last unsaved keystrokes is the correct trade when
- *     the alternative is corrupting the taker's copy.
+ * ⚠ TWO FLAVOURS OF SURRENDER, AND ONLY ONE OF THEM FLUSHES:
+ *   · GRACEFUL (a 'take-over' message): flush FIRST, while writes are still allowed, THEN freeze,
+ *     THEN ack — so the holder's final keystrokes survive with zero overwrite risk.
+ *   · FORCED (the lock was stolen with no handshake — a dead/hung tab): freeze ONLY, NEVER flush.
+ *     The taker may already be writing, so a late flush from us is the overwrite we forbid.
+ * → docs/archive/storage-and-sync.md#so-two-surrenders
  */
 export function installHolder(id: string, w: Wiring = defaultWiring()): () => void {
   const ch = w.makeChannel()
@@ -133,9 +117,9 @@ export function installHolder(id: string, w: Wiring = defaultWiring()): () => vo
     if (surrendered) return
     surrendered = true
     if (flush) {
-      // Flush BEFORE freezing — the flush routes through saveDocument, which the freeze refuses.
-      // A failure is logged but never blocks the handoff: the taker then opens the previously saved
-      // state, which is safe (no overwrite), just missing the last unsaved edit.
+      // ⚠ Flush BEFORE freezing — the flush routes through saveDocument, which the freeze refuses.
+      // A failure never blocks the handoff: the taker opens the previously saved state, which is
+      // safe, just missing the last unsaved edit.
       try { await w.flush() } catch (e) { console.error('[inkwave] surrender flush failed:', e) }
     }
     w.freeze(id)            // hard stop: no new body for `id` can be persisted from this tab
@@ -157,9 +141,9 @@ export function installHolder(id: string, w: Wiring = defaultWiring()): () => vo
 
 // ─── Taker side (the blocked screen's three actions) ────────────────────────────
 
-/** "Switch to it" — ask the holder to bring its window forward, then this tab backs off. Fire-and-
- *  forget; the holder may not be able to focus itself (browser policy), which is why the blocked
- *  screen keeps its other two actions available. */
+/** "Switch to it" — ask the holder to bring its window forward, then back off. Fire-and-forget: the
+ *  holder may not be ABLE to focus itself (browser policy), which is why the blocked screen keeps
+ *  its other two actions available. */
 export function requestSwitch(id: string, w: Wiring = defaultWiring()): void {
   const ch = w.makeChannel()
   if (!ch) return
@@ -169,29 +153,22 @@ export function requestSwitch(id: string, w: Wiring = defaultWiring()): void {
 }
 
 /**
- * "Take over here" — the safe handoff. Posts a take-over and WAITS for the holder's surrender ack (so
- * the loser has frozen before we do anything), then physically steals the lock. Resolves once this
- * tab holds the lock and it is safe for the caller to read + write `id`.
+ * "Take over here" — the safe handoff. Posts a take-over, WAITS for the holder's surrender ack, then
+ * steals the lock. Resolves once it is safe for the caller to read + write `id`.
  *
- * THE ACK-TIMEOUT RACE (auditor, reproduced) and why the post-steal GRACE closes it. The ack timer
- * can fire while a LIVE holder is still inside `await flush()` — before it reaches its freeze. Steal-
- * and-return-immediately then lets the caller READ the body while the holder is still UNFROZEN with an
- * in-flight `saveDocument` that can land AFTER the read; the caller's later save would overwrite the
- * holder's flushed final keystrokes — the exact overwrite this mechanism exists to prevent. The steal
- * itself cannot force an early freeze: the holder's onLockLost fires `surrender(false)`, but its
- * `if (surrendered) return` guard is already tripped by the in-progress `surrender(true)`, so the
- * freeze only happens when that in-flight flush completes. So after a timeout we STEAL, then wait a
- * brief grace for the LATE `surrendered` a live slow-flusher posts once it finishes flushing and
- * freezes — guaranteeing the caller reads AFTER the freeze. A genuinely dead holder never posts; the
- * grace expires and the rescue proceeds exactly as before. Degraded (no bus): steal only, as before.
+ * ⚠ AFTER AN ACK TIMEOUT, STEAL AND THEN WAIT A GRACE. The timer can fire while a LIVE holder is
+ * still inside its flush, and a steal cannot force an early freeze; returning immediately would let
+ * the caller read a body the holder is still about to write. A slow-flusher posts the LATE
+ * `surrendered` once frozen, so the grace guarantees the read happens after the freeze; a dead
+ * holder never posts and it expires. → docs/archive/storage-and-sync.md#so-ack-timeout-grace
  */
 export async function takeOverHere(id: string, w: Wiring = defaultWiring()): Promise<void> {
   const ch = w.makeChannel()
   if (!ch) { await w.steal(id); return } // no bus — nothing to coordinate with; rescue steal
 
-  // ONE persistent listener for the whole handoff: `acked` records a `surrendered` whenever it lands,
-  // and `onAck` wakes whichever phase is currently waiting. Recording it even when no phase waits
-  // closes the gap where the late ack arrives DURING the steal (between the two waits below).
+  // ONE persistent listener for the whole handoff: `acked` records a `surrendered` whenever it lands
+  // and `onAck` wakes whichever phase is waiting. ⚠ Recording it even when NO phase waits closes the
+  // gap where the late ack arrives DURING the steal, between the two waits below.
   let acked = false
   let onAck: (() => void) | null = null
   ch.onMessage((msg) => {
