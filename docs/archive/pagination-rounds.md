@@ -274,3 +274,119 @@ own gaps are cleared before it measures). Absent ⇒ byte-identical to the gap-f
 
 Mid-block forced line-starts are mapped per block: doc pos → block-relative char (`pos − offset −
 1`). A gap AT the block start (charOffset 0) is a no-op; a break past the content never matches.
+
+---
+
+## `breakTable.ts` — the whole-document page index
+
+<a id="break-table"></a>
+### What it is, and why it replaces a bitmap cache rather than joining one
+
+BREAK TABLE (2026-07-17) — the whole-document index, at ~8 bytes per page.
+
+WHAT IT IS. Per version: the doc position each page STARTS at. That is all a renderer needs to be
+whole-document, because a page's layout is PREFIX-INDEPENDENT (proved before this was built:
+windowProof/windowCost — 30/30, 31/31, 31/31 line starts at 2k/10k/40k, mid-line negatives
+collapsing to 0). A break `at` IS a line start and greedy wrap restarts deterministically there,
+so the prefix is needed ONLY to FIND the break, never to draw the page.
+
+WHY IT REPLACES A BITMAP CACHE RATHER THAN JOINING ONE. A thumbnail is a picture of one pane, at
+one scrollTop, at one zoom, for one version — coverage means baking every page of every version,
+and it goes stale the moment the reader scrolls somewhere new. That is the mechanism behind doc's
+116/116-baked-yet-12%-real. A table has no window to fall outside of:
+
+    171 pages x 8B = 1.4KB/version   ·   116 versions ~ 158KB   (vs 1.53MB/version = 177.8MB fat)
+
+Cost: ONE full build per version (measured 4/16/62ms at 2k/10k/40k), once, then every page of
+that version renders on demand in ~0.6ms.
+
+STALENESS MUST FAIL LOUDLY. A table is a function of the canonical context. If that context moves
+and we hydrate anyway, we paint the WRONG WORDS on the page and report success — which is exactly
+what paginate()'s retired orphan rule did to us once already. So every table carries its context
+SIGNATURE and a mismatch is a MISS (rebuild), never a silent reuse.
+
+POSITIONAL RELIABILITY: pages [0, reliablePages) are trustworthy. A bibliography is force-broken
+onto its own page at the END, so a whole-table boolean threw away ~57 of 58 exact pages and told
+us nothing about WHERE. The table carries the boundary so a caller can render the exact pages and
+fall back to the bitmap ONLY from there on.
+
+### The context signature — zoom and DPR are deliberately absent
+
+THE CONTEXT SIGNATURE. Everything the break positions are a function of, and nothing they aren't.
+
+ZOOM AND DPR ARE DELIBERATELY ABSENT — canonical pagination's whole point is that breaks are
+measured in a forced canonical context and are therefore device- and zoom-independent ("same text
+on page N at every zoom, on phone, and in print"). That makes a table PORTABLE: baked once, valid
+at any zoom, on any device, across reloads. This is a claim the codebase makes, so it is VERIFIED
+by probe (zoomPortability, and panezoom.prove.mjs on BOTH engines) rather than trusted.
+
+EVERY COMPONENT MUST BE CONTENT-DERIVED, NOT SESSION-DERIVED. A signature that embeds anything
+counted since page load cannot survive the reload it exists to survive. `bibSig` replaced the
+session epoch for exactly that reason — see below.
+
+### Memory is authoritative for what it holds
+
+MEMORY IS AUTHORITATIVE FOR WHAT IT HOLDS (fixed 2026-07-17 — the layer's first execution
+caught this). `getTable` used to early-return a MISS whenever `!i.loaded`, i.e. before loadTables()
+had run. But putTable() populates `tables` WITHOUT setting `loaded`, so a session that built
+its own tables and then looked one up MISSED EVERY TIME — a cache that reports a full index
+and never serves a single hit, silently rebuilding forever. `loaded` only ever meant "ABSENCE
+is authoritative"; absence already returns null → rebuild, which is correct either way. So the
+flag has no business gating a PRESENT table. Same family as the signature-blind bake counter
+reporting 116/116 while every lookup missed.
+
+A hydrated table has no LRU history — `loadTables` seeds it so the first `evict()` cannot prefer a
+just-loaded table over one this session built. A corrupt index starts fresh: a table is
+regenerable.
+
+### The budget, and why eviction must be named
+
+BUDGET + EVICTION (2026-07-17). A table is ~1.4KB, so 116 versions is ~158KB and eviction should
+NEVER fire at Peter's scale — which is exactly why the budget must exist and must be REPORTED
+rather than assumed: a store with no bound is one long session away from being the thing that
+fills the origin's quota, and "it's only 1.4KB" is a claim about today's document. Every drop is
+NAMED (`dropped`), because bounded coverage that reports as total is how "we covered everything"
+becomes false without anyone noticing — the grow-only snapshot truncation, same lesson.
+
+Counters are PER-DOC because that is the scope `tableStats()` is asked about. A global counter
+answering a per-doc question is how the signature-blind bake counter reported 116/116 while every
+lookup correctly missed.
+
+At ~1.4KB a table survives reload trivially, which KILLS the cold-start penalty that has flattered
+every bitmap number we have taken (a cold scrub far from the origin currently presents ~0 real
+intermediates). The store's shape mirrors snapThumbs' OPFS store — one index JSON per doc — rather
+than inventing a second scheme. It NEVER travels with the .studio: regenerable, local, Peter's
+hard-minimise rule.
+
+<a id="bib-signature"></a>
+### `bibSignature` — the session counter that made the cache structurally incapable of a hit
+
+THE BIBLIOGRAPHY'S CONTRIBUTION TO WRAP, AS A CONTENT SIGNATURE (2026-07-17).
+
+WHY THIS EXISTS — and it is the single thing that made persistence possible at all. `contextSig`
+used to embed `opts.bibEpoch` = `bibProvider.getVersion()`, which is a **monotonic session event
+counter** (`notify()` does `this._version++`). It counts how many bibliography notifications have
+fired THIS SESSION. It is not derived from content, so it does not reproduce across a reload:
+measured 15 on the writing session and 2 after reload, on a byte-identical document. Every
+hydrated table therefore stale-missed, ALWAYS. The layer was structurally incapable of ever
+scoring a hit — it would have shipped reporting "116 tables persisted" and served ZERO lookups,
+forever, while looking like a working cache. That is exactly the disease: the feature's absence
+looks identical to the feature being unnecessary.
+
+The ORIGINAL INTENT was right — a citation's box changes its wrap, so the bibliography genuinely
+belongs in the signature. The INSTRUMENT was wrong: an epoch is a proxy for "something changed",
+not a description of WHAT THE STATE IS, and only the latter survives a process boundary.
+
+So: hash the entries themselves. If the CSL data and the style are byte-identical, every citation
+resolves to the same in-text string, so every citation box is the same width, so the wrap is the
+same. OVER-invalidation is safe here (a miss rebuilds and is counted); UNDER-invalidation is the
+direction that paints wrong words — so this hashes the WHOLE entry rather than guessing which
+fields a given CSL style reads.
+
+The epoch keeps its ONE legitimate job: an in-session memo key. Hashing the library is O(entries)
+and the epoch tells us for free when that work can be skipped.
+
+The hash itself is FNV-1a over the serialized entries. Not cryptographic — this guards a
+regenerable cache, and a collision costs a stale-looking hit on byte-identical-but-for-a-collision
+data. Cheap and stable is what matters; the entries are sorted so Map iteration order can never
+move the signature.
