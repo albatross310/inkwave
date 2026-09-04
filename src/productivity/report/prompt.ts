@@ -1,44 +1,26 @@
 // The transparent prompt — spec §A7.1.2.
 //
-// The payload the writer copies has two halves:
-//   1. A FIXED first half, generated here and shown VERBATIM in the export panel before it is
-//      copied. The writer must be able to see exactly what Inkwave asks their AI to do. It is
-//      the same text every time for a given window/content choice — no hidden steering.
-//   2. An OPTIONAL user-written second half, layered over sensible defaults so that most
-//      writers never write a prompt at all.
+// TWO HALVES: a FIXED first half generated here and shown VERBATIM in the export panel before it is
+// copied — the same text every time for a given window/content choice, so there is no hidden
+// steering — plus an OPTIONAL user-written second half over sensible defaults.
+// → docs/archive/productivity-email-build.md#prompt-two-halves
 //
-// ─── WRITTEN FOR A STRONG MODEL (Peter, 2026-07-17) ─────────────────────────────────────────
-// Peter runs this in his own Claude session and wants OPUS: "really detailed qualitative reports
-// written by opus", with examples, inspirational moments, which sessions produced his best work.
-// §A7.2's "Opus is unnecessary… ~5× the cost" reasoning is about PATH 2, the backend, where
-// Inkwave pays. THIS IS PATH 1 — the writer runs it themselves, so the model is their choice and
-// costs us nothing. (Path 2's model choice stays open; nothing here decides it.)
-// So this asks for an ESSAY, not a form. The first cut read as a scorecard to fill in — five
-// bullet points and a table — which is exactly what a strong model will dutifully produce if you
-// ask for it. The constraints below are unchanged in force and stricter in wording; what changed
-// is the shape of what is asked for.
+// ⚠ IT ASKS FOR AN ESSAY, NOT A FORM. Peter runs this in his own strong model, so §A7.2's "Opus is
+// unnecessary… ~5× the cost" does not apply — that is PATH 2, where Inkwave pays. The first cut
+// read as a scorecard and a strong model dutifully produced one.
+// → docs/archive/productivity-email-build.md#prompt-strong-model
 //
-// ─── §A5 WAS REVERSED ON 2026-07-17 — TONE IS "HONEST FIRST, FUNNY SECOND, KIND THIRD" ──────
-// Peter: "tbh I think it's too nice and not enough humour. We need it to be quirkier and read
-// like a comedian wrote it" / "It doesn't need to be kind. It needs to be honest." The old
-// kind/non-shaming rule is SUPERSEDED — do not restore it from memory of an earlier draft.
+// ⚠ §A5 TONE IS "HONEST FIRST, FUNNY SECOND, KIND THIRD" — do NOT restore the kind/non-shaming rule
+// from an earlier draft; a test asserts it is gone. What makes the reversal safe: PRODUCTIVITY
+// GUILT IS A STANDARD IMPOSED ON THE WRITER, ACCOUNTABILITY IS A GOAL THE WRITER SET (§A5b). NO
+// GOAL ⇒ DESCRIBE, DON'T PUSH, and that is STRUCTURAL — goals travel only on their own consent
+// tick, so a model sent none has nothing to hold the writer to and is told so.
+// → docs/archive/productivity-email-build.md#a5-tone-reversal
 //
-// WHAT DID NOT CHANGE, AND WHY THE REVERSAL IS SAFE. §A5's surviving distinction is the whole
-// thing: PRODUCTIVITY GUILT IS A STANDARD IMPOSED ON THE WRITER; ACCOUNTABILITY IS A GOAL THE
-// WRITER SET (§A5b). "You only managed 200 words, poor effort" is imposed, worthless, banned.
-// "You said you'd finish the lit review by Friday and you've opened it twice" is the writer's own
-// words quoted back, and is the point. So the goal is what gives the report STANDING to push, and
-// §A5b's boundary is its corollary: NO GOAL ⇒ DESCRIBE, DON'T PUSH — never invent a standard.
-// That boundary is STRUCTURAL here, not a request: goals travel only on their own consent tick,
-// so a model sent no goal has nothing to hold the writer to, and is told so in as many words.
-//
-// Three of the spec's hard rules are baked into the fixed half, and NONE is trusted to the prompt
-// alone — a prompt is a request, not a guarantee, so each is also enforced on the reply:
-//   • §A5 no verdicts on the PERSON    → asked here; flagged by claims.ts findPersonVerdicts
-//   • §A6.2 statistical honesty        → asked here; enforced by claims.ts on daily replies
-//   • §A6.4 never round-trip measured  → asked here; enforced by judged.ts (measured columns are
-//                                        REJECTED) and claims.ts (invented numbers are flagged)
-//   • quality/insight without content  → asked here; enforced by judged.ts (CONTENT_ONLY_COLUMNS)
+// ⚠ A PROMPT IS A REQUEST, NOT A GUARANTEE. Four hard rules are asked here AND enforced on the
+// reply: §A5 person-verdicts and §A6.2 honesty by `claims.ts`; §A6.4 no round-trip and
+// quality-without-content by `judged.ts`.
+// → docs/archive/productivity-email-build.md#prompt-asked-and-enforced
 
 import type { ReportWindow } from '../types'
 
@@ -49,12 +31,11 @@ import type { ReportWindow } from '../types'
 /**
  * Columns that may be asked for ONLY when the writer sent document text.
  *
- * THE HONESTY THIS ENFORCES (§A6.1): you cannot judge writing from minutes and word counts.
- * A `quality` or `insight` verdict derived from "45 active minutes, 400 words added" is
- * vibes-as-numbers wearing a judged label — the exact failure §A6.1 exists to prevent, and the
- * most tempting one here, because Peter is ASKING for "which sessions produced your best
- * content" and a model will happily oblige from telemetry alone. So the columns exist only when
- * their evidence does, and judged.ts REFUSES them otherwise. Structural, not a prompt request.
+ * ⚠ YOU CANNOT JUDGE WRITING FROM MINUTES AND WORD COUNTS (§A6.1). A `quality` or `insight` verdict
+ * from "45 active minutes, 400 words added" is vibes-as-numbers wearing a judged label — and it is
+ * the most tempting failure here, because a model will happily oblige from telemetry alone. The
+ * columns exist only when their evidence does, and judged.ts REFUSES them otherwise: structural,
+ * not a prompt request. → docs/archive/productivity-email-build.md#prompt-content-only-columns
  */
 export const CONTENT_ONLY_COLUMNS = ['insight', 'quality'] as const
 
@@ -65,14 +46,10 @@ export function judgedHeader(window: ReportWindow, contentIncluded = false): rea
       ? ['session_id', 'phase', 'effort', 'insight', 'quality', 'note']
       : ['session_id', 'phase', 'effort', 'note']
   }
-  // Weekly/monthly rows are DAYS. `character` is what answers Peter's "what the good days were,
-  // what the bad" — see its column doc: it describes the day, never grades the writer.
-  //
-  // NB no content-only columns here, deliberately. At weekly+ the ledger sends day rollups and
-  // WHOLE documents (§A3.3 / the sessions:[] contract) — there is no per-session excerpt to
-  // ground a per-day quality verdict against, so asking for one would invite exactly the
-  // ungrounded judgement the daily gate refuses. Quality lives on the daily window, where the
-  // session→prose pairing makes it real.
+  // Weekly/monthly rows are DAYS, and `character` describes the DAY — it never grades the writer.
+  // ⚠ NO content-only columns here: weekly+ sends day rollups and WHOLE documents, so there is no
+  // per-session excerpt to ground a per-day quality verdict against. Quality lives on the daily
+  // window, where the session→prose pairing makes it real.
   return ['day', 'phase', 'effort', 'momentum', 'character', 'note']
 }
 

@@ -35,7 +35,7 @@ nothing; no account, no key, never paywalled (§C6). Path 2 (backend) and Path 3
 import; its demo-fixtures import is now gated on demo MODE, not the flag, so a real writer's session
 never fetches the fixtures chunk.
 
-- **⚠️ §A5 WAS REVERSED 2026-07-17 — the tone is "honest first, funny second, kind third".** Peter:
+- <a id="a5-tone-reversal"></a>**⚠️ §A5 WAS REVERSED 2026-07-17 — the tone is "honest first, funny second, kind third".** Peter:
   *"it's too nice and not enough humour… read like a comedian wrote it"* / *"It doesn't need to be
   kind. It needs to be honest."* Do NOT restore the kind/non-shaming rule from an earlier draft; a
   test asserts it is GONE. **What makes the reversal safe is §A5's surviving distinction, and it is
@@ -1660,3 +1660,61 @@ CLAUDE.md's load-performance rule is explicit — the OTS sweep used to cost ~10
 this runs only on demand/idle, and only for days that are DONE: today's block still gains rows, so
 its hash still changes and stamping it would burn a proof on a block that no longer exists by
 evening.
+
+---
+
+## `productivity/report/prompt.ts` — the transparent prompt (§A7.1.2)
+
+<a id="prompt-two-halves"></a>
+### Two halves, and the first is shown verbatim
+
+The payload the writer copies has two halves:
+
+1. A FIXED first half, generated in `prompt.ts` and shown VERBATIM in the export panel before it
+   is copied. The writer must be able to see exactly what Inkwave asks their AI to do. It is
+   the same text every time for a given window/content choice — no hidden steering.
+2. An OPTIONAL user-written second half, layered over sensible defaults so that most
+   writers never write a prompt at all.
+
+<a id="prompt-strong-model"></a>
+### Written for a strong model — and why §A7.2's cost note does not apply
+
+Peter runs this in his own Claude session and wants OPUS: "really detailed qualitative reports
+written by opus", with examples, inspirational moments, which sessions produced his best work.
+§A7.2's "Opus is unnecessary… ~5× the cost" reasoning is about PATH 2, the backend, where
+Inkwave pays. THIS IS PATH 1 — the writer runs it themselves, so the model is their choice and
+costs us nothing. (Path 2's model choice stays open; nothing here decides it.)
+
+So this asks for an ESSAY, not a form. The first cut read as a scorecard to fill in — five
+bullet points and a table — which is exactly what a strong model will dutifully produce if you
+ask for it. The constraints are unchanged in force and stricter in wording; what changed
+is the shape of what is asked for.
+
+<a id="prompt-asked-and-enforced"></a>
+### Four hard rules, asked here and enforced on the reply
+
+A prompt is a request, not a guarantee, so none of the spec's hard rules is trusted to the prompt
+alone — each is also enforced after the fact:
+
+- §A5 no verdicts on the PERSON → asked here; flagged by `claims.ts` findPersonVerdicts
+- §A6.2 statistical honesty → asked here; enforced by `claims.ts` on daily replies
+- §A6.4 never round-trip measured → asked here; enforced by `judged.ts` (measured columns are
+  REJECTED) and `claims.ts` (invented numbers are flagged)
+- quality/insight without content → asked here; enforced by `judged.ts` (CONTENT_ONLY_COLUMNS)
+
+<a id="prompt-content-only-columns"></a>
+### `CONTENT_ONLY_COLUMNS` — you cannot judge writing from minutes and word counts
+
+THE HONESTY THIS ENFORCES (§A6.1): a `quality` or `insight` verdict derived from "45 active
+minutes, 400 words added" is vibes-as-numbers wearing a judged label — the exact failure §A6.1
+exists to prevent, and the most tempting one here, because Peter is ASKING for "which sessions
+produced your best content" and a model will happily oblige from telemetry alone. So the columns
+exist only when their evidence does, and judged.ts REFUSES them otherwise. Structural, not a
+prompt request.
+
+There are no content-only columns at weekly/monthly, deliberately. At weekly+ the ledger sends day
+rollups and WHOLE documents (§A3.3 / the `sessions: []` contract) — there is no per-session excerpt
+to ground a per-day quality verdict against, so asking for one would invite exactly the ungrounded
+judgement the daily gate refuses. Quality lives on the daily window, where the session→prose
+pairing makes it real. `character` is what answers Peter's "what the good days were, what the bad":
+it describes the day, never grades the writer.
