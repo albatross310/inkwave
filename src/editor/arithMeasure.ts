@@ -1,19 +1,12 @@
-// ARITHMETIC CANONICAL MEASURE (Decision 6, 2026-07-15 — flag `inkwave:arithLayout`, default OFF).
-// The THIRD acquisition path for the pagination measure: instead of forcing a full-document browser
-// reflow (canonicalMeasure) and reading each block's line geometry with range.getClientRects,
-// COMPUTE the canonical lines + block boundaries from the arithmeticLayout engine (canvas advances +
-// greedy wrap — proven byte-identical for the certified font palette). Output is the SAME
-// {lines, blocks} shape collectLines produces, feeding the SAME computeBreaks — so break positions +
-// page-break signature are byte-identical, and the caller can SKIP forceCanonicalContext entirely
-// (no visible-tree reflow) on the paths where the live layout isn't already canonical (phone).
+// ARITHMETIC CANONICAL MEASURE — the THIRD acquisition path for the pagination measure (flag
+// `inkwave:arithLayout`, default OFF). Computes the canonical lines + block boundaries from the
+// arithmeticLayout engine instead of forcing a reflow and reading `range.getClientRects`. Output is
+// the SAME {lines, blocks} shape collectLines produces, feeding the SAME computeBreaks — so break
+// positions and the page-break signature are byte-identical.
 //
-// SCOPE OF THIS FIRST VERSION (conservative — correctness over coverage): the whole document must be
-// arithmetic-eligible TEXT PARAGRAPHS (certified uniform-size fonts, no citations / inline-math /
-// lists / rules / refList / headings). ANY ineligible block ⇒ return null ⇒ caller falls back to the
-// DOM measure. Uniform-size + leading-free means firstLineLeadingPx=0 is byte-identical (the leading
-// only shifts the cosmetic botMargin at a SIZE boundary, which an all-body-text doc never has). The
-// idle DOM verifier + pagCheck remain the safety net. Extending eligibility (headings via the
-// per-font leading table, block-math via a cached KaTeX box, per-region scoped use) is the follow-up.
+// ⚠ CONSERVATIVE BY CONSTRUCTION: ANY ineligible block ⇒ return null ⇒ the caller falls back to the
+// DOM measure. It never approximates, it DEFERS (R8). The idle DOM verifier + pagCheck are the net.
+// → docs/archive/pagination-rounds.md#arith-measure
 
 import type { Node as PMNode } from '@tiptap/pm/model'
 import {
@@ -34,27 +27,13 @@ function resolveSizePx(v: unknown, basePx: number): number {
   return isNaN(n) ? basePx : n
 }
 
-// MARKS THIS ENGINE MODELS — and marks it has PROVED it may ignore. Anything else DEFERS.
-//
-// WHY AN ALLOWLIST (2026-07-18, `typematrix.prove.mjs`). `runOf` used to walk `node.marks` and act
-// on bold/italic/textStyle, SILENTLY IGNORING every other mark. For a metric-neutral mark that is
-// right by luck; for `code` it was right by nothing at all. The `code` mark renders the run in a
-// MONOSPACE face, and the engine measured it in the body font: MEASURED against the live editor on
-// a 13k-word fixture with 434 code runs — **the model said 47 pages, the editor 79, and NOT ONE of
-// its 79 break positions matched (first divergence at break 0, Δ955)**. It reported
-// `estimatedBlocks 0` and full reliability the whole time. Wrong words on every page, declared
-// trustworthy — the worst failure this renderer can produce.
-//
-// The gate is modelled on `isCertifiedStack`, which already does exactly this for FONTS: an
-// allowlist, and anything outside it defers to the DOM measure rather than being guessed. The
-// property that matters is what happens to the NEXT mark someone adds to the schema — today it
-// would silently corrupt every break below it; with this it defers and says so.
-//
-// METRIC_NEUTRAL is not an assumption: every family below is PROVED byte-identical to the live
-// editor by typematrix.prove.mjs at ~46 breaks/fixture (underline, strike, highlight, scasSlot,
-// comment, insertion, deletion — decorations and colour, no advance change). If a future change
-// gives one of them a metric (padding, a font swap), its row goes red and this list is the first
-// place to look.
+// ⚠ MARKS ARE AN ALLOW-LIST, and anything outside it DEFERS the block to the DOM (R8). `runOf` once
+// acted on bold/italic/textStyle and SILENTLY IGNORED every other mark — right by luck for a
+// metric-neutral one, right by nothing at all for `code`, which renders MONOSPACE and was measured
+// in the body font. Modelled on `isCertifiedStack`, which does the same for fonts (R2).
+// ⚠ METRIC_NEUTRAL is PROVED, never assumed (typematrix.prove.mjs) — give one of these a metric and
+// its row goes red, and this list is the first place to look (R3).
+// → docs/archive/pagination-rounds.md#marks-allowlist
 const MODELLED_MARKS = new Set(['bold', 'italic', 'textStyle'])
 const METRIC_NEUTRAL_MARKS = new Set(['underline', 'strike', 'highlight', 'scasSlot', 'comment', 'insertion', 'deletion'])
 
@@ -77,23 +56,18 @@ function runOf(node: PMNode, basePx: number): InlineRun {
       if (m.attrs.fontSize) size = resolveSizePx(m.attrs.fontSize, basePx)
     }
   }
-  // An unmodelled mark rides the run so blockEligibility can refuse the block. It is carried as a
-  // REASON rather than acted on here: this function's job is metrics, and inventing a metric for a
-  // mark we have not certified is precisely the bug.
+  // ⚠ An unmodelled mark rides the run as a REASON, never as a metric — this function's job is
+  // metrics, and inventing one for an uncertified mark IS the bug (R8). blockEligibility refuses it.
   const bad = unmodelledMark(node)
   return { text: node.text || '', fontFamily: family, fontSizePx: size, fontWeight: weight, italic, ...(bad ? { unmodelledMark: bad } : {}) }
 }
 
 // One paragraph's inline content → engine runs. SHARED by the whole-doc path and the scoped
-// per-block path so the two can never drift apart.
+// per-block path so the two can never drift apart (R2).
 //
-// INLINE ATOMS: a CITATION is a proven opaque box (CitationNodeView pins white-space: nowrap, so
-// its label has no internal break opportunity and its `normal`-mode subtree cannot reach the
-// parent's line breaking) — it supplies the cached canonical box harvested by the DOM measure
-// (citations/citeBox.ts). Anything else (inline MATH) supplies NO box, so blockEligibility's
-// `!r.box` gate defers the whole block — exactly the gate we want until its own rect-fix lands.
-// Marked citations cache under their own FONT KEY: real ones nearly always carry a
-// textStyle{fontFamily} mark, so skipping them would defer ~every citation-bearing block.
+// ⚠ A CITATION supplies the cached canonical box (citations/citeBox.ts) because it is a PROVEN
+// opaque box; anything else — inline MATH — supplies NONE, and blockEligibility's `!r.box` gate
+// then defers the whole block (R8). → docs/archive/pagination-rounds.md#arith-measure
 function runsOfParagraph(node: PMNode, basePx: number, citationStyle: string, bibEpoch: number): InlineRun[] {
   const runs: InlineRun[] = []
   node.forEach((child) => {
@@ -101,10 +75,8 @@ function runsOfParagraph(node: PMNode, basePx: number, citationStyle: string, bi
     else if (child.type.name === 'hardBreak')
       runs.push({ text: '\n', fontFamily: DEFAULT_STACK, fontSizePx: basePx, fontWeight: 400, italic: false })
     else {
-      // basePx joins the box lookup: the label sets in `font: inherit`, so its advance is base-
-      // dependent (117px at canonical 18, 143px at the phone's 22.5 render base). A box harvested at
-      // a different base MISSES ⇒ this block defers to the DOM measure rather than wrap on a width
-      // that is ~26px wrong per citation. See citations/citeBox.ts keyOf.
+      // ⚠ basePx joins the box lookup — the label sets in `font: inherit`, so a box harvested at a
+      // different base MISSES and this block defers, rather than wrap ~26px wrong per citation (R9).
       const box = child.type.name === 'citation'
         ? citeBox((child.attrs.citekeys as string[]) ?? [], citationStyle, bibEpoch, citeFontKey(child.marks), basePx) ?? undefined
         : undefined
@@ -115,15 +87,11 @@ function runsOfParagraph(node: PMNode, basePx: number, citationStyle: string, bi
 }
 
 // ── ONE block, laid out arithmetically (the scoped/per-region seam) ─────────────────────────────
-// computeScoped's whole cost is measuring the CHANGED blocks live — which is what forces the
-// canonical context and pays its two full-document reflows (the 400–1100ms phone pause). When every
-// changed block is arithmetic-eligible we can produce the SAME per-block geometry with no DOM at
-// all, so the scoped measure needs no forced context and no reflow. Unchanged blocks already reuse
-// their cached entries, so a typing pause in ordinary prose becomes pure arithmetic.
-//
-// `relPos` is the payoff: the DOM path leaves each line's doc position LAZY and pays a posAtCoords
-// hit-test for the one line a break lands on. Arithmetically the position is exact and free —
-// relPos = 1 + charIndex (the block's content starts at offset+1) — so nothing is ever hit-tested.
+// When every changed block is arithmetic-eligible the scoped measure needs NO forced context and no
+// reflow — which is where computeScoped's whole cost lives (two full-document reflows, the
+// 400–1100ms phone pause). `relPos` is the payoff: arithmetically a line's doc position is exact and
+// free (1 + charIndex), so nothing is ever hit-tested.
+// → docs/archive/pagination-rounds.md#arith-measure
 export interface ArithBlockLayout {
   relTops: number[]   // per-line top, relative to the block's own top
   relPos: number[]    // per-line doc position, relative to the block's offset (never lazy)
@@ -165,15 +133,12 @@ export function arithBlockLayout(
 export interface ArithLine { top: number; blockIdx: number; pos: number }
 export interface ArithMeasureResult { lines: ArithLine[]; blocks: Array<{ start: number; end: number }>; contentHeight: number }
 
-// `fontLoaded(stack, sizePx)` gates a text run whose face isn't loaded (measureText would fall back
-// to a system face). `ratio` = the render context's line-height (1.618 desktop / 1.55 phone / the
-// live --inkwave-lh). `contentWidthPx` = the CANONICAL content width (pageWidthPx − 2·sideMargin).
-// `forcedBreaks` — doc positions at which a line MUST start (the mid-block canonical break `at`
-// positions from computeBreaks). The RENDER pass needs these: a page-gap widget is display:block
-// inside the `<p>`, so it ends the pre-gap line partial and text resumes AFTER the gap; without it
-// the continuous wrap fills that slack and loses a render line, drifting every band below. The
-// CANONICAL pass passes none (it PRODUCES the breaks; feeding them back would be circular and its
-// own gaps are cleared before it measures). Absent ⇒ byte-identical to the gap-free layout.
+// `fontLoaded(stack, sizePx)` gates a run whose face isn't loaded (measureText would fall back to a
+// system face). `ratio` = the render line-height; `contentWidthPx` = the CANONICAL content width.
+// ⚠ `forcedBreaks` is for the RENDER pass ONLY. A page-gap widget is display:block, so text resumes
+// AFTER the gap and a continuous wrap would fill that slack, lose a line and drift every band below.
+// The CANONICAL pass passes NONE — it PRODUCES the breaks, so feeding them back is circular (R7).
+// Absent ⇒ byte-identical to the gap-free layout. → docs/archive/pagination-rounds.md#forced-breaks
 export function buildArithMeasure(
   doc: PMNode,
   contentWidthPx: number,

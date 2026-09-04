@@ -1,18 +1,13 @@
 // ─── Smart leader-line routing (build-spec §A2 — distinctive feature) ────────
 //
-// "When the space above/below a stave is cramped, the student draws a curved connector so a
-// dynamics/feedback note can sit where there's room and still point to the right place
-// (above-midline → belongs to the stave below, etc.)."
+// Reflow gives the student room to write, but the room is not next to the thing they are writing
+// about, and a straight line between them cuts through the music. So the connector LEAVES the note
+// sideways, travels through whitespace, and ARRIVES from the side that has clearance.
 //
-// The problem in one line: reflow gives the student room to write, but the room is not next to the
-// thing they are writing about. The note sits in a gap; the bar it is about is inside a system. A
-// straight line between them cuts through the music. So the connector has to LEAVE the note
-// sideways, travel through whitespace, and ARRIVE at the target from the side that has clearance.
-//
-// PURE — no DOM. Coordinates are LAYOUT space (normalised; see reflow.ts `buildLayout`), because a
-// leader is a thing you SEE, and what it must avoid is where the systems are ON SCREEN. Its
-// endpoints are stored as anchors in source/gap space (types.ts) and resolved to layout space by the
-// caller each render, so a reflow adjustment re-routes rather than strands the line.
+// PURE — no DOM. ⚠ Coordinates are LAYOUT space, because a leader is a thing you SEE and what it must
+// avoid is where the systems are ON SCREEN. Its endpoints are STORED as anchors in source/gap space
+// and resolved each render, so a reflow adjustment re-routes rather than strands the line.
+// → docs/archive/music-module-build.md#leader
 
 export interface Point { x: number; y: number }
 
@@ -41,9 +36,9 @@ export interface RouteOptions {
   to: Point                   // the point on the music being indicated
   obstacles?: Obstacle[]
   /**
-   * Page aspect (width / height) in layout space. Bézier control offsets are computed in x and y
-   * independently, and without this a curve on a tall page looks limp and on a wide one looks like a
-   * hairpin — the same offset is a different DISTANCE on each axis.
+   * Page aspect (width / height) in layout space. Control offsets are computed per axis, so without
+   * it the same offset is a different DISTANCE on each: a curve looks limp on a tall page and like a
+   * hairpin on a wide one.
    */
   aspect?: number
   /** Force the approach side (the student's override of the §A2 midline rule). */
@@ -53,19 +48,13 @@ export interface RouteOptions {
 // ─── The midline rule (§A2) ──────────────────────────────────────────────────
 
 /**
- * §A2's ownership rule for a mark sitting in the space between two staves: "above-midline → belongs
- * to the stave below".
+ * §A2's ownership rule for a mark between two staves: "above-midline → belongs to the stave below".
  *
- * ⚠️ IMPLEMENTED LITERALLY, AND THE SPEC'S INTENT HERE IS GENUINELY AMBIGUOUS — flagged for Peter
- * rather than guessed at. Read one way it is the engraving convention that a marking is written
- * ABOVE the stave it belongs to (so a mark in the upper half of a gap is "above" the lower stave and
- * belongs to it). Read the other way it is the opposite of what a pianist expects, since dynamics
- * between the staves of a grand stave usually belong to whichever hand is nearer. The two readings
- * disagree for exactly the marks that sit near the midline — the ones that need the rule.
- *
- * So: this returns the spec's literal rule as a DEFAULT, `LeaderContent.side` overrides it, and the
- * override is what the UI writes the moment the student drags the line. A default that is wrong half
- * the time is survivable; a rule with no override would not be.
+ * ⚠️ IMPLEMENTED LITERALLY, AND THE SPEC IS GENUINELY AMBIGUOUS HERE — flagged for Peter rather than
+ * guessed at, because the two readings disagree for exactly the marks near the midline, the ones
+ * that need the rule. So this is a DEFAULT and `LeaderContent.side` overrides it: a default that is
+ * wrong half the time is survivable; a rule with no override would not be.
+ * → docs/archive/music-module-build.md#leader-midline
  */
 export function ownerOfGapMark(markY: number, gapTop: number, gapBottom: number): 'above' | 'below' {
   const midline = (gapTop + gapBottom) / 2
@@ -96,18 +85,14 @@ function inside(o: Obstacle, p: Point): boolean {
 }
 
 /**
- * How many obstacle bands the sampled path passes through.
+ * How many obstacle bands the sampled path passes through. Counts BANDS ENTERED, not points inside —
+ * otherwise a long curve lying along a system scores worse than a short stab straight through it.
  *
- * Counts BANDS ENTERED, not points inside — a long curve lying along a system would otherwise score
- * far worse than a short one stabbing straight through it, and the short stab is the worse route.
- *
- * ⚠️ THE TARGET'S OWN BAND IS NOT AN OBSTACLE, and getting this wrong made every route look bad.
- * A leader points at a BAR, and a bar is inside a system — so any route that does its job ends up
- * inside a system, and a metric that counts that scored the correct route as a violation (measured:
- * a clean route reported 1 crossing, and the "smart vs naive" comparison tied at 2-vs-2 because both
- * were being charged for arriving). Excluding only the final POINT is not enough either: the curve
- * enters the band a good third of its length before the end. So the band CONTAINING the target is
- * dropped wholesale — arriving is the point; crossing something else is the fault.
+ * ⚠️ THE TARGET'S OWN BAND IS NOT AN OBSTACLE, and getting this wrong made every route look bad: a
+ * leader points at a BAR, a bar is inside a system, so any route that does its job ends up inside
+ * one. Excluding only the final POINT is not enough — the curve enters the band a third of its
+ * length before the end — so the whole band is dropped.
+ * → docs/archive/music-module-build.md#leader-crossings
  */
 export function countCrossings(points: Point[], obstacles: Obstacle[]): number {
   if (!points.length) return 0
@@ -136,23 +121,15 @@ function pathLength(points: Point[], aspect: number): number {
 }
 
 /**
- * Route one leader line.
+ * Route one leader line: leave the note HORIZONTALLY (so it reads as coming out of the label) and
+ * arrive VERTICALLY (so it points AT the stave). Both approach sides are built and SCORED, because
+ * which side is clear changes every time the student drags a handle.
  *
- * THE SHAPE: leave the note HORIZONTALLY (so the line reads as coming out of the label, not stabbing
- * it) and arrive at the target VERTICALLY from above or below (so it points AT the stave, the way a
- * hand-drawn arrow to a bar does). That is one cubic Bézier with the control points pulled along
- * those two axes.
- *
- * THE "SMART" PART: both approach sides are built and SCORED — crossings first, then length. Not a
- * fixed rule, because which side is clear depends on where the reflow put the gaps, and that changes
- * every time the student drags a handle. A route that crosses no music always beats a shorter one.
- *
- * ⚠️ HONEST LIMIT ON "AVOIDANCE": a system spans the full page width, so a leader from a gap two
- * systems away MUST pass through whatever lies between — no curve routes around a band with no ends.
- * For full-width obstacles this router chooses WHERE to cross and from which side, not WHETHER. What
- * it genuinely routes around are LOCAL obstacles: the student's other sticky notes and labels
- * crowding the same gap — which is the congestion §A2 is actually describing, since the gap is
- * exactly where everything they write ends up. Pass those as obstacles with an x-extent.
+ * ⚠️ HONEST LIMIT ON "AVOIDANCE": a system spans the full page width, so a leader from two systems
+ * away MUST pass through what lies between — no curve routes around a band with no ends. For
+ * full-width obstacles this chooses WHERE to cross, not WHETHER. What it genuinely routes around are
+ * LOCAL obstacles (other sticky notes crowding the same gap), which is the congestion §A2 describes.
+ * → docs/archive/music-module-build.md#leader-scoring
  */
 export function routeLeader(opts: RouteOptions): LeaderRoute {
   const { from, to, obstacles = [], aspect = 0.75 } = opts
@@ -161,18 +138,16 @@ export function routeLeader(opts: RouteOptions): LeaderRoute {
     const dx = to.x - from.x
     const dy = to.y - from.y
 
-    // How the line LEAVES the label. Two ways, and both are needed:
-    //  'side'     — out horizontally toward the target. The natural, legible default.
-    //  'vertical' — drop/rise first, then run across. The escape hatch for when something sits
-    //               directly beside the label: with only a sideways exit, a note pinned next to
-    //               another note has nowhere to go but through it (measured — the known-negative in
-    //               leader.test.ts crossed on BOTH approach sides until this existed).
+    // How the line LEAVES the label. 'side' is the legible default; 'vertical' is the escape hatch
+    // for when something sits directly beside the label — with only a sideways exit, a note pinned
+    // next to another has nowhere to go but through it (measured: the known-negative crossed on
+    // BOTH approach sides until this existed).
     const c1: Point = exit === 'side'
       ? { x: from.x + (Math.abs(dx) < 0.06 ? 0.06 * Math.sign(dx || 1) : dx * 0.5), y: from.y }
       : { x: from.x, y: from.y + (Math.abs(dy) < 0.06 ? 0.06 * Math.sign(dy || 1) : dy * 0.5) }
 
-    // Arrive vertically. The stand-off scales with the vertical distance so a near target gets a
-    // gentle hook and a far one a long sweep — a fixed offset overshoots on short runs.
+    // Arrive vertically. The stand-off scales with the vertical distance — a fixed offset overshoots
+    // on short runs.
     const stand = Math.max(0.02, Math.min(0.12, Math.abs(dy) * 0.45))
     const c2: Point = { x: to.x, y: approach === 'above' ? to.y - stand : to.y + stand }
 
@@ -185,13 +160,11 @@ export function routeLeader(opts: RouteOptions): LeaderRoute {
     }
   }
 
-  // Score every combination, in this order and for these reasons:
-  //  1. CROSSINGS — a route through the music (or through another note) is wrong at any length.
-  //  2. EXIT STYLE — at equal crossings the sideways exit wins. This is a LEGIBILITY rule, not an
-  //     optimisation: a line leaving the label sideways reads as a pointer coming out of the note,
-  //     where a vertical one reads as a stem hanging off it. The vertical exit exists ONLY to dodge,
-  //     so it must not win merely by being shorter — which it otherwise does whenever the target
-  //     sits directly below the label, i.e. the commonest case of all.
+  // Score in THIS order:
+  //  1. CROSSINGS — a route through the music is wrong at any length.
+  //  2. EXIT STYLE — ⚠ a LEGIBILITY rule, not an optimisation: the vertical exit exists ONLY to
+  //     dodge, and reads as a stem hanging off the note, so it must not win merely by being shorter
+  //     — which it otherwise does whenever the target sits directly below the label.
   //  3. LENGTH — the tie-break within one style.
   const sides: Array<'above' | 'below'> = opts.side ? [opts.side] : ['above', 'below']
   const exits = ['side', 'vertical'] as const
@@ -213,11 +186,9 @@ function f(n: number): string {
 }
 
 /**
- * A straight line from note to target — what the connector replaces.
- *
- * Kept as the KNOWN-NEGATIVE's engine, not as a fallback: `leader.test.ts` asserts the naive route
- * crosses music that `routeLeader` avoids. Without a comparator, "the router picks a good route" is
- * unfalsifiable — every route it returns would look like the right one.
+ * A straight line from note to target — what the connector replaces. ⚠ Kept as the KNOWN-NEGATIVE's
+ * engine, never as a fallback: without a comparator, "the router picks a good route" is
+ * unfalsifiable, because every route it returns would look like the right one.
  */
 export function naiveRoute(from: Point, to: Point, obstacles: Obstacle[] = []): LeaderRoute {
   const points = bezier(from, from, to, to)

@@ -1,10 +1,7 @@
 // Shared visual chrome for the marketing / legal pages (About, Verify, Privacy) so the whole set can be
 // re-themed from ONE place. Hard-coded hex on purpose — tweak here and every page updates together.
 
-export const PAGE_INK = '#302438'          // headings / primary purple
-export const PAGE_LIGHT = '#41425b'        // lighter purple accent
 export const PAGE_PARCHMENT = '#f3f1ec'    // neutral parchment; same lightness as the editor page
-export const PAGE_TEXT = '#3a3a3a'
 // Deep-black → aquamarine surround behind the page (no waves). ~20° declension, top-left origin.
 // Emulates the Inkwave logo's gradient (its exact stops, reversed so the near-black end sits in the
 // dark corner): near-black → deep indigo → royal blue → blue → teal → the page aquamarine.

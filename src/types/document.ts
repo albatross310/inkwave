@@ -72,44 +72,22 @@ import type { JSONContent } from '@tiptap/react'
 export type TiptapJSON = JSONContent
 
 // ─── Document type (productivity spec §A3.2 `doc_type`) ──────────────────────
-// A document's OWN property — it knows what it is. The productivity ledger READS this to tag its
-// session rows (`doc_type: email`), which is what makes email writing show up in the report.
-// Optional, so every pre-existing document still loads without a migration write.
-//
-// OWNERSHIP: this is the classification only. RESOLVING an absent docType to a row's `doc_type` is
-// the LEDGER's rule and lives there (`productivity/capture.ts` resolveDocType / DEFAULT_DOC_TYPE) —
-// deliberately NOT duplicated here. An accessor with its own default used to sit in this file and
-// answered 'note' where the ledger answers 'essay': two rules for one question, which is how two
-// implementations drift apart (cf. citationText, exported rather than copied). One rule, in the
-// module that owns the ledger.
+// ⚠ DECLARED ONCE, HERE. A document's own property; the ledger READS it to tag its session rows.
+// But RESOLVING an absent docType is the LEDGER's rule (`productivity/capture.ts` resolveDocType),
+// never a second accessor here — one once answered 'note' where the ledger answered 'essay' (R2).
 
 /**
  * What a session was spent doing. The ledger files every row under one of these (§A3.2).
  *
- * **`misc` IS THE DEFAULT, AND IT IS THE HONEST ONE** (Peter, 2026-07-17: "if the productivity
- * tracker doesn't know what they were doing but they were working"). It used to default to
- * `'essay'`, which meant every unclassified session was COUNTED AS ESSAY WRITING whether it was or
- * not — a claim dressed as a measurement. This is the same shape the rest of the codebase converged
- * on today (`found | absent | error`, no null member; StorageReadError; RemoteRead): **absence of
- * classification must not masquerade as a classification.** A session gets a real type only when
- * something SETS one — never a guess.
- *
- * ⚠ **`misc` IS NOT `other` — do not collapse them.** The next person will want to:
- *   · `other`  — a real kind we RECOGNISE but have not enumerated. We know what it was.
- *   · `misc`   — we know they were WORKING; we do not know at what. An honest unknown.
- * A window that is mostly `misc` is a finding about OUR INSTRUMENTATION, not about the writer, and
- * must never be reported to them as a failing.
- *
- * `reading`/`annotating` are BEHAVIOURAL, not inferential (Peter, 2026-07-17: "pure reading time and
- * annotating time can be 2 separate things"). They are set by observed EVENTS on the PDF surface —
- * scroll activity, an annotation in the last 5 minutes — in the same class as the ledger's
- * inactivity boundary. That is why they are legitimate where a note-vs-essay heuristic (guessing
- * INTENT from length or title) is not: one is a fact about what happened, the other is a guess about
- * what it meant. §A6.1 forbids the second, not the first.
- *
- * **READING TIME IS NEVER SUMMED INTO "WORDS WRITTEN"** — a report that added them would lie about
- * both. Reading rows carry no words by construction (nothing was typed), so a sum is safe; the rule
- * is about NARRATIVE, and it is the report lane's policy.
+ * ⚠ `misc` IS THE DEFAULT AND IT IS THE HONEST ONE — never a guess. It defaulted to 'essay' once,
+ * so every unclassified session was counted as essay writing: a claim dressed as a measurement (R8).
+ * ⚠ `misc` IS NOT `other`, so do not collapse them: `other` is a kind we recognise but have not
+ * enumerated; `misc` is "they were working, we don't know at what". A window that is mostly `misc`
+ * is a finding about OUR INSTRUMENTATION, never a failing to report to the writer.
+ * `reading`/`annotating` are BEHAVIOURAL (observed events on the PDF surface), not inferential —
+ * which is why they are legitimate where guessing note-vs-essay from length or title is not
+ * (§A6.1). Reading time is NEVER summed into "words written".
+ * → docs/archive/productivity-email-build.md#doc-doctype
  */
 export type DocType =
   | 'note'
@@ -172,18 +150,11 @@ export interface MusicExcerptRef {
 /**
  * One annotation anchored to a note or measure (§B4).
  *
- * §B4 IS NOT BUILT, but THE ANCHOR QUESTION IS SETTLED (2026-07-17). This file used to record it as
- * open: `MusicXmlAnchor` declared `measure: number`, and MusicXML bar numbers are STRINGS by spec, so
- * a numeric anchor cannot express a '0' pickup or an '8a' repeat ending. The Piece's owner ruled —
- * and the answer was not "make it a string": a printed bar number is also NOT UNIQUE (repeat endings
- * reuse it, multi-movement files restart at 1), so it cannot be a key at all. `music/types.ts` BarRef
- * has the full argument. The shape is now `bar_index` (0-based ORDINAL — identical to `parse.ts`
- * `Measure.index`, so this lane needs no conversion) + `bar_label` (the printed string; display and
- * citation only, never a key), both optional because they are known at different times.
- *
- * This stays deliberately open ANYWAY: the ARRAY is hashed today (see musicAttachmentsHash) so that
- * populating it later needs no new bundle version, and it is empty today so no anchored hash can be
- * affected by whatever §B4 records per annotation.
+ * §B4 IS NOT BUILT; the ANCHOR question is settled. `bar_index` (0-based ordinal) is the key and
+ * `bar_label` (printed, a STRING by spec, and NOT UNIQUE) never is — `music/types.ts` BarRef has
+ * the argument. The ARRAY is hashed today so populating it later is not a protocol change, and it
+ * is empty today so no anchored hash can move.
+ * → docs/archive/productivity-email-build.md#doc-music-anchor
  */
 export interface MusicAnnotationRecord {
   id: string
@@ -202,49 +173,24 @@ export interface MusicAttachments {
 
 export type SchemaVersion = '0.1.0'
 
-// ─── Goals and plan (spec §A5b, 2026-07-17) ───────────────────────────────────
-// Peter: "each doc has the writers goals in it and a rough plan — and the AI's prompts need to
-// include the goals so it can give users a kick up the butt if they're not meeting their goals."
-//
-// WHY THIS LIVES ON THE DOCUMENT, and why that matters more than it looks: §A5b says "stored on
-// the document, like any other content", and it is the DOCUMENT's property — what this document
-// is for. Declared HERE, once, for the same reason `DocType` is (see its note): two lanes writing
-// identical shapes in parallel is not harmless, and the productivity/AI-report lane reads goals
-// rather than owning them.
-//
-// WHAT THEY ARE FOR — the whole of §A5's reversal rests on this type existing. The tone rule was
-// reversed on 2026-07-17 (honest first, funny second, kind third), and the ONLY thing separating
-// that from productivity guilt is the distinction §A5 draws: guilt is a standard IMPOSED on the
-// writer; accountability is a goal the writer SET. "You only managed 200 words, poor effort" is
-// imposed and still banned. "You said you'd finish the lit review by Friday and you've opened it
-// twice" is the writer's own words quoted back, and is the point. So a goal is what gives the
-// report STANDING to push — and §A5b's honesty boundary is the corollary: with no goal set, the
-// report must not invent a standard to measure against. No goal ⇒ describe, don't push.
-//
-// The report path enforces that boundary structurally rather than by asking: goals travel only on
-// their own consent tick, so a model that was sent no goal has nothing to hold the writer to and
-// is told so explicitly (see productivity/report/compile.ts + prompt.ts).
-//
-// ⚠ NOT YET AUTHORABLE. Nothing writes this field: the editor UI for setting a goal is a design
-// question Peter owns and has not answered (raised 2026-07-17). Until it exists, every document's
-// goals are `undefined`, which the report path handles as the honest "no goal ⇒ describe, don't
-// push" case rather than as an error. Do NOT default it to an empty goal — an empty goal and no
-// goal are different states, and only the second is honest about itself.
+// ─── Goals and plan (spec §A5b) ───────────────────────────────────────────────
+// ⚠ DECLARED ONCE, HERE — a goal is the DOCUMENT's property (what this document is for); the
+// productivity/AI-report lane READS goals rather than owning them (R2).
+// ⚠ A GOAL IS WHAT GIVES THE REPORT STANDING TO PUSH. §A5's distinction: guilt is a standard
+// IMPOSED on the writer, accountability is a goal the writer SET. NO GOAL ⇒ DESCRIBE, DON'T PUSH —
+// enforced structurally, since goals travel only on their own consent tick.
+// ⚠ NOT YET AUTHORABLE: nothing writes this field (the editor UI is Peter's open design question).
+// Never default it to an empty goal — an empty goal and no goal are different states.
+// → docs/archive/productivity-email-build.md#doc-goals
 /**
- * ONE dated milestone — the TIMELINE (Peter, 2026-07-17: "goals should include a timeline and then
- * ai can fill in how they actually do").
+ * ONE dated milestone — the TIMELINE.
  *
- * WHY THIS EXISTS ALONGSIDE `plan` RATHER THAN REPLACING IT. DocGoals' original note warns: do not
- * upgrade the plan to a schema of dates, because "the moment it needs to be filled in properly, it
- * stops being written at all". That warning is RIGHT and `plan` stays free text, untouched. But
- * Peter asked for a report on "how they meet each of their timed goals" — and a free-text plan
- * cannot be tracked per-goal, because there is nothing to compare to a date. So the timeline is
- * ADDITIVE and OPTIONAL: write nothing and the plan behaves exactly as before.
- *
- * §A6.4 APPLIES: whether a milestone was MET is a MEASURED comparison of two dates the writer
- * supplied. It is computed client-side (`productivity/goals.ts` milestoneStatus) and handed to the
- * model as a VERDICT — never as two dates for a narrator to compare. The model says what it MEANS;
- * it never decides whether it happened.
+ * ADDITIVE TO `plan`, never a replacement: `plan` stays free text (a plan that must be filled in
+ * properly stops being written at all), but free text cannot be tracked per-goal.
+ * ⚠ §A6.4: whether a milestone was MET is a MEASURED comparison of two dates the writer supplied.
+ * `productivity/goals.ts` milestoneStatus computes it and hands the model a VERDICT — never two
+ * dates for a narrator to compare.
+ * → docs/archive/productivity-email-build.md#doc-milestone
  */
 export interface DocMilestone {
   id: string
@@ -319,33 +265,21 @@ export interface InkwaveDocument {
   docType?: DocType                // absent ⇒ 'note' (docTypeOf). The ledger tags session rows from this.
   email?: EmailHeaders             // present iff docType === 'email' — the body is contentJson
 
-  // ─── Imported media (2026-07-17) ─────────────────────────────────────────
-  // Peter: "a photo import button (which has photo or audio or video)" — general, into any
-  // document. REFERENCES ONLY: the bytes live in OPFS (`library/media/`), exactly as an embedded
-  // source PDF's do (`pdfName` above). A .studio that inlined a 20MB video would re-break every
-  // load-performance rule the PDF precedent exists to keep.
-  //
-  // ⚠ NOT ANCHORED YET, AND THAT IS AN OPEN RULING, NOT A DECISION MADE HERE. `bundleHash` is v:1
-  // /v:2/v:3/v:4 (content · bib · email · music) and this adds no version, so a media asset is
-  // currently OUTSIDE what Bitcoin commits to — the PDF precedent (bytes unanchored) rather than
-  // the music precedent (masters anchored by {id, contentHash} in v:4). That is defensible while
-  // media is a reference the prose does not depend on, and it stops being defensible the moment a
-  // photo is part of the argument. Do not fold it into a bundle version without Peter's ruling —
-  // and note `musicHash.test.ts` pins v:1 against a hand-computed literal, so an attempt to
-  // sneak it in fails a test that already exists.
+  // ─── Imported media ──────────────────────────────────────────────────────
+  // REFERENCES ONLY: the bytes live in OPFS (`library/media/`), as an embedded source PDF's do. A
+  // .studio that inlined a 20MB video would re-break every load-performance rule.
+  // ⚠ NOT ANCHORED, and that is an OPEN RULING, not a decision made here — it takes the PDF
+  // precedent (bytes unanchored), not the music one (masters anchored in v:4). Do not fold it into
+  // a bundle version without Peter's ruling. → docs/archive/productivity-email-build.md#doc-media-unanchored
   media?: MediaAsset[]
 
-  // ─── Toolbar layout (2026-07-17) ─────────────────────────────────────────
-  // Peter: "we should encode the toolbar configuration into a .studio document" — the layout is
-  // per-DOCUMENT and task-based (a score gets music tools, an essay gets writing tools) rather
-  // than one global preference. The rules, the shape and the resolution chain all live in
-  // `editor/toolbarContract.ts`; read it before touching this field.
-  //
-  // NOT ANCHORED, and structurally so: `contentHash()` takes contentJson only — never this
-  // document — and `bundleHash()` takes four EXPLICIT hash arguments, so no document field can
-  // ride in. `musicHash.test.ts` already pins the v:1 form against a hand-computed literal, so
-  // any attempt to fold this in fails a test that exists. Rearranging your buttons must never
-  // read as tampering with your thesis. Same class of field as `citationStyle` above.
+  // ─── Toolbar layout ──────────────────────────────────────────────────────
+  // Per-DOCUMENT and task-based, not one global preference. The rules, the shape and the
+  // resolution chain live in `editor/toolbarContract.ts`; read it before touching this field.
+  // ⚠ NOT ANCHORED, structurally: `contentHash()` takes contentJson only and `bundleHash()` takes
+  // four EXPLICIT hash arguments, so no document field can ride in. Rearranging your buttons must
+  // never read as tampering with your thesis.
+  // → docs/archive/productivity-email-build.md#doc-toolbar-unanchored
   toolbar?: ToolbarConfig
 
   // ─── Attached music (§B5/§B6) ────────────────────────────────────────────
@@ -354,34 +288,16 @@ export interface InkwaveDocument {
   music?: MusicAttachments
 
   // ─── The Piece (§1) — this document IS a score ───────────────────────────
-  //
-  // ⚠️ `piece` AND `music` ARE DIFFERENT THINGS AND BOTH ARE RIGHT. Read this before merging them:
-  //   · `music: MusicAttachments` (§B5/§B6) — this document is PROSE that quotes music. An essay
-  //     with a MusicXML master attached and bar-range excerpts transcluded into the writing.
-  //   · `piece: Piece` (§1) — this document IS the music. A photographed score with markup, a
-  //     heatmap, lesson notes and a practice record. The prose, if any, is incidental.
-  // An essay about Chopin has `music`; the Chopin the student is learning has `piece`. A document
-  // could legitimately have both (write about the piece you are practising — §A6's "write about the
-  // piece in Inkwave and cite bars"), which is exactly why they are not one field.
-  //
-  // WHY IT LIVES HERE AT ALL, and this RETIRES A FORK I SHIPPED: §1 says "the whole thing … is
-  // bundled in a single `.studio` file (the Inkwave document container)". `music/store.ts` did not
-  // do that — it wrote a PARALLEL container at `music/<pieceId>/piece.json`, a second document store
-  // beside `documents/<id>/current.json`. §1 explicitly says not to have one, and the cost was not
-  // theoretical: a Piece got no edit history, no provenance hashing, no session capture and no cloud
-  // sync, because all of those are things that happen to DOCUMENTS.
-  //
-  // The precedent is the email lane's, verbatim: "An email is an ORDINARY document — that is the
-  // whole design." A Piece is an ordinary document too. `docType: 'music'` + this field; the photo
-  // pages are assets; everything else applies for free rather than because `src/music/` arranges it.
-  //
+  // ⚠️ `piece` AND `music` ARE DIFFERENT FIELDS AND BOTH ARE RIGHT — do not merge them. `music`
+  // (§B5/§B6) is PROSE that quotes music; `piece` (§1) is a document that IS music. One document
+  // may legitimately carry both (write about the piece you are practising).
+  // ⚠️ A PIECE IS AN ORDINARY DOCUMENT — never a parallel container. `music/store.ts` once wrote
+  // one at `music/<pieceId>/piece.json`, and a Piece then got no edit history, no provenance
+  // hashing, no session capture and no cloud sync, because all of those happen to DOCUMENTS.
   // Absent ⇒ every existing document is byte-identical, as with `email` and `music`.
-  //
-  // ⚠️ OPEN, for the MusicXML lane + coordinator: a `PieceSource {type:'musicxml', xml_ref}` and
-  // `music.masters[]` can both name the same MusicXML bytes. They must not become two copies —
-  // §B6's whole design is "stored ONCE as an embedded source attachment on the document/Piece
-  // (deduplicated)". The seam is that `xml_ref` should REFERENCE a master, not duplicate one.
-  // Unresolved deliberately: it is that lane's field, and guessing is how the dedup silently dies.
+  // ⚠️ OPEN, for the MusicXML lane: a `PieceSource {type:'musicxml', xml_ref}` and `music.masters[]`
+  // can name the same bytes and must not become two copies — `xml_ref` REFERENCES a master.
+  // → docs/archive/productivity-email-build.md#doc-piece-vs-music
   piece?: Piece
 }
 
@@ -437,20 +353,15 @@ export interface Snapshot {
   contentHash: string               // sha256Hex(JCS(contentJson))
   contentJson: TiptapJSON           // held by the writer; never transmitted
   receipts?: SignedReceipt[]        // the live-composition (+cadence) chain for this span (M3)
-  // The DISPLAYED bibliography frozen at snapshot time (mode-resolved cited subset), and its hash.
-  // Present only when the doc had ≥1 displayed citation; absent → bundle stays the v:1 form so
-  // pre-citation documents hash byte-identically to before. See §3/§12 of the citations spec.
-  bibliography?: Bibliography       // frozen copy (its generatedAt is NOT part of bibHash)
+  // FROZEN COPIES + THEIR HASHES — ONE rule for all three: present only when the document has that
+  // feature; absent ⇒ the bundle keeps its earlier v-form, so every document anchored before that
+  // feature existed hashes BYTE-IDENTICALLY to before.
+  // → docs/archive/productivity-email-build.md#doc-snapshot-optional-hashes
+  bibliography?: Bibliography       // the DISPLAYED cited subset at snapshot time; its generatedAt is NOT in bibHash
   bibHash?: string                  // sha256Hex(JCS({ v:1, entries, style }))
-  // The email headers frozen at snapshot time, and their hash. Present only on `doc_type: email`
-  // documents — absent ⇒ the bundle keeps its v:1/v:2 form, so every non-email document (i.e. every
-  // document anchored before this feature existed) hashes byte-identically to before. §B2.2.
-  email?: EmailHeaders              // frozen copy of To/Cc/Bcc/Subject
+  email?: EmailHeaders              // frozen copy of To/Cc/Bcc/Subject (§B2.2)
   emailHash?: string                // sha256Hex(JCS({ v:1, to, cc, bcc, subject })) — canonicalised
-  // The attached music frozen at snapshot time, and its hash (§B5). Present only on a document that
-  // carries a score — absent ⇒ the bundle keeps its v:1/v:2/v:3 form, so every non-music document
-  // (i.e. every document anchored before this feature existed) hashes byte-identically to before.
-  music?: MusicAttachments          // frozen copy of the master refs + excerpts + annotations
+  music?: MusicAttachments          // frozen copy of the master refs + excerpts + annotations (§B5)
   musicHash?: string                // sha256Hex(JCS({ v:1, masters, excerpts, annotations }))
   bundleHash: string                // v:1 {contentHash,receipts}; v:2 adds bibHash; v:3 adds emailHash; v:4 adds musicHash
   ots: OtsProofState                // OTS over bundleHash → Bitcoin (M2)
@@ -460,12 +371,11 @@ export interface Snapshot {
   versionSummary?: string           // AI bullet-point summary of changes across the full version (stored on manual snap)
 }
 
-// The "snapshot memory diet" projection: everything the editor chrome renders (labels, OTS
-// status, summaries, hashes) WITHOUT the heavy payload — contentJson, the receipts array, and
-// the frozen bibliography can each be MBs, and hundreds of snapshots × full content in React
-// state was hundreds of MB resident (GC pauses). The full array lives ONCE in the snapshots.ts
-// cache; consumers fetch it via listSnapshots() at action time (export, verify, diff).
-// Derived via toSnapshotMeta() in provenance/snapshots.ts.
+// The "snapshot memory diet" projection: everything the chrome renders WITHOUT the heavy payload.
+// ⚠ NEVER HOLD contentJson / receipts / the frozen bibliography IN REACT STATE — each can be MBs,
+// and hundreds of snapshots × full content was hundreds of MB resident (GC pauses). The full array
+// lives ONCE in the snapshots.ts cache; fetch via listSnapshots() at action time.
+// → docs/archive/productivity-email-build.md#doc-snapshot-meta
 export type SnapshotMeta = Omit<Snapshot, 'contentJson' | 'receipts' | 'bibliography'> & {
   receiptCount: number              // receipts?.length — the UI only ever shows counts
 }

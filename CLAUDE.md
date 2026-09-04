@@ -91,7 +91,7 @@ keep them out of the conversation by default so earlier chat remains readable.
   from popovers); swap → resolves; verdicts freeze at commit so `S_v` rotation never
   reflows committed text. Unit-tested (`scas/engine.test.ts`) + browser-verified.
 - **Provenance spine M1 — snapshots + local hashing: DONE.** `provenance/hash.ts`
-  (RFC 8785 JCS + SHA-256 + bundleHash), `provenance/kicks.ts` (KickEvent emitter),
+  (RFC 8785 JCS + SHA-256 + bundleHash), `provenance/wordNudges.ts` (the nudge emitter),
   `provenance/snapshots.ts` (OPFS append-only store; snapshot on a resolved kick when
   the contentHash changed — typing/pastes never snapshot), `components/ReceiptPanel.tsx`.
   Offline, no network; `ots:unstamped` until M2. Unit-tested (`hash.test.ts`) +

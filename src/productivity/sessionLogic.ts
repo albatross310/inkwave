@@ -1,15 +1,12 @@
 // Session boundary detection + row computation (spec §A2, §A4) — PURE.
 //
-// Everything here is a pure function of its arguments (clock injected by the caller), so the
-// boundary rules and the arithmetic are unit-testable without an editor, a DOM or a disk.
-// The impure orchestration (timers, the edit stream, disk writes) lives in capture.ts.
+// Everything here is a pure function of its arguments (clock injected), so the boundary rules and
+// the arithmetic are unit-testable without an editor, a DOM or a disk. The impure orchestration
+// (timers, the edit stream, disk writes) lives in capture.ts.
 //
-// THE TYPING-PERFORMANCE SHAPE (why this module looks the way it does): the editor's per-keystroke
-// path may do NO O(doc) work. So a session's `words_start` is NOT counted when the session opens —
-// it is carried in from the previous close's baseline. That is exact, not an approximation: a
-// session boundary IS an inactivity gap (or an explicit start/stop, or a doc switch), and the
-// document cannot change while nobody is editing it. So the word count at the previous close is the
-// word count at the next open, and a keystroke costs O(steps). See capture.ts for the baseline.
+// ⚠ `words_start` IS CARRIED IN FROM THE PREVIOUS CLOSE, never counted at open — the per-keystroke
+// path may do NO O(doc) work. Exact, not approximate: a boundary IS an inactivity gap, and the
+// document cannot change while nobody is editing it. → docs/archive/productivity-email-build.md#session-typing-shape
 
 import type { DocType, Reflection, SessionRow } from './types'
 
@@ -17,14 +14,10 @@ import type { DocType, Reflection, SessionRow } from './types'
 export const DEFAULT_IDLE_MS = 5 * 60_000
 
 /**
- * The most one inter-edit gap may contribute to `active_minutes`.
- *
- * `active_minutes` is "time actually editing (excludes idle within session)" (§A3.2), so it is the
- * sum of gaps BETWEEN consecutive edits, each capped: a writer who types, thinks for 3 minutes
- * (under the 5-minute boundary) and types again was not editing for those 3 minutes. The cap is the
- * one judgement call in the arithmetic — it is deliberately a named constant so the number it
- * produces is explainable ("we count up to 60s of thinking between two keystrokes as working
- * time"), never a black box.
+ * The most one inter-edit gap may contribute to `active_minutes` (§A3.2 excludes idle within a
+ * session). A NAMED constant so the number stays explainable — "we count up to 60s of thinking
+ * between two keystrokes as working time" — rather than a black box; it is the one judgement call
+ * in the arithmetic. → docs/archive/productivity-email-build.md#session-active-cap
  */
 export const ACTIVE_GAP_CAP_MS = 60_000
 
@@ -72,10 +65,9 @@ export function isIdleBoundary(lastEditAt: number, now: number, idleMs: number =
 /**
  * Open a new draft. The opening edit contributes no active time (there is no gap yet).
  *
- * `edits` is how many edit events the OPENING itself represents: 1 when a keystroke opened the
- * session (the ordinary case), and **0 when the TIMER did** — a Pomodoro block opens a session with
- * no edit behind it (Peter: reading printed paper), and counting a phantom keystroke there would put
- * a fictional edit_events: 1 on a session in which nothing was typed.
+ * ⚠ `edits` is 1 when a KEYSTROKE opened the session and 0 when the TIMER did — a Pomodoro block
+ * opens with no edit behind it (reading printed paper), and a phantom `edit_events: 1` would claim
+ * a keystroke that never happened. → docs/archive/productivity-email-build.md#session-open-edits
  */
 export function openDraft(opts: {
   sessionId: string
@@ -121,11 +113,9 @@ function pad(n: number, w = 2): string {
 
 /**
  * ISO-8601 carrying the UTC instant AND the writer's local offset, e.g.
- * `2026-07-17T09:14:03.000+10:00`. §A9 requires UTC + offset so aggregation can happen in the
- * writer's LOCAL day; a bare `Z` string loses the offset and with it the local day.
- *
- * `offsetMin` is minutes to ADD to UTC to get local time (Brisbane = +600), i.e. the negation of
- * `Date.prototype.getTimezoneOffset()`. Injected so tests are timezone-independent.
+ * `2026-07-17T09:14:03.000+10:00`. ⚠ NEVER A BARE `Z`: §A9 aggregates in the writer's LOCAL day and
+ * a `Z` string loses it. `offsetMin` is minutes to ADD to UTC (Brisbane = +600) — the negation of
+ * `getTimezoneOffset()`, injected so tests are timezone-independent.
  */
 export function isoWithOffset(ms: number, offsetMin: number): string {
   const local = new Date(ms + offsetMin * 60_000)
@@ -139,19 +129,11 @@ export function isoWithOffset(ms: number, offsetMin: number): string {
 }
 
 // ─── Local-day / local-hour resolution (§A9) — THE ONE TIME RULE ─────────────
-//
-// Aggregates roll up by the WRITER'S local day, not by UTC day — a 9pm Brisbane session belongs to
-// that evening, not to the next UTC date. The offset in the ISO string is the source of truth when
-// present, so aggregation is a pure function of the ledger's own bytes and does NOT depend on the
-// machine's TZ. (A test suite that silently passes only in Australia/Brisbane is the kind of check
-// that can't see its own failure — the fixtures therefore carry explicit offsets.)
-//
-// MERGED 2026-07-17 (feat/prod-integrate): `feat/prod-graphs` shipped these same five functions in
-// its placeholder `ledger.ts` mirror. That mirror is retired and its implementations live HERE, the
-// module that already owned `localDayOf`/`localMonthOf` — one rule for one question. The graphs
-// lane's version is the one kept: it is strictly stronger than this module's original
-// `iso.slice(0, 10)`, which agreed with it on every offset-bearing ISO the ledger emits (the date
-// part as written IS the local day) but answered garbage-in-garbage-out on unparseable input.
+// ⚠ ROLL UP BY THE WRITER'S LOCAL DAY, never the UTC day, and read the offset OUT OF THE ISO STRING
+// — so aggregation is a pure function of the ledger's own bytes and cannot depend on the machine's
+// TZ (fixtures carry explicit offsets for the same reason). These five functions are the ONE
+// implementation; the graphs lane's `ledger.ts` mirror was retired into them (R2).
+// → docs/archive/productivity-email-build.md#session-local-day
 
 /** Matches a trailing `Z` or `±HH:MM` / `±HHMM` offset on an ISO-8601 timestamp. */
 const OFFSET_RE = /(Z|[+-]\d{2}:?\d{2})$/
@@ -232,14 +214,10 @@ export interface CloseMeasurement {
 }
 
 /**
- * Build the persisted row (§A3.2).
- *
- * `prevSessionEndAt` is the epoch ms the PREVIOUS session (in any document — capture is global)
- * closed, or null when this is the ledger's first session → `break_before_min` 0.
- * `offsetMin` is the local UTC offset (see isoWithOffset).
- *
- * `doc_label`, `note` and `place` are OMITTED (not emptied) when absent or suppressed, so a
- * suppressed title or a skipped note leaves no trace at all.
+ * Build the persisted row (§A3.2). `prevSessionEndAt` is the epoch ms the PREVIOUS session (in any
+ * document — capture is global) closed, or null for the ledger's first → `break_before_min` 0.
+ * ⚠ `doc_label`, `note` and `place` are OMITTED, never emptied, so a suppressed title or a skipped
+ * note leaves no trace at all.
  */
 export function buildRow(
   d: SessionDraft,
@@ -275,14 +253,10 @@ export function buildRow(
 /**
  * Did this row's time come from the writer's memory rather than the timer?
  *
- * THE ONE PLACE `entered` IS READ, and it asks the POSITIVE question deliberately: "did this row SAY
- * post-hoc?". A row must CLAIM to be testimony to be treated as testimony. Legacy rows (written
- * before the field existed) predate the manual add entirely, so they are timer rows as a matter of
- * history — not because absence defaults to anything. Keeping that reasoning in one named function is
- * what stops it being silently re-derived as `!row.entered` somewhere else.
- *
- * It lives HERE, beside the builders, rather than in `aggregate.ts`, because the panel needs it too
- * and must not drag the whole rollup layer in to ask a one-field question. `aggregate.ts` re-exports.
+ * ⚠ THE ONE PLACE `entered` IS READ, and it asks the POSITIVE question: a row must CLAIM to be
+ * testimony to be treated as testimony, so nothing re-derives it as `!row.entered`. Here rather
+ * than in `aggregate.ts` so the panel can ask without dragging the rollup layer in.
+ * → docs/archive/productivity-email-build.md#session-ispost-hoc
  */
 export function isPostHoc(r: SessionRow): boolean {
   return r.entered === 'post-hoc'
@@ -290,14 +264,11 @@ export function isPostHoc(r: SessionRow): boolean {
 
 /**
  * Split rows by where their time came from. Every consumer that TOTALS anything starts here, so
- * "measured" and "told to us" cannot be accidentally summed — a caller has to name which population
- * it wants.
+ * "measured" and "told to us" cannot be accidentally summed.
  *
- * ⚠ THE DROP-UP'S `daySummary` IS A REAL CALLER, and it is why this is exported rather than kept
- * private to the aggregates: it sums the day's minutes independently, it reduced over ALL rows, and
- * it reported 45 remembered minutes to the writer as "focused minutes" while every unit test stayed
- * green (the tests guard `aggregate.ts`; the panel never calls it). Caught by driving the real UI.
- * A guard on one implementation of a rule says nothing about the other.
+ * ⚠ EXPORTED because the drop-up's `daySummary` is a REAL caller: it summed all rows and reported
+ * 45 remembered minutes as "focused minutes" with every unit test green (they guard `aggregate.ts`,
+ * which the panel never calls). → docs/archive/productivity-email-build.md#session-ispost-hoc
  */
 export function splitByEntry(rows: readonly SessionRow[]): { measured: SessionRow[]; postHoc: SessionRow[] } {
   const measured: SessionRow[] = [], postHoc: SessionRow[] = []
@@ -321,19 +292,12 @@ export interface PostHocEntry {
 /**
  * Build a row the writer TOLD us about (§A5's repair tool).
  *
- * **DO NOT MAKE HIM PRECISE.** A form demanding start/end times won't get used on a Tuesday, and this
- * whole feature dies if the ritual becomes data entry. So the input is a rough duration and a rough
- * category, and we derive the span: it ENDS when he told us and reaches back by the duration he said.
- * That span is not a measurement and does not pretend to be one — `entered: 'post-hoc'` flags the
- * entire row as testimony, so every field on it, the span included, is read as his word rather than
- * ours. It lands in the local day he is standing in, which is the day he means.
- *
- * Every MEASURED field is ZERO, deliberately, and that is not missing data — it is the true value.
- * We did not see him type, so `words_added: 0` is exactly right: nothing was measured. The minutes
- * live in `active_minutes` and are kept out of the measured bars by `entered`, never by being blank.
- *
- * `break_before_min` is 0: a break is a gap between two MEASURED sessions, and we have no idea what
- * ran before something we never saw.
+ * ⚠ DO NOT MAKE HIM PRECISE — a form demanding start/end times will not get used on a Tuesday. The
+ * input is a rough duration and a rough category; the span is derived (ends when he told us,
+ * reaches back by what he said) and `entered: 'post-hoc'` flags the WHOLE row as testimony.
+ * ⚠ EVERY MEASURED FIELD IS ZERO AND THAT IS THE TRUE VALUE, not missing data: we did not see him
+ * type. `break_before_min` is 0 because a break is a gap between two MEASURED sessions.
+ * → docs/archive/productivity-email-build.md#session-posthoc-row
  */
 export function buildPostHocRow(
   entry: PostHocEntry,
@@ -343,9 +307,8 @@ export function buildPostHocRow(
   const note = cleanText(entry.note)
   return {
     session_id: opts.sessionId,
-    // Not the open document: he is repairing the RECORD, and the work he forgot to time may not have
-    // been in Inkwave at all (a printed article, a library afternoon). Attributing it to whatever
-    // happened to be on screen when he remembered would be a guess wearing a measurement's clothes.
+    // ⚠ NOT the open document: he is repairing the RECORD, and the work may not have been in
+    // Inkwave at all. Attributing it to whatever was on screen is a guess in measurement's clothes.
     doc_id: 'post-hoc',
     start: isoWithOffset(opts.at - minutes * 60_000, opts.offsetMin),
     end: isoWithOffset(opts.at, opts.offsetMin),
@@ -368,13 +331,9 @@ export function buildPostHocRow(
  * Is this session worth persisting?
  *
  * ANY real edit counts — a thinking-heavy, low-output session is still work, and discarding it is
- * exactly the judgement §A5 forbids.
- *
- * **AND A POMODORO BLOCK COUNTS WITH NO EDITS AT ALL** (Peter, 2026-07-17). This used to be
- * `editEvents > 0`, which threw away the paper-reading case entirely: reading a printed article for
- * 25 minutes produces zero events, so the block was measured, closed, and then SILENTLY DROPPED on
- * its way to the ledger. Starting the timer is the writer saying *count this*; a rule that requires
- * a keystroke to believe them is the tracker calling a real day thin.
+ * the judgement §A5 forbids. ⚠ AND A POMODORO BLOCK COUNTS WITH NO EDITS AT ALL: `editEvents > 0`
+ * silently dropped every paper-reading block on its way to the ledger.
+ * → docs/archive/productivity-email-build.md#session-recordable
  */
 export function isRecordable(d: SessionDraft): boolean {
   return d.editEvents > 0 || d.pomodoro
@@ -386,23 +345,16 @@ export function isRecordable(d: SessionDraft): boolean {
 /**
  * Active minutes that must accrue before the writer is asked to reflect.
  *
- * 25, and every part of that number is a decision:
- *   · NOT per Pomodoro block — a toll booth every 25 minutes of clock time kills the ritual it is
- *     meant to be. This counts ACTIVE minutes, which accrue slower than the clock.
- *   · NOT at day's close — you cannot remember by then, and the chart only works as a recall prompt
- *     while the stretch is still warm.
- *   · Once per stretch, never re-prompted, always skippable. A skipped reflection is not a failure
- *     and nothing anywhere may treat it as one.
- * The bar for all of it: would he fill this in on a bad Tuesday?
+ * ⚠ ACTIVE minutes, not clock minutes and not per Pomodoro block (a toll booth every 25 minutes
+ * kills the ritual), and not at day's close (you cannot remember by then). Once per stretch, never
+ * re-prompted, always skippable — a skipped reflection is not a failure and nothing may treat it as
+ * one. → docs/archive/productivity-email-build.md#session-reflection
  */
 export const REFLECT_AFTER_ACTIVE_MS = 25 * 60_000
 
 /**
- * Should we offer the reflection now? PURE.
- *
- * `activeMsSinceLastReflection` is summed from the rows written since the last one. Asking is
- * OFFERING — this returns true at most once per stretch because accepting or skipping resets the
- * accumulator (the caller marks the stretch), never because we track whether they complied.
+ * Should we offer the reflection now? PURE. ASKING IS OFFERING: true at most once per stretch
+ * because accepting or skipping resets the accumulator, never because we track compliance.
  */
 export function shouldOfferReflection(activeMsSinceLastReflection: number): boolean {
   return activeMsSinceLastReflection >= REFLECT_AFTER_ACTIVE_MS
@@ -411,13 +363,17 @@ export function shouldOfferReflection(activeMsSinceLastReflection: number): bool
 /**
  * The rows a reflection has not yet spoken for, for the given local day. PURE.
  *
- * Extracted so the drop-up (which SHOWS the prompt) and the session-close watcher (which OPENS the
- * panel to it) read ONE rule — two copies of "what counts as unreflected" is exactly how the two
- * would drift. A row is spoken-for when it ends at/before the newest reflection's `to`.
+ * ⚠ ONE RULE for "what counts as unreflected": the drop-up SHOWS the prompt and the session-close
+ * watcher OPENS the panel to it, and two copies would drift (R2). Spoken-for = ends at/before the
+ * newest reflection's `to`.
+ * ⚠ §A6.1: MEASURED ROWS ONLY. The prompt shows these minutes back as "focused minutes" and the
+ * gate opens the panel on their total, so a remembered block reaching either one merges testimony
+ * into measurement — and asks the writer to recall a stretch they have already described.
  */
 export function unreflectedRows(rows: SessionRow[], reflections: Reflection[], todayLocal: string): SessionRow[] {
   const last = reflections.reduce<string>((a, r) => (r.to > a ? r.to : a), '')
-  return rows.filter((r) => localDayOf(r.start) === todayLocal && r.end > last)
+  const { measured } = splitByEntry(rows)
+  return measured.filter((r) => localDayOf(r.start) === todayLocal && r.end > last)
 }
 
 /**

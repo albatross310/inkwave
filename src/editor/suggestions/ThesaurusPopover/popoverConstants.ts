@@ -1,6 +1,5 @@
 export const CYCLE_SIZE      = 8
 export const DELETE_SENTINEL = '\x00delete'
-export const CARD_PAD_X      = 3
 
 // Cap on the RIGHT-side compression RATE (letter-spacing em per character). The after-text
 // squeezes at most this much per character — so a word near the right margin, with only a few

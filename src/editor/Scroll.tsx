@@ -16,53 +16,22 @@ import { syncTwinkles, setScrollScene, swayFields } from './waveTwinkle'
 import { isTouchDevice } from './isTouchDevice'
 export { isTouchDevice }
 
-// ── Zoom input sensitivity (Peter, 2026-07-10: both were too slow — retune HERE) ──────────────
-// Trackpad ctrl-pinch fine-deltas: multiplier on the fractional step per 100px of deltaY. A
-// discrete mouse-wheel notch (|ΔY| ≥ 100) is ALWAYS exactly one 1.08 step — this only speeds up
-// the sub-notch accumulation, capped at one step per event.
-// 2026-08-20 (Peter, real Mac trackpad: "takes way too much movement to zoom even one step") — the
-// commit itself is a hard Math.trunc() with ZERO visual feedback below a whole step (applyFrame /
-// applyMagnifyFrame), so at the old value of 2 a real trackpad's small per-event deltas needed many
-// accumulated events before ANYTHING moved, which read as "nothing happens" rather than "zooming,
-// slowly". Raised 2 → 4; still capped at one committed step per event so a single frame can never
-// leap multiple lattice steps. See FIRST_STEP_BONUS below for the other half of the fix — a
-// head-start on the very first commit of a gesture, so the initial response doesn't need a full
-// step's worth of accumulated movement either.
-const TRACKPAD_ZOOM_SENSITIVITY = 4
-// One-time bonus added to the FIRST wheel event of a fresh gesture (latch.isIdle()), on top of its
-// own normal contribution — makes the first commit land sooner than steady-state cadence would, so
-// the very start of a zoom gesture reacts immediately rather than needing to "warm up" the
-// accumulator from zero. Purely additive; steady-state per-step distance (TRACKPAD_ZOOM_SENSITIVITY
-// above) is unchanged once a gesture is under way. 0.5 → 0.92 (Peter, still felt slow to start):
-// at 0.92 almost any nonzero first tick — even a very light touch — crosses the 1.0 commit threshold
-// on its own; it doesn't reach 1.0 by itself only so a literal zero-delta event can't spuriously
-// commit a step.
-const FIRST_STEP_BONUS = 0.92
-// How long after the last committed zoom step the SETTLE runs — the heavy half of zooming: it exits
-// the live-reflow window, re-measures page breaks canonically and re-anchors the viewport.
-// 200 → 450 (2026-08-23, Peter: zoom "goes like three zooms then stops then another three").
-// MEASURED: a deliberate trackpad gesture notches every ~400ms, so at 200 EVERY notch outran the
-// debounce and paid its own full re-measure — 8 notches, 4 blocking tasks of ~80ms. The stall was
-// never the step itself (the step is a cache hit or one scoped reflow); it was the settle firing
-// between steps. 450 sits past a deliberate notch cadence so a multi-notch gesture coalesces into
-// ONE settle, and is still well inside Peter's stated bar for this ("paras split over pages even if
-// they render 0.2s late; the cursor line moves instantly") — the step's own reflow is unchanged, so
-// what he sees while notching does not move; only the re-measure waits for him to stop.
+// ── Zoom input sensitivity — RETUNE THESE FOUR, never the formulas they feed ──────────────────
+// Each was measured against a real gesture on Peter's own hardware; the reasoning and the numbers
+// they replaced are in → docs/archive/editor-surface.md#scroll-zoom-tuning
+const TRACKPAD_ZOOM_SENSITIVITY = 4 // fine-delta fraction per 100px of deltaY; a full notch is always 1 step
+const FIRST_STEP_BONUS = 0.92 // one-time head start on a gesture's first event, so it needs no warm-up
+// ⚠ The SETTLE is the heavy half of zooming (exit the live window, re-measure canonically,
+// re-anchor), so this must sit PAST a deliberate notch cadence (~400ms) or every notch outruns the
+// debounce and pays its own re-measure — the felt "three zooms then stops".
 const ZOOM_SETTLE_MS = 450
-// Phone pinch: multiplier on the finger-distance-ratio → steps mapping (log(d/d₀)/log(RATIO)).
-// 1 = the pinched distance ratio maps 1:1 onto the zoom ratio; higher = fewer centimetres of
-// pinch per step. Steps still commit whole on the shared zoomStep lattice. Raised 1.75 → 2.5
-// (Peter, 2026-07-10) now the transform preview decouples gesture feel from reflow cost.
-const PINCH_ZOOM_SENSITIVITY = 2.5
+const PINCH_ZOOM_SENSITIVITY = 2.5 // finger-distance ratio → steps; higher = fewer cm of pinch per step
 
-// ── Deep-zoom-out scroll acceleration (Peter, 2026-07-10) ─────────────────────────────────────
-// The plain-wheel scroll is content-proportional (delta × scale) so a notch always covers the
-// same fraction of a page — but taken literally that gets GLACIAL at tiny scales (at 0.05 a notch
-// is 5px). Below the knee the multiplier accelerates above pure proportionality, ramping harder
-// as the scale approaches MIN_MAGNIFY: f(s) = s^(1 − a·t), t = (KNEE − s)/(KNEE − MIN) ∈ [0,1].
-// At the knee t=0 → f(s) = s exactly (continuous, and the s ≥ KNEE regime is byte-identical);
-// with a = 0.5 the boost over proportional is ≈2.4× at s=0.1, ≈3.9× at s=0.05, ≈7× at 0.02.
-// Retune the KNEE (where acceleration starts) and STRENGTH (how hard it ramps) — not the formula.
+// ── Deep-zoom-out scroll acceleration ─────────────────────────────────────────────────────────
+// A content-proportional notch (delta × scale) goes GLACIAL at tiny scales, so below the knee the
+// multiplier ramps above proportionality: f(s) = s^(1 − a·t), t = (KNEE − s)/(KNEE − MIN) ∈ [0,1].
+// At the knee f(s) = s exactly, so the s ≥ KNEE regime is byte-identical. Retune the KNEE and the
+// STRENGTH, not the formula. → docs/archive/editor-surface.md#scroll-accel
 const SCROLL_ACCEL_KNEE = 1 / 3
 const SCROLL_ACCEL_STRENGTH = 0.5
 function scrollScale(s: number): number {
@@ -72,14 +41,12 @@ function scrollScale(s: number): number {
 }
 
 // ─── The S-curve slow down — an ADDITIVE BRAKE over the never-stopped drift ──────────────────
-// The load unit's deceleration (Peter's spec, 2026-07-11): the drift animation is never stopped;
-// SETTLE adds a second animation composited with `animation-composition: add` whose value starts
-// at 0 with zero initial velocity — the handoff is continuous BY CONSTRUCTION whenever the
-// commit lands, however starved the main thread is. After the coast time T a linear hold cancels
-// the drift exactly, so the TOTAL pose is static until the rest handoff, however late its commit
-// lands. The twinkle fields ride the SAME injected keyframes via CSS (index.css), so every layer
-// decelerates in lockstep. ONE COAST PER LOAD: every surface (shell + editor) swaps class in the
-// same event dispatch and shares the injected keyframes + the resolved clock.
+// ⚠ THE DRIFT IS NEVER STOPPED. SETTLE composites a second animation over it (`animation-
+// composition: add`) starting at zero value AND zero velocity, so the hand-off is continuous BY
+// CONSTRUCTION however starved the main thread is; after the coast time T a linear hold cancels
+// the drift exactly. ONE COAST PER LOAD: every surface swaps class in the same dispatch and shares
+// the injected keyframes + the resolved clock, and the twinkle fields ride those same keyframes.
+// → docs/archive/editor-surface.md#scroll-coast
 export const ADDITIVE_COAST =
   typeof CSS !== 'undefined' && !!CSS.supports?.('animation-composition', 'add')
 const COAST_HOLD_MS = 8000 // linear hold after T: total pose static until the rest handoff lands
@@ -102,13 +69,10 @@ const timelineNow = (): number => {
   return t ?? performance.now()
 }
 
-// ─── Load watchdog — the ONE backstop (replaces the old per-stage fallback caps) ─────────────
-// Playback is compositor-only and the rest handoff is a resolved-clock timer, so on any healthy
-// load the whole chain always completes; the only way it cannot is SETTLE never arriving (the
-// document never became ready) or the page's timers being dead. If a load is still drifting
-// WATCHDOG_MS after it began, LOG loudly and force the chain: start the coast and dispatch
-// 'inkwave:load-watchdog' (Edit.tsx force-drops the shell; TiptapEditor force-lifts `covered`).
-// 30s ≫ any healthy load (worst measured cold 20MB open ≈ 12s) — it must never fire on one.
+// ─── Load watchdog — the ONE backstop, and it MUST NEVER FIRE ON A HEALTHY LOAD ──────────────
+// Playback is compositor-only, so the only way the chain does not complete is SETTLE never arriving
+// or the page's timers being dead. 30s ≫ any healthy load (worst measured cold 20MB open ≈ 12s).
+// → docs/archive/editor-surface.md#scroll-coast
 const WATCHDOG_MS = 30000
 let watchdogT: ReturnType<typeof setTimeout> | undefined
 function armLoadWatchdog(): void {
@@ -126,15 +90,10 @@ function disarmLoadWatchdog(): void {
   watchdogT = undefined
 }
 
-// Inject the brake keyframes (literal px — var()-dependent keyframes can't composite).
-// ZERO-JERK S-CURVE (2026-07-11 live-tick round): total velocity = −v·(1 − smoothstep(τ)) — the
-// water holds full speed with ZERO initial deceleration, eases into the slowdown, and lands with
-// zero end velocity: a true S-curve slow down (Peter's spec), and any residual anchor lag ε now
-// costs add(ε) ∝ ε³ (sub-pixel even at hundreds of ms) instead of ∝ ε². add(τ) = vT(τ³ − τ⁴/2),
-// d = vT/2 (90px desktop / 72px phone), sampled as ~24 linear segments (max deviation from the
-// true quartic ≈ 0.06px); after T a linear hold at +v cancels the still-running drift exactly.
-// Direction: coast-l opposes drift-l (positive), coast-r mirrored. The twinkle fields' CSS brake
-// uses these SAME keyframe names, so one injection drives every layer in lockstep.
+// Inject the brake keyframes in LITERAL px — `var()`-dependent keyframes cannot composite. The
+// curve is zero-jerk: add(τ) = vT(τ³ − τ⁴/2), d = vT/2, so a residual anchor lag ε costs ∝ ε³
+// rather than ∝ ε². ONE injection drives every layer — the twinkle fields' CSS brake names these
+// same keyframes. → docs/archive/editor-surface.md#scroll-coast
 function injectAdditiveCoastFrames(phone: boolean, d: number): boolean {
   const v = 140 / 1.944 // px/s — must match the drift exactly
   const T = phone ? 2 : 2.5
@@ -160,28 +119,20 @@ function injectAdditiveCoastFrames(phone: boolean, d: number): boolean {
   } catch { return false }
 }
 
-// The scroll "paper" chrome — the white page surface and the parchment column with its drop
-// shadow. Shared by BOTH the live editor (TiptapEditor) and the prerendered/loading shell
-// (EditorShell) so the static landing page is a direct visual function of the same components
-// + CSS. Style changes here flow to both.
-//
-// Both wooden rollers are now removed and the page is pulled up near the top of the viewport
-// (see the `.inkwave-editor-surface` rule in styles/index.css). Long-term the parchment grows a
-// vectorised torn-paper edge; keeping the chrome in one shared component makes that a one-place change.
-/** WHEN THE NON-PASSIVE WHEEL LISTENER MUST EXIST — pure, so it can be asserted without a browser.
- *  A non-passive wheel listener makes the compositor wait for main-thread dispatch on every event,
- *  so it is attached only when it could actually intercept something. The `pointerOver` term is
- *  load-bearing and easy to lose: a TRACKPAD PINCH arrives as wheel{ctrlKey:true} with NO keydown,
- *  so `ctrlHeld` is false throughout, and if the listener is not ALREADY attached the browser has
- *  zoomed before the page hears about it — a browser zoom level a page cannot undo. See the long
- *  note at the arming site. */
-/** The zoom's no-anchor fallback position, as a fraction of the scroll range — pure, so the clamp
- *  can be asserted without a browser.
- *  `scrollRange()` FLOORS AT 1 so it can be divided by. When the document fits its viewport that
- *  floor is a fiction — there is no range — and any scrollTop divided by it yields ≥ 1, i.e. "you
- *  are at the bottom"; the next frame multiplies that by a REAL range and the document leaps to the
- *  references page. A degenerate range answers 0 (everything fits ⇒ you are at the top), and a real
- *  one is clamped to [0,1], which a proportion cannot leave anyway. */
+// The scroll "paper" chrome — the white page surface and the parchment column with its drop shadow,
+// shared by BOTH the live editor and the prerendered/loading shell, so the static landing page is a
+// direct visual function of the same components + CSS. Style changes here flow to both.
+// → docs/archive/editor-surface.md#scroll-chrome
+/** ⚠ WHEN THE NON-PASSIVE WHEEL LISTENER MUST EXIST — pure, so it can be asserted without a browser.
+ *  The `pointerOver` term is load-bearing and easy to lose: a TRACKPAD PINCH arrives as
+ *  wheel{ctrlKey:true} with NO keydown, so a listener not ALREADY attached hears about it only
+ *  after the browser has zoomed — and a browser zoom level a page cannot undo.
+ *  → docs/archive/editor-surface.md#scroll-zone */
+/** ⚠ The zoom's no-anchor fallback position, as a fraction of the scroll range — pure, so the clamp
+ *  can be asserted without a browser. R1: `scrollRange()` FLOORS AT 1 so it can be divided by, and
+ *  on a document that FITS its viewport that floor is a fiction — every scrollTop then reads as
+ *  "you are at the bottom" and the next frame leaps the document to its end.
+ *  → docs/archive/editor-surface.md#scroll-anchor */
 export function scrollRatioOf(top: number, range: number): number {
   if (!Number.isFinite(top) || !Number.isFinite(range) || range <= 1) return 0
   return Math.min(1, Math.max(0, top / range))
@@ -239,25 +190,19 @@ export function Scroll({
   const paperElRef = paperRef ?? localPaperRef
 
   // ── Wave stillness through zoom (Peter: "stop it moving the waves") ─────────────────────────
-  // The sway is --wave-x = base + scrollTop·WAVE_SWAY (see the scroll-sway effect below). Zoom
-  // writes scrollTop in many ways — anchor corrections, the settle re-anchor, and ASYNC browser
-  // scroll-clamps when the wrapper/content shrinks (those materialise at a later layout flush, so
-  // no synchronous bracket can catch them all). Mechanism: zoom activity opens a HOLD WINDOW
-  // (holdWavesFor, extended by every zoom frame + settle); while it's open, the sway handler
-  // treats every scroll delta as zoom-driven and rebases the base EQUAL-AND-OPPOSITE — --wave-x
-  // is held exactly constant through gesture, settle, re-measure and any clamp. When the window
-  // closes, sway resumes from exactly where the waves were (same rebase pattern as the coast
-  // handoff) — no jump. Trade-off: a user scroll INSIDE the window doesn't sway (decorative, and
-  // scrolling mid-zoom is rare); the moment the window lapses, normal sway is untouched.
+  // ⚠ ZOOM MUST NOT MOVE THE WAVES, and no synchronous bracket can catch every scroll it causes
+  // (the browser's own clamps land at a later layout flush). So zoom opens a HOLD WINDOW and the
+  // sway handler rebases its base EQUAL-AND-OPPOSITE for every delta inside it, holding --wave-x
+  // exactly constant through gesture, settle, re-measure and clamp.
+  // → docs/archive/editor-surface.md#scroll-wave-hold
   const WAVE_SWAY = 0.06 // 2/3 of the old 0.09 sway speed — shared by the sway + the rebases
   const waveBaseRef = useRef(0)
   const zoomHoldUntilRef = useRef(0)
   const holdWavesFor = (ms: number) => {
     zoomHoldUntilRef.current = Math.max(zoomHoldUntilRef.current, performance.now() + ms)
   }
-  // Gapped mode draws a separate-sheet drop shadow at EACH page break (the rounded caps in
-  // PaginationExtension); the single tall outer shadow would otherwise bleed continuously down the
-  // left/right edges and through the gaps, so we drop it here and let the per-gap caps do the work.
+  // Gapped mode draws a per-break drop shadow (PaginationExtension's rounded caps), so the single
+  // tall outer shadow is dropped here — it would bleed down the edges and through the gaps.
   const gapped = gappedPagesEnabled()
   const [, rerender] = useState(0)
   useEffect(() => {
@@ -267,24 +212,17 @@ export function Scroll({
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
 
-  // HYBRID ZOOM scope: only the desktop LIVE DOCUMENT (fill) with fixed-size paper gets the
-  // transform-magnify + fit-to-width cap. Isolated application surfaces own an equivalent local
-  // fit wrapper because their natural width is app-defined rather than paper-defined. Phone has its own model
-  // (canonically-narrower render + pinch font zoom); SnapshotView's in-flow Scroll and 'scroll'
-  // paper (no mm width) stay plain.
-  // getPaperSize() is re-read on the page-settings rerender above, so switching paper flips this.
+  // HYBRID ZOOM scope: only the desktop LIVE editor (fill) with a fixed-size paper gets the
+  // transform-magnify + fit-to-width cap. Isolated applications own their equivalent fit wrapper;
+  // phone, SnapshotView's in-flow Scroll, and fluid paper stay plain.
   const hybrid = usesTransformMagnify({ fill, phone, paperSize: getPaperSize(), presentation })
 
   // ── Magnify plumbing (hybrid only) ──────────────────────────────────────────────────────────
-  // ONE subscriber applies the module's effective magnify to the DOM: the --iw-magnify var (the
-  // CSS transform reads it), the .iw-magnified class (scaleFor() keys off it; also gates the
-  // transform rule so scale=1 renders EXACTLY like master — no containing-block change), and the
-  // wrapper box's width/height. The wrapper is the scroll-height fix: transform doesn't change
-  // layout size, so a scaled-down page would leave ghost scroll space (and a scaled-up one would
-  // clip) — sizing the wrapper to the page's VISUAL dims (pageW·s × paperH·s) makes layout ≡
-  // visual, so the scroll range always matches what's on screen and mx-auto centring stays exact.
-  // useLayoutEffect: the first fit/magnify application lands BEFORE the browser paints the mounted
-  // surface, so a narrow window (or a persisted magnify) never flashes one frame at scale 1.
+  // ONE subscriber applies the effective magnify to the DOM: the --iw-magnify var, the
+  // .iw-magnified class, and the wrapper box's size. ⚠ THE WRAPPER IS SIZED TO THE PAGE'S VISUAL
+  // DIMS because a transform does not change layout size — that is what keeps the scroll range
+  // equal to what is on screen. useLayoutEffect so a narrow window never flashes a frame at
+  // scale 1. → docs/archive/editor-surface.md#scroll-magnify
   useLayoutEffect(() => {
     const el = surfaceRef.current
     if (!el || !hybrid) return
@@ -320,23 +258,16 @@ export function Scroll({
         window.dispatchEvent(new Event('inkwave:zoom-settled'))
       }, 200)
     }
-    // holdWavesFor: applying a new scale resizes the wrapper, and the browser may CLAMP scrollTop
-    // against the new extent (asynchronously, at the next layout) — scroll changes the sway must
-    // absorb, whether this fires inside a wheel frame or standalone on a resize-driven fit change.
+    // holdWavesFor: a new scale resizes the wrapper and the browser may CLAMP scrollTop against
+    // the new extent ASYNCHRONOUSLY, at the next layout — scroll the sway must absorb.
     const unsub = subscribeMagnify(() => { holdWavesFor(350); apply(); armSettle() })
-    // FIT CAP: recompute from the surface's width on every resize (and page-settings change).
-    // clientWidth excludes the scrollbar (scrollbar-gutter: stable), so the fit page never sits
-    // under it; WATER_MARGIN_PX keeps a strip of water visible either side.
-    //
-    // SCROLL LOCK THROUGH THE SQUEEZE (Peter, 2026-07-10): when a width change re-binds the fit
-    // cap — the PDF panel opening/closing (its --iw-pdf-room inset narrows this fixed surface over
-    // a 0.18s transition), or a window resize — the effective magnify changes, the wrapper's
-    // height changes with it, and the reading position would scroll away. Anchor the TOP-visible
-    // text line: read its viewport top, apply the new fit (setFitContext → the subscriber's
-    // apply() resizes the wrapper SYNCHRONOUSLY), read it again, and displacement-correct
-    // scrollTop — per RO tick, so the transition's stream of small changes each cancels to zero
-    // and the text you were reading stays put through the whole open/close relayout. Same
-    // held-anchor rule (and the same block-rejection rules) as the zoom paths below.
+    // FIT CAP: recompute from the surface's clientWidth (excludes the scrollbar, so the fit page
+    // never sits under it) on every resize and page-settings change.
+    // SCROLL LOCK THROUGH THE SQUEEZE: a width change re-binds the cap, so the wrapper's height
+    // changes and the reading position would scroll away. Anchor the top-visible TEXT line and
+    // displacement-correct per RO tick, so a 0.18s panel transition's stream of small changes each
+    // cancels to zero. Same held-anchor and block-rejection rules as the zoom paths below.
+    // → docs/archive/editor-surface.md#scroll-magnify
     const pickTopAnchor = (): HTMLElement | null => {
       const vr = el.getBoundingClientRect()
       const pr = paperElRef.current?.getBoundingClientRect()
@@ -366,23 +297,15 @@ export function Scroll({
     // typing, pagination. offsetHeight is layout px (transform-invariant), × s = visual height.
     const roPaper = paper ? new ResizeObserver(() => {
       const s = getMagnify()
-      // NB: NO holdWavesFor here (2026-07-14 sway-freeze fix). This RO fires on EVERY paper resize
-      // (pagination, typing reflow, the box.height write's own relayout) — open-ended, unlike a
-      // bounded zoom gesture. Arming a 250ms wave-hold per fire meant that whenever the paper
-      // resizes more often than every 250ms at s≠1 (fit-cap bound on a narrow window / PDF panel
-      // open / persisted magnify≠1), the hold never lapsed and the scroll sway froze permanently
-      // (Peter's live "waves don't wave when scrolling"). Zoom-induced clamps are ALREADY held by
-      // the gesture path (holdWavesFor 350 per step + 800 at settle); a clamp from an ordinary
-      // reflow is genuine content motion the sway SHOULD follow. Just track the height.
+      // ⚠ NO holdWavesFor here. This RO fires on EVERY paper resize — open-ended, unlike a bounded
+      // gesture — so a hold per fire never lapses at s≠1 and the scroll sway freezes permanently.
+      // A clamp from an ordinary reflow is genuine content motion the sway SHOULD follow; the
+      // gesture path already holds the zoom-induced ones.
       if (s !== 1 && box && paper) box.style.height = `${paper.offsetHeight * s}px`
-      // SELF-HEAL (2026-08-20) — belt-and-braces alongside canonicalMeasure.ts's own restore fix and
-      // the className-keyed effect below (THAT one is the actual root-cause fix — see its comment for
-      // the full story: React overwrites this element's whole `class` attribute on every wave-reveal
-      // state change, silently wiping the imperatively-added `iw-magnified`). `--iw-magnify` and that
-      // class are two independently-mutable pieces of state `apply()` keeps in lockstep on ITS OWN
-      // writes only; this RO fires on every paper reflow (pagination, typing, the height write two
-      // lines up) — far more often than any OTHER path to the same desync needs to be invisible for —
-      // so re-asserting both together here is a standing correction, not specific to one cause.
+      // SELF-HEAL, belt-and-braces beside the className-keyed effect below (that one is the actual
+      // root cause). The var and the class are independently mutable and `apply()` keeps them in
+      // lockstep on ITS OWN writes only, so re-asserting both on every paper reflow is a standing
+      // correction rather than a fix for one cause. → docs/archive/editor-surface.md#scroll-classname
       if (el) { el.style.setProperty('--iw-magnify', String(s)); el.classList.toggle('iw-magnified', s !== 1) }
     }) : null
     if (paper && roPaper) roPaper.observe(paper)
@@ -401,17 +324,16 @@ export function Scroll({
       if (settle) clearTimeout(settle)
       el.classList.remove('iw-magnified')
       el.style.removeProperty('--iw-magnify')
-      // NB: the module's fit cap is deliberately NOT reset here — the loading shell and the live
-      // editor are BOTH hybrid surfaces during the load handoff, and the shell unmounting must not
-      // yank the cap from under the editor. A remount recomputes it immediately (computeFit()).
+      // ⚠ The module's fit cap is deliberately NOT reset here: shell and editor are BOTH hybrid
+      // surfaces during the load handoff, so the shell unmounting must not yank the cap from under
+      // the editor. A remount recomputes it immediately.
     }
   }, [hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Non-hybrid fill surfaces (phone; 'scroll' paper) render the magnify wrapper too — hydration
-  // STRUCTURE must match the desktop-built prerender (see the render below) — but must not keep
-  // its width: React 18 silently adopts mismatched server attributes at hydration and never
-  // rewrites one whose vdom value doesn't change between renders, so the build-time `width:210mm`
-  // would stick to a phone's wrapper forever (horizontal overflow). Clear it pre-paint.
+  // ⚠ Non-hybrid fill surfaces render the magnify wrapper too (hydration STRUCTURE must match the
+  // desktop-built prerender) but must CLEAR its width pre-paint: React 18 adopts a mismatched
+  // server attribute at hydration and never rewrites one whose vdom value does not change, so the
+  // build-time `width:210mm` would stick to a phone's wrapper forever.
   useLayoutEffect(() => {
     if (fill && !hybrid) magnifyBoxRef.current?.style.removeProperty('width')
   }, [fill, hybrid])
@@ -424,45 +346,36 @@ export function Scroll({
   const [editorZoom, setEditorZoom] = useState(() => {
     try { return stepToZoom(zoomToStep(Number(localStorage.getItem('inkwave:editorZoom')) || 1)) } catch { return 1 }
   })
-  // The ref is the AUTHORITATIVE live zoom; React state only trails it (the settle's catch-up
-  // setEditorZoom). Do NOT re-assign the ref from state on render — any re-render landing
-  // MID-GESTURE (reveal chain, panel updates) reset it to the stale state and the next commit
-  // stepped from zoom 1: a visible multi-step snap-back (probed: a −9-step jump mid-pinch).
+  // ⚠ THE REF IS THE AUTHORITATIVE LIVE ZOOM; React state only trails it. Never re-assign the ref
+  // from state on render — a re-render landing MID-GESTURE resets it to the stale state and the
+  // next commit steps from zoom 1 (probed: a −9-step snap-back mid-pinch).
   const editorZoomRef = useRef(editorZoom)
-  // Anchor the font zoom to the pointer, SYNCHRONOUSLY (no flicker): set the zoom var, force layout by
-  // reading the anchored element's new position, then correct scrollTop in the SAME frame — all before
-  // the browser paints. The anchor is the actual element under the cursor (exact — a fraction estimate
-  // drifts badly further down the page since reflow doesn't grow uniformly). scrollLeft is held so it
-  // never jumps to the left edge. React state is updated after, to the same value (no re-paint).
+  // Anchor the font zoom SYNCHRONOUSLY (no flicker): set the zoom var, force layout by reading the
+  // anchored element's new position, correct scrollTop in the SAME frame, all before paint. The
+  // anchor is the real element under the cursor — a fraction estimate drifts badly down the page,
+  // because reflow does not grow uniformly. → docs/archive/editor-surface.md#scroll-anchor
   useEffect(() => {
     const el = surfaceRef.current
     if (!el) return // desktop: Ctrl/⌘+wheel on the surface; phone: two-finger pinch (body-scroll, below)
-    // FRAME COALESCING (the zoom-flicker fix): trackpads/pinch emit several wheel events per frame,
-    // and each zoom step forces a FULL-document reflow (the font-size is calc'd from the zoom var).
-    // 2–3 reflows per 16ms blows the frame budget on a long doc → visible stutter. So wheel events
-    // only accumulate ±1 steps; ONE rAF applies the net step count — one reflow per painted frame,
-    // and rAF runs before paint so the synchronous anchor logic below stays single-frame/flicker-free.
-    // React state + localStorage persist are deferred to a settle timer: neither changes pixels
-    // (the var is already on the DOM), and the per-tick setState re-rendered PageGuides for nothing.
-    // BOTH accumulators are FRACTIONAL and commit WHOLE lattice steps per frame (Math.trunc, the
-    // remainder carries) — wheel notches contribute ±1, trackpad fine-deltas and phone pinch
-    // contribute proportional fractions, so every input quantizes onto the shared zoomStep.ts
-    // lattice. That's what makes zoom levels precomputable (the pagination step cache).
+    // ⚠ FRAME COALESCING: every zoom step forces a FULL-document reflow, and trackpads emit several
+    // wheel events per frame, so events only ACCUMULATE and ONE rAF applies the net step count —
+    // one reflow per painted frame, and rAF runs pre-paint so the anchor logic stays flicker-free.
+    // BOTH accumulators are FRACTIONAL and commit WHOLE lattice steps (the remainder carries), so
+    // every input quantizes onto the shared zoomStep lattice — which is what makes zoom levels
+    // precomputable at all. → docs/archive/editor-surface.md#scroll-anchor
     let steps = 0 // font-reflow zone
     let mSteps = 0 // magnify zone (hybrid, cursor over the WATER) — same coalescing, separate zone
     let raf = 0
     let settle: ReturnType<typeof setTimeout> | undefined
     // Phone is BODY-scroll: the anchor correction must move window.scrollY — the surface itself
-    // never scrolls there (el.scrollTop is always 0). One pair of helpers keeps applyFrame +
-    // the settle re-anchor identical for both scrollers.
+    // never scrolls there. ONE pair of helpers keeps every path identical for both scrollers (R2).
     const getScrollTop = () => (phone ? window.scrollY : el.scrollTop)
     const setScrollTop = (y: number) => {
       if (phone) window.scrollTo(window.scrollX, Math.max(0, y))
       else el.scrollTop = Math.max(0, y)
-      // The zoom guard discriminates OUR writes from user scrolls (rebase vs pin): record every
-      // write's clamped result so commit/exit corrections never read as user scrolls — the guard
-      // was rebasing its pin onto relevancy-wave displacement whenever a commit's correction
-      // landed between its ticks (probed: 11 rebases vs 3 pins over one wheel session).
+      // ⚠ Record every write's CLAMPED result: the zoom guard discriminates OUR writes from user
+      // scrolls (rebase vs pin), and without this it rebased its pin onto relevancy-wave
+      // displacement (probed: 11 rebases vs 3 pins in one wheel session).
       guardScrollTop = getScrollTop()
     }
     const scrollRange = () => {
@@ -471,30 +384,22 @@ export function Scroll({
       return Math.max(1, se.scrollHeight - window.innerHeight)
     }
     // Pinch state (phone): the gesture-START midpoint picks the anchor; holding it and correcting
-    // by its actual displacement keeps the pinched-on text stationary for the whole gesture (the
-    // same held-anchor rule as the wheel path, midpoint instead of viewport centre).
+    // by its actual displacement keeps the pinched-on text stationary for the whole gesture.
     let pinchDist = 0
     let pinchX = 0, pinchY = 0
-    // One STABLE anchor per gesture — a TEXT POSITION (caret range), not a block top. Re-picking
-    // under the viewport centre every frame made the anchor flip between elements at block
-    // boundaries (drift toward the doc top in both directions — fixed 2026-07-09 by holding one
-    // element per gesture). But holding a BLOCK's TOP was still too coarse (Peter, 2026-07-11:
-    // "phone screen doesn't stay in fixed scroll position when zooming"): a font-zoom step scales a
-    // paragraph's height ≈ zoom² (line count × line height), so text N px into the block slides to
-    // N·zoom² while the block top sits perfectly pinned — on a phone one paragraph can exceed the
-    // screen, so the pinched-on words sailed off by hundreds of px (measured: 1300px over one
-    // gesture at the lattice cap). The anchor is now the CARET position at the pinch midpoint /
-    // cursor (caretRangeFromPoint), whose line-box rect tracks the exact content through any
-    // reflow; the block element is kept for connectivity checks and as the fallback when no text
-    // caret resolves (margins, gaps, empty paragraphs).
+    // ⚠ ONE STABLE anchor per gesture, and it is a TEXT POSITION (caret range), NOT a block top.
+    // Re-picking every frame flips the anchor at block boundaries; a block TOP is too coarse,
+    // because a font-zoom step scales a paragraph's height ≈ zoom² and text N px into the block
+    // slides to N·zoom² while its top sits perfectly pinned (measured: the pinched-on words 1300px
+    // away over one gesture). The block is kept only for connectivity checks and as the fallback
+    // where no caret resolves. → docs/archive/editor-surface.md#scroll-anchor
     let anchorEl: HTMLElement | null = null
     let anchorNode: Node | null = null // text node of the caret anchor (null → block-top fallback)
     let anchorOff = 0
     let anchorTop0 = 0 // the anchor's viewport top when picked — the gesture's PIN position
-    // Viewport top of a held anchor: the caret's line-box top when the text position is alive,
-    // else the block top, else null (both dead → caller falls back to the ratio correction).
-    // A skipped block (content-visibility mid-gesture) yields a degenerate 0×0 caret rect at the
-    // origin — fall through to the block-top placeholder box rather than trust it.
+    // Viewport top of a held anchor: the caret's line-box top when alive, else the block top, else
+    // null (the caller falls back to the ratio). R1: a skipped block yields a degenerate 0×0 caret
+    // rect at the origin — fall through to the block-top box rather than trust it as a position.
     const anchorTopFor = (node: Node | null, off: number, block: HTMLElement | null): number | null => {
       if (node && node.isConnected && node.nodeType === Node.TEXT_NODE) {
         const len = (node as Text).length
@@ -510,13 +415,10 @@ export function Scroll({
       return block && block.isConnected ? block.getBoundingClientRect().top : null
     }
     const anchorTop = () => anchorTopFor(anchorNode, anchorOff, anchorEl)
-    // Resolve the content anchor at (x, y). Preferred: the CARET text position under the point
-    // (caretRangeFromPoint / caretPositionFromPoint), validated to sit in real editor text.
-    // Fallback: the old block probe — reject the big containers (.ProseMirror / .scroll-paper —
-    // they span the whole doc, so their top reflows toward the doc top and a correction against
-    // them lurches — the old "jump to top" bug) and the PAGE-GAP widgets/sheet chrome (their
-    // heights are pinned px that do NOT reflow with the font — the "funky near page gaps" bug).
-    // When the point falls in a gap/margin, probe outward until real text is found.
+    // Resolve the content anchor at (x, y): the CARET text position, validated to sit in real
+    // editor text, else a block probe that REJECTS the big containers (.ProseMirror /
+    // .scroll-paper reflow toward the doc top — the "jump to top" bug) and the PAGE-GAP widgets
+    // and sheet chrome (pinned px that do NOT reflow with the font — "funky near page gaps").
     const pickAnchor = (x: number, y: number): void => {
       anchorEl = null
       anchorNode = null
@@ -549,16 +451,13 @@ export function Scroll({
         if (t.classList.contains('ProseMirror') || t.classList.contains('scroll-paper')) return null
         if (t.closest('.ProseMirror') == null) return null // outside the text (sheet chrome, layer divs)
         if (t.closest('.inkwave-page-gap') || t.classList.contains('inkwave-page-gap-band')) return null
-        // STRICT pass: refuse blocks SPLIT by a page gap (a mid-paragraph break nests the fixed-px
-        // gap widget inside the block). Such a block's rect straddles the boundary, so as the text
-        // redistributes across it the top↔gap relationship warps and successive frame corrections
-        // alternate direction — the boundary-zoom flicker. Prefer a block fully inside one page.
+        // STRICT pass refuses blocks SPLIT by a page gap: such a block's rect straddles the
+        // boundary, so successive frame corrections alternate direction — the boundary flicker.
         if (strict && t.querySelector('.inkwave-page-gap')) return null
         return t
       }
-      // Probe the point first, then alternate above/below in growing steps — finds the nearest
-      // text block when the midline sits in a page gap. Two passes: strict (whole block inside
-      // one page), then lenient (a split block still beats the no-anchor ratio fallback).
+      // Probe the point, then alternate above/below in growing steps. Two passes: strict, then
+      // lenient — a split block still beats the no-anchor ratio fallback.
       for (const strict of [true, false]) {
         anchorEl = pickAt(y, strict)
         for (const dy of [40, -40, 90, -90, 150, -150, 220, -220]) {
@@ -569,13 +468,10 @@ export function Scroll({
       }
       if (anchorEl) anchorTop0 = anchorEl.getBoundingClientRect().top // the gesture's pin position
     }
-    // MAGNIFY frame (hybrid, wheel over the water/gaps): scale the whole page about the VIEWPORT
-    // CENTRE (Peter: "centre it around the centrepoint of screen" — the cursor position picks the
-    // ZONE only, never the anchor). The wrapper box's rect IS the page's visual bounds (layout ≡
-    // visual — see the magnify plumbing effect), so the content point at the screen centre is the
-    // offset (centre − box.top) into the page; after the scale change it sits at box'.top +
-    // offset·(after/before) — correct the scroll by its displacement so it stays pinned at the
-    // centre (the shared conversion: paper-local = visual ÷ scale; new visual = local × new scale).
+    // MAGNIFY frame (hybrid, wheel over the water/gaps): scale the page about the VIEWPORT CENTRE
+    // — the cursor picks the ZONE only, never the anchor. The wrapper box's rect IS the page's
+    // visual bounds, so the content point at the centre is (centre − box.top) into the page and
+    // lands at box'.top + offset·(after/before). → docs/archive/editor-surface.md#scroll-anchor
     const applyMagnifyFrame = () => {
       const net = Math.trunc(mSteps) // whole steps only; the fractional remainder carries
       mSteps -= net
@@ -586,8 +482,8 @@ export function Scroll({
       const vr = el.getBoundingClientRect()
       const cX = vr.left + vr.width / 2, cY = vr.top + vr.height / 2
       const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net)
-      // Multiply the EFFECTIVE scale (not the raw intent): while the fit cap binds, intent hovers
-      // just above it instead of silently running to 2.5 and snapping huge when the window widens.
+      // ⚠ Multiply the EFFECTIVE scale, never the raw intent: while the fit cap binds, intent
+      // hovers just above it instead of running to 2.5 and snapping huge when the window widens.
       const after = setUserMagnify(before * factor) // subscriber applied var + wrapper sizes synchronously
       if (box && r0 && after !== before) {
         const r1 = box.getBoundingClientRect() // one forced layout, same frame — pre-paint
@@ -600,15 +496,10 @@ export function Scroll({
       raf = 0
       holdWavesFor(350) // zoom corrections (and the clamps they trigger) must not sway the waves
       applyMagnifyFrame()
-      // GESTURE REBASE (Peter, 2026-07-11: "if it has to load, it has to measure the zoom from
-      // when it starts working, not the finger width at the start — so there's not a big jump"):
-      // when the main thread is busy at gesture start (a previous settle's relayout, a SCAS tick),
-      // the queued touchmoves burst in together and the whole backlog would commit as one
-      // multi-step leap (then the next frames replay the rest — Peter's "multiple jumps"). The
-      // FIRST responsive frame of a pinch instead DISCARDS the backlog and takes the current
-      // finger spread as the gesture's baseline (pinchDist already tracks it — every queued move
-      // updated it), so zoom follows finger movement from the moment the pipeline actually
-      // responds. Costs at most one frame's worth of spread on a responsive start.
+      // GESTURE REBASE: a busy main thread at gesture start bursts its queued touchmoves in
+      // together, and the whole backlog would commit as one multi-step leap. The FIRST responsive
+      // frame DISCARDS the backlog and takes the current finger spread as the baseline, so zoom
+      // follows the fingers from the moment the pipeline actually responds.
       if (!gestureRebased) { gestureRebased = true; steps = 0 }
       const net = Math.trunc(steps) // commit whole lattice steps; the fractional remainder carries
       steps -= net
@@ -616,40 +507,27 @@ export function Scroll({
       const anchorX = phone ? pinchX : vr.left + vr.width / 2
       const anchorY = phone ? pinchY : vr.top + vr.height / 2
       // No step committed this frame → nothing to apply. Between-commit drift (native pan on
-      // phone, content-visibility relevancy waves on both platforms) is owned by the zoom GUARD
-      // loop (guardTick below), which runs every frame while the live window is up.
+      // phone, content-visibility relevancy waves on both) is owned by the zoom GUARD loop.
       if (!net) return
       // Pick (or re-pick, if the node was destroyed) the content anchor under the pinch midpoint /
-      // viewport centre (phone picks at touchstart; this is the desktop first-commit pick and the
-      // dead-anchor re-pick).
+      // viewport centre; phone picks at touchstart.
       if (!anchorEl || !anchorEl.isConnected) pickAnchor(anchorX, anchorY)
       const keepLeft = el.scrollLeft // desktop only; the phone helper pins window.scrollX itself
-      // ⚠ THE RATIO MUST BE CLAMPED, and this is the "doc keeps jumping down to the bottom"
-      // (Peter, 2026-08-28, the same session the pinch started working again — which is not a
-      // coincidence: the fallback below is reached ONLY when no content anchor could be picked,
-      // and that is exactly the pinch-over-the-WATER case, which was unreachable while the wheel
-      // listener stayed unarmed at magnify 1).
-      // `scrollRange()` floors at 1 so it can be divided by. When the document currently FITS its
-      // viewport that floor is a FICTION — there is no range — and any scrollTop at all divided by
-      // it yields a ratio ≥ 1, i.e. "you are at the very bottom". The next frame multiplies that by
-      // a REAL range and the document leaps to its end. Same shape as the archive guards: a
-      // defensive default (max(1,…)) silently became a measurement.
-      // So: a degenerate range answers 0 — the honest position when everything fits is the top —
-      // and a real one is clamped to [0,1], which a proportion cannot leave anyway.
+      // ⚠ THE RATIO MUST BE CLAMPED — this is the "doc keeps jumping down to the bottom" (R1: a
+      // defensive `max(1,…)` silently became a measurement). See scrollRatioOf above.
       const ratio = scrollRatioOf(getScrollTop(), scrollRange())
       const tPick0 = performance.now()
       const topBefore = anchorTop() ?? 0 // at the CURRENT size
       probePerf('zoom-anchorPre', performance.now() - tPick0)
-      // LATTICE COMMIT: level = 1.08^step exactly (same 8%-per-notch feel as the old multiply, but
-      // every reachable level is a shared lattice point the pagination step cache can precompute).
+      // LATTICE COMMIT: level = 1.08^step exactly, so every reachable level is a shared lattice
+      // point the pagination step cache can precompute.
       const stepNext = zoomToStep(editorZoomRef.current) + net // zoomToStep clamps; re-clamped inside stepToZoom
       const next = stepToZoom(stepNext)
       if (next === editorZoomRef.current) return // pinned at a lattice bound — nothing to apply
       const commitT0 = performance.now() // perflog zoom-commit: reflow + anchor + bands, this task
-      // Pin pagination's RO-driven painters for the whole gesture (per-frame LIVE repositioning
-      // lagged the reflowing text 1–2 frames — the page-boundary up/down flicker). The step cache
-      // below replaces live repositioning with instant precomputed geometry; the RO path stays
-      // gated as the cache-MISS fallback. Cleared in the settle, right before zoom-settled.
+      // Pin pagination's RO-driven painters for the whole gesture: per-frame LIVE repositioning
+      // lagged the reflowing text 1–2 frames (the page-boundary flicker). The step cache replaces
+      // it with precomputed geometry; the RO path stays gated as the cache-MISS fallback.
       ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
       // Lazy off-screen (both platforms): the live-reflow window makes each step lay out ~one
       // screenful. BOTH enter on the first committed step (2026-07-11 — phone used to enter at
@@ -663,10 +541,9 @@ export function Scroll({
       el.style.setProperty('--iw-editor-zoom', String(next)) // apply now → text reflows
       // Skipped-placeholder heights track the committed zoom (see enterZoomLive) — same recalc.
       if (zoomLiveEd) el.style.setProperty('--iw-cis-scale', ((next / zoomLiveZ0) ** 2).toFixed(4))
-      // Hybrid at magnify ≠ 1: the reflow changed the paper's height, and the wrapper box must
-      // track it SYNCHRONOUSLY (its RO fires later this frame) or the scroll-range clamp below
-      // could bite against the stale height near the document end. One offsetHeight read in a
-      // frame that's about to force layout anyway.
+      // Hybrid at magnify ≠ 1: the wrapper box must track the reflowed paper height SYNCHRONOUSLY
+      // (its RO fires later this frame) or the scroll-range clamp bites against a stale height near
+      // the document end.
       const mag = getMagnify()
       if (mag !== 1 && magnifyBoxRef.current && paperElRef.current)
         magnifyBoxRef.current.style.height = `${paperElRef.current.offsetHeight * mag}px`
@@ -674,22 +551,18 @@ export function Scroll({
       // switch + font reflow + wrapper sync all land in this single anchor read.
       const topAfter = anchorTop()
       const tAfterAnchor = performance.now()
-      // PREDICTIVE STEP CACHE: tell the paginator which lattice step just committed — AFTER the
-      // anchor read, so a cache MISS's band measure rides the layout just forced above (a hit is
-      // pure style writes that batch into this frame's paint; the panels still move WITH the
-      // text). The surface is included so the SnapshotView's zoom (its own Scroll dispatches too)
-      // can never drive the live editor's panels. Dispatched before the scroll correction below —
-      // applyBands' sheet min-height write must precede the scroll write or the range could clamp.
+      // PREDICTIVE STEP CACHE: dispatch AFTER the anchor read, so a cache MISS's band measure rides
+      // the layout just forced; BEFORE the scroll correction, because applyBands' sheet min-height
+      // write must precede the scroll write or the range clamps. The surface is carried so
+      // SnapshotView's own Scroll can never drive the live editor's panels.
       const tStep0 = performance.now()
       window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(next), surface: el, z0: zoomLiveZ0 } }))
       probePerf('zoom-stepEvent', performance.now() - tStep0)
       if (topAfter != null) {
-        // LIVE WINDOW: pin the anchor to its GESTURE-START viewport top, not last frame's — the
-        // content-visibility placeholder set re-evaluates between frames (scroll corrections move
-        // the viewport), and per-frame displacement correction PRESERVES that inter-frame drift
-        // instead of undoing it (the pinch midpoint slid ~200px over a big gesture). While the
-        // window is active the user cannot scroll (fingers down / ctrl+wheel burst), so the pin
-        // is safe; outside it (CV unsupported) the classic displacement correction stands.
+        // ⚠ LIVE WINDOW: pin to the GESTURE-START viewport top, not last frame's. The
+        // content-visibility set re-evaluates between frames, and per-frame displacement correction
+        // PRESERVES that inter-frame drift instead of undoing it (~200px over a big gesture). The
+        // pin is safe only because the user cannot scroll while the window is up.
         setScrollTop(getScrollTop() + (topAfter - (zoomLiveEd ? anchorTop0 : topBefore)))
         if (!phone) el.scrollLeft = keepLeft
       } else {
@@ -698,9 +571,9 @@ export function Scroll({
       }
       editorZoomRef.current = next
       notePerf('zoom-commit', performance.now() - commitT0)
-      // Per-EVENT profiling (probePerf costs one property check unless a harness defines
-      // window.__iwPerf). notePerf keeps only the worst value per 2s, which cannot answer "what
-      // does ONE notch cost" — see scripts/textrender-probe/zoomcost.prove.mjs.
+      // Per-EVENT profiling: `notePerf` keeps only the worst value per 2s, which cannot answer
+      // "what does ONE notch cost"; `probePerf` costs one property check unless a harness defines
+      // window.__iwPerf. See scripts/textrender-probe/zoomcost.prove.mjs.
       probePerf('zoom-commit', performance.now() - commitT0)
       probePerf('zoom-reflow', tAfterAnchor - tReflow0)   // the write + the forced anchor read
       if (settle) clearTimeout(settle)
@@ -713,10 +586,9 @@ export function Scroll({
         holdWavesFor(800) // …but the re-measure + re-anchor below must not sway the waves either
         setEditorZoom(editorZoomRef.current) // same var value → no visual change, just React catch-up
         try { localStorage.setItem('inkwave:editorZoom', String(editorZoomRef.current)) } catch { /* private mode */ }
-        // ZOOM-SETTLE RE-MEASURE: page breaks stay pinned DURING the gesture (re-measuring live made
-        // the text lurch), but the gaps + sheet panels were measured at the OLD font size and sit
-        // misaligned with the reflowed text. One clean re-measure now — and we re-anchor the viewport
-        // around it (same held-anchor logic) so the adjustment doesn't move the text you're reading.
+        // ZOOM-SETTLE RE-MEASURE: breaks stay pinned DURING the gesture (re-measuring live made the
+        // text lurch), so the gaps + panels are still at the OLD font size. One clean re-measure,
+        // re-anchored around the same held anchor so the adjustment moves no text.
         const heldNode = anchorNode, heldOff = anchorOff, heldEl = anchorEl
         anchorEl = null; anchorNode = null // gesture over → next gesture picks a fresh anchor
         const topBeforeMeasure = anchorTopFor(heldNode, heldOff, heldEl)
@@ -734,36 +606,24 @@ export function Scroll({
         setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
       }, ZOOM_SETTLE_MS)
     }
-    // MODE LATCH + COOLDOWN (Peter, 2026-07-10): the FIRST zoom event of a gesture picks the
-    // mode (water = whole-page magnify, text = font reflow) and it stays LOCKED until 0.5s
-    // after the last zoom event — regardless of cursor movement. (Replaces the old 8px-cursor-
-    // movement latch: zooming moves the page under a stationary cursor, and a deliberate slow
-    // notching gesture must never flip modes mid-flight.) The latch also drives the zoom-cursor
-    // classes on the surface (zoomZone.ts + the .iw-zooming-* rules in index.css).
+    // MODE LATCH + COOLDOWN: the FIRST zoom event of a gesture picks the mode (water = whole-page
+    // magnify, text = font reflow) and it stays LOCKED until 0.5s after the last one, regardless of
+    // cursor movement — zooming moves the page under a stationary cursor, so a slow deliberate
+    // gesture must never flip mid-flight. → docs/archive/editor-surface.md#scroll-zone
     const latch = createZoomLatch(() => surfaceRef.current)
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) {
-        // CONTENT-PROPORTIONAL PLAIN SCROLL (Peter: "the scroll needs to change depending on how
-        // zoomed in we are"): the wrapper sizes scroll space to VISUAL dims, so a native ~100px
-        // wheel notch covers 1/scale× the document distance — at 0.1 the tiny page zips past, at
-        // 2× it crawls. Scale the delta by scrollScale(s) — pure proportionality down to the
-        // knee (one notch = the same fraction of a page), then accelerating toward MIN_MAGNIFY
-        // so deep zoom-out scrolling stays brisk (see the curve's constants above).
-        // Scale 1 returns without preventDefault — the native path is untouched.
+        // CONTENT-PROPORTIONAL PLAIN SCROLL below the knee only: the wrapper sizes scroll space to
+        // VISUAL dims, so at a deep zoom-out a native notch covers 1/scale× the document distance
+        // and the tiny page zips past. Scale 1 returns without preventDefault.
         if (!hybrid) return
         const s = getMagnify()
-        // ⚠ NATIVE SCROLLING FOR THE WHOLE NORMAL ZOOM BAND (Peter, 2026-08-23: scrolling has
-        // "some lag vs a normal word doc… it feels like a resistance"). Above the knee this branch
-        // multiplied every wheel delta by `scrollScale(s) === s`, so at a fit-to-width magnify of
-        // ~0.57 — which is simply what a ~570px window gives you, not a zoom anyone chose — the page
-        // moved 57% of what the fingers asked for. That IS resistance, and `preventDefault()` on top
-        // of it replaced the trackpad's compositor-driven momentum with discrete main-thread writes,
-        // so the shortfall came without inertia to disguise it.
-        // The proportionality it bought ("one notch = the same fraction of a page") is a real idea
-        // but the wrong trade here: the wrapper already sizes the scroll RANGE to the visual content,
-        // so native scrolling covers the document correctly on its own — it just does it with
-        // momentum and sub-pixel smoothing we cannot reproduce by hand. Below the knee the accel
-        // curve still earns its keep (a page at 0.1 needs the boost), so that path is untouched.
+        // ⚠ NATIVE SCROLLING FOR THE WHOLE NORMAL ZOOM BAND — Peter felt "a resistance". Above the
+        // knee this multiplied every delta by the scale, so a fit-to-width 0.57 (what a 570px
+        // window gives you, not a zoom anyone chose) moved the page 57% of what the fingers asked,
+        // and preventDefault replaced the trackpad's momentum with discrete main-thread writes.
+        // The wrapper already sizes the RANGE to the visual content, so native scrolling covers the
+        // document correctly by itself. → docs/archive/editor-surface.md#scroll-accel
         if (s >= SCROLL_ACCEL_KNEE) return
         e.preventDefault()
         const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1 // lines/pages → px
@@ -776,33 +636,24 @@ export function Scroll({
       }
       e.preventDefault()
       if (e.deltaY === 0) return
-      // ZONE GEOMETRY v2 (Peter, 2026-07-10) — X-BASED, not point-in-panel: the text column's
-      // left/right edges (the live .ProseMirror rect — custom margins respected) are two
-      // imaginary vertical lines. Cursor x OUTSIDE them → WATER zoom (side water, the page's
-      // own side margins, and the parts of gaps/bottom margins beyond the lines); x INSIDE
-      // them → font zoom (text, bottom margins, gap regions within the column's x-range).
-      // y never enters the test. Latched per gesture — see zoomZone.ts.
-      // isIdle() must be read BEFORE resolve() — resolve() itself latches a mode on its first
-      // call, so this is the only point that can still see "no gesture in progress yet".
+      // ZONE GEOMETRY is X-BASED, never point-in-panel: the text column's left/right edges are two
+      // imaginary vertical lines, x outside them is WATER zoom and x inside is font zoom. y never
+      // enters the test. ⚠ `isIdle()` must be read BEFORE `resolve()`, which latches a mode on its
+      // first call — this is the only point that can still see "no gesture yet".
       const freshGesture = latch.isIdle()
       const mode = latch.resolve(
         () => (hybrid && isWaterAtX(el, e.clientX) ? 'water' : 'text'),
         e.deltaY > 0,
       )
-      // LATTICE QUANTIZATION: a full mouse-wheel notch (|ΔY| ≥ 100 in Chrome/Firefox) = exactly
-      // ±1 step (identical to the old feel); trackpad ctrl-pinch fine-deltas (small |ΔY|)
-      // contribute proportional FRACTIONS that accumulate until a whole step commits — so every
-      // input lands on the shared zoomStep lattice instead of an arbitrary float in between.
-      // TRACKPAD_ZOOM_SENSITIVITY scales ONLY the fine-delta fraction (Peter: raise it "quite a
-      // bit") — a discrete notch stays exactly one step; retune the constant, not the formula.
+      // LATTICE QUANTIZATION: a full wheel notch (|ΔY| ≥ 100) is exactly ±1 step; fine-deltas
+      // contribute proportional FRACTIONS that accumulate until a whole step commits, so every
+      // input lands on the shared lattice rather than an arbitrary float between points.
+      // TRACKPAD_ZOOM_SENSITIVITY scales ONLY the fraction — a discrete notch stays one step.
       const mag = Math.abs(e.deltaY)
       const dir = e.deltaY < 0 ? 1 : -1
       let stepDelta = dir * (mag >= 100 ? 1 : Math.min(1, (mag / 100) * TRACKPAD_ZOOM_SENSITIVITY))
-      // FIRST-STEP HEAD START (Peter: "make the first step a bit shorter than the others") — a
-      // one-time bonus on the gesture's very first event, on top of its own normal contribution,
-      // so the first commit doesn't need to "warm up" the accumulator from a cold start the way
-      // steady-state cadence does. Applied AFTER the mode is decided (mode doesn't affect which
-      // accumulator gets it) and only ever once per gesture (freshGesture is captured pre-resolve).
+      // FIRST-STEP HEAD START, once per gesture and applied AFTER the mode is decided (the mode
+      // does not affect which accumulator gets it; `freshGesture` was captured pre-resolve).
       if (freshGesture) stepDelta += dir * FIRST_STEP_BONUS
       if (mode === 'water') {
         mSteps += stepDelta
@@ -811,24 +662,14 @@ export function Scroll({
       }
       if (!raf) raf = requestAnimationFrame(applyFrame)
     }
-    // PHONE PINCH-TO-ZOOM — LIVE font reflow per lattice step, exactly like the desktop wheel
-    // (Peter, 2026-07-10: "I want live reflow with better performance — do everything off the
-    // screen lazily; anchor to the point between the two fingers"). The performance budget comes
-    // from the LIVE-REFLOW WINDOW below: during the gesture, off-screen blocks skip layout
-    // entirely (content-visibility: auto — a phone screen holds ~one screenful of text, so each
-    // zoom step lays out only that in real time). ANCHOR: the pinch MIDPOINT's vertical position
-    // (applyFrame's phone branch picks the text block at pinchX/pinchY and holds its displacement
-    // to zero) — horizontal is inherently fixed by the full-width reflow. Feature-detected: where
-    // content-visibility is unsupported (iOS < 18) the same live pipeline runs against the full
-    // document (correct, just heavier).
-    //
-    // INPUT-PIPELINE COST (round-2 iPhone lag, 2026-07-10): a NON-PASSIVE touchstart / touchmove
-    // on the whole surface makes iOS synchronously dispatch EVERY touch to the main thread and
-    // wait — so touchstart stays PASSIVE (records pinch state only), and the non-passive
-    // touchmove is attached ONLY while two fingers are down (armed synchronously inside the
-    // second finger's touchstart, before any move can dispatch). Pinch suppression = that
-    // preventDefault + the CAPTURE-phase document backstop + gesture* preventDefault
-    // (entry.client.tsx) + the universal phone `touch-action: pan-x pan-y`.
+    // PHONE PINCH-TO-ZOOM — LIVE font reflow per lattice step, exactly like the desktop wheel, on
+    // the LIVE-REFLOW WINDOW's budget; the anchor is the pinch MIDPOINT (horizontal is fixed by the
+    // full-width reflow). Feature-detected: without content-visibility the same pipeline runs
+    // against the full document — correct, just heavier.
+    // ⚠ TOUCHSTART STAYS PASSIVE and the non-passive touchmove is attached ONLY while two fingers
+    // are down (armed inside the second finger's touchstart, before any move can dispatch): a
+    // non-passive listener on the whole surface makes iOS dispatch EVERY touch to the main thread
+    // and wait. → docs/archive/editor-surface.md#scroll-pinch
     const touchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
     let pinchMoveArmed = false
     let gestureStartZoom = 1 // zoom level at pinch start — detects a no-commit gesture
@@ -840,19 +681,13 @@ export function Scroll({
       if (pinchMoveArmed) { pinchMoveArmed = false; el.removeEventListener('touchmove', onTouchMove) }
     }
     // ── LIVE-REFLOW WINDOW (the "lazy off-screen" strategy — phone pinch AND desktop wheel) ──
-    // While a zoom gesture is active, `.iw-zoom-live` puts content-visibility:auto on the
-    // editor's block children (see index.css): the browser natively SKIPS layout of off-screen
-    // blocks, so a zoom step reflows ~one screenful instead of the whole document. Skipped-
-    // placeholder height = the document's average REAL block height, published as ONE root-level
-    // var (--iw-cis) — NEVER per-block inline styles: writing a style attribute on a ProseMirror-
-    // OWNED node trips PM's DOM observer, which REBUILDS the touched blocks — that detached the
-    // gesture's touch target (iOS keeps dispatching a pinch's touchmoves to the ORIGINAL node, so
-    // the gesture died after the first commit) and stripped the placeholder sizes (scroll
-    // collapse). The aggregate scroll geometry stays ≈ exact (n·avg ≈ total content); per-block
-    // error is absorbed by the anchor PIN (anchorTop0) and trued by the exit bracket + settle.
-    // Measurement stays exact: forceCanonicalContext forces --iw-cv: visible inside every
-    // canonical window, and no measure runs mid-gesture anyway (__iwZoomHold + no edits, with the
-    // SCAS tick / PageGuides also deferring on the hold). Scoped to the GESTURE only.
+    // `.iw-zoom-live` puts content-visibility:auto on the editor's block children, so a zoom step
+    // reflows ~one screenful instead of the whole document. ⚠ NEVER write a style attribute on a
+    // ProseMirror-OWNED node to size the placeholders: PM's DOM observer REBUILDS the touched
+    // blocks, which detaches the gesture's touch target (iOS keeps dispatching to the ORIGINAL
+    // node) and strips the placeholder sizes. Measurement stays exact because forceCanonicalContext
+    // forces `--iw-cv: visible`, and no measure runs mid-gesture anyway.
+    // → docs/archive/editor-surface.md#scroll-live-window
     const CV_LIVE = typeof CSS !== 'undefined' && !!CSS.supports?.('content-visibility', 'auto')
     let zoomLiveEd: HTMLElement | null = null
     let zoomLiveStyle: HTMLStyleElement | null = null
@@ -865,20 +700,17 @@ export function Scroll({
     const arithBandsOn = (): boolean => {
       try { return typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:arithBands') === '1' } catch { return false }
     }
-    // ── ZOOM GUARD (round-3 flicker, 2026-07-12): the live window's placeholder regime is only
-    // piecewise-consistent AT commit instants — the browser re-evaluates content-visibility
-    // RELEVANCY asynchronously between frames, and each wave (skipped↔rendered swaps, heights
-    // start-zoom vs current-zoom) shifts the layout with NO handler running: the text moved but
-    // the pin and the band/panel geometry were commit-time — measured 93-546px of band/text
-    // desync lasting until the next commit ("text flows over gap", "page joins gap"). While the
-    // live window is up, this rAF loop re-pins the anchor and re-syncs the bands the frame a
-    // wave lands. A DESKTOP scrollTop change between commits is a genuine user scroll (wheel
-    // without ctrl) — accept it (rebase the pin); on PHONE fingers are down, so any scroll not
-    // ours is a native pan that survived suppression — fight it (pin), the round-2 rule.
+    // ── ZOOM GUARD: the placeholder regime is only piecewise-consistent AT commit instants,
+    // because the browser re-evaluates content-visibility RELEVANCY asynchronously between frames
+    // and each wave shifts the layout with NO handler running (measured 93-546px of band/text
+    // desync until the next commit). This rAF loop re-pins the anchor and re-syncs the bands on the
+    // frame a wave lands. A DESKTOP scroll between commits is a genuine user scroll — REBASE; on
+    // PHONE fingers are down, so any scroll not ours is a native pan that survived suppression —
+    // PIN. → docs/archive/editor-surface.md#scroll-live-window
     let guardRaf = 0
     let guardScrollTop = 0
-    // Shared across Scroll instances (the loading shell's instance would otherwise shadow the
-    // live editor's counters) — debug/probe only.
+    // Shared across Scroll instances (the loading shell's would otherwise shadow the live
+    // editor's) — debug/probe only.
     const gw = window as unknown as { __iwZoomGuard?: { ticks: number; rebase: number; pin: number; noAnchor: number } }
     const guardStats = (gw.__iwZoomGuard ||= { ticks: 0, rebase: 0, pin: 0, noAnchor: 0 })
     const guardTick = () => {
@@ -909,30 +741,20 @@ export function Scroll({
       const ed = el.querySelector('.ProseMirror') as HTMLElement | null
       if (!ed || !ed.children.length) return
       // Re-entering from the RESTING arith window: the class is already on, so every offsetHeight
-      // below reads a placeholder (no content layout) and the doc is never un-skipped. The old
-      // exact stylesheet is replaced by the fresh baseline the rules below generate.
+      // below reads a placeholder and the doc is never un-skipped; the old exact stylesheet is
+      // replaced by the fresh baseline the rules below generate.
       zoomLiveResting = false
       if (restUnskipTimer) { clearTimeout(restUnskipTimer); restUnskipTimer = undefined } // a new gesture owns the window
       zoomLiveStyle?.remove()
       zoomLiveStyle = null
-      // EXACT per-block placeholder heights, via ONE generated stylesheet — :nth-child rules,
-      // NEVER inline styles on PM-owned nodes (PM's DOM observer rebuilds touched blocks and the
-      // gesture dies on the detached touch target — the original --iw-cis lesson). Exactness
-      // matters (2026-07-12): a flat mean placeholder shifted off-screen geometry by Σ(real−mean),
-      // so the entry needed a huge compensating scroll (~5,000px at the doc bottom) which DRAGGED
-      // the content-visibility relevancy set across the doc — and WebKit's async relevancy
-      // relayout landed AFTER that frame's pin correction: one painted frame with the pinched
-      // text ~2,400px off (deterministic at the document bottom). Height-identical placeholders
-      // make the switch geometry-neutral at the current zoom — no compensating scroll, no
-      // relevancy drag, no second-wave jump. --iw-cis stays as the fallback for any child beyond
-      // these rules; the :nth-child specificity beats the base `> *` rule in index.css.
-      // Placeholders TRACK the zoom (2026-07-12, the residual single-frame blips): a multiline
-      // block's height ≈ lines·lineHeight ∝ zoom² (both factors scale), so frozen gesture-start
-      // heights diverge from rendered blocks as the gesture moves — every relevancy swap then
-      // jumped by (z/z0)²−1 of the block (probed: 90-450px single-frame blips at commits). Each
-      // rule multiplies the measured height by --iw-cis-scale = (zoom/z0)², written next to the
-      // zoom var each commit (same style recalc — zero extra invalidation), so swap deltas drop
-      // to line-quantization noise.
+      // ⚠ EXACT per-block placeholder heights via ONE generated stylesheet of `:nth-child` rules.
+      // A flat mean shifted off-screen geometry by Σ(real−mean), so entry needed a ~5,000px
+      // compensating scroll that DRAGGED the relevancy set across the doc and painted one frame
+      // with the pinched text ~2,400px off. Height-identical placeholders make the switch
+      // geometry-neutral. And they TRACK the zoom (`--iw-cis-scale = (zoom/z0)²`, written beside
+      // the zoom var in the same recalc): a block's height ∝ zoom², so frozen gesture-start heights
+      // made every relevancy swap jump 90-450px. `--iw-cis` remains the fallback for children
+      // beyond these rules. → docs/archive/editor-surface.md#scroll-live-window
       const kids = Array.from(ed.children) as HTMLElement[]
       let css = ''
       let sum = 0
@@ -942,11 +764,9 @@ export function Scroll({
         css += `.ProseMirror.iw-zoom-live>:nth-child(${i + 1}){contain-intrinsic-size:auto calc(${h}px*var(--iw-cis-scale,1))}\n`
       }
       zoomLiveZ0 = editorZoomRef.current
-      // No entry bracket (2026-07-11): the ONLY caller is applyFrame's commit path, immediately
-      // before the zoom var write — the (geometry-neutral) switch and the font reflow land in ONE
-      // forced layout (the anchor read that follows), and the pin correction against anchorTop0
-      // absorbs the frame's whole displacement. The old touchstart-time entry paid a separate
-      // full bracketed relayout inside the touchstart task (gesture-start lag).
+      // No entry bracket: the ONLY caller is applyFrame's commit path, immediately before the zoom
+      // var write, so the geometry-neutral switch and the font reflow land in ONE forced layout and
+      // the pin absorbs the frame's displacement.
       zoomLiveStyle = document.createElement('style')
       zoomLiveStyle.textContent = css
       document.head.appendChild(zoomLiveStyle)
@@ -957,13 +777,12 @@ export function Scroll({
       if (!guardRaf) guardRaf = requestAnimationFrame(guardTick)
     }
     // ── THE DEFERRED EXACT UN-SKIP ──────────────────────────────────────────────────────────
-    // The fast exit leaves the content-visibility window ON, so off-screen blocks still reserve
-    // their (approximate) placeholder heights: the SCROLL RANGE is off by up to ~5% (measured
-    // 20,931px on a 20k-word doc) until each block is scrolled into view and `auto` remembers its
-    // real size. Visible bands are exact regardless (they are read from the same regime the text
-    // lays out in), so nothing on screen is ever wrong — but the scrollbar would lie. So we still
-    // pay the un-skip; we just pay it when the writer is IDLE, never in the gesture's own frame.
-    // Anchored on the first block crossing the viewport top so the exact relayout can't jump the page.
+    // The fast exit leaves the window ON, so off-screen blocks still reserve approximate heights
+    // and the SCROLL RANGE is off by up to ~5% (measured 20,931px on a 20k-word doc). Nothing on
+    // screen is ever wrong — visible bands are read from the same regime the text lays out in — but
+    // the scrollbar would lie, so we still pay the un-skip, just when the writer is IDLE and never
+    // in the gesture's own frame. Anchored on the first block crossing the viewport top.
+    // → docs/archive/editor-surface.md#scroll-live-window
     const restUnskip = () => {
       const ed = el.querySelector('.ProseMirror') as HTMLElement | null
       if (!ed || !zoomLiveResting) return
@@ -1003,16 +822,11 @@ export function Scroll({
       zoomLiveEd = null
       if (guardRaf) { cancelAnimationFrame(guardRaf); guardRaf = 0 }
       // ── ARITH EXIT (flag inkwave:arithBands) ────────────────────────────────────────────────
-      // The un-skip below is O(doc): dropping content-visibility invalidates every block and the
-      // anchor read then forces the whole document's layout (240/722/2688ms at 5k/20k/40k words).
-      // Ask the paginator instead: if the doc is arith-eligible it computes the bands AND every
-      // block's exact render height with NO layout read. Then the window STAYS ON with exact
-      // reservations — only the on-screen blocks lay out — and the exit is O(visible). The bands
-      // are applied inside the dispatch, so they still land in THIS task, atomic with the pin.
+      // The un-skip below is O(doc) — 240/722/2688ms at 5k/20k/40k words. EXPERIMENT A: keep the
+      // window ON and re-derive the bands in the PLACEHOLDER regime, which is exactly what every
+      // mid-gesture step already does, so the exit is O(visible). The bands are applied inside the
+      // dispatch, so they still land in THIS task, atomic with the pin.
       if (arithBandsOn()) {
-        // EXPERIMENT A: the un-skip IS the cost. Keep the window on and re-derive the bands in the
-        // PLACEHOLDER regime — exactly what every mid-gesture step already does (onZoomStep routes
-        // to liveCache/readBands when .iw-zoom-live is on), and those frames are fine. No arith.
         zoomLiveResting = true
         window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(editorZoomRef.current), surface: el } }))
         const after = anchorTop()
@@ -1022,21 +836,17 @@ export function Scroll({
         scheduleRestUnskip() // the exact layout returns at idle — off the gesture's frame
         return
       }
-      // Re-anchoring bracket: skipped blocks held their gesture-START heights; un-skipping lays
-      // them out at the committed zoom, displacing everything below — pin the held content anchor
-      // back to its gesture-start viewport top in the same task so the anchored text never jumps.
+      // Re-anchoring bracket: skipped blocks held their gesture-START heights, so un-skipping
+      // displaces everything below — pin the held anchor back in the SAME task.
       ed.classList.remove('iw-zoom-live')
       ed.style.removeProperty('--iw-cis')
       el.style.removeProperty('--iw-cis-scale')
       zoomLiveStyle?.remove()
       zoomLiveStyle = null
       const after = anchorTop() // forces the full relayout now, pre-paint
-      // ATOMIC EXIT (round-3 flicker): the un-skip relayout must never paint under the
-      // placeholder-era panels — that window (exit → settle recompute → paint, 2 rAFs + a forced
-      // measure) showed 779-1170px of band/text desync for ~180ms at EVERY settle. Re-derive the
-      // band geometry from the full layout in this same task: the class is off, so onZoomStep
-      // routes to the full-regime stepCache (hit = pure writes; miss = one band read riding the
-      // layout the anchor read just forced). Dispatched BEFORE the scroll write so applyBands'
+      // ⚠ ATOMIC EXIT: the un-skip relayout must never paint under placeholder-era panels — that
+      // window showed 779-1170px of band/text desync for ~180ms at EVERY settle. Re-derive the
+      // bands from the full layout in THIS task, dispatched BEFORE the scroll write so applyBands'
       // sheet min-height lands first (scroll-range clamp order).
       window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(editorZoomRef.current), surface: el } }))
       if (after != null) setScrollTop(getScrollTop() + (after - anchorTop0))
@@ -1049,15 +859,12 @@ export function Scroll({
       pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2
       steps = 0
       gestureRebased = false // first responsive frame discards the backlog (see applyFrame)
-      // Fresh gesture → anchor the TEXT POSITION under THIS midpoint, from the pre-gesture
-      // layout (before the live window's placeholder switch), so the pin holds exactly what the
-      // fingers grabbed for the whole gesture. This hit-test is the touchstart task's ONLY
-      // layout-touching work — the live window enters lazily at the first commit (applyFrame).
+      // Fresh gesture → anchor the TEXT POSITION under THIS midpoint, from the PRE-gesture layout,
+      // so the pin holds exactly what the fingers grabbed. This hit-test is the touchstart task's
+      // ONLY layout-touching work; the live window enters lazily at the first commit.
       pickAnchor(pinchX, pinchY)
-      // Hold from the FIRST touch (not the first commit): a queued SCAS tick landing mid-pinch
-      // rebuilds the touched paragraph and the gesture dies on the detached node (iOS dispatches
-      // a pinch's touchmoves to the ORIGINAL target). Cleared by the settle, or at touchend on a
-      // gesture that never commits.
+      // ⚠ Hold from the FIRST touch, not the first commit: a queued SCAS tick landing mid-pinch
+      // rebuilds the touched paragraph and the gesture dies on the detached node.
       ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = true
       gestureStartZoom = editorZoomRef.current
       armPinchMove()
@@ -1069,27 +876,14 @@ export function Scroll({
       if (d < 8) return // fingers (nearly) touching — the ratio is degenerate noise
       steps += (Math.log(d / pinchDist) / Math.log(ZOOM_STEP_RATIO)) * PINCH_ZOOM_SENSITIVITY
       pinchDist = d
-      // PAN-WHILE-PINCHING (2026-08-20, Peter: "it doesn't work if the average centrepoint of your
-      // two fingers zooming is panning at the same time"). Before this, the two fingers' MIDPOINT
-      // was captured once at touchstart and never touched again — pinchDist (the SEPARATION) was
-      // the only thing this handler ever updated. e.preventDefault() above unconditionally blocks
-      // the browser's own native two-finger pan/scroll (deliberately — we're replacing its pinch),
-      // so a real-world gesture that pinches AND drags at once had its drag half go nowhere: the
-      // zoom ratio kept working (distance-based, translation-invariant), but the content refused to
-      // follow the fingers moving together, which reads as "doesn't work" even though it's really
-      // "only half the gesture is implemented". Fix: track the midpoint's OWN frame-to-frame
-      // movement and apply it as a direct, additive scroll offset — independent of the zoom-step
-      // commit path below (that only fires when a LATTICE step crosses, i.e. rarely; this must
-      // track every touchmove or the pan reads as sticky/laggy). Phone is never CSS-scaled
-      // (hybrid = fill && !phone in magnify.ts), so a screen-pixel delta maps 1:1 to a scroll-pixel
-      // delta with no unscale conversion needed. VERTICAL goes through getScrollTop/setScrollTop —
-      // NOT el.scrollTop directly — because on phone scrolling is the WINDOW (window.scrollY /
-      // window.scrollTo), not the surface div (el.scrollHeight === el.clientHeight there; the
-      // surface is never itself the scroller), and setScrollTop also records guardScrollTop so the
-      // zoom guard loop recognises this as OUR write, not a user scroll to rebase against. pinchX/Y
-      // then update to the CURRENT midpoint (was stale at the touchstart position) so the anchor
-      // fallback re-pick (line ~584) and the zoom-commit anchor also track where the fingers
-      // actually are now, not where they started.
+      // PAN-WHILE-PINCHING: `preventDefault` above blocks the browser's native two-finger pan
+      // (deliberately — we replace its pinch), so a gesture that pinches AND drags needs its drag
+      // half implemented here. Track the MIDPOINT's own frame-to-frame movement as a direct
+      // additive scroll — independent of the zoom-step path, which fires only when a lattice step
+      // crosses, while this must track every touchmove or the pan reads as sticky. Phone is never
+      // CSS-scaled, so a screen pixel is a scroll pixel; vertical goes through setScrollTop (phone
+      // scrolls the WINDOW, and it records guardScrollTop so the guard reads this as OUR write).
+      // → docs/archive/editor-surface.md#scroll-pinch
       const curMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2
       const curMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2
       const dx = curMidX - pinchX, dy = curMidY - pinchY
@@ -1122,39 +916,26 @@ export function Scroll({
       el.addEventListener('gesturestart', onGesture)
       el.addEventListener('gesturechange', onGesture)
     } else {
-      // ── SCROLL LATENCY: the non-passive wheel listener exists ONLY when it can actually
-      // preventDefault (Peter, 2026-07-10: ~100ms wheel→scroll lag). A non-passive wheel listener
-      // — however cheap its body — forces the compositor to WAIT for main-thread dispatch on
-      // EVERY wheel event, so plain scrolling inherited whatever task was running (SCAS tick,
-      // measures). The listener is now ARMED only while it could intercept: ctrl/⌘ held (zoom) or
-      // magnify ≠ 1 (content-proportional scroll). At rest there is NO non-passive wheel listener
-      // at all — plain scrolling is fully compositor-threaded, native latency.
-      // Residual edge: entering the window with ctrl ALREADY held gives the browser the first
-      // notch (page zoom) until a keydown/pointer event reveals the modifier — the passive
-      // pointermove check below closes that for the mouse-first flow.
+      // ── SCROLL LATENCY: the non-passive wheel listener exists ONLY when it could intercept
+      // something. However cheap its body, it forces the compositor to WAIT for main-thread
+      // dispatch on EVERY wheel event, so plain scrolling inherited whatever task was running
+      // (~100ms of lag). At rest there is NO non-passive wheel listener at all.
+      // Residual: entering the window with ctrl ALREADY held gives the browser the first notch
+      // until a keydown/pointer event reveals the modifier; the pointermove check closes that for
+      // the mouse-first flow. → docs/archive/editor-surface.md#scroll-zone
       let wheelArmed = false
       const armWheel = () => { if (!wheelArmed) { wheelArmed = true; el.addEventListener('wheel', onWheel, { passive: false }) } }
       const disarmWheel = () => { if (wheelArmed) { wheelArmed = false; el.removeEventListener('wheel', onWheel) } }
       let ctrlHeld = false
-      // ⚠ A TRACKPAD PINCH PRESSES NO KEY (2026-08-28, Peter: "both water and page zoom no longer
-      // appear to be working with finger drawing closer and farther. It overrides to the native GPU
-      // zoom"). macOS/Windows trackpads synthesise `wheel` with `ctrlKey: true` and NO keydown ever
-      // fires — so the two arming triggers this had (a real Control/Meta KEY, or magnify ≠ 1) both
-      // read false during a pinch, the non-passive listener was never attached, and the gesture fell
-      // straight through to the BROWSER's own zoom. It looked intermittent because the second
-      // trigger papered over it: at a narrow window fit-to-width puts magnify ≠ 1, so the listener
-      // happened to be armed and the pinch worked — go full-screen and magnify returns to 1, the
-      // listener detaches, and the same gesture zooms the browser instead. Window-size-dependent,
-      // which reads as random.
-      //
-      // A gesture that announces itself only in its own first event cannot be armed for reactively:
-      // by the time we have seen `ctrlKey` the browser has already zoomed a notch, and a browser
-      // zoom level is not something a page can undo. So the listener is armed WHILE THE POINTER IS
-      // OVER THE SURFACE — the only state that reliably precedes the pinch. The latency guard the
-      // arming exists for is preserved where it matters: the cursor parked over another window or
-      // panel still leaves no non-passive wheel listener, and the handler's own first branch
-      // returns for an ordinary scroll without preventDefault (see onWheel), so the compositor
-      // keeps the scroll.
+      // ⚠ A TRACKPAD PINCH PRESSES NO KEY — trackpads synthesise `wheel` with `ctrlKey: true` and
+      // NO keydown ever fires, so arming on a real Control/Meta key left the listener unattached
+      // and the gesture fell through to the BROWSER's own zoom. R9: a gesture that announces itself
+      // only in its own first event cannot be armed for REACTIVELY, because by then the browser has
+      // zoomed a notch and a page cannot undo that. So arm WHILE THE POINTER IS OVER THE SURFACE —
+      // the only state that reliably PRECEDES the pinch. The latency guard survives where it
+      // matters: a cursor over another panel still leaves no listener, and onWheel's first branch
+      // returns for an ordinary scroll without preventDefault.
+      // → docs/archive/editor-surface.md#scroll-zone
       let pointerOver = false
       const syncWheelArming = () => { if (shouldArmWheel({ ctrlHeld, pointerOver, magnify: getMagnify() })) armWheel(); else disarmWheel() }
       const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') { ctrlHeld = true; syncWheelArming() } }
@@ -1211,33 +992,26 @@ export function Scroll({
   const btmMarginPx   = getBtmMarginPx()
   const paraSpacingEm = getParaSpacingEm()
   const columns       = getColumns()
-  // Waves sway horizontally as you scroll up/down (the "nice motion"), but must NOT move when you
-  // ZOOM. Inside the zoom hold window (holdWavesFor above) every scroll delta — anchor
-  // corrections, settle re-anchors, async clamp scrolls, whatever — is rebased into the base
-  // equal-and-opposite, so base + scrollTop·WAVE_SWAY (the value written here) is CONSTANT
-  // through the whole gesture. (The old approach — skip one sway frame when the zoom var changed
-  // — leaked: coalesced and clamp-induced scroll events after the skipped one still swayed.)
-  // The sway rides on a persistent BASE offset: where the loading coast came to rest (see the coast
-  // handoff below, which rebases it against the scroll position at that moment). Starts at 0, so
-  // surfaces that never drift (SnapshotView) keep the plain scrollTop·WAVE_SWAY sway.
+  // Waves sway horizontally with scroll, and NEVER with zoom — see the hold window above. The sway
+  // rides on a persistent BASE offset (where the loading coast came to rest), starting at 0 so
+  // surfaces that never drift keep the plain scrollTop·WAVE_SWAY sway.
   useEffect(() => {
     const el = surfaceRef.current
-    // Phone: waves exist only DURING load (.iw-wave-anim/.iw-wave-coast in index.css) — at rest the
-    // surface returns to parchment (::before display:none), so the sway var would be a style-recalc
-    // per scroll frame for nothing — don't attach the listener at all (scroll-lag fix).
+    // Phone attaches NO listener: waves exist only DURING load there, and at rest the surface is
+    // parchment, so the sway var would be a style recalc per scroll frame for nothing.
     if (!el || phone) return
     const target: HTMLElement | Window = el
     let raf = 0
     let lastTop = el.scrollTop
-    // FULLSCREEN PDF SWAY (Peter, 2026-07-10): while the PDF viewer floats over the water it
-    // dispatches its absolute scrollTop ('inkwave:pdf-sway'); folded into the SAME base+top
-    // formula as a second scroll source, so the waves at the pane's sides sway with PDF scrolling
-    // exactly like editor scrolling — one write path, and the zoom-hold/coast rules stay intact.
+    // FULLSCREEN PDF SWAY: the PDF viewer dispatches its absolute scrollTop, folded into the SAME
+    // base+top formula as a second scroll source (R2) — one write path, so the zoom-hold and coast
+    // rules stay intact.
     let pdfTop = 0
     const writeWave = () => {
-      // ONE rounded value for both consumers: the surface var (wave pseudos) and the twinkle
-      // fields' literal transforms (swayFields — no var inheritance into the instance leaves;
-      // see the --wave-x firebreak block in index.css).
+      // ONE rounded value for both consumers: the surface var and the twinkle fields' LITERAL
+      // transforms (`swayFields`). ⚠ `--wave-x` MUST NEVER INVALIDATE THE PAGE SUBTREE — index.css
+      // firebreaks it to 0px under the page roots, and a NEW `var(--wave-x)` consumer must not sit
+      // beneath them. Without that, desktop scroll frames were p50 417ms; with it, 50ms.
       const wx = Number((waveBaseRef.current + (el.scrollTop + pdfTop) * WAVE_SWAY).toFixed(1))
       el.style.setProperty('--wave-x', `${wx}px`)
       swayFields(el, wx)
@@ -1294,23 +1068,13 @@ export function Scroll({
   const waveModeRef = useRef(waveMode)
   waveModeRef.current = waveMode
 
-  // ⚠ 2026-08-20 — THE ACTUAL ROOT CAUSE of the fit-to-width "zoom snap" bug (found after three
-  // earlier band-aids — canonicalMeasure's restore, roPaper's self-heal, a 600ms delayed self-heal —
-  // ALL failed to close it, which was the tell that something OUTSIDE that effect's own lifecycle was
-  // the culprit). The surface's className below is a JSX TEMPLATE STRING keyed on `phone`/`fill`/
-  // `covered`/`waveMode`: `${waveMode === 'anim' ? ' iw-wave-anim' : ...}` etc. `waveMode` is REACT
-  // STATE that walks 'anim' → 'coast' → 'off' over the SEVERAL-SECOND wave reveal sequence, and
-  // `covered` flips too — EVERY one of those transitions makes React compute a NEW className string
-  // and write the WHOLE `class` attribute to the DOM. React has no idea the OTHER layoutEffect above
-  // also imperatively added `iw-magnified` outside its own bookkeeping, so that write silently
-  // replaces the entire class list — including `iw-magnified` — with whatever the template currently
-  // says, which never includes it. Traced live: the class is correctly present within the first
-  // ~1.3s of load, and gone again by t=4000ms with nothing in the OTHER effect having touched it
-  // since — exactly consistent with a wave-state transition overwriting the attribute later in the
-  // reveal, well past every earlier self-heal's timing window.
-  // FIX: re-assert both the class and the variable every time React is about to write a NEW
-  // className for this exact reason — a layoutEffect keyed on the template's own inputs runs AFTER
-  // React's commit (so it sees the fresh class string) but BEFORE paint (so the repair is invisible).
+  // ⚠ REACT'S className WRITE SILENTLY STRIPS AN IMPERATIVELY-ADDED CLASS. The surface's className
+  // is a JSX template keyed on `waveMode`/`covered`, which walk over the several-second reveal, and
+  // every transition writes the WHOLE `class` attribute — taking `iw-magnified` with it. So
+  // re-assert the class AND the var from a layoutEffect keyed on that template's own inputs: it
+  // runs after React's commit (it sees the fresh string) and before paint (the repair is
+  // invisible). This was the fit-to-width "zoom snap", past three band-aids.
+  // → docs/archive/editor-surface.md#scroll-classname
   useLayoutEffect(() => {
     const el = surfaceRef.current
     if (!el || !hybrid) return
@@ -1319,32 +1083,20 @@ export function Scroll({
     el.classList.toggle('iw-magnified', s !== 1)
   }, [hybrid, phone, fill, covered, waveMode])
 
-  // SIBLING CLOCK ADOPT (the one cross-surface sync the tiles need). Two overlapping surfaces
-  // (the loading shell + the editor beneath it) each carry their own CSS drift; a surface that
-  // mounts MID-LOAD starts its animation at its own recalc, out of phase with the shell's — the
-  // reveal cross-fade would smear two offset copies (the 2026-07-09 ~10px hiccup). Adopting the
-  // sibling's literal startTime makes every copy pixel-identical by construction. Surfaces that
-  // mount BEFORE the atomic gate opens have no animations at all — then every copy is born in
-  // the same gate recalc and is identical without any adoption. useLayoutEffect: the adopt must
-  // land before this surface's first paint. Also arms the load watchdog (disarmed at rest).
+  // ⚠ SIBLING CLOCK ADOPT — the one cross-surface sync the tiles need. Two overlapping surfaces
+  // each carry their own CSS drift, and one that mounts MID-LOAD starts at its own recalc, out of
+  // phase; adopting the sibling's LITERAL startTime makes every copy pixel-identical by
+  // construction. useLayoutEffect, because the adopt must land before this surface's first paint.
+  // It also arms the load watchdog. → docs/archive/editor-surface.md#scroll-sibling-clock
   useLayoutEffect(() => {
     const el = surfaceRef.current
     if (!el || !startedHiddenRef.current) return
     armLoadWatchdog()
-    // SIBLING CLOCK ADOPT — the REFERENCE is the first-mounted surface, and it is NEVER rewritten
-    // (2026-07-18 desync fix). The reference is whatever surface mounted first (the loading shell);
-    // The deterministic scene fields use the SAME animation names as the wave pseudos, so the loop
-    // below adopts all four together. Every LATER surface (the covered editor) therefore equals the
-    // reference before its first visible frame—wave and marks share one spatial clock.
-    //
-    // WHY THE OLD `sibling != null` GATE FAILED (measured, markskew.prove.mjs + diag-trace): the
-    // covered editor routinely mounts ~150-250ms BEFORE the shell's drift commits its startTime — so
-    // at the covered editor's mount NO sibling was resolved yet, the gate skipped adoption ENTIRELY,
-    // registered no retry, and the two drifts then resolved independently 150-250ms (10-18px) apart,
-    // FOREVER. Peter's "the little short lines often appear out of sync with the waves" is exactly
-    // that: the covered surface's wave off the shell's, and — since the marks share the shell-clocked
-    // trackT0 — the covered surface's marks off their own crest by the same amount. The fix is to
-    // WAIT for the reference to resolve rather than give up: adopt on retry until it lands.
+    // ⚠ THE REFERENCE IS THE FIRST-MOUNTED SURFACE AND IS NEVER REWRITTEN — `waveTwinkle.findDrift`
+    // resolves that same surface, so the marks' clock is read from a startTime nothing here touches.
+    // ⚠ AND THE ADOPT MUST RETRY UNTIL THE REFERENCE COMMITS: the covered editor routinely mounts
+    // ~150-250ms BEFORE the shell's drift resolves its startTime, so a `sibling != null` gate
+    // skipped adoption ENTIRELY, registered no retry, and left the two drifts 10-18px apart forever.
     const isReference = driftSurfaces.size === 0
     driftSurfaces.add(el)
     if (!isReference) {
@@ -1367,8 +1119,8 @@ export function Scroll({
             const n = (a as CSSAnimation).animationName ?? ''
             if (n === 'iw-wave-drift-l' || n === 'iw-wave-drift-r') {
               try { a.startTime = sib } catch { /* pending write below re-asserts */ }
-              // STICKY (2026-07-11): a write to a PLAY-PENDING CSS animation is CLOBBERED when the
-              // pending start resolves — re-assert at `ready`, when the write sticks.
+              // ⚠ A write to a PLAY-PENDING CSS animation is CLOBBERED when the pending start
+              // resolves — re-assert at `ready`, which is where the write sticks.
               void a.ready.then(() => { try { if (a.startTime !== sib) a.startTime = sib } catch { /* detached */ } }).catch(() => { /* cancelled */ })
             }
           }
@@ -1376,9 +1128,8 @@ export function Scroll({
         return true
       }
       if (!adopt()) {
-        // The reference has not committed its startTime yet — retry each frame until it does (capped,
-        // so a reference that never resolves cannot spin forever). This is the whole fix: the old
-        // code had no retry, so a covered editor that mounted first simply never adopted.
+        // The reference has not committed its startTime yet — retry each frame until it does,
+        // capped so a reference that never resolves cannot spin forever.
         let tries = 0
         const kick = (): void => {
           if (!el.isConnected || tries++ > 240) return
@@ -1394,24 +1145,21 @@ export function Scroll({
       if (driftSurfaces.size === 0) disarmLoadWatchdog()
     }
   }, [])
-  // Two effects, deliberately: the settle (switch class) must not share an effect with the
-  // handoff — setWaveMode('coast') inside a [waveMode]-dep effect re-ran the effect and its
-  // CLEANUP tore down the just-armed listeners, leaving .iw-wave-coast stuck forever.
-  // SETTLE → coast. The drift is never stopped: the brake is added on top (see the module
-  // header), so there is nothing to freeze and no clock to compensate — shared by the desktop
-  // trigger (revealed, below) and the 'inkwave:reveal-imminent' event. ONE coast per load: every
-  // surface adopts the same record (injected keyframes + resolved clock + snapped travel).
+  // ⚠ TWO EFFECTS, DELIBERATELY: the settle must not share an effect with the handoff —
+  // `setWaveMode('coast')` inside a `[waveMode]`-dep effect re-ran the effect, and its CLEANUP tore
+  // down the just-armed listeners, leaving `.iw-wave-coast` stuck forever.
+  // SETTLE → coast: the drift is never stopped, so there is nothing to freeze and no clock to
+  // compensate; every surface adopts ONE record. → docs/archive/editor-surface.md#scroll-coast
   const coastT0Ref = useRef(0)
   const coastEndRef = useRef<number | null>(null) // device-pixel-snapped coast end offset (see below)
   const settleToCoast = () => {
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
-    // PHONE + covered: this surface renders NO wave classes (see the className) — the SHELL owns
-    // the only water, and a class-less surface has nothing to coast. Drop straight to rest.
+    // PHONE + covered renders NO wave classes — the SHELL owns the only water, and a class-less
+    // surface has nothing to coast. Drop straight to rest.
     if (phone && covered) { setWaveMode('off'); return }
-    // No animation-composition (pre-2023 engines): no brake possible — stop cleanly instead.
-    // Read the drift pose from the animation clock, hand it to the sway, done. A hard stop, not
-    // a coast; acceptable degrade on engines none of our targets ship.
+    // No animation-composition: no brake possible, so read the drift pose from the animation clock,
+    // hand it to the sway and stop cleanly. An acceptable degrade on engines none of ours ship.
     if (!ADDITIVE_COAST) {
       let tx = 0
       try {
@@ -1444,24 +1192,20 @@ export function Scroll({
     // Normally a no-op FALLBACK on both platforms: 'inkwave:reveal-imminent' (below) already
     // swapped to 'coast' before revealed flips — but if the event never fired, coast at reveal.
   }, [revealed, waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
-  // SETTLE arrives as 'inkwave:reveal-imminent' (TiptapEditor's gate; LoadingVeil's ready). The
-  // brake starts on that light frame, ahead of the heavy reveal commit — and because it is
-  // additive with zero start velocity, a starved commit cannot make the handoff discontinuous
-  // anyway. Every drifting surface listens — the visible loading SHELL (revealed never flips
-  // there; it unmounts at/after the reveal) and the editor's own surface underneath coast in
-  // lockstep (same adopted clock, same injected keyframes), so the shell swap is seamless.
+  // SETTLE arrives as 'inkwave:reveal-imminent', so the brake starts on that light frame, ahead of
+  // the heavy reveal commit — and being additive with zero start velocity, a starved commit cannot
+  // make the handoff discontinuous anyway. EVERY drifting surface listens, so shell and editor
+  // coast in lockstep on one adopted clock and the swap is seamless.
   useEffect(() => {
     if (waveMode !== 'anim') return
     const onImminent = () => settleToCoast()
     window.addEventListener('inkwave:reveal-imminent', onImminent)
     return () => window.removeEventListener('inkwave:reveal-imminent', onImminent)
   }, [waveMode]) // eslint-disable-line react-hooks/exhaustive-deps
-  // Coast END → sway handoff. The deceleration itself is pure CSS (drift + brake); JS wakes only
-  // at the resolved-clock timer to hand over: the snapped rest offset is written into --wave-x in
-  // the same commit the coast class drops. Because the coast geometry's ±280px overdraw is
-  // exactly two 140px tiles, transform +tx ≡ background-position +tx — dropping the class while
-  // setting --wave-x = txFinal paints identical pixels: no snap, no dead frame, and the sway then
-  // continues from that offset (base = txFinal − scrollTop·WAVE_SWAY, rebased here).
+  // Coast END → sway handoff. Deceleration is pure CSS; JS wakes only at the resolved-clock timer
+  // to write the snapped rest offset into --wave-x in THE SAME COMMIT the coast class drops.
+  // Because the coast's ±280px overdraw is exactly two 140px tiles, transform +tx ≡
+  // background-position +tx, so that pair of writes paints identical pixels: no snap, no dead frame.
   useLayoutEffect(() => {
     if (waveMode !== 'coast') return
     const el = surfaceRef.current
@@ -1472,40 +1216,31 @@ export function Scroll({
       if (done) return
       done = true
       disarmLoadWatchdog()
-      // On phone the waves cease to exist the moment the classes drop (parchment surface,
-      // ::before display:none), so the sway base/--wave-x write is inert there — kept
-      // unconditional for one code path.
-      // The coast ends on a device-pixel-SNAPPED offset (coastEndRef) — the --wave-x handoff
-      // must write that same number or the bg-position repaint shifts sub-pixel.
+      // On phone the waves cease to exist the moment the classes drop, so this write is inert
+      // there — kept unconditional for ONE code path. ⚠ The coast ends on a device-pixel-SNAPPED
+      // offset, and the handoff must write that same number or the repaint shifts sub-pixel.
       const txFinal = coastEndRef.current ?? loadCoast?.end ?? -(phone ? 72 : 90)
       waveBaseRef.current = txFinal - el.scrollTop * WAVE_SWAY
       el.style.setProperty('--wave-x', `${txFinal.toFixed(3)}px`) // 3 decimals — must carry the device-px snap exactly
       setWaveMode('off') // class drops on React's commit — --wave-x is already in place
-      // This load's coast is over — the next load must never adopt its clock. (Sibling surfaces
-      // finishing moments later already carry the resolved values in their own refs.)
+      // This load's coast is over — the next load must never adopt its clock. Sibling surfaces
+      // finishing moments later already hold the resolved values in their own refs.
       if (loadCoast && timelineNow() - loadCoast.t0 > (phone ? 1900 : 2400)) loadCoast = null
-      // The waves are at REST — the load choreography keys on this (Edit.tsx drops the shell +
-      // TiptapEditor uncovers the editor's water in listeners of this same dispatch, so React
-      // batches all three into ONE commit: no frame ever shows a mid-motion swap).
+      // The waves are at REST, and the load choreography keys on this: Edit.tsx drops the shell and
+      // TiptapEditor uncovers in listeners of THIS dispatch, so React batches all three into ONE
+      // commit and no frame ever shows a mid-motion swap.
       window.dispatchEvent(new Event('inkwave:wave-rest'))
     }
     // Provisional cap until the anchor lands (covers exotic states where no frame ever runs).
     let cap = setTimeout(finish, (phone ? 2000 : 2500) + ANCHOR_SLACK_MS + 1200)
 
-    // FORWARD ANCHOR (2026-07-11, Peter's live "backward tick"). The brake animations are born
-    // CSS-PAUSED (zero additive value — the drift alone keeps rendering, byte-identical), so
-    // engines that resolve a pending CSS animation at STYLE time (Firefox; Chromium under
-    // starved compositor acks) can never present brake(lag) as a first frame — the old tick:
-    // when a CPU spike delayed the swap commit, the compositor had drifted past the brake's
-    // recorded start and its first presented frame applied a cancellation computed for a pose
-    // N frames ago (a backward step proportional to the spike). Instead, ONE rAF after the swap
-    // commit we stamp the load's anchor t_a = now + slack ON THE TIMELINE CLOCK, compute the
-    // drift pose AT t_a analytically from the drift animation's own startTime (presentation-
-    // exact for a long-running compositor animation), snap the rest pose to a device pixel,
-    // inject the final keyframes, and start every coast animation (tiles + twinkle-field brakes
-    // across both surfaces—all name-matched in the subtree—at exactly t_a. The
-    // brake then begins at zero value/velocity at a future compositor time: continuous BY
-    // CONSTRUCTION however starved the main thread was, and every copy shares one clock.
+    // ⚠ BRAKES ARE BORN CSS-PAUSED AND STARTED AT A FORWARD ANCHOR (t_a = now + slack, on the
+    // TIMELINE clock). Engines resolve a pending CSS animation at STYLE time, so a brake started
+    // "now" presents a cancellation computed for a pose N frames ago — a backward step
+    // proportional to the commit lag. Compute the drift pose at t_a analytically from the drift's
+    // own startTime, snap to a device pixel, inject the final keyframes, and start EVERY coast
+    // animation on both surfaces at exactly t_a: continuous by construction however starved the
+    // main thread was, and every copy on one clock. → docs/archive/editor-surface.md#scroll-forward-anchor
     const coastAnims = () => {
       try {
         return el.getAnimations({ subtree: true }).filter((a) => {
@@ -1526,8 +1261,8 @@ export function Scroll({
       let tA = sc.resolvedT0
       if (tA == null) {
         tA = timelineNow() + ANCHOR_SLACK_MS
-        // The drift pose at t_a, from the drift animation's own clock (shared across surfaces
-        // via the sticky sibling adopt).
+        // The drift pose at t_a, from the drift's own clock — shared across surfaces by the
+        // sticky sibling adopt.
         let tx0 = 0
         try {
           const drift = el.getAnimations({ subtree: true })
@@ -1545,8 +1280,8 @@ export function Scroll({
       coastT0Ref.current = tA
       coastEndRef.current = sc.end
       for (const a of coastAnims()) {
-        // play() first: it marks the WAAPI override (the CSS paused declaration must never
-        // re-pause on a later recalc), then the explicit startTime sets the exact shared clock.
+        // `play()` FIRST — it marks the WAAPI override, so the CSS paused declaration can never
+        // re-pause on a later recalc — then the explicit startTime sets the shared clock.
         try { a.play(); a.startTime = tA } catch { /* detached — a mode change owns it */ }
       }
       schedule(tA)
@@ -1555,14 +1290,11 @@ export function Scroll({
     return () => { cancelled = true; clearTimeout(cap) }
   }, [waveMode, phone])
 
-  // Scrollbar idle-fade (desktop fill only): the thumb shows while scrolling or when the pointer is
-  // near the right edge, and fades out (via .iw-sb-idle - CSS makes it transparent) after 1.4s of
-  // inactivity, so at rest only the waves remain in the channel.
-  // ARMED ONLY AFTER THE LOAD WAVES REST (waveMode 'off' — 2026-07-09 regression fix): the toggles
-  // used to land during the drift (classList.add at hydration; the restore-scroll's show() +
-  // its 1.4s re-add timer), and each one ran the 0.3s scrollbar-color transition — a per-frame
-  // repaint of the scroll container's bar region (Firefox repaints the whole scroller) that read
-  // as the "jump at ~0.7s / bigger jump at ~1.4s" in the wave drift.
+  // Scrollbar idle-fade (desktop fill only): the thumb shows while scrolling or near the right
+  // edge and fades after 1.4s, so at rest only the waves remain in the channel.
+  // ⚠ ARMED ONLY AFTER THE LOAD WAVES REST: each toggle runs a 0.3s scrollbar-color transition,
+  // and Firefox repaints the WHOLE scroller for it — landing during the drift, that read as a
+  // jump in the wave. → docs/archive/editor-surface.md#scroll-chrome
   useEffect(() => {
     const el = surfaceRef.current
     if (!el || !fill || phone || waveMode !== 'off') return
@@ -1589,9 +1321,9 @@ export function Scroll({
   useLayoutEffect(() => {
     const host = twinkleRef.current
     if (!host || !fill) return
-    // PHONE + covered: no twinkles on this host, and — critically — do NOT call syncTwinkles at
-    // all: waterMode is GLOBAL, and this surface's early drop to 'off' (settleToCoast) would
-    // clobber the shell's live coast for every host. The shell owns the water until wave-rest.
+    // ⚠ PHONE + covered: do NOT call syncTwinkles AT ALL. `waterMode` is GLOBAL, so this surface's
+    // early drop to 'off' would clobber the shell's live coast for every host; the shell owns the
+    // water until wave-rest.
     if (phone && covered) return
     // The two fields use the SAME named drift/brake CSS animations as the tiles. Scroll's sibling
     // adoption and forward coast anchor therefore include them automatically.
@@ -1699,17 +1431,15 @@ export function Scroll({
       </div>
       )
       if (!fill) return paperNode // in-flow surfaces (SnapshotView) mount client-only — no wrapper
-      // The magnify wrapper: mx-auto + an explicit width centre the page; the width starts as the
-      // same mm value the paper uses (layout identical to master at scale 1) and is imperatively
-      // switched to pageWidth·s px while magnified (see the magnify plumbing effect). Height is
-      // ONLY ever set imperatively (paperHeight·s), so React never fights the RO's writes.
-      // RENDERED FOR EVERY fill SURFACE, hybrid or not (2026-07-10 iOS regression): the prerendered
-      // shell is built desktop-side (hybrid), so gating this div on `hybrid` made the phone's first
-      // client render STRUCTURALLY different from the server HTML — hydration failed (#418), React
-      // client-re-rendered <html> from scratch and stripped .iw-water-ready + data-theme, and the
-      // whole load choreography died (gradient with no waves). Structure must be a constant of
-      // `fill`; hybrid only drives styling/behaviour. Non-hybrid: width comes from the cleanup
-      // effect below (the adopted server attribute must be cleared imperatively).
+      // The magnify wrapper: its width starts as the paper's own mm value (layout identical to
+      // master at scale 1) and is imperatively switched to pageWidth·s while magnified; height is
+      // ONLY ever set imperatively, so React never fights the RO's writes.
+      // ⚠ RENDERED FOR EVERY `fill` SURFACE, hybrid or not. The prerendered shell is built
+      // desktop-side, so gating this div on `hybrid` made a phone's first client render
+      // STRUCTURALLY different from the server HTML: hydration failed, React re-rendered <html>
+      // from scratch, stripped .iw-water-ready + data-theme, and the whole load choreography died.
+      // Structure is a constant of `fill`; hybrid drives only styling.
+      // → docs/archive/editor-surface.md#scroll-magnify
       return (
         <div
           ref={magnifyBoxRef}
@@ -1724,29 +1454,20 @@ export function Scroll({
   )
 }
 
-// Page guides (ungapped mode): a faint dashed rule + page number at each page BREAK. The break
-// positions come from the pagination extension's zero-size break markers (.inkwave-page-gap
-// .iw-break-marker) — the SAME line-measured breaks gapped mode uses, derived from the canonical
-// physical page height in pageModel — so toggling the gapped switch never moves content across
-// pages, and the on-screen breaks are the print/PDF breaks. Falls back to the uniform canonical
-// model (topMargin + n×textArea) where no markers exist (loading shell, SnapshotView, multi-column).
-// Purely visual overlay (no content reflow).
+// Page guides (ungapped mode): a faint dashed rule + page number at each page BREAK, read from the
+// pagination extension's own zero-size break markers — the SAME line-measured breaks gapped mode
+// uses — so toggling the gapped switch never moves content across pages and the on-screen breaks
+// are the print/PDF breaks. Falls back to the uniform canonical model where no markers exist.
+// → docs/archive/editor-surface.md#scroll-guides
 function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
-  // Our OWN overlay div — the sheet is resolved as its parentElement, NOT via sheetRef. React
-  // attaches host refs bottom-up during commit, so on a fresh mount a CHILD's useLayoutEffect runs
-  // BEFORE the parent's sheetRef is attached: sheetRef.current was null here in production, the
-  // effect bailed without wiring its ResizeObserver / pagination-measured listener, and the page
-  // guides never rendered (the "dotted lines disappeared" regression, 2026-07-09 — introduced when
-  // this went useEffect → useLayoutEffect for the paint-with-the-text reveal). Dev never showed it:
-  // StrictMode's double-invoked effects re-ran after the ref attached. A component's ref to its own
-  // rendered element IS guaranteed set in its own layout effects — and parentElement is structurally
-  // the enclosing .scroll-paper, so this can never resolve to another surface (e.g. the loading
-  // shell's), either.
+  // ⚠ RESOLVE THE SHEET FROM OUR OWN REF's `parentElement`, never from `sheetRef`. React attaches
+  // host refs bottom-up during commit, so a CHILD's layout effect runs BEFORE the parent's ref is
+  // attached — `sheetRef.current` was null in production and the guides never rendered. StrictMode
+  // masks it in dev by re-running effects after the ref attaches.
   const overlayRef = useRef<HTMLDivElement>(null)
   const [breaks, setBreaks] = useState<number[]>([]) // sheet-local y of each page boundary
-  // The guides depend on client-only state (paper size / gapped, both from localStorage), so the
-  // prerendered shell and the client's first render disagree → hydration mismatch. Gate on a post-mount
-  // flag so the FIRST client render matches the shell (nothing), then the guides fill in a tick later.
+  // The guides read client-only state (localStorage), so gate on a post-mount flag: the FIRST
+  // client render must match the prerendered shell (nothing), and the guides fill in a tick later.
   const [hydrated, setHydrated] = useState(false)
   useEffect(() => { setHydrated(true) }, [])
   const gapped = gappedPagesEnabled()

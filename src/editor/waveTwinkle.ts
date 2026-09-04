@@ -51,7 +51,6 @@ type HostState = {
   epoch: number | null
   scrollTop: number
 }
-
 const hosts = new Map<HTMLElement, HostState>()
 let listenersInstalled = false
 let sceneEpoch: number | null = null

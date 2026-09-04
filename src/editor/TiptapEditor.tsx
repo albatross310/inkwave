@@ -61,21 +61,16 @@ import { SyncStatus } from '../components/SyncStatus'
 import { UnsyncedNotice } from '../components/UnsyncedNotice'
 import { shouldWarnUnsynced, unsyncedReducer, initialUnsyncedState } from './unsyncedWatch'
 import { VerifyModal } from '../components/VerifyModal'
-// LAZY, AND IT MUST STAY LAZY (2026-07-17). A static import here put the whole report lane —
-// the modal, report/compile.ts and its prompt strings — inside THIS chunk, which every writer
-// loads, with the flag off and no chunk of its own to show for it. `{reportOpen && <Modal/>}` is a
-// RENDER guard and `if (reportFlag)` is a RUNTIME guard; neither can stop the bundler. flag.ts's
-// "ZERO load-path cost … neither panel is imported unless asked for" was measured false in the
-// built output while that comment sat two lines above the flag it described. Verify in
-// `react-router build` output, never in the source: a separate chunk file is NOT evidence of
-// laziness (fixtures had its own chunk and was still statically imported, hence preloaded).
+// ⚠ LAZY, AND IT MUST STAY LAZY. A static import puts the whole report lane in THIS chunk, which
+// every writer loads, flag or no flag: a render guard and a runtime guard are both invisible to
+// the bundler. VERIFY IN `react-router build` OUTPUT, never in the source — a separate chunk file
+// is NOT evidence of laziness. → docs/archive/editor-surface.md#editor-lazy-chunks
 const ProductivityReportModal = lazy(() =>
   import('../components/ProductivityReportModal').then(m => ({ default: m.ProductivityReportModal })),
 )
-// The measured writing-charts panel (P1a-viz). LAZY for the same reason the report modal is: its
-// charts + fixtures must never ride the editor's eager graph (`scripts/prodLoadPath.prove.mjs`). The
-// trigger lives in the clock drop-up (ClockMenu), which is eager — but that button only calls a
-// callback, so no chart code reaches this chunk.
+// The measured writing-charts panel (P1a-viz), lazy for the same reason and kept honest by
+// `scripts/prodLoadPath.prove.mjs`. Its trigger in the clock drop-up is eager, but that button only
+// calls a callback, so no chart code reaches this chunk.
 const ProductivityGraphsPanel = lazy(() =>
   import('../components/ProductivityGraphsPanel').then(m => ({ default: m.ProductivityGraphsPanel })),
 )
@@ -120,21 +115,16 @@ import type { Snapshot, SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../t
 // This keeps the green/red word set stable between nudges and avoids spurious receipts.
 
 // ─── Toolbar slot customisation ───
-// The population, the row size, the migration and the bar-layer exclusion all live in ONE place:
-// `editor/toolbarContract.ts`. They are NOT re-declared here. Three lanes take toolbar real
-// estate at once (feat/prod-ledger, feat/music-piece-photo, feat/music-musicxml) and this
-// codebase's recurring wound is two implementations of one rule — so a lane registers a button by
-// adding a member to SlotId + ALL_SLOTS there, and gets the row, the ▲ overflow, the drag-to-swap
-// and the migration for free. Read that file before adding anything to this one.
+// ⚠ The population, the row size, the migration and the bar-layer exclusion live ONLY in
+// `editor/toolbarContract.ts` and are never re-declared here. Register a button by adding a member
+// to `SlotId` + `ALL_SLOTS` there and the row, the ▲ overflow, drag-to-swap and migration follow.
 
 /**
- * Visual px reserved on EACH SIDE of the centred footer toolbar for the edge-anchored pills that
- * share its band — SyncStatus (`right:0`, ~138px painted: max-w-7.5rem + padding, ×1.12 scale) and
- * ReceiptPanel's snaps pill (`left:0`, ~96px painted). Sized to the larger of the two plus a ~12px
- * gap. All three are independently `position: fixed` with no awareness of each other, so without
- * this reserve the centred toolbar grows straight into the sync pill on a narrow window (measured:
- * collision begins at ~650px viewport width). See the `--iw-bar-budget` comment on the pill's style
- * for why this must be ONE number shared with the per-circle shrink clamp in index.css.
+ * ⚠ Visual px reserved on EACH SIDE of the centred footer toolbar for the edge-anchored pills that
+ * share its band. All three are independently `position: fixed` with no awareness of each other,
+ * so without this the centred toolbar grows into the sync pill below ~650px of viewport width. It
+ * must stay ONE number shared with the per-circle shrink clamp in index.css.
+ * → docs/archive/editor-surface.md#editor-side-reserve
  */
 const TOOLBAR_SIDE_RESERVE_PX = 140
 
@@ -149,18 +139,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     docRef.current = doc
   }, [doc])
 
-  // ── ONE COMMIT PATH FOR A DOCUMENT MUTATION ───────────────────────────────────────────────────
-  // Every mutation must do the same three things in the same order: make the new document the one
-  // this component reads (`docRef`), tell the parent (`onDocChange`), and schedule the write
-  // (`scheduleSave`). This was written out longhand at ten call sites, which is ten chances to omit
-  // the third line — and omitting it is SILENT: the edit appears on screen, the parent re-renders,
-  // and only the DISK is stale, so the work is lost at the next reload rather than at the moment of
-  // the mistake. `email.prove.mjs` caught exactly that omission once (a header edit never called
-  // `scheduleSave`, because autosave is driven by the editor's own update handler and a header field
-  // never fires it), and nothing but a browser probe could have.
-  //
-  // NB `ensureDocFresh` deliberately does NOT use this: it CACHES a lazily-built document into
-  // `docRef` and is not a mutation — there is nothing to tell the parent and nothing new to save.
+  // ── ⚠ ONE COMMIT PATH FOR A DOCUMENT MUTATION (R2) ────────────────────────────────────────────
+  // Every mutation does the same three things in the same order: docRef, onDocChange, scheduleSave.
+  // Written longhand at ten call sites, omitting the third is SILENT — the edit appears on screen
+  // and only the DISK is stale, so the work is lost at the next reload rather than at the mistake.
+  // NB `ensureDocFresh` deliberately does NOT use this: it CACHES a lazily-built document and is not
+  // a mutation. → docs/archive/editor-surface.md#editor-commit-doc
   const commitDoc = (updated: InkwaveDocument) => {
     docRef.current = updated
     onDocChange(updated)
@@ -168,13 +152,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
 
 
-  // ── WHERE YOU WERE, ACROSS A HARD REFRESH (2026-08-28, Peter: "very useful as I have to keep
-  // hard refreshing for testing") ───────────────────────────────────────────────────────────────
-  // Written on a settled scroll, restored once the document has its real height — i.e. AFTER the
-  // reveal and the first pagination, because a paginated document is dramatically shorter until the
-  // gap widgets land and restoring against that shorter range would clamp the offset to nothing.
-  // The rule itself (clamp, refuse a materially different document, ignore the very top) is pure
-  // and lives in editor/scrollMemory.ts.
+  // ── WHERE YOU WERE, ACROSS A HARD REFRESH ─────────────────────────────────────────────────────
+  // ⚠ Restore only once the document has its REAL height — after the reveal and the first
+  // pagination — because a paginated document is dramatically shorter until the gap widgets land
+  // and restoring against that shorter range clamps the offset to nothing. The rule itself is pure
+  // (editor/scrollMemory.ts). → docs/archive/editor-surface.md#editor-scroll-memory
   useEffect(() => {
     const el = document.querySelector('.inkwave-editor-surface.iw-fill:not(.is-phone)') as HTMLElement | null
     if (!el) return
@@ -200,7 +182,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       }
     }
     // Try across the settling window rather than once: fonts, pagination and the reveal each change
-    // the height, and a single attempt lands before the document is its real size.
+    // the height, so a single attempt lands before the document is its real size.
     const timers = [900, 1600, 2600, 4000].map((t) => setTimeout(tryRestore, t))
     return () => {
       timers.forEach(clearTimeout)
@@ -396,14 +378,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const [unsyncedNow, setUnsyncedNow] = useState(() => Date.now())
   useEffect(() => { if (syncActive) dispatchUnsynced({ type: 'sync-active' }) }, [syncActive])
   useEffect(() => { dispatchUnsynced({ type: 'doc-switch' }) }, [doc.id])
-  // A slow tick, and ONLY while a warning is actually pending: nothing to re-render once sync is
-  // live, dismissed, or before the first unsynced edit. (The reducer returns its input unchanged on
-  // a no-op edit, so useReducer bails out and typing never re-renders the shell — the
-  // console-snappy rule.)
-  // PROBE SEAM (the `__iwRasterDprCap` / `__iwAnchorRule` pattern): shorten the threshold so the
-  // wiring can be DRIVEN and observed in a live browser instead of waiting five real minutes — a
-  // feature whose only proof is "the rule is unit-tested" is a feature nobody has ever seen fire.
-  // Undefined in every real session ⇒ the constant in unsyncedWatch.ts applies.
+  // A slow tick, and ONLY while a warning is actually pending — the reducer returns its input
+  // unchanged on a no-op edit, so typing never re-renders the shell (the console-snappy rule).
+  // PROBE SEAM (the `__iwRasterDprCap` pattern): shorten the threshold so the wiring can be DRIVEN
+  // in a live browser rather than waited out for five real minutes (R3).
+  // → docs/archive/editor-surface.md#editor-unsynced-notice
   const warnAfterMs = (window as unknown as { __iwUnsyncedWarnMs?: number }).__iwUnsyncedWarnMs
   useEffect(() => {
     if (syncActive || unsynced.dismissed || unsynced.firstUnsyncedEditAt === null) return
@@ -572,25 +551,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const dragIdRef = useRef<SlotId | null>(null)
 
   // ─── Phone: touch-hold drag-to-reorder for the row's slot circles ──────────
-  // HTML5 drag events never fire from touch in this UI (and the iOS long-press guards
-  // deliberately swallow the native gestures), so phone reorder is hand-rolled: hold a
-  // circle ~400ms → it arms (scale-up pulse = the haptic-feel cue), drag horizontally →
-  // neighbours FLIP-slide out of the way (transform-only, 180ms) previewing the drop,
-  // release → the order commits + persists. Coexists with the guards: .iw-touch-guard
-  // suppresses selection/loupe, the slot wrappers get touch-action:none (per-element —
-  // it doesn't inherit), and the post-drop synthetic click is swallowed.
+  // HTML5 drag events never fire from touch here (the iOS long-press guards swallow the native
+  // gestures), so this is hand-rolled: hold ~400ms → arm → drag → FLIP-slide preview → commit.
+  // It coexists with the guards, and each slot wrapper needs its OWN `touch-action: none`.
+  // → docs/archive/editor-surface.md#editor-slot-drag
   const HOLD_MS = 400
   const slotElsRef = useRef<(HTMLDivElement | null)[]>([])
 
   // ─── Hotkeys: Alt+1…6 = the row, Alt+0 = the ▲ drawer, Mod+, = Settings ────
-  // THE HOTKEY IS THE TAP. It dispatches the slot's OWN button click rather than calling the
-  // slot's action, and that is deliberate: every slot owns its open state privately (GuideMenu,
-  // PageMenu, MediaMenu, SettingsMenu, ClockSlotButton all differ), so an "action registry" would
-  // mean a SECOND way to trigger each one — two roads that drift the first time a slot changes
-  // what its tap does. Routing through the real button makes divergence unrepresentable: the
-  // keyboard and the finger are the same event, by construction.
-  // `altHeld` shows the hints. It flips only on Alt's own down/up — never per keystroke — and the
-  // ref guard stops key-repeat from setting state 30×/second while Alt is held.
+  // ⚠ THE HOTKEY IS THE TAP: it dispatches the slot's OWN button click, never a registered action.
+  // Every slot owns its open state privately, so an action registry would be a SECOND way to
+  // trigger each one — two roads that drift the first time a slot changes what its tap does (R2).
+  // `altHeld` flips only on Alt's own down/up, and the ref guard stops key-repeat setting state
+  // 30×/second. → docs/archive/editor-surface.md#editor-hotkey-tap
   const [altHeld, setAltHeld] = useState(false)
   const altHeldRef = useRef(false)
   const altArmRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -601,17 +574,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       altHeldRef.current = v
       setAltHeld(v)
     }
-    // ⚠ THE HINTS MUST NOT REACT TO A SHORTCUT IN PROGRESS (Peter, 2026-08-23: "my ctrl del and opt
-    // del aren't working bc these numbers keep coming up on the pill buttons and interfering").
-    // Alt is a MODIFIER before it is a hint trigger: on macOS ⌥⌫ is delete-word-left and ⌃⌫ its
-    // cousin, so a writer taps Alt as part of a chord many times a minute. Showing the badges on
-    // Alt's keydown meant every one of those re-rendered TiptapEditor's whole tree BETWEEN the
-    // modifier and the key it modifies — and this component deliberately does not re-render per
-    // transaction (`shouldRerenderOnTransaction: false`) precisely because that tree is expensive.
-    // So the hint now waits for a DELIBERATE hold: Alt alone, unaccompanied, for ALT_HINT_DELAY_MS.
-    // Any other key arriving cancels it, which is exactly what a chord is. The teaching affordance
-    // is unchanged for someone who holds Alt to look — that is a pause, not a chord — and Alt+digit
-    // still works instantly either way, because the hotkey handler never consulted `altHeld`.
+    // ⚠ THE HINTS MUST NOT REACT TO A SHORTCUT IN PROGRESS. Alt is a MODIFIER before it is a hint
+    // trigger (⌥⌫ is delete-word-left), so showing badges on its keydown re-rendered this whole
+    // tree BETWEEN the modifier and the key it modifies. The hint waits for a DELIBERATE hold, and
+    // any other key cancels it — which is exactly what a chord is. Alt+digit still works instantly
+    // either way, because the hotkey handler never consults `altHeld`.
+    // → docs/archive/editor-surface.md#editor-alt-hints
     const ALT_HINT_DELAY_MS = 400
     const cancelArm = () => { if (altArmRef.current) { clearTimeout(altArmRef.current); altArmRef.current = null } }
     const armHint = () => {
@@ -927,16 +895,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => clearTimeout(t)
   }, [reviewOpen])
 
-  // ⚠ TRACK CHANGES CANNOT OUTLIVE ITS OWN CONTROL (2026-08-28, Peter: "stop the text from going
-  // red"). The ✎ toggle lives on the review row and nowhere else, so with the row closed the mode
-  // was invisible AND unreachable while still rewriting every keystroke into a red insertion mark —
-  // Peter spent a session in it, reaching for the text-colour menu, which cannot touch a suggestion
-  // mark. Closing the row now ends the mode. The suggestions already made are untouched: they are
-  // marks in the document, and reopening the row shows them with accept/discard.
+  // ⚠ TRACK CHANGES CANNOT OUTLIVE ITS OWN CONTROL (R4). The ✎ toggle lives on the review row and
+  // nowhere else, so a closed row left the mode invisible AND unreachable while it kept rewriting
+  // every keystroke into a red insertion mark. The suggestions already made survive — they are
+  // marks in the document. → docs/archive/editor-surface.md#editor-track-changes
   useEffect(() => { if (!reviewOpen) setSuggestOn(false) }, [reviewOpen])
-  // The exclusion RULE is pure and lives in toolbarContract.ts (planBarToggle, swept over every
-  // (active, which) pair by its tests). This function is only its hands: it does the timing, the
-  // sequence guard and the style bar's idle timer. Adding a layer changes NOTHING here.
+  // The exclusion RULE is pure and lives in toolbarContract.ts (`planBarToggle`). This function is
+  // only its hands — timing, sequence guard, idle timer. Adding a layer changes NOTHING here.
   function toggleBar(which: BarLayerId) {
     const seq = ++barSeqRef.current
     markBarsAnimating()
@@ -1079,18 +1044,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }
 
   const editor = useEditor({
-    // RE-RENDER STORM FIX (2026-07-11, the ablation's #1 keystroke cost): @tiptap/react's legacy
-    // default re-renders the OWNING component on EVERY transaction — every keystroke, caret move,
-    // SCAS repaint and pagination meta re-ran this whole ~2,500-line tree (footer, panels, menus).
-    // With it off, re-renders happen only when React state actually changes. Everything the render
-    // body used to read live off editor.state is mirrored into state by the selection-tracking
-    // effect below (selectionEmpty + selIsAtomNode); StyleBar/ReviewBar self-subscribe.
+    // ⚠ THIS MUST STAY FALSE — it was the ablation's #1 keystroke cost. @tiptap/react's legacy
+    // default re-ran this whole ~2,500-line tree on EVERY transaction. CONSEQUENCE: the render body
+    // must NEVER read `editor.state` / `editor.isActive`; mirror what it needs into React state
+    // from an editor subscription. → docs/archive/editor-surface.md#editor-rerender
     shouldRerenderOnTransaction: false,
-    // THE ONE EXTENSION LIST — moved verbatim to extensions/editorExtensions.ts so /snapshot, which
-    // has no editor, can build the SAME schema and turn a version's contentJson into a real PM Node
-    // (the plaintext renderer's blocker). Same entries, same order, same configure() args; this call
-    // returns a fresh array per render exactly as the inline literal did. A schema-only COPY of the
-    // list was rejected — two lists is how the model drifts from what the editor paginates.
+    // THE ONE EXTENSION LIST (R2), in extensions/editorExtensions.ts so /snapshot — which has no
+    // editor — builds the SAME schema. A schema-only COPY was rejected: two lists is how the model
+    // drifts from what the editor paginates.
     extensions: buildEditorExtensions({
       getDoc: () => docRef.current,
       getHintState: () => hintStateRef.current,
@@ -1098,11 +1059,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       presentation: isolatedEmail ? 'application' : 'document',
     }),
     content: doc.contentJson,
-    // DOUBLE-MOUNT NOTE (2026-07-11): this component must mount in a default-lane render — NOT a
-    // time-sliced one (lazy/Suspense retry). useEditor's in-render creation + its 1ms
-    // scheduleDestroy safety timer otherwise race across the slices: two full editor creations
-    // and a doubled reveal chain per load. Edit.tsx holds the resolved module in state (no
-    // Suspense) precisely for this — see the note there before changing how this mounts.
+    // ⚠ THIS COMPONENT MUST MOUNT IN A DEFAULT-LANE RENDER, never a time-sliced one (lazy/Suspense
+    // retry): useEditor's in-render creation and its 1ms scheduleDestroy timer race across the
+    // slices, giving two full editor creations and a doubled reveal chain per load. Edit.tsx holds
+    // the resolved module in state precisely for this.
     editorProps: {
       attributes: {
         class: 'tiptap-editor',
@@ -1110,15 +1070,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         'aria-label': doc.docType === 'email' ? 'Message body editor' : 'Document body editor',
         spellcheck: 'false',
       },
-      // ── Task #28: keydown-synchronous typing (flag: inkwave:kdSync; desktop default ON,
-      // touch default OFF — the virtual keyboard's native path + autocorrect must never be
-      // intercepted). Plain printable keys dispatch their ProseMirror transaction synchronously
-      // IN the keydown task, so the character paints in the SAME frame — instead of the native
-      // route (browser mutates the DOM → PM's MutationObserver reconciles a task later).
-      // handleTextInput runs first, exactly like the native path, so input rules (smart quotes,
-      // math shortcuts, citation triggers) behave identically. Backspace/Enter are already
-      // keydown-synchronous via the keymaps. Guards: no modifiers (shift ok), no IME
-      // composition, no open word-cycle (it owns j/k/space/tab), text selections only.
+      // Keydown-synchronous typing (`inkwave:kdSync`; desktop ON, touch OFF — ⚠ the virtual
+      // keyboard's native path and autocorrect must never be intercepted). A printable key
+      // dispatches its transaction IN the keydown task, so it paints in the SAME frame.
+      // `handleTextInput` runs first, exactly like the native path, so input rules behave
+      // identically. → docs/archive/editor-surface.md#editor-kdsync
       handleKeyDown: (view, event) => {
         if (!kdSyncEnabled()) return false
         if (event.ctrlKey || event.metaKey || event.altKey) return false
@@ -1136,37 +1092,29 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       },
     },
     onTransaction: ({ editor: e, transaction }) => {
-      // ── Insignia (paid): keystroke-cadence tap ───────────────────────────────
-      // Fold this transaction's steps into the current 0.5s cadence bin. Counts only — never chars.
-      // Inert for the free tier (cadenceTierActive() false → tap never created).
+      // ── Insignia (paid): keystroke-cadence tap. Counts only — never chars — and inert for the
+      // free tier (the tap is never created).
       if (cadenceTierActive()) {
         if (!cadenceTapRef.current) cadenceTapRef.current = new CadenceTap()
         cadenceTapRef.current.record(transaction.steps)
       }
 
-      // ── Productivity ledger: session capture (spec §A4) ──────────────────────
-      // Rides the SAME stream, derives counts from the SAME countSteps primitive — no new content
-      // instrumentation. O(steps): it compares two numbers and increments three fields. Every
-      // O(doc) number the ledger needs is computed at session CLOSE, off this path. Flag default
-      // OFF and cached in a module variable, so the disabled cost is one boolean test.
+      // ── Productivity ledger session capture (spec v0.2 §A4): rides the SAME stream and the SAME
+      // `countSteps` primitive — O(steps), and every O(doc) number is computed at session CLOSE.
       if (prodLedgerEnabled()) getCapture().record(transaction.steps)
 
-      // ── SCAS tick (deferred): CONSOLE-SNAPPY RULE — a keystroke does no O(doc) work. ──────────
-      // The engine scan (processDoc walks every committed word) and the decoration rebuild both
-      // move to ONE debounced tick ~120ms after the last input; the decoration plugin meanwhile
-      // just position-maps its existing marks through each edit (see RedHighlightExtension.apply).
-      // Deletion tracking accumulates across the debounce window so the lock-on-delete rule still
-      // sees every deletion. The tick's own repaint transaction carries SCAS_HINT_META → never re-arms.
+      // ── ⚠ SCAS tick — CONSOLE-SNAPPY RULE: a keystroke does no O(doc) work. The engine scan and
+      // the decoration rebuild move to ONE debounced tick; the decoration plugin meanwhile just
+      // position-maps its existing marks. The tick's own repaint carries SCAS_HINT_META so it can
+      // never re-arm. → docs/archive/editor-surface.md#editor-scas-tick
       if (!transaction.getMeta(SCAS_HINT_META) && (transaction.docChanged || transaction.selectionSet)) {
         if (transaction.docChanged) {
           const size = e.state.doc.content.size
           if (prevDocSizeRef.current >= 0 && size < prevDocSizeRef.current) scasHadDeletionRef.current = true
           prevDocSizeRef.current = size
-          // SCAN WINDOW bookkeeping (phone): accumulate WHERE this debounce window's edits landed,
-          // in current-doc coordinates — map the running range and the last-tick caret through this
-          // edit, then union this transaction's own changed range (each step's new range, mapped
-          // through the steps after it). The tick below hands the union to processDoc so the scan
-          // is O(window), not O(doc). Cost here is O(steps) per keystroke — no doc walks.
+          // SCAN WINDOW bookkeeping: accumulate WHERE this window's edits landed, in current-doc
+          // coordinates, so the tick's scan is O(window) not O(doc). Cost here is O(steps) per
+          // keystroke — no doc walks.
           scasLastCaretRef.current = transaction.mapping.map(scasLastCaretRef.current)
           let wf = scasWinRef.current ? transaction.mapping.map(scasWinRef.current.from, -1) : Infinity
           let wt = scasWinRef.current ? transaction.mapping.map(scasWinRef.current.to, 1) : -Infinity
@@ -1181,23 +1129,17 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           if (wt >= wf) scasWinRef.current = { from: wf, to: wt }
         }
         if (scasTickTimerRef.current) clearTimeout(scasTickTimerRef.current)
-        // ENGINE KILL SWITCH (diagnostic/benchmark only): inkwave:scasEngineOff='1' disables the whole
-        // SCAS tick (scan + decorations). NB the USER's "SCAS suggestions" toggle (inkwave:scasOff) is
-        // a separate DISPLAY-only flag and must NOT stop the tick — the words stay remembered.
+        // ENGINE KILL SWITCH (diagnostic only): `inkwave:scasEngineOff` disables the whole tick.
+        // ⚠ NOT the same as the USER's "SCAS suggestions" toggle (`inkwave:scasOff`), which is
+        // DISPLAY-only and must never stop the tick — the words stay remembered.
         if (scasEngineOffRef.current) return
-        // PHONE: the tick's engine scan + decoration rebuild is O(doc) — ~7ms/10k words in Node,
-        // several × slower on a phone CPU (tens of ms on a thesis-length doc), and at 120ms it
-        // landed between keystrokes during normal typing. 250ms keeps it in genuine gaps; verdicts
-        // freeze at commit anyway, so a later repaint changes nothing semantically. Desktop stays 120.
+        // Phone waits 250ms rather than 120: the scan is O(doc) and at 120 it landed between
+        // keystrokes. Verdicts freeze at commit, so a later repaint changes nothing semantically.
         scasTickTimerRef.current = setTimeout(function tick() {
           if (e.isDestroyed) return
-          // ZOOM-GESTURE DEFERRAL (Peter, 2026-07-10 "lag in the reflow zoom"): the tick's engine
-          // scan + decoration rebuild is the heaviest non-visual work that can land mid-gesture —
-          // and a decoration repaint REBUILDS paragraph DOM, which detaches an active pinch's
-          // touch target (iOS keeps dispatching to the original node → the gesture dies). While a
-          // zoom gesture holds the painters (__iwZoomHold, cleared at settle), park the tick and
-          // retry — it flushes ≤150ms after the settle. Verdicts freeze at commit anyway, so a
-          // deferred repaint changes nothing semantically.
+          // ⚠ ZOOM-GESTURE DEFERRAL: a decoration repaint REBUILDS paragraph DOM, which detaches
+          // an active pinch's touch target (iOS keeps dispatching to the original node, so the
+          // gesture dies). Park while `__iwZoomHold` is set and retry after the settle.
           if ((window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) {
             scasTickTimerRef.current = setTimeout(tick, 150)
             return
@@ -1205,31 +1147,26 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           const tickT0 = performance.now()
           const hadDeletion = scasHadDeletionRef.current
           scasHadDeletionRef.current = false
-          // WINDOWED TICK (phone 2026-07-10; desktop joined 2026-07-11 — the tick's O(doc) scan +
-          // decoration rebuild at the 120ms cadence was part of the desktop "waves of lag"): scan
-          // only where this tick's edits/caret moves happened — the window = accumulated edit
-          // range ∪ last-tick caret ∪ current caret (a word commits when the caret LEAVES it, so
-          // both caret paragraphs must be scanned). Full scan stays for: any tick with a DELETION
-          // (the engine's vanished-lemma pass needs whole-doc word presence — the phantom-snapshot
-          // guard), and the decoration repaint whenever the tick DID change state (a verdict
-          // change repaints every instance of that lemma doc-wide). Windowed ≡ full equivalence is
-          // unit-pinned in scas/controller.window.test.ts + extensions/redHighlightWindow.test.ts.
+          // WINDOWED TICK on both platforms: scan only where this tick's edits and caret moves
+          // happened — the window is the accumulated edit range ∪ last-tick caret ∪ current caret,
+          // because a word commits when the caret LEAVES it and both paragraphs must be scanned.
+          // Windowed ≡ full equivalence is unit-pinned (scas/controller.window.test.ts +
+          // extensions/redHighlightWindow.test.ts).
           const caretNow = e.state.selection.from
           const acc = scasWinRef.current
           scasWinRef.current = null
           const lastCaret = scasLastCaretRef.current
           scasLastCaretRef.current = caretNow
-          // Deletion ticks are windowed too (round-4 "deleting lags in waves"): the controller's
-          // whole-doc presence INDEX answers the vanished-lemma pass, so the scan never needs to
-          // leave the window.
+          // Deletion ticks are windowed TOO: the controller's whole-doc presence INDEX answers the
+          // vanished-lemma pass, so the scan never needs to leave the window.
           const win = {
             from: Math.min(acc ? acc.from : caretNow, caretNow, lastCaret),
             to: Math.max(acc ? acc.to : caretNow, caretNow, lastCaret),
           }
           const stateChanged = scasRef.current!.processDoc(e.state.doc, caretNow, hadDeletion, win)
-          // Always repaint: the deferred decorations need it after edits, and it refreshes the
-          // cursor-word suppression after pure caret moves. Windowed splice only when nothing
-          // outside the window can differ (no state change, no open popover) — else full rebuild.
+          // ⚠ Always repaint, but a WINDOWED SPLICE is legal only when nothing outside the window
+          // can differ (no state change, no open popover) — a verdict change repaints that lemma
+          // doc-wide. Else a full rebuild.
           const meta = win && !stateChanged && hintStateRef.current.focusedPos === null
             ? { window: win } : true
           e.view.dispatch(e.state.tr.setMeta(SCAS_HINT_META, meta))
@@ -1237,9 +1174,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         }, isTouchDevice() ? 250 : 120)
       }
 
-      // Paragraph index feeds the thesaurus popover — must track SELECTION moves too (clicking into
-      // a paragraph), so it stays above the docChanged gate. O(blocks-before-caret) walk (return
-      // false at each textblock so it never descends into inline content); React bails on same value.
+      // The paragraph index feeds the thesaurus popover and must track SELECTION moves too, so it
+      // stays ABOVE the docChanged gate. O(blocks-before-caret): returning false at each textblock
+      // keeps it out of inline content, and React bails on the same value.
       const { $from } = e.state.selection
       let pIdx = 0
       e.state.doc.nodesBetween(0, $from.pos, (node) => {
@@ -1248,21 +1185,19 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       })
       setCurrentParagraphIndex(Math.max(0, pIdx - 1))
 
-      // ── docChanged gate (THE typing-lag fix) ─────────────────────────────────
-      // Everything below serializes the document / re-renders the shell — and this handler fires for
-      // EVERY transaction: caret moves, the SCAS hint repaint above, and the pagination extension's
-      // two per-keystroke meta dispatches. Paying full-doc getJSON + a React re-render + an IndexedDB
-      // write up to 3× per keystroke was the dominant lag source. Selection-only transactions stop here.
+      // ── ⚠ docChanged gate (THE typing-lag fix) ───────────────────────────────
+      // Everything below serializes the document or re-renders the shell, and this handler fires
+      // for EVERY transaction — caret moves, the SCAS repaint, the paginator's two per-keystroke
+      // metas. Selection-only transactions STOP HERE.
+      // → docs/archive/editor-surface.md#editor-docchanged-gate
       if (!transaction.docChanged) return
 
       // CONSOLE-SNAPPY RULE: no serialization on the keystroke either. The document object is
-      // rebuilt lazily (ensureDocFresh: getJSON + title + bibliography) at the first point that
-      // actually needs it — the 200ms save beat, any snapshot/signing work, or a mirror. The beat
-      // stays data-only; the shell re-renders only when the title changed.
+      // rebuilt LAZILY (`ensureDocFresh`) at the first point that actually needs it — the save
+      // beat, snapshot/signing work, or a mirror.
       docStaleRef.current = true
-      // Peter's 5-minute unsynced clock: only a change the WRITER caused counts (see the arming
-      // effect below). The reducer returns its input unchanged once started or while sync is live,
-      // so useReducer bails and this costs nothing per keystroke.
+      // The unsynced clock: only a change the WRITER caused counts. The reducer returns its input
+      // unchanged once started, so this costs nothing per keystroke.
       if (sawUserInputRef.current) {
         dispatchUnsynced({ type: 'edit', now: Date.now(), syncActive: syncActiveRef.current })
       }
@@ -1289,10 +1224,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         if (words.length > 0) prefetchSynonyms([...new Set(words)])
       }, 600)
 
-      // ── Paragraph snapshot: fire when Enter creates a new top-level paragraph ──
-      // (Already behind the docChanged gate above.) Cheap top-level count first; only collect the
-      // paragraph TEXTS when the count actually grew by one — the full textContent collection on
-      // every keystroke was an O(doc) walk for a check that's almost always false.
+      // ── ⚠ Paragraph snapshot: ENTER MUST DO NO O(doc) WORK ON THE KEYSTROKE. A cheap top-level
+      // count first; the paragraph TEXTS are collected only when the count actually grew by one.
+      // → docs/archive/editor-surface.md#editor-enter
       {
         let paraCount = 0
         e.state.doc.forEach((node) => { if (node.type.name === 'paragraph') paraCount++ })
@@ -1301,9 +1235,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
 
         // Only trigger on a single new paragraph (Enter key, not paste of multiple blocks).
         if (paraCount === prev + 1 && pIdx >= 2) {
-          // ONLY the completed paragraph's text (round-4 Enter "mega lag": collecting EVERY
-          // paragraph's textContent was an O(doc) string build ON the Enter keystroke).
-          // pIdx-1 is the 0-based current (new empty) paragraph; pIdx-2 is the just-completed one.
+          // ONLY the completed paragraph's text — collecting every paragraph's was an O(doc) string
+          // build ON the keystroke. pIdx-1 is the new empty paragraph; pIdx-2 the just-completed one.
           let completedRaw = ''
           let paraIdx = 0
           e.state.doc.forEach((node) => {
@@ -1315,12 +1248,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           if (completedText.length > 0) {
             const wordCount = completedText.match(/[\p{L}\p{N}]+/gu)?.length ?? 0
 
-            // Round-4 Enter "mega lag" (b): the snapshot chain (ensureDocFresh getJSON +
-            // JCS canonicalize + hash + OPFS write + OTS stamp) started right on the Enter
-            // keystroke. Defer it to a GENUINE input pause — content is captured at WORK time
-            // (enqueueSnapshotWork always ran ensureDocFresh at work time, so the capture-drift
-            // semantics are unchanged in kind); the buffer bookkeeping below stays synchronous
-            // so Enter ordering is deterministic.
+            // ⚠ The snapshot chain (getJSON + JCS + hash + OPFS write + OTS stamp) is DEFERRED to a
+            // genuine input pause — content is still captured at WORK time, as it always was. The
+            // buffer bookkeeping stays synchronous so Enter ordering is deterministic.
             const takeParaSnapshot = (summaryFn: () => Promise<string>) => runWhenQuiet(() => {
               enqueueSnapshotWork(async () => {
                 const snap = await createSnapshotIfChanged(docRef.current, 'paragraph', sessionRef.current?.receipts ?? [])
@@ -1374,11 +1304,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     setPaginationGappedMode(editor.view.dom, emailSurfaceMode === 'contextual' && gappedPagesEnabled())
   }, [editor, emailDocument, emailSurfaceMode])
 
-  // ── Productivity ledger: bind the doc + close sessions at real boundaries (§A4) ──
-  // Binding takes the document's word baseline ONCE per open (an O(doc) count, off the keystroke
-  // path) — that baseline is what makes a session's words_start free. A doc switch closes the
-  // outgoing session; `visibilitychange → hidden` closes and flushes while the page is still alive
-  // (pagehide is too late to do async work reliably, and a backgrounded tab throttles timers).
+  // ── Productivity ledger: bind the doc + close sessions at real boundaries (spec v0.2 §A4).
+  // Binding takes the word baseline ONCE per open, off the keystroke path — that is what makes a
+  // session's `words_start` free. Close on `visibilitychange → hidden`, while the page is still
+  // ALIVE: pagehide is too late for async work and a backgrounded tab throttles timers.
   useEffect(() => {
     if (!editor || !prodLedgerEnabled()) return
     const cap = getCapture()
@@ -1450,17 +1379,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   }, [editor])
 
 
-  // Detect the on-screen keyboard from the visual viewport: when it's up, the visible height
-  // drops well below the LARGEST height seen (its no-keyboard height). Comparing to the
-  // tracked max — rather than to window.innerHeight — is robust to iOS quirks where
-  // innerHeight tracks the keyboard, and we ignore offsetTop (a scroll offset, not the
-  // keyboard) so page scroll doesn't fool it. 150px threshold ignores URL-bar resizes.
+  // Detect the on-screen keyboard from the visual viewport: when it is up the visible height drops
+  // well below the LARGEST height seen. Compare against that tracked max, never `innerHeight` (iOS
+  // has it track the keyboard), and ignore `offsetTop` — a scroll offset, not the keyboard.
+  // → docs/archive/editor-surface.md#editor-keyboard-dock
   const kbMaxRef = useRef(0)
   useEffect(() => {
-    // Soft keyboards only exist on touch devices. On desktop, browser ZOOM (Ctrl +/−) also shrinks
-    // visualViewport.height — which would falsely read as "keyboard up" and hide the snapshot/sync
-    // pills (and skew the baseline so they never return). So only run this on touch; pinch-zoom on
-    // touch is filtered via visualViewport.scale below.
+    // ⚠ TOUCH ONLY: on desktop, browser ZOOM also shrinks visualViewport.height, which reads as
+    // "keyboard up" and hides the pills while skewing the baseline so they never return.
     if (!isTouchDevice()) return
     const vv = window.visualViewport
     if (!vv) return
@@ -1475,22 +1401,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     window.addEventListener('orientationchange', onOrient)
     return () => { vv.removeEventListener('resize', onVV); window.removeEventListener('orientationchange', onOrient) }
   }, [])
-  // Mirror keyboardUp to a window flag so non-React code can read it — PaginationExtension's phone
-  // edit debounce stretches while the keyboard is up (reflow mid-composition is worthless).
+  // Mirrored to a window flag for non-React readers — PaginationExtension stretches its phone edit
+  // debounce while the keyboard is up (a reflow mid-composition is worthless).
   useEffect(() => {
     ;(window as unknown as { __iwKeyboardUp?: boolean }).__iwKeyboardUp = keyboardUp
   }, [keyboardUp])
 
-  // PHONE: the footer toolbar HUGS the keyboard instead of retracting — pinned flush to the visual
-  // viewport's bottom edge (keyboard top / URL bar) at ALL times. iOS never resizes the layout
-  // viewport for the keyboard, and scrolling with the keyboard up PANS the visual viewport within
-  // it — during which WebKit composites the pan WITHOUT re-running layout, so writing a layout
-  // property (the old `bottom`) left the bar drifting anywhere the pan took it ("all over the
-  // shop"). The dock (editor/toolbarDock.ts) instead slaves a compositor-path transform:
-  // translateY(-off) on the fixed wrapper, one write per frame while the geometry moves (rAF
-  // follow loop — vv events are sparse mid-slide and unreliable in momentum tails), parked once
-  // stable. --iw-kb-offset still carries the same value for the scroll-padding reserve (outside
-  // React, so re-renders never clobber it).
+  // ⚠ PHONE: the footer toolbar HUGS the keyboard by TRANSFORM, never by a layout property. iOS
+  // never resizes the layout viewport for the keyboard and composites keyboard-up pans WITHOUT
+  // re-running layout, so a `bottom` write does not apply mid-pan and the bar drifts wherever the
+  // pan takes it. The dock (editor/toolbarDock.ts) writes translateY(-off) per frame while the
+  // geometry moves, and `--iw-kb-offset` carries the same value for the scroll-padding reserve.
+  // → docs/archive/editor-surface.md#editor-keyboard-dock
   useEffect(() => {
     if (!isTouchDevice()) return
     const vv = window.visualViewport
@@ -1501,8 +1423,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     let revealTimers: number[] = []
     const dock = createDock({
       readGeom: () => {
-        // Rubber-band detection: during elastic overscroll fixed elements ride the elastic
-        // layout viewport and vv geometry goes garbage — the dock freezes (see toolbarDock.ts).
+        // Rubber-band detection: under elastic overscroll the vv geometry is garbage, so the dock
+        // freezes whole (see toolbarDock.ts).
         const se = document.scrollingElement
         const maxY = se ? Math.max(0, se.scrollHeight - se.clientHeight) : Infinity
         const y = window.scrollY
@@ -1521,12 +1443,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         root.style.setProperty('--iw-kb-offset', `${off}px`)
         const wrap = footerWrapRef.current
         if (wrap) {
-          // KEYBOARD-SLIDE CHASE (Peter round 2, nice-to-have): iOS reports the keyboard's
-          // final geometry in one/few big resize steps — a raw write teleports the bar. A
-          // LARGE jump gets a short ease-out transition (transform-only; CSS retargets
-          // smoothly if another step lands mid-glide), so the bar visually chases the slide.
-          // Small per-frame follow deltas (pans, momentum) stay immediate — never transition
-          // those, the compositor tracking IS the mechanism.
+          // KEYBOARD-SLIDE CHASE: iOS reports the keyboard's final geometry in one or two big
+          // steps, and a raw write teleports the bar — a LARGE jump gets a short ease-out.
+          // ⚠ Small per-frame follow deltas (pans, momentum) must NEVER be transitioned: the
+          // compositor tracking IS the mechanism.
           clearTimeout(clearTransTimer)
           const jump = Math.abs(off - lastApplied)
           wrap.style.transition = jump > 60 ? 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1)' : ''
@@ -1541,11 +1461,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         const el = footerRef.current
         if (el) syncPmScrollReserve(Math.ceil(el.getBoundingClientRect().height))
         keepCaretRef.current()
-        // TAP-REVEAL (Peter round 2: "revealed the moment you tap, not on the first key"):
-        // iOS runs its OWN focus pan AFTER the keyboard geometry settles, which can re-park
-        // the caret just above the keyboard but BEHIND the pill. Two delayed no-op-guarded
-        // passes (keepCaret only scrolls when actually obstructed >4px — the single-reveal
-        // rule holds) catch whatever iOS does after our settle. Cleared on any new episode.
+        // TAP-REVEAL: iOS runs its OWN focus pan AFTER the geometry settles, which can re-park the
+        // caret above the keyboard but BEHIND the pill. Two delayed no-op-guarded passes catch
+        // whatever it does after our settle (keepCaret only scrolls when actually obstructed).
         revealTimers = [
           window.setTimeout(() => keepCaretRef.current(), 250),
           window.setTimeout(() => keepCaretRef.current(), 600),
@@ -1559,11 +1477,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     vv.addEventListener('resize', kick)
     vv.addEventListener('scroll', kick)
     window.addEventListener('resize', kick)
-    // Keyboard-up page scrolls fire window scroll even when vv events go missing (momentum
-    // tails); check() is two property reads and only kicks on real drift.
+    // vv events go missing in momentum tails and around load/orientation races, so a window-scroll
+    // listener and a 500ms drift probe re-kick the loop — the bar can never stick wrong. `check()`
+    // is two property reads and only kicks on real drift.
     window.addEventListener('scroll', check, { passive: true })
-    // Watchdog: vv events can be missed around load/orientation races — a drift probe every
-    // 500ms re-kicks the loop if the parked value has gone stale, so the bar can never stick wrong.
     const watchdog = setInterval(check, 500)
     kick()
     return () => {
@@ -1584,10 +1501,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     }
   }, [])
 
-  // The toolbar band is RESERVED space: --iw-toolbar-h mirrors the footer pill's LIVE height
-  // (grows when the style/review rows open — the RO tracks the animation) so index.css can
-  // (a) pad the phone surface's bottom and (b) scroll-padding every scroller, keeping the caret,
-  // selection handles and scrollIntoView targets ABOVE the toolbar + keyboard, never behind them.
+  // The toolbar band is RESERVED space: `--iw-toolbar-h` mirrors the pill's LIVE height (the RO
+  // tracks the row animations), so index.css can pad the phone surface and scroll-padding every
+  // scroller — the caret, selection handles and scrollIntoView targets stay ABOVE the toolbar.
   useEffect(() => {
     const el = footerRef.current
     if (!el) return
@@ -1604,28 +1520,21 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     write()
     return () => { ro.disconnect(); root.style.removeProperty('--iw-toolbar-h') }
   }, [])
-  // ENTER-CARET FIX (2026-07-11, Peter: "press Enter … the cursor isn't visible until you type"):
-  // ProseMirror's own scrollIntoView (what Tiptap's Enter/splitBlock dispatches) IGNORES CSS
-  // scroll-padding — it scrolls the new caret line to the scroller's RAW bottom edge, which is
-  // exactly the band the floating toolbar reserves via scroll-padding-bottom (index.css). The
-  // new empty line (and its caret) settled BEHIND the toolbar; the next typed character made the
-  // BROWSER's native caret-reveal run, which does honour scroll-padding — hence "appears when
-  // you type". Give PM the same reserve through its own mechanism: scrollThreshold (when a
-  // position counts as too close to the edge) + scrollMargin (how far clear to scroll), kept in
-  // sync with the live toolbar height by the ResizeObserver above.
+  // ⚠ PM's own scrollIntoView IGNORES CSS scroll-padding, so Enter parked the new caret line
+  // BEHIND the floating toolbar and only the next character — which triggers the BROWSER's native
+  // caret-reveal, and that DOES honour scroll-padding — brought it back. Give PM the same reserve
+  // through its own mechanism (scrollThreshold + scrollMargin), kept in sync with the live toolbar
+  // height by the RO above, and with ANY new floating bottom chrome.
+  // → docs/archive/editor-surface.md#editor-keyboard-dock
   const lastPmReserveRef = useRef<{ view: unknown; bottom: number } | null>(null)
   const syncPmScrollReserve = (h: number) => {
     const ed = editorRef.current
     if (!ed || ed.isDestroyed) return
-    // Pill height ONLY — do NOT add the keyboard offset. prosemirror-view's windowRect bottom is
-    // ALREADY visualViewport.height (the keyboard is excluded from PM's window box), so a
-    // kb-inclusive reserve DOUBLE-COUNTS it: the bottom rule then fires on every Enter (bounds
-    // 328 − 421 < 0) → +180px over-scroll, and the next Enter's top rule yanks −84 back — the
-    // probed "screen moves, then moves again" bounce. The toolbar band above the vv bottom is a
-    // CONSTANT h regardless of keyboard state; the CSS scroll-padding (a LAYOUT-viewport
-    // scroller mechanism) is the one that needs --iw-toolbar-h + --iw-kb-offset.
-    // +28 over the pill: PM scrolls the CARET rect clear, but the paragraph's line box extends a
-    // few px of leading below it — clear the whole line, with margin to spare.
+    // ⚠ PILL HEIGHT ONLY — never add the keyboard offset. prosemirror-view's windowRect bottom is
+    // ALREADY visualViewport.height, so a kb-inclusive reserve DOUBLE-COUNTS the keyboard: probed
+    // at +180px of over-scroll then −84 back on alternating Enters, a screen bounce per keystroke.
+    // The CSS scroll-padding is the LAYOUT-viewport mechanism, and that one does need --iw-kb-offset.
+    // +28 over the pill clears the whole line box, not just PM's caret rect.
     const bottom = h + 28
     // setProps triggers a full PM updateState — skip when nothing changed (the dock settles after
     // every scroll episode), but never skip a NEW view (editor recreation must be re-synced).
@@ -1642,14 +1551,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (el) syncPmScrollReserve(Math.ceil(el.getBoundingClientRect().height))
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // MENU FOCUS GUARD (Peter round 2: "the toolbar retracts when opening menus"): on iOS any tap
-  // outside the contenteditable blurs it → the keyboard dismisses → the docked pill (and the
-  // just-opened menu) slide to the screen bottom mid-interaction. The pill used to preventDefault
-  // its own pointerdowns, but every drop-up PANEL is PORTALED to <body> — taps inside Settings/
-  // Options/Page/Guide/Math dropped focus. One document-level capture guard covers the pill AND
-  // every portaled panel (they all carry .iw-touch-guard): while the editor owns focus,
-  // preventDefault pointerdowns on guard surfaces so focus (and the keyboard) stay put. Real
-  // form fields inside menus are exempt — they legitimately take focus.
+  // ⚠ MENU FOCUS GUARD: on iOS any tap outside the contenteditable blurs it, the keyboard
+  // dismisses, and the docked pill and its just-opened menu slide to the screen bottom. Every
+  // drop-up PANEL is PORTALED to <body>, so the guard is ONE document-level capture handler over
+  // every `.iw-touch-guard` surface — a new footer drop-up without that class retracts the
+  // keyboard. Real form fields are exempt. → docs/archive/editor-surface.md#editor-keyboard-dock
   useEffect(() => {
     if (!isTouchDevice()) return
     const onPointerDown = (e: PointerEvent) => {
@@ -1666,12 +1572,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => document.removeEventListener('pointerdown', onPointerDown, { capture: true } as EventListenerOptions)
   }, [])
 
-  // iOS touch-and-hold guard, half two (half one = .iw-touch-guard user-select CSS): a touch that
-  // STARTS on the toolbar or any of its drop-ups must never start a text selection mid-slide when
-  // the finger moves up onto the editor — touch events keep firing on their START target, so one
-  // document-level non-passive touchmove preventDefault covers every guard surface, including
-  // portaled menus. Touches that start in the editor itself are untouched (long-press selection
-  // there still works). Capture-phase + first-touch-only so a second finger can't drop the guard.
+  // iOS touch-and-hold guard, half two (half one is the `.iw-touch-guard` user-select CSS): touch
+  // events keep firing on their START target, so a finger that starts on the toolbar and slides
+  // onto the editor would begin a selection. ONE document-level non-passive touchmove
+  // preventDefault covers every guard surface, portaled menus included; touches that start in the
+  // editor are untouched. Capture-phase + first-touch-only, so a second finger cannot drop it.
   useEffect(() => {
     if (!isTouchDevice()) return
     let guarded = false
@@ -1767,51 +1672,36 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     const finish = () => {
       if (done) return
       done = true
-      // BOTH platforms: start the coast FIRST, on this light frame — 'inkwave:reveal-imminent'
-      // freezes + class-swaps every drifting surface (shell + this editor's own, in lockstep —
-      // see Scroll.tsx). The freeze must NOT share the reveal commit (the busiest frame of the
-      // load): the compositor kept drifting while that commit blocked the main thread, so a
-      // same-commit freeze snapshotted a stale offset and the waves snapped ~7px BACKWARD when
-      // the coast started (the reveal flicker, Chrome + Firefox desktop, 2026-07-09).
+      // ⚠ START THE COAST FIRST, on this LIGHT frame: the freeze must not share the reveal commit,
+      // the busiest frame of the load. The compositor keeps drifting while that commit blocks the
+      // main thread, so a same-commit freeze snapshots a stale offset and the waves snap ~7px
+      // BACKWARD. → docs/archive/editor-surface.md#editor-reveal
       window.dispatchEvent(new Event('inkwave:reveal-imminent'))
       if (isTouchDevice()) {
-        // PHONE (Peter's spec): waves decelerate first; at 1.5s the shell drops instantly and the
-        // page + chrome fade IN over the still-coasting waves for the remaining 0.5s — the fade
-        // completes at 2s, the moment the waves reach rest (see Edit.tsx + the phone transition
-        // in Scroll.tsx + .iw-chrome-in below).
-        revealTimer = setTimeout(reveal, 1200) // 0.8s fade lands exactly in the coast tail (ends at 2s = wave rest)
+        // PHONE: waves decelerate first, the shell drops at 1.5s, and the page fades in over the
+        // still-coasting waves so the fade completes at 2s — the moment the waves reach rest.
+        revealTimer = setTimeout(reveal, 1200)
         return
       }
-      // DESKTOP (Peter, 2026-07-10, second tune): the page fade-in starts AT coast start — no
-      // extra wait (the 1s fade runs over the first 1s of the 2.5s coast; the slowdown stays
-      // visible for another 1.5s after the fade completes). Two clean frames between the coast
-      // class swap and the heavy reveal commit, as before — the coast is compositor-driven and
-      // already easing smoothly when the commit lands (the 2026-07-09 backward-flick fix).
+      // DESKTOP: the page fade-in starts AT coast start, with two clean frames between the class
+      // swap and the heavy commit, so the compositor-driven coast is already easing when it lands.
       revealRaf = requestAnimationFrame(() => { revealRaf = requestAnimationFrame(reveal) })
-      // rAF can starve on a wedged/backgrounded main thread — the reveal must still happen
-      // (bulletproof cap; reveal is idempotent).
+      // rAF can starve on a wedged/backgrounded main thread and the reveal must still happen.
       revealTimer = setTimeout(reveal, 1500)
     }
-    // ── THE DELIBERATE DELAY (Peter, 2026-07-17: "make it show at least one loop before the file
-    // comes up. purposefully delay it. (And use that time to warm up the document)") ────────────
-    // "Warm up the document" needs NO code of its own: fonts.ready, the first pagination measure
-    // and the editor's own mount are ALREADY running through this window. The delay just stops the
-    // reveal cutting them short — the warm-up is what the load was doing anyway, given room.
-    //
-    // THE FLAG IS READ INLINE, never imported from waveVideo: importing a helper to decide whether
-    // to wait would pull the whole video module into the editor bundle on every load and make "off
-    // costs nothing" false (the reason btDebug/textRender read their flags inline, below).
-    // OFF ⇒ `waveLooped` is an already-resolved promise and this gate is byte-for-byte the old one.
+    // ── THE DELIBERATE DELAY: show at least one wave-video loop before the document appears.
+    // "Warm up the document" needs no code of its own — fonts.ready, the first pagination measure
+    // and the editor's mount are ALREADY running through this window; the delay only stops the
+    // reveal cutting them short.
+    // ⚠ THE FLAG IS READ INLINE, never imported from waveVideo: importing a helper to decide
+    // whether to wait would pull the whole video module into the editor bundle on every load.
     let waveVideoOn = false
     try { const v = localStorage.getItem('inkwave:waveVideo'); waveVideoOn = v === '1' || v === 'debug' } catch { /* private mode */ }
-    // ASK, THEN SUBSCRIBE, in ONE synchronous block — the video can loop before we get here, and a
-    // bare addEventListener would then wait for an event already in the past, forever. waveVideo
-    // fires this on EVERY exit (wrap, bail, decode timeout, autoplay refusal, settle), so it is a
-    // signal that always arrives.
-    //
-    // AND IT IS CAPPED HERE, INDEPENDENTLY. That guarantee only holds if the MODULE LOADED — a
-    // chunk 404 or a parse error fires nothing, and the failure mode would be a document that never
-    // appears. The document must never depend on the animation succeeding.
+    // ⚠ ASK, THEN SUBSCRIBE, IN ONE SYNCHRONOUS BLOCK — the video can loop before we get here, and
+    // a bare addEventListener would wait for an event already in the past, forever. waveVideo fires
+    // this on EVERY exit, so it always arrives — but it is CAPPED here independently anyway,
+    // because that guarantee holds only if the module LOADED. The document must never depend on
+    // the animation succeeding. → docs/archive/editor-surface.md#editor-reveal
     const waveLooped: Promise<void> = !waveVideoOn
       ? Promise.resolve()
       : new Promise<void>((res) => {
@@ -1820,13 +1710,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           window.addEventListener('inkwave:wave-video-loop', on)
           setTimeout(() => { console.warn('[inkwave] wave video never reported a loop — revealing anyway'); on() }, 7000)
         })
-    // The 1200ms safety cap predates the video and would fire straight through a ~2s loop, undoing
-    // the delay on every load. With the video ON it becomes the loop gate's own backstop (7s) plus
-    // the old margin; with it OFF the constant is untouched.
+    // The 1200ms safety cap predates the video and would fire straight through a ~2s loop; with the
+    // video ON it becomes the loop gate's own backstop plus the old margin, and OFF it is untouched.
     const cap = setTimeout(finish, waveVideoOn ? 8200 : 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
-    // The pagination extension measures in BOTH page modes now (gap widgets / break markers), so
-    // always wait for its first measure — the 1.2s cap covers any mode where it never fires.
+    // Pagination measures in BOTH page modes, so always wait for its first measure — the cap covers
+    // any mode where it never fires.
     const paginationReady: Promise<void> =
       (window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady
         ? Promise.resolve()
@@ -1840,19 +1729,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { clearTimeout(cap); if (revealTimer) clearTimeout(revealTimer); if (revealRaf) cancelAnimationFrame(revealRaf) }
   }, [editor])
 
-  // ── iOS break-table store test (flag `inkwave:btDebug`, default OFF) ──────────────────────────
-  // Peter opens `/?btDebug=1` on his iPhone 8, on the live site. The store's OPFS layer is proved
-  // on Chromium, but Chromium has createWritable — iOS takes opfsWrite.ts's OTHER branch (worker
-  // createSyncAccessHandle, ONE handle per file or it throws), which has never executed with this
-  // store and which CI physically cannot reach. The store's first execution found two bugs that were
-  // invisible until the code ran; this asks those same questions on the device.
-  // ZERO COST WHEN OFF, BY CONSTRUCTION: the flag read is a localStorage get and the module is a
-  // dynamic import, so nothing of this reaches the bundle — let alone the typing path — unless
-  // Peter turns it on. It self-mounts a fullscreen overlay; it touches no editor state.
+  // ── iOS break-table store test (`inkwave:btDebug`, default OFF) — the on-device half of the OPFS
+  // store's proof: Chromium has createWritable, iOS takes opfsWrite.ts's OTHER branch, and CI
+  // cannot reach it. ⚠ Flag read INLINE + dynamic import, so nothing reaches the bundle when off.
+  // → docs/archive/editor-surface.md#editor-lazy-chunks
   useEffect(() => {
-    // The flag is read INLINE, not imported from the debug module: importing a `btDebugEnabled()`
-    // helper to decide whether to import the module would pull the module on every load and make
-    // "off costs nothing" false — the exact reason textRenderFlag.ts lives alone (see its header).
     let on = false
     try { const v = localStorage.getItem('inkwave:btDebug'); on = v === '1' || v === 'race' } catch { /* private mode */ }
     if (!on) return
@@ -1861,17 +1742,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { cancelled = true }
   }, [])
 
-  // ── textRender probe surface — MEASUREMENT ONLY, never a user feature ─────────────────────────
-  // The plaintext page renderer is measured IN THE REAL APP — live doc, real shipped fonts, real
-  // DPR — never a harness that reimplements the context (the trap that has burned this codebase
-  // five times). This is a 1477-line probe that installs window.__iwTextRenderProbe and walks the
-  // doc; it must NEVER install for a real writer.
-  //
-  // It is DELIBERATELY NOT gated on textRenderEnabled(): that flag is now DEFAULT ON (the rich
-  // /snapshot pane ships live), so gating the probe on it would hand every writer the harness. It
-  // arms instead on the FRESH `?textRender` URL param — what every .prove.mjs navigates to (and only
-  // them) — so a normal load of `/` never pays for the chunk. Dynamic import ⇒ out of the bundle
-  // entirely when unarmed.
+  // ── textRender probe surface — MEASUREMENT ONLY, and it must NEVER install for a real writer.
+  // ⚠ DELIBERATELY NOT gated on `textRenderEnabled()`: that flag is DEFAULT ON, so gating the probe
+  // on it would hand every writer the harness. It arms on the FRESH `?textRender` URL param — what
+  // every .prove.mjs navigates to, and only them. R5: the renderer is measured IN THE REAL APP,
+  // never in a harness that reimplements the context.
+  // → docs/archive/editor-surface.md#editor-lazy-chunks
   useEffect(() => {
     if (!editor) return
     let armed = false
@@ -1885,13 +1761,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     }
   }, [editor])
 
-  // Live word count for the record panel. Debounced: getText() walks the whole doc, and a panel
-  // readout doesn't need per-keystroke precision — 300ms after the last edit is indistinguishable.
-  // The readout only renders INSIDE the open ◈ panel (ReceiptPanel is controlled on all platforms
-  // now), so while it's CLOSED we don't count AT ALL — the O(doc) string build + unicode regex +
-  // the editor-shell re-render otherwise landed in every typing pause (desktop counted every 300ms
-  // of a 100-page doc for a hidden number — 2026-07-11 ablation). Opening the panel counts
-  // immediately (the effect re-runs on receiptOpen) and keeps counting while open.
+  // ⚠ WORD COUNT RUNS ONLY WHILE THE ◈ PANEL IS OPEN, on both platforms: `getText()` is an O(doc)
+  // string build plus a unicode regex plus a shell re-render, and it was landing in every typing
+  // pause for a number nobody could see. Debounced too — a panel readout does not need
+  // per-keystroke precision. → docs/archive/editor-surface.md#editor-word-count
   useEffect(() => {
     if (!editor) return
     const touch = isTouchDevice()
@@ -2040,17 +1913,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       .then(async () => { ensureDocFresh(); await work() })
       .catch((err) => { console.warn('[inkwave] snapshot work failed:', err) })
   }
-  // THE CLOCK STARTS AT REAL WORK — a document change the WRITER caused.
-  //
-  // Both halves are needed, and each was PROBED (scripts/tabdoc-probe/unsynced.mjs):
-  //  · A docChanged transaction ALONE is wrong: the editor fires them during LOAD, so the clock
-  //    started at page load and the notice would nag someone who opened Inkwave, typed nothing and
-  //    walked away (cells 1+3 caught exactly that).
-  //  · `beforeinput` alone is wrong too: it never fires here — ProseMirror's input pipeline means
-  //    the event is simply absent (measured: 0 events at document capture while typing). A signal
-  //    that never arrives silently disables the feature, which is this codebase's signature bug.
-  // So: user input ARMS the clock, and the next real document change starts it. Caret moves and
-  // load-time transactions do neither.
+  // ⚠ THE CLOCK STARTS AT REAL WORK — a document change the WRITER caused. Both halves are needed
+  // and both were PROBED: a docChanged transaction ALONE starts it at PAGE LOAD (the editor fires
+  // them then), and `beforeinput` alone never fires at all under ProseMirror — a signal that never
+  // arrives silently disables the feature. So user input ARMS, the next real change STARTS.
+  // → docs/archive/editor-surface.md#editor-unsynced-clock
   useEffect(() => {
     if (!editor) return
     const dom = editor.view.dom
@@ -2060,27 +1927,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { dom.removeEventListener('keydown', arm); dom.removeEventListener('paste', arm) }
   }, [editor])
 
-  // A failed read must never REPLACE a good list with an empty one — the panel would then assert,
-  // in the UI, the exact lie the storage layer no longer tells. Keep what we have and log.
+  // ⚠ R1: a failed read must never REPLACE a good list with an empty one — the panel would then
+  // assert, in the UI, the exact lie the storage layer no longer tells.
   const refreshSnapshots = async (docId: string) => {
     const r = await readSnapshotArchive(docId)
     if (r.kind === 'error') { console.warn('[inkwave] snapshot list refresh skipped — archive unreadable:', r.error); return }
     setSnapshots(r.snapshots.map(toSnapshotMeta))
   }
 
-  // Load existing snapshots when the document opens / switches. The LIST loads EAGERLY — rapid snapshot
-  // scrubbing is a core feature, so the reviewer never waits for it. The OTS Bitcoin re-check does NOT
-  // run here: it re-writes the compressed snapshot file per snapshot + does serial calendar round-trips
-  // (~10s), which was the startup lag. It now runs only when the receipts panel is opened (runOtsSweep),
-  // throttled. New snapshots are still stamped on creation, so nothing is lost by not sweeping on load.
+  // ⚠ THE SNAPSHOT LIST LOADS EAGERLY — rapid scrubbing is a core feature, so the reviewer never
+  // waits — while the OTS Bitcoin re-check MUST NOT run here (per-snapshot rewrites + serial
+  // calendar round-trips, ~10s of startup lag); it runs throttled when the receipts panel opens.
+  // ⚠ R1: a failed read here would render "no snapshots yet" over a full archive — the storage
+  // bug's own claim, made by the UI, as the writer opens his thesis. Say it plainly instead.
+  // → docs/archive/editor-surface.md#editor-archive-reads
   useEffect(() => {
     const docId = doc.id
     let cancelled = false
-    // Reads through the same cache, so this still warms the full list for scrubbing.
-    // THE EAGER LOAD IS WHERE A FAILED READ WOULD BECOME VISIBLE AS A LIE: leave `snapshots` at []
-    // and the receipts panel renders "no snapshots yet" over a full archive — the storage bug's
-    // exact claim, now made by the UI, at the moment the writer opens his thesis. It also had no
-    // `.catch`, so the throw would only ever be an unhandled rejection. Say it plainly instead.
     void readSnapshotArchive(docId).then((r) => {
       if (cancelled) return
       if (r.kind === 'error') {
@@ -2109,12 +1972,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         await runPeriodRef.current()
         const nudgeWord = event.replacement ? { from: event.lemma, to: event.replacement } : undefined
         // State holds metadata only — read the FULL previous snapshot (cached) for the diff below.
-        // THE SILENT-DISABLE SEAM. createSnapshotIfChanged reads the archive itself and now refuses
-        // rather than write over a history it couldn't read — correct, but on its own it would make
-        // provenance stop accruing with nothing but a console warning (enqueueSnapshotWork swallows
-        // the throw). Peter would keep writing, believing he was building his authorship trace, and
-        // find the gap when it was too late to fix. Reading through the guard here means the failure
-        // is SEEN. Typing is untouched either way: this whole queue runs off the typing path.
+        // ⚠ THE SILENT-DISABLE SEAM (R4): `createSnapshotIfChanged` refuses rather than write over
+        // a history it could not read, which on its own would make provenance stop accruing behind
+        // a console warning while the writer believed he was building his trace. Reading through
+        // the guard makes the failure SEEN. This queue is off the typing path either way.
         const before = await snapshotsForAction('this snapshot')
         if (!before) return
         const prevSnap = before[before.length - 1] ?? null
@@ -2138,7 +1999,6 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Manual "save version" — always creates a snapshot regardless of whether content changed.
   function saveVersion() {
     enqueueSnapshotWork(async () => {
-      // State holds metadata only — read the FULL previous snapshot (cached) for the diff below.
       // Guarded for the same reason as the word-nudge path: a "Save version" that silently did
       // nothing is the worst possible answer at the moment the writer is deliberately marking work.
       const before = await snapshotsForAction('this version')
@@ -2185,19 +2045,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     })
   }
 
-  // THE ARCHIVE READ FOR ANY ACTION THAT PUBLISHES OR OVERWRITES THE RECORD.
-  //
-  // `listSnapshots` now THROWS when it cannot read the archive rather than answering `[]` — because
-  // `[]` meant "no history" and every one of these actions would then have written or exported an
-  // empty history over Peter's real one (see provenance/snapshots.ts). But a throw reaching a click
-  // handler is just a button that does nothing, so each action reads through here: on a failure the
-  // action is CANCELLED and says so, instead of quietly shipping a gutted record.
-  //
-  // Cancelling is the safe direction for all of them and none of it touches typing: an export, a
-  // cloud sync and a folder mirror are all re-runnable, and the archive is still on disk. What is
-  // NOT re-runnable is a .studio the writer believes holds his proof, or a OneDrive copy overwritten
-  // with one snapshot. Note this returns `[]` happily for a genuinely new document — an established
-  // emptiness is not a failed read, and first-save must keep working forever.
+  // ⚠ THE ARCHIVE READ FOR ANY ACTION THAT PUBLISHES OR OVERWRITES THE RECORD (R1). `listSnapshots`
+  // THROWS rather than answering `[]`, because `[]` meant "no history" and every one of these
+  // actions would then export or write an empty history over the real one — but a throw reaching a
+  // click handler is just a button that does nothing. So each action reads through here and is
+  // CANCELLED with a message. Cancelling is the safe direction: an export, a sync and a mirror are
+  // all re-runnable; a .studio the writer believes holds his proof is not. An established
+  // emptiness is NOT a failed read, so a genuinely new document still gets `[]`.
+  // → docs/archive/editor-surface.md#editor-archive-reads
   async function snapshotsForAction(action: string): Promise<Snapshot[] | null> {
     const r = await readSnapshotArchive(docRef.current.id)
     if (r.kind === 'error') {
@@ -2238,10 +2093,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function mirrorIfActive() {
     ensureDocFresh() // mirrors write docRef — never a stale one
     if (folderActiveRef.current) {
-      // The archive read is separated from the WRITE deliberately. Both used to land in the same
-      // `.catch`, which would now report a transient archive fault as "your folder permission
-      // lapsed" and drop the link — a wrong story and a needless interruption. A failed read means
-      // only: skip THIS mirror. The link stays live and the next kick mirrors the full archive.
+      // ⚠ The archive READ is separated from the WRITE deliberately: sharing a `.catch` reports a
+      // transient archive fault as "your folder permission lapsed" and drops the link. A failed
+      // read means only "skip THIS mirror" — the next kick mirrors the full archive.
       void readSnapshotArchive(docRef.current.id)
         .then((r) => {
           if (r.kind === 'error') { console.warn('[inkwave] folder mirror skipped — archive unreadable:', r.error); return }
@@ -2253,9 +2107,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     }
     if (oneDriveActiveRef.current) scheduleOneDriveSync()
     if (gdriveActiveRef.current) {
-      // Silent auto-mirror: a failed archive read skips this cycle rather than pushing a short
-      // archive at Drive. `.catch(() => {})` already swallowed sync errors here; the read failure
-      // joins them, but it must never reach syncToGoogleDrive.
+      // Silent auto-mirror: a failed archive read skips this cycle rather than pushing a SHORT
+      // archive at Drive. It must never reach `syncToGoogleDrive`.
       void readSnapshotArchive(docRef.current.id)
         .then((r) => {
           if (r.kind === 'error') { console.warn('[inkwave] Drive mirror skipped — archive unreadable:', r.error); return }
@@ -2272,18 +2125,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   function oneDriveWriteNow() {
     oneDriveLastWriteRef.current = Date.now()
     // Same rule as the other silent mirrors: never PUT an archive derived from a failed read.
-    //
-    // ⚠ THIS CHECK IS DEFENCE IN DEPTH, NOT THE LOAD-BEARING GUARD — recorded because it was
-    // claimed to be the latter, and a lane that trusts the wrong line stops guarding the right one.
-    // PROBED + mutation-proved (`storage/cloudLocalRead.test.ts`): the PRE-FIX composition
-    // `listSnapshots(id).then(s => syncToOneDrive(doc, s)).catch(() => {})` ALSO refuses — because
-    // `listSnapshots` now THROWS on a failed read and the fire-and-forget `.catch` swallows the
-    // throw before the sync is ever called. What actually stands between a failed local read and
-    // Peter's archive is `readSnapshotsFromDisk`'s throw (M13: restore its `catch { return [] }`
-    // and cells die). This check earns its place for two OTHER reasons, both worth keeping: it
-    // makes the refusal VISIBLE (a named warning, not a silently swallowed rejection), and the
-    // `SnapshotRead` union is what stops the next edit here writing `.catch(() => [])` — the one
-    // caller shape that still destroys the archive, pinned as a known-negative in that file.
+    // ⚠ THIS CHECK IS DEFENCE IN DEPTH, NOT THE LOAD-BEARING GUARD — recorded because it was once
+    // claimed to be the latter, and a lane trusting the wrong line stops guarding the right one.
+    // What stands between a failed local read and the archive is `readSnapshotsFromDisk`'s THROW
+    // (mutation-proved in `storage/cloudLocalRead.test.ts`). This earns its place by making the
+    // refusal VISIBLE, and because the `SnapshotRead` union is what stops the next edit here
+    // writing `.catch(() => [])`. → docs/archive/editor-surface.md#editor-archive-reads
     void readSnapshotArchive(docRef.current.id)
       .then((r) => {
         if (r.kind === 'error') { console.warn('[inkwave] OneDrive mirror skipped — archive unreadable:', r.error); return }
@@ -2406,10 +2253,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // Print / Export PDF — the print stylesheet renders just the writing; the browser dialog lets the
   // writer pick a printer or "Save as PDF". Set the title so the PDF gets a sensible filename.
   function printDoc() {
-    // PRINT FLOOR (round-6): breaks may be lazily stale between a scoped measure and its idle
-    // refresh — print is a canonical consumer and must NEVER see that. The pagination plugin runs
-    // a synchronous FULL canonical measure + repaint on this event (belt) and on 'beforeprint'
-    // (braces — Chromium fires it before the dialog; some engines are flaky, hence the event).
+    // ⚠ PRINT FLOOR: breaks may be lazily stale between a scoped measure and its idle refresh, and
+    // print is a canonical consumer that must NEVER see that. The plugin runs a synchronous FULL
+    // measure on this event (belt) and on 'beforeprint' (braces — some engines are flaky).
     window.dispatchEvent(new Event('inkwave:measure-now'))
     const prev = document.title
     document.title = (docRef.current.title || 'inkwave').trim()
@@ -2438,13 +2284,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     if (!ed) return
     exportEquationsDownload(ed.getJSON() as Parameters<typeof exportEquationsDownload>[0], docRef.current.title || 'inkwave')
   }
-  // Fetch a cloud file's bytes THROUGH the OPFS open cache: change-tag match → cached bytes, no
-  // download (instant); mismatch/unknown → download + refill; download failed but bytes cached →
-  // serve the stale copy (airplane-mode opens keep working). Returns null only with nothing at all.
-  // A cache HIT only ever compares against a TRUSTED tag: the tag from a fresh listing, or a live
-  // metadata GET when the picker was still showing its cached listing — a stale listing tag could
-  // false-hit and silently open OUTDATED content, which the next sync would then write back over
-  // the newer remote copy. A wrong STORED tag, by contrast, can only cause a miss (safe).
+  // Fetch a cloud file's bytes THROUGH the OPFS open cache: tag match → cached bytes; mismatch →
+  // download + refill; download failed but bytes cached → the stale copy (airplane-mode opens keep
+  // working). ⚠ A cache HIT may only ever compare a TRUSTED tag (a fresh listing, or a live
+  // metadata GET) — a stale listing tag can FALSE-HIT and open outdated content that the next sync
+  // writes back over the newer remote. A wrong STORED tag can only cause a miss, which is safe.
   async function fetchCloudBytes(
     provider: OpenCacheProvider,
     itemId: string,
@@ -2618,11 +2462,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       folderActiveRef.current = true
       setNeedsReconnect(false)
       setFileName(h.name)
-      // LOAD-PATH RULE: re-link only — do NOT rebuild + rewrite the bundle here. The old load-time
-      // write re-read/re-encoded/rewrote the whole (possibly 20 MB) file before anything changed and
-      // was most of the ~1.5s open block. The file already holds our last write and nothing local has
-      // changed since load, so the verified link means "in sync"; the next provenance checkpoint
-      // mirrors as usual (mirrorIfActive), which also runs the once-per-session grow-only merge then.
+      // ⚠ LOAD-PATH RULE: RE-LINK ONLY — never rebuild and rewrite the bundle here. That write
+      // re-read, re-encoded and rewrote a possibly-20MB file before anything had changed, and was
+      // most of the ~1.5s open block. The next provenance checkpoint mirrors as usual.
       setLastFileSave(Date.now())
       return
     }
@@ -2712,27 +2554,23 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     void SessionRunner.open(docId).then(async (runner) => {
       if (cancelled || !runner || docRef.current.id !== docId) return
       sessionRef.current = runner
-      // Adopt the server set + repaint IMMEDIATELY; the receipt recovery/purge below is heavy
-      // (snapshot archive reads + an Ed25519 verify per historical receipt chain) and used to run
-      // right here — landing in the first seconds after load, where it competed with first scrolls
-      // and keystrokes (part of the "shaky first 2 seconds"). It now runs at browser idle.
+      // Adopt the server set + repaint IMMEDIATELY. The recovery/purge below is heavy (archive
+      // reads + an Ed25519 verify per historical chain) and must run at browser IDLE — right here
+      // it competed with the writer's first scrolls and keystrokes.
       priorReceiptsRef.current = docRef.current.scasReceipts ?? []
       scasRef.current!.useServerSet(runner.current.lemmas, runner.current.setVersion)
       if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
 
       const recoverAndPurge = async () => {
       if (cancelled || docRef.current.id !== docId) return
-      // Recover any receipts from previous sessions that were lost due to the cross-session
-      // overwrite bug (now fixed). Scan OPFS snapshots; collect receipts from sessions that
-      // appear in the snapshots but not in doc.scasReceipts. Only adds receipts from sessions
-      // whose counter-0 is present (so the chain can be verified end-to-end). Saves back to
-      // OPFS so future exports include the full receipt history.
+      // Recover receipts lost to the old cross-session overwrite bug: collect any that appear in
+      // the snapshots but not in `doc.scasReceipts`, and only from sessions whose counter-0 is
+      // present, so the chain stays verifiable end-to-end.
       const knownSigs = new Set((docRef.current.scasReceipts ?? []).map((r) => r.signature))
       const knownSessions = new Set((docRef.current.scasReceipts ?? []).map((r) => r.sessionToken))
-      // THIS PASS DELETES SNAPSHOTS, so it may never run on a view of the archive it isn't sure of.
-      // On a failed read the old `[]` made it a no-op by luck (no candidates ⇒ no badSessions); that
-      // luck is not a guard, and the purge below reasons from ABSENCE ("no good receipt for this
-      // session ⇒ purge it"), which is precisely the reasoning an empty archive corrupts. Bail.
+      // ⚠ THIS PASS DELETES SNAPSHOTS, so it may never run on a view of the archive it is unsure
+      // of. On a failed read the old `[]` was a no-op BY LUCK, and the purge reasons from ABSENCE
+      // ("no good receipt ⇒ purge") — exactly the reasoning an empty archive corrupts (R1). Bail.
       const recoverRead = await readSnapshotArchive(docId)
       if (recoverRead.kind === 'error') {
         console.warn('[inkwave] receipt recovery skipped — archive unreadable:', recoverRead.error)
@@ -2763,11 +2601,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         commitDoc(updated)
       }
 
-      // Purge sessions whose receipts fail cryptographic verification (bad signature = was signed
-      // with a dev key, or corrupted by the kicks-array reference bug). Done once at session open
-      // so the next export bundle only includes verifiable receipt chains. Also removes any OPFS
-      // snapshots whose embedded receipts were all from purged sessions (so content integrity
-      // checks won't fail on receipts that are no longer in bundle.receipts).
+      // Purge sessions whose receipts fail cryptographic verification, once at session open, so the
+      // next export bundle only carries verifiable chains. (A bad signature means signed with a dev
+      // key, or corrupted by the old kicks-array reference bug.)
       const pubKey = signingPublicKeys()
       const bySession = new Map<string, SignedReceipt[]>()
       for (const r of (docRef.current.scasReceipts ?? [])) {
@@ -2797,29 +2633,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           console.warn('[inkwave] receipt purge skipped — archive unreadable:', afterRead.error)
           return
         }
-        // ⚠ THIS LOOP USED TO `deleteSnapshot` EVERY SNAPSHOT WHOSE RECEIPTS WERE ALL "BAD", AND IT
-        // DESTROYED PETER'S HISTORY — 79 Bitcoin-anchored snapshots down to 4, twice, reproduced in a
-        // clean browser here (79 → 78 → 76 → 73, a few seconds after load, one per yielded tick).
-        //
-        // THE CAUSE IS THE PREMISE, NOT THE LOOP. A chain that fails `verifyChain` has NOT been shown
-        // to be forged — it has been shown to be unverifiable BY THIS BUILD, WITH THIS KEY. And the
-        // commonest reason is completely innocent: `signingPublicKeyHex()` (provenance/receipts.ts)
-        // returns the DEV key under `import.meta.env.DEV`, so every document signed by the production
-        // service fails every chain the moment it is opened on localhost. Peter develops on localhost
-        // and opens his real thesis there. Every receipt-bearing snapshot was therefore "bad" and was
-        // deleted; the survivors were exactly the receipt-less ones (`snapReceipts.length > 0` spares
-        // them), which is why the count always settled on the same small number.
-        // A rotated key, an older bundle, a partial receipt set or a future key-id would each do the
-        // same thing to a real user in production.
-        //
-        // THE RULE, and it is this project's own, one level along: a failed READ is not an empty
-        // archive (readSnapshotsFromDisk), a failed read is not an absent document (opfs.ts) — and a
-        // failed VERIFICATION is not a forged snapshot. None of those may be answered with deletion.
-        // Provenance is append-only; the writer's evidence is not ours to discard to make a check go
-        // green. The receipt chain is reported as unverified (the ReceiptPanel already surfaces chain
-        // status), and the snapshots STAY. Nothing here may delete provenance again — if a genuine
-        // forgery case ever needs handling, it belongs behind an explicit writer-initiated action,
-        // never an automatic background sweep.
+        // ⚠ A FAILED VERIFICATION IS NOT A FORGED SNAPSHOT, and NOTHING HERE MAY DELETE PROVENANCE.
+        // This loop once deleted every snapshot whose receipts were all "bad" and destroyed 79
+        // Bitcoin-anchored snapshots down to 4, twice. The premise was the bug: a failed
+        // `verifyChain` shows only that THIS BUILD, with THIS KEY, could not verify it — and the
+        // commonest cause is innocent (a production-signed document opened against the dev key on
+        // localhost). Report the chain as unverified; the snapshots STAY. A genuine forgery case
+        // belongs behind an explicit writer-initiated action, never a background sweep.
+        // → docs/archive/editor-surface.md#editor-no-auto-delete
         const unverifiable = afterRead.snapshots.filter((s) => {
           const rs = s.receipts ?? []
           return rs.length > 0 && rs.every((r) => badSessions.has(r.sessionToken))
@@ -2843,12 +2664,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
     return () => { cancelled = true }
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The signing period. With a session: sign the period's receipt (content + resolved kicks), chain
-  // it, and adopt the next server-issued set. Without one: fall back to a local resample (M0).
-  // Verdicts are frozen (locked ∪ liveKicks persist), so neither reflows committed text. Held in a
-  // ref so the interval always runs the latest closure (no stale editor/refs).
-  // Returns a promise so the nudge handler can await signing before snapshotting,
-  // ensuring the snapshot's bundleHash covers the receipt for this nudge.
+  // The signing period: with a session, sign the period's receipt and adopt the next server set;
+  // without one, fall back to a local resample. Verdicts are frozen, so neither reflows committed
+  // text. Held in a REF so the interval always runs the latest closure, and it RETURNS A PROMISE so
+  // the nudge handler can await signing — the snapshot's bundleHash must cover this nudge's receipt.
   const runPeriodRef = useRef<() => Promise<void>>(async () => {})
   runPeriodRef.current = async () => {
     const ed = editorRef.current
@@ -2953,12 +2772,10 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   // while the keyboard is up. Touchscreen laptops keep it (they report hover via trackpad).
   const isTouch = isTouchDevice()
 
-  // A single atom node (citation / reference list / math) selected via click-hold shouldn't summon the
-  // TEXT formatting bar — those have their own popovers (e.g. the citation locator card). Treat that as
-  // "no text selection" for the style bar. (selIsAtomNode is state, mirrored by the selection effect —
-  // the render body must not read editor.state now that per-transaction re-renders are off.)
-  // On phone with keyboard up + text selected: show ONLY the style bar (not the full toolbar).
-  // styleBarOpen keeps the main row alive while the user is actively formatting.
+  // A single atom node (citation / reference list / math) selected by click-hold must not summon
+  // the TEXT formatting bar — those carry their own popovers — so it reads as "no text selection".
+  // ⚠ `selIsAtomNode` is STATE, mirrored by the selection effect: the render body must never read
+  // `editor.state` now that per-transaction re-renders are off.
   const selectionOnPhone = isTouch && keyboardUp && !selectionEmpty && !selIsAtomNode
   const selectionOnDesktop = !isTouch && !!editor && !selectionEmpty && !selIsAtomNode
   // The main row no longer retracts while typing on phone — the footer hugs the keyboard instead
@@ -3094,21 +2911,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
         {fileOpenError && (
           <div
             // KIND, not one voice for everything: the blind-overwrite guard's messages are GOOD
-            // news ("nothing was overwritten"), and shouting them in the red ⚠ error banner told
-            // the writer their thesis was in trouble at the moment it had just been protected.
-            // The info variant is calm and themed (tokens with day fallbacks); the error variant
-            // keeps its existing red.
-            // `iw-nightable` on the INFO variant only: the night tokens (--iw-ink et al) are scoped
-            // INSIDE that class, so without it these vars would silently resolve to their day
-            // fallbacks on a night background. It also re-surfaces the banner to dolphin grey in
-            // night, which is right. The ERROR variant must keep its red — being alarming is its
-            // job — so it stays outside the themed surface.
+            // news, and shouting them in the red ⚠ banner told the writer their thesis was in
+            // trouble at the moment it had just been protected. ⚠ `iw-nightable` on the INFO
+            // variant ONLY — the night tokens are scoped inside that class, and the ERROR variant
+            // must keep its red. → docs/archive/editor-surface.md#editor-banner-kind
             className={`fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-3 px-4 py-2 text-sm font-serif${fileOpenError.kind === 'info' ? ' iw-nightable' : ''}`}
             style={fileOpenError.kind === 'info'
               ? {
-                  background: '#faf7ff', // night: .iw-nightable overrides to dolphin grey; a token here would
-                  // have to carry a day value that disagrees with --iw-subtle-bg's #fcfcfb, which
-                  // is drift for no gain: this variant is already themed by the class.
+                  background: '#faf7ff', // literal: .iw-nightable already overrides it at night, and
+                  // a token here would need a day value that disagrees with --iw-subtle-bg.
                   borderBottom: '1px solid var(--iw-nightable-border, #e7e5e4)',
                   color: 'var(--iw-ink, #302438)',
                 }
@@ -3143,11 +2954,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 setEmailSurfaceMode(mode)
               }}
               onDocChange={(updated) => {
-                // A header edit is a document edit, and NOTHING else saves it: scheduleSave is
-                // driven by the editor's own update handler, which a header field never fires. Left
-                // to onDocChange alone the headers lived in React state and vanished on reload
-                // unless the writer happened to also touch the body. docRef is updated FIRST so any
-                // snapshot/finalise work that reads it sees the new headers immediately.
+                // ⚠ A header edit is a document edit and NOTHING else saves it — autosave is driven
+                // by the editor's own update handler, which a header field never fires. This is the
+                // live instance of the commitDoc rule.
                 commitDoc(updated)
               }}
             >
@@ -3342,11 +3151,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             // writing; a bottom dock lifts the whole toolbar above it (--iw-pdf-room-bottom).
             left: 'var(--iw-pdf-room-left, 0px)',
             right: 'var(--iw-pdf-room, 0px)',
-            // Phone: the keyboard/URL-bar lift is NOT part of `bottom` — the dock
-            // (editor/toolbarDock.ts) writes translate3d(0,-kbOffset,0) imperatively on this
-            // wrapper per frame. transform composites during iOS pans; `bottom` (layout) does
-            // NOT apply mid-pan, which left the bar floating "all over the shop". Never move
-            // the lift back into a layout property, and never transition transform here.
+            // ⚠ Phone: the keyboard lift is NOT part of `bottom` — the dock writes a transform on
+            // this wrapper per frame. NEVER move it back into a layout property, and never
+            // transition transform here.
             bottom: 'var(--iw-pdf-room-bottom, 0px)',
             willChange: isTouch ? 'transform' : undefined,
             transition: isTouch ? 'left 0.18s ease, right 0.18s ease' : 'left 0.18s ease, right 0.18s ease, bottom 0.18s ease',
@@ -3356,30 +3163,14 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             ref={footerRef}
             className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
             style={{
-              // ── THE SIDE-PILL COLLISION, AND THE ONE BUDGET THAT PREVENTS IT (2026-08-20) ──
-              // MEASURED (viewport sweep, real browser): the footer pill is CENTRED (its wrapper is
-              // `fixed left-0 right-0 flex justify-center`) while the sync pill (SyncStatus, `right:0`)
-              // and the snaps pill (ReceiptPanel, `left:0`) are EDGE-anchored — three independently
-              // positioned fixed elements sharing one band, with nothing making them aware of each
-              // other. At ≥700px they never touch, which is why every earlier attempt (tested at
-              // 900–2000px) "passed" while Peter's screenshots still showed the sync pill sitting on
-              // top of the toolbar's right edge: he runs a ~600px-wide window (half-screen on a
-              // Retina Mac). Overlap begins at ~650px and worsens below it.
-              // TWO EARLIER FIXES FAILED FOR THE OPPOSITE REASONS, and both lessons are baked in here:
-              //   1. A bare `maxWidth: 58vw` on this box alone → the box shrank but the CIRCLES did
-              //      not (their clamp keys off a different budget), so the row overflowed its own
-              //      rounded border: "the right button is falling off".
-              //   2. Removing the cap entirely → nothing bounded the centred pill at all, so at a
-              //      narrow window it simply grew into the sync pill again.
-              // So: ONE number, `--iw-bar-budget`, is the maximum width the toolbar may occupy, and
-              // BOTH constraints derive from it — this box's max-width (below) and the per-circle
-              // shrink clamp in index.css (`.iw-desktop-toolbar`, which inherits the var from here).
-              // They cannot disagree, because there is only one of them.
-              // The reserve is per SIDE and is measured, not guessed: the sync pill is ~138px visual
-              // (max-w-7.5rem + padding, ×1.12) and the snaps pill ~96px; 160px covers the larger plus
-              // a ~12px breathing gap. Divided by the transform scale below, because max-width is a
-              // LAYOUT property while the collision happens in VISUAL px — a 421px layout pill paints
-              // 471px wide at ×1.12, and it is the painted box that hits the sync pill.
+              // ── ⚠ ONE BUDGET, TWO CONSUMERS. `--iw-bar-budget` is the maximum width the toolbar
+              // may occupy, and BOTH this box's max-width and the per-circle shrink clamp in
+              // index.css derive from it — they cannot disagree, because there is only one of them.
+              // Capping only the box leaves the circles spilling past the rounded border; capping
+              // neither lets the centred pill grow into the edge-anchored sync pill below ~650px.
+              // ⚠ Divided by the transform scale, because max-width is a LAYOUT property while the
+              // collision happens in PAINTED px. Sweep the WIDTH RANGE when testing this: it is
+              // invisible above ~700px. → docs/archive/editor-surface.md#editor-side-reserve
               ...(isTouch ? {} : {
                 ['--iw-bar-budget' as string]: `calc((100vw - ${TOOLBAR_SIDE_RESERVE_PX * 2}px) / ${(zoom * 1.12).toFixed(4)})`,
                 maxWidth: 'var(--iw-bar-budget)',
@@ -3389,11 +3180,9 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
               transition: 'opacity 160ms ease',
-              // Counter browser zoom so the pill stays a constant physical size.
-              // transform instead of zoom: zoom scales the positioned `bottom` offset, causing
-              // the pill to drift up/down on zoom. transform does not affect the offset.
-              // ×1.12 = the "bigger pills" boost — desktop only. On a phone the bar is w-full, so
-              // any upscale makes it VISUALLY 12% wider than the screen and the end buttons clip.
+              // Counter browser zoom so the pill stays a constant physical size. TRANSFORM, never
+              // `zoom`: zoom scales the positioned `bottom` offset and the pill drifts. ×1.12 is
+              // the "bigger pills" boost, desktop ONLY — the phone bar is w-full and would clip.
               transform: `scale(${zoom * (isTouch ? 1 : 1.12)})`,
               transformOrigin: 'bottom center',
             }}
@@ -3407,18 +3196,12 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 opacity: styleBarExpanded ? 1 : 0,
                 pointerEvents: styleBarExpanded ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
-                // ⚠ A COLLAPSED ROW STILL HAS A WIDTH (2026-08-20 — the real cause of the toolbar's
-                // proportions repeatedly looking "wrong again"). `max-height: 0` hides this row but
-                // does NOT remove it from the pill's WIDTH calculation: the pill is a flex column, so
-                // its width is the widest child's max-content — and the style bar (font picker, size,
-                // B/H/align/list/∀) is WIDER than the circle row. So the pill was being sized by a row
-                // nobody can see, leaving the circles adrift in it (measured: 86px of empty pill to the
-                // right of the last circle) and no amount of tuning the circle rules could fix it,
-                // because they were never what set the width.
-                // `width: 0` drops this row's intrinsic contribution so the VISIBLE row sizes the pill;
-                // `min-width: 100%` then makes it fill whatever width that turns out to be, so it still
-                // lays out correctly when it expands. Growing the pill when the style bar opens is
-                // correct and intended — it just must not do so while collapsed.
+                // ⚠ A COLLAPSED ROW STILL HAS A WIDTH — the real cause of the toolbar's proportions
+                // repeatedly drifting back. `max-height: 0` hides this row but leaves it in the
+                // pill's WIDTH calculation, and the pill is a flex COLUMN sized by its widest
+                // child, so the invisible style bar was sizing it (86px of dead pill past the last
+                // circle). `width: 0; min-width: 100%` drops the contribution while collapsed
+                // without breaking the layout when it expands.
                 ...(styleBarExpanded ? {} : { width: 0, minWidth: '100%' }),
               }}>
                 {/* Phone: slim side padding — nine 38px circles + the font/size pills need the room */}
@@ -3442,11 +3225,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               </div>
             )}
 
-            {/* Music row — the second-bar layer the music slot opens. Same collapse animation as
-                the style/review rows; MUTUALLY EXCLUSIVE with them by the TYPE (activeBar holds ONE
-                id — toolbarContract.ts). This lane owns the SHELL; components/MusicBar.tsx is the
-                clearly-labelled STUB the music lane (feat/music-piece-photo) fills. Gated on the
-                music flag so it is byte-invisible on the live toolbar until that lane ships. */}
+            {/* Music row — the second-bar layer the music slot opens, MUTUALLY EXCLUSIVE with the
+                style/review rows by the TYPE (`activeBar` holds ONE id — toolbarContract.ts). */}
             {musicEnabled() && (
               <div style={{
                 overflow: 'hidden',
@@ -3459,30 +3239,18 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               </div>
             )}
 
-            {/* Main toolbar row. Phone: iw-phone-toolbar (index.css) sizes the EIGHT circles
-                (▲ + 6 slots + ⋮ — S and ⚙ are SLOTS now; ◈/☁ live in the ▲ drop-up) to
-                (100vw − 45px)/8 and caps each button's 44px min-WIDTH at the same size;
-                justify-between spreads the ~45px of slack as ~6px breathing-room gaps. py-1.5
-                (vs desktop py-0.5) gives the row vertical air — the footer RO mirrors whatever
-                height results into --iw-toolbar-h + the PM scroll reserve, so never hardcode
-                the pill height anywhere. iw-slot-dragging paints every circle's disc opaque
-                while a drag is live so the lifted one passes OVER its neighbours. */}
+            {/* Main toolbar row. Phone: `iw-phone-toolbar` (index.css) sizes the circles from
+                --iw-row-slots and caps each button's 44px min-WIDTH at the same size; the footer RO
+                mirrors whatever height results into --iw-toolbar-h + the PM scroll reserve, so
+                NEVER hardcode the pill height anywhere. */}
             {showMainRow && (
             <div className={`iw-toolbar-circles flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
-              // PHONE AND DESKTOP ARE ONE EXPERIENCE, SO THEY ARE ONE NUMBER (Peter, 2026-07-17:
-              // "there's only 6 slots not 7 which I think is a good number because it fits well on
-              // phone… we want to keep the phone and desktop experience continuous"). The phone
-              // circle size is (100vw − 45px) / (the row + ▲ + ⋮), and index.css used to divide by a
-              // literal 8 — a SECOND copy of ROW_SLOTS, in another language, that no lane would think
-              // to update. The whole justification for six is that it fits the phone, so the phone's
-              // fit must be derived from six rather than agree with it by coincidence.
-              // ⚠ 2026-08-20: this was STILL feeding the CSS var the static ROW_SLOTS constant (6)
-              // rather than the row's actual live length — so once a 7th slot graduated to default-on
-              // (the clock), the shrink formula kept dividing by 8 (6+2) instead of 9 (7+2), leaving
-              // exactly one circle's worth of width unaccounted for. That's what "hung off the right"
-              // in the screenshot — the ⋮ options button had nowhere to go. toolbarSlots.length is the
-              // exact array rendered below (toolbarSlots.map), so it can never drift from what's on
-              // screen the way a re-typed constant can.
+              // ⚠ ONE ROW SIZE, DERIVED FROM THE ROW ITSELF (R2). index.css once divided by a
+              // literal 8 — a second copy of ROW_SLOTS in another language — and this then fed it
+              // the static constant rather than the live length, so a seventh slot left exactly one
+              // circle's width unaccounted for and the ⋮ hung off the right. `toolbarSlots.length`
+              // is the exact array rendered below, so it cannot drift from what is on screen.
+              // → docs/archive/editor-surface.md#editor-row-slots
               style={{ ['--iw-row-slots' as string]: String(toolbarSlots.length) }}
               onClickCapture={(e) => {
                 // A click synthesised from a just-finished touch-hold drag must not activate the

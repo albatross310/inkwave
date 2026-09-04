@@ -1,46 +1,25 @@
-// ClockMenu — the toolbar's clock button and the ledger DROP-UP (Peter, 2026-07-17):
-// "a new button with a picture of a clock on it in the toolbar for all these new productivity
-// features, with the ledger. Make the ledger a drop up rather than a new page."
+// ClockMenu — the toolbar's clock button and the ledger DROP-UP. Peter, 2026-07-17: "Make the
+// ledger a drop up rather than a new page" — a Pomodoro you must navigate away to reach is not one
+// you would use while writing. → docs/archive/panels-and-popovers.md#clock-why-a-dropup
 //
-// The ledger stops being a route and becomes part of the writing surface: a Pomodoro you must
-// navigate away to reach is not one you would use while writing.
+// THREE HOUSE RULES, each a live bug elsewhere before it was a rule:
+//  • `iw-touch-guard` on the panel, or a tap outside the contenteditable retracts the iOS keyboard
+//    and the docked pill slides to the screen bottom with its just-opened menu.
+//  • `iw-nightable` + theme tokens with day fallbacks, NEVER a hard-coded hex.
+//  • ⚠ NOTHING HERE TICKS REACT: the face and ring subscribe to the store's IMPERATIVE tick channel
+//    (TimeFace/TimeRing), so this component re-renders only on real state changes.
 //
-// THREE HOUSE RULES, all live bugs elsewhere before they were rules:
-//  • `iw-touch-guard` on the panel — any tap outside the contenteditable blurs it on iOS, the
-//    keyboard retracts, and the docked pill + its just-opened menu slide to the screen bottom.
-//  • `iw-nightable` + theme tokens with day fallbacks, never a hard-coded hex. Nobody has looked at
-//    these panels in night mode; Peter is about to.
-//  • Nothing here ticks React. The face and the ring subscribe to the store's imperative tick
-//    channel (TimeFace/TimeRing) — this component re-renders only on real state changes.
+// TONE (§A5): a ritual, not a dashboard — no red numbers, no scores, no streak-shaming. A quiet day
+// reads as a quiet day.
 //
-// TONE (§A5): a ritual, not a dashboard. Sexy here means considered — no red numbers, no scores,
-// no streak-shaming. A quiet day reads as a quiet day.
-//
-// TYPE (Peter, 2026-07-17): "the entire text font of the panel needs to be increased. It's okay if
-// users have to scroll." / "Every font proportionally up." Sizes come from the ONE ramp
-// (`music/typeScale.ts`) — the same one `GoalsSection` below already uses. NOT a second scale: two
-// lanes wrote competing ramps once and that is how this repo forks. A `text-[11px]`/`text-xs` class
-// anywhere in this file is a regression; the steps are SEMANTIC (`TYPE.label` because the thing IS a
-// label), which is what stops the ramp regrowing into nine near-identical sizes.
-//
-// SCROLLING IS NOT A COST TO MINIMISE HERE. The panel is `maxHeight: 72vh` and overflows — that is
-// the accepted trade, not a bug. Do not shrink a step to kill a scrollbar.
-//
-// THE 16px FLOOR — and what is actually true about it (MEASURED, `scripts/cssfloor.prove.mjs`):
-// iOS Safari zooms into any focused control under 16px and STAYS zoomed. But index.css ALREADY
-// floors `input, select, textarea` at `max(16px, 1em) !important` inside
-// `@media (pointer: coarse) and (hover: none)`, and the probe confirms in a real engine that this
-// beats an inline 13px on an iPhone 12 (computed 16px; desktop correctly leaves it 13px). So the
-// 13px inputs these panels shipped were NOT zooming Peter's phone — they were backstopped.
-//
-// The floor stays on the ramp regardless, for reasons the backstop does not cover:
-//  • It is phone-ONLY. Any coarse device the query misses gets the authored size, unfloored.
-//  • It is INVISIBLE HERE. A 13px in this file reads as 13px to everyone; that a stylesheet three
-//    directories away silently rewrites it on one device class is exactly the kind of spooky action
-//    that makes a number untrustworthy. The authored size should BE the shipped size.
-//  • Peter asked for bigger text anyway. 16 is the ramp's floor because it is the ramp's floor.
-// `prodType.test.ts` fails the build if any control here slips under it, and DERIVES the CSS
-// backstop's 16 from this ramp rather than re-typing it.
+// ⚠ ONE TYPE RAMP (`music/typeScale.ts`), and its steps are SEMANTIC — `TYPE.label` because the
+// thing IS a label. A `text-[11px]`/`text-xs` in this file is a regression, and a second ramp is how
+// this repo forks. Scrolling is NOT a cost to minimise: the panel is 72vh and overflows by design,
+// so never shrink a step to kill a scrollbar. The 16px floor is on the ramp because the AUTHORED
+// size should BE the shipped size — index.css's phone-only backstop is real but invisible here, and
+// a stylesheet three directories away silently rewriting a number is what makes it untrustworthy.
+// `prodType.test.ts` derives its 16 from this ramp rather than re-typing it.
+// → docs/archive/panels-and-popovers.md#clock-type-ramp
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -167,15 +146,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 /**
  * §A3.3's day summary, in the app's voice. Descriptive; never a score.
  *
- * ⚠ THIS IS A SECOND PLACE THE DAY'S MINUTES ARE SUMMED — `aggregate.ts` is the other — and it is
- * exactly how §A6.1's rule got broken once already. THE BUG, caught live by `pdfposthoc.prove.mjs`
- * driving the real panel: this function reduced over ALL rows, so the moment the post-hoc add landed,
- * 45 remembered minutes were reported back to the writer as "focused minutes". Every unit test was
- * green — they guard `aggregate.ts`, and the drop-up never calls it. **A guard on one implementation
- * of a rule says nothing about the other.**
- *
- * So the split happens HERE too, and the two numbers are spoken as different KINDS of thing. If a
- * third summariser ever appears, it must do the same — or better, all three should call one rule.
+ * ⚠ A SECOND PLACE THE DAY'S MINUTES ARE SUMMED — `aggregate.ts` is the other — and it is how
+ * §A6.1's rule got broken once already: reducing over ALL rows reported 45 REMEMBERED minutes back
+ * to the writer as "focused minutes", with every unit test green, because they guard `aggregate.ts`
+ * and this panel never calls it. **A guard on one implementation of a rule says nothing about the
+ * other.** So the split happens HERE too; a third summariser must do the same, or all three should
+ * call one rule. → docs/archive/panels-and-popovers.md#clock-day-summary
  */
 function daySummary(allRows: SessionRow[]): string {
   const { measured: rows, postHoc } = splitByEntry(allRows)
@@ -216,12 +192,11 @@ const LENGTH_FIELDS: Array<{ key: keyof PomodoroConfig; label: string; min: numb
 /**
  * The toolbar's clock — A TRIGGER, NEVER AN OWNER.
  *
- * The panel's open state is LIFTED to the editor (`ledgerOpen`), and this button only calls the
- * setter. That is load-bearing now that Peter has ruled the row stays SIX ("it fits well on phone,
- * and we want to keep the phone and desktop experience continuous"): `clock` competes for a slot and
- * lands in the ▲ overflow by default, so this component is often NOT MOUNTED. If it owned the state,
- * the countdown's "click to open" would silently do nothing whenever the clock sat in ▲ — a feature
- * that vanishes depending on where a button was dragged. Two access paths, one owner.
+ * ⚠ The panel's open state is LIFTED to the editor (`ledgerOpen`); this button only calls the
+ * setter. `clock` competes for one of six row slots and lands in the ▲ overflow by default, so this
+ * component is often NOT MOUNTED — an owned state would make the countdown's "click to open"
+ * silently dead depending on where a button was dragged.
+ * → docs/archive/panels-and-popovers.md#clock-trigger-not-owner
  */
 export function ClockSlotButton({ open, onToggle }: { open: boolean; onToggle: () => void }): JSX.Element | null {
   const [, bump] = useState(0)
@@ -248,18 +223,15 @@ export function ClockSlotButton({ open, onToggle }: { open: boolean; onToggle: (
 }
 
 // ─── The nav shell (Peter, 2026-07-18) ───────────────────────────────────────
-//
-// "The clock button opens a panel with FIVE buttons (more to add later)." So this is a NAV SHELL, not
-// one long scroll: a home screen of buttons, and each opens its own view. It reuses the existing
-// pieces UNCHANGED behind those buttons — the pomodoro, the goals section, the report, the charts, the
-// ledger — rather than reimplementing any of them (a second copy of any of these is the failure).
-//
-// The five, designed so a sixth is one array entry:
-//   1. Start / stop work  → WorkView (the pomodoro + the WHERE/WHAT start flow + the end summary)
+// "The clock button opens a panel with FIVE buttons (more to add later)" — so a NAV SHELL, not one
+// long scroll, and it reuses the existing pieces UNCHANGED behind those buttons (a second copy of
+// the pomodoro, goals, report, charts or ledger is the failure). A sixth is one array entry.
+//   1. Start / stop work  → WorkView (pomodoro + the WHERE/WHAT start flow + the end summary)
 //   2. Goals              → GoalsSection
 //   3. Reporting          → the AI report modal (a lifted opener; closes this panel)
 //   4. Progress tracking  → the charts modal (a lifted opener; closes this panel)
 //   5. Manage projects    → ProjectsView (today's sessions, notes, reading, reflections, titles)
+// → docs/archive/panels-and-popovers.md#clock-nav-shell
 
 type NavView = 'home' | 'work' | 'goals' | 'projects'
 
@@ -793,16 +765,11 @@ function ChimeSelect(): JSX.Element {
 }
 
 // ─── Reading (Peter: "a reading indicator on the ledger, next to a pdf name") ──
-//
-// SHOWS ONLY WHAT WE SAW. A PDF that is open but unscrolled does not appear — that is the honest
-// state, not a detection failure: an open PDF nobody is scrolling is a tab you forgot about, and
-// counting it is exactly how a reading number stops being true. So an empty section reads "no reading
-// right now", never "0 minutes read".
-//
-// NO PROGRESS BAR — considered and rejected (§A3.2). We hold whether you scrolled, never where, so
-// there is nothing to draw a progress bar FROM, and a page-by-page trace of the writer's private PDFs
-// would be a far more sensitive object for no feature gain. If a progress reading ever seems needed,
-// that is Peter's call, not a field to add here.
+// ⚠ SHOWS ONLY WHAT WE SAW. An open but unscrolled PDF does not appear — that is the honest state,
+// not a detection failure, so an empty section reads "no reading right now", never "0 minutes read".
+// ⚠ NO PROGRESS BAR, considered and rejected (§A3.2): we hold WHETHER you scrolled, never where, so
+// there is nothing to draw one from and a page-by-page trace of private PDFs would be far more
+// sensitive for no gain. → docs/archive/panels-and-popovers.md#clock-reading-indicator
 
 /** The two live states, in the app's ink. A dot, not a badge — this is a ritual, not a dashboard. */
 function ReadingDot({ state }: { state: PdfReadingState }): JSX.Element {
@@ -875,19 +842,13 @@ function TodaySection({ rows, summary, onSaved }: {
 }
 
 // ─── The post-hoc add (Peter: "a manual add for if you forget to use the timer") ──
-//
-// §A5's register, and it decides every choice below: **a friend letting you correct the record, not a
-// supervisor auditing your timesheet.** So it is COLLAPSED by default (an always-open form is a
-// standing question about what you failed to log), it never nags, and using it is never scolded — the
-// confirmation says what landed and stops talking.
-//
-// **DO NOT MAKE HIM PRECISE.** Rough duration, rough category, done. A form demanding start and end
-// times won't get used on a Tuesday, and this whole feature dies if the ritual becomes data entry.
-// Hence PILLS, not number inputs: every answer is one tap. The note is optional and a skipped note is
-// not a failure.
-//
-// The honesty lives in the ROW (`entered: 'post-hoc'`), not in this form's copy — which is why the
-// form can afford to be this relaxed. See types.ts.
+// §A5's register decides every choice here: a friend letting you correct the record, not a
+// supervisor auditing your timesheet. COLLAPSED by default (an always-open form is a standing
+// question about what you failed to log), never nags, never scolds.
+// ⚠ DO NOT MAKE HIM PRECISE — rough duration, rough category, done. PILLS, not number inputs: every
+// answer is one tap, and a skipped note is not a failure. The honesty lives in the ROW
+// (`entered: 'post-hoc'`), not in this form's copy, which is why it can afford to be relaxed.
+// → docs/archive/panels-and-popovers.md#clock-posthoc-form
 
 const POSTHOC_MINUTES = [15, 25, 45, 60, 90]
 const POSTHOC_KINDS: Array<{ id: DocType; label: string }> = [
@@ -1029,11 +990,8 @@ function SessionCard({ row, onSaved }: { row: SessionRow; onSaved: () => void })
 }
 
 // ─── Manage projects: the ledger (today's sessions, reading, reflections, titles) ──
-//
-// This is the "Manage projects — opens/manages the ledger" view. It is the OLD drop-up's ledger
-// content — today's sessions, the reading indicator, the reflection journal, the per-document title
-// controls — now behind its own nav button rather than stacked under the timer. Nothing here is a
-// second implementation of the ledger; it renders the same pieces.
+// The OLD drop-up's ledger content, now behind its own nav button. ⚠ NOT a second implementation
+// of the ledger — it renders the same pieces.
 
 function ProjectsView({ rows, reflections, docs, onSaved }: {
   rows: SessionRow[]; reflections: Reflection[]; docs: Array<{ id: string; label?: string }>; onSaved: () => void

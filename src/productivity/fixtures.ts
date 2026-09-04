@@ -1,51 +1,29 @@
 // Synthetic ledger fixtures — for tests, for the heuristic's honest evaluation, and for the panel's
-// demo mode while the `feat/prod-ledger` lane's real capture lands.
+// demo mode.
 //
-// NO REAL CONTENT, EVER. Every doc label here is invented. Peter's actual Honours writing must never
-// enter the repo, fixtures, logs or screenshots, and metadata-only is the ledger's own rule (§A3.2).
+// ⚠ NO REAL CONTENT, EVER. Every doc label here is invented: Peter's actual Honours writing must
+// never enter the repo, fixtures, logs or screenshots, and metadata-only is the ledger's own rule
+// (§A3.2).
 //
-// ─── WHY THE GENERATIVE MODEL IS BUILT THE WAY IT IS ─────────────────────────
+// This file is the MEASURING INSTRUMENT for the deep-vs-shallow heuristic, so it is built to be
+// capable of showing that rule FAILING. Two rules hold throughout:
+//  1. ⚠ THE PARAMETERS COME FROM BEHAVIOUR, NEVER FROM THE THRESHOLDS. Every range is a claim about
+//     how a person writes, chosen before looking at PHASE_THRESHOLDS. Ranges read off the rule's own
+//     cut-points score ~100% by construction and measure nothing but their own circularity.
+//  2. ⚠ THE CLASSES MUST OVERLAP IN THE PROXY THE RULE ACTUALLY USES — not "in both proxies", in the
+//     SHIPPED one. This file's first version got (1) right and (2) wrong, and the 0.70 cut sat in a
+//     void where every mutant scored identically.
+//     → docs/archive/productivity-email-build.md#phase-fixture-void
 //
-// These fixtures are the measuring instrument for the deep-vs-shallow heuristic, so they are built
-// to be capable of showing it FAILING. Two rules held throughout:
+// GROUND TRUTH IS THE WRITER'S ACTIVITY, not what the proxies look like: drafting/burst ⇒ 'drafting',
+// editing/revising ⇒ 'editing'. `burst` (short but composing) and `revising` (long but cutting) are
+// the honest hard cases — the spec's two proxies point OPPOSITE ways in both — and they are ~35% of
+// sessions because they are common in real writing, not rare corners.
 //
-//   1. THE PARAMETERS COME FROM BEHAVIOUR, NOT FROM THE THRESHOLDS. Every range below is a claim
-//      about how a person writes (a drafting stretch runs 18–90 minutes; you delete a bit as you
-//      draft), chosen before looking at PHASE_THRESHOLDS. A fixture whose ranges are read off the
-//      rule's own cut-points scores ~100% by construction and measures nothing but its own
-//      circularity — the "known-negative that scored identically BY CONSTRUCTION" failure.
-//
-//   2. THE CLASSES MUST OVERLAP IN THE PROXY THE RULE ACTUALLY USES. Not merely "in both proxies" —
-//      in the SHIPPED one. This file's first version got rule 1 right and rule 2 wrong, and an
-//      external audit caught it: the `deleteRatio` bands were DISJOINT across the truth classes
-//      (measured: editing topped out at addRatio 0.624, drafting started at 0.803, with ZERO of 64
-//      sessions in between). The rule's 0.70 cut-point sat in the middle of that void, so every
-//      draftAddRatio in [0.625, 0.800] produced numerically IDENTICAL output — 100% precision,
-//      81.3% coverage, 0 wrong. `expect(wrong).toBe(0)` was a tautology of the fixture, and
-//      mutating the threshold to 0.65 / 0.75 / 0.78 left the suite green. By this file's own
-//      standard it was the fiction it warns about.
-//
-//      The bands below now genuinely overlap in addRatio (drafting reaches DOWN to ~0.57, editing
-//      reaches UP to ~0.69), because that is what real writing does — see the per-process notes.
-//      Consequence, and it is the point: no threshold scores 100% any more, so the fixture can
-//      finally say a threshold is wrong. `phase.sweep.probe.test.ts` prints the distribution, the
-//      overlap band, and a full threshold sweep; `phase.thresholds.test.ts` fails if the overlap
-//      ever collapses back to a void.
-//
-// Ground truth is the WRITER'S ACTIVITY — what the feature claims to detect — not what the proxies
-// look like:
-//   • drafting / burst  → composing new prose            → truth 'drafting'
-//   • editing / revising → working over existing prose    → truth 'editing'
-// `burst` (short but composing) and `revising` (long but cutting) are the honest hard cases: the
-// spec's two proxies point OPPOSITE ways in both. They are ~35% of sessions here because they are
-// common in real writing, not rare corners.
-//
-// A NOTE ON WHAT THIS FIXTURE CAN AND CANNOT SETTLE. It is SYNTHETIC: it encodes a belief about how
-// writing sessions behave. It can prove a rule is INSENSITIVE (a threshold that changes nothing is
-// measuring nothing) and it can show a rule's shape. It CANNOT calibrate a threshold — tuning
-// cut-points to maximise a score on data invented by the same author who chose the cut-points is
-// circular in the other direction. Real calibration needs real ledger rows with the writer's own
-// account of what they were doing. Treat the sweep as a sensitivity analysis, not a recommendation.
+// ⚠ WHAT IT CANNOT SETTLE: being synthetic, it can prove a rule INSENSITIVE and show a rule's shape,
+// but it CANNOT calibrate a threshold — tuning cut-points on data invented by the same author who
+// chose them is circular the other way. Read the sweep as a sensitivity analysis, never a
+// recommendation.
 
 import type { DocGoals, Snapshot } from '../types/document'
 import type { DocType, SessionRow } from './types'
@@ -131,12 +109,10 @@ export interface FixtureOptions {
 }
 
 /**
- * Generate a labelled synthetic month.
- *
- * The shape of a week is modelled too, because the weekly/monthly aggregates are only meaningful
- * against something week-shaped: weekends are lighter, some days are missed entirely (gaps are shown
- * honestly, never fabricated — §A9), and email sessions are sprinkled through so `doc_type` rollups
- * have something to roll up (§B2.1).
+ * Generate a labelled synthetic month. A WEEK is modelled too, because the weekly/monthly
+ * aggregates are only meaningful against something week-shaped: weekends are lighter, some days are
+ * missed entirely (gaps shown honestly, never fabricated — §A9), and email sessions are sprinkled
+ * through so `doc_type` rollups have something to roll up (§B2.1).
  */
 export function makeLedger(opts: FixtureOptions = {}): LabelledSession[] {
   const { seed = 20260716, offset = '+10:00', startDay = '2026-07-01', days = 31 } = opts
@@ -240,11 +216,9 @@ export function makeLightDay(offset = '+10:00'): SessionRow[] {
 }
 
 /**
- * A synthetic AI report — the shape the `feat/prod-ai-report` lane will produce (§A6.1).
- *
- * Exists so the measured/judged seam and the §A6.2 gate are VISIBLE in demo mode rather than being
- * dead code that first runs the day the AI lane lands. The `pattern` claims below are exactly what
- * the daily window must refuse to show; the `descriptive` one is what it may.
+ * A synthetic AI report — the §A6.1 shape. It exists so the measured/judged seam and the §A6.2 gate
+ * are VISIBLE in demo mode rather than dead code that first runs the day the AI lane lands. The
+ * `pattern` claims below are exactly what the daily window must refuse; `descriptive` is what it may.
  */
 export function makeJudgedReport(sessions: readonly SessionRow[] = []): JudgedReport {
   return {
@@ -363,15 +337,11 @@ export function fixtureWindow(window: 'daily' | 'weekly' | 'monthly'): WindowAgg
     from: '2026-07-06',
     to: window === 'weekly' ? '2026-07-12' : '2026-07-31',
     days: DAYS,
-    // THE DECIDED CONTRACT (feat/prod-ledger, 2026-07-17 — updated here on integration): `sessions`
-    // is EMPTY at weekly/monthly, because rows here would put a SECOND copy of every measured number
-    // beside the day rollups above (§A6.4). The writer's opted-in words travel as `note_digest`, per
-    // local day — exactly what `buildWindow` produces from the real ledger.
-    //
-    // These fixtures previously carried the pre-answer shape (rows at every window). That is why the
-    // weekly/monthly notes break was invisible: `?prodReport=demo` — the path a developer actually
-    // looks at — kept working off the session rows while the real ledger sent none. A demo whose
-    // shape the real source never produces is a fiction to build against.
+    // ⚠ `sessions` IS EMPTY AT WEEKLY/MONTHLY — the decided contract (§A6.4), and these fixtures
+    // must MIRROR it: carrying the pre-answer shape is what made the weekly/monthly notes break
+    // invisible, because `?prodReport=demo` kept working off rows the real ledger never sends.
+    // A demo whose shape the real source never produces is a fiction to build against.
+    // → docs/archive/productivity-email-build.md#compile-note-digest
     sessions: [],
     note_digest: NOTE_DIGEST,
     docs: DOCS,
