@@ -1740,14 +1740,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                   allowFullScreen
                   // ⚠ `allow-downloads` IS LOAD-BEARING: without it a download link inside a framed
-                  // page does NOTHING AT ALL, reported only to the browser's own console, so the
-                  // site looks broken and Inkwave looks like the reason.
-                  // It lets a framed page start a download into the writer's ordinary Downloads
-                  // folder, subject to every normal prompt and check; it grants no reach into this
-                  // origin, and the page could already navigate itself anywhere.
-                  // ⚠ NEVER GATE A SANDBOX TOKEN ON A FEATURE FLAG — this frame exists only in live
-                  // mode, and a flag would make the same page behave differently for no visible
-                  // reason. → docs/archive/reader-panels.md#sb-sandbox
+                  // page does NOTHING AT ALL, reported only to the browser's own console. It grants
+                  // no reach into this origin — the archive entry sets out the posture in full.
+                  // ⚠ NEVER GATE A SANDBOX TOKEN ON A FEATURE FLAG — the same page would behave
+                  // differently for no visible reason. → docs/archive/reader-panels.md#sb-sandbox
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-downloads"
                   // NO referrerPolicy override: many image CDNs use the referer for hotlink
                   // protection, and stripping it is a plausible cause of the missing pictures Peter
