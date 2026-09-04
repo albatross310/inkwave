@@ -98,6 +98,16 @@ the source instead of reimplementing cloning. Today it opens as a separate one-d
 multi-email contextual placement, journal annotations, selection/preflight, and batch results remain
 the next W2 slices. The production browser probe now proves the source/copy bytes and identity split.
 
+**Draft saving vs provenance wording (2026-09-05).** The explicit action is labelled “Snapshot this
+draft”, not “Record this draft”: Inkwave already autosaves ordinary draft edits, and connected Gmail
+Draft synchronisation will also be automatic. The button means “make an intentional, timestamped
+provenance snapshot”; direct send still performs that snapshot automatically before transmission.
+The email surface now shows its automatic persistence status at bottom right. Today it says “Saved
+locally …” and advances only on the storage funnel's successful `inkwave:doc-saved` acknowledgement;
+it never launders that local write into “synced”. When connected Gmail drafts land, “Last synced …”
+is reserved for Google's acknowledged revision. Its state is isolated in a small child component so
+the autosave beat does not re-render the full editor tree.
+
 ---
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT ON since 2026-07-18)

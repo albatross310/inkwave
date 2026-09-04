@@ -2,7 +2,7 @@
 //
 // The module tests (src/email/roundtrip.test.ts) prove the hashing/anchor/verify path with the real
 // production functions. They cannot prove the WIRING: that the flag gates the panel, that the panel
-// renders, that "Record this draft" reaches the spine, that a header edit actually PERSISTS. Those
+// renders, that “Snapshot this draft” reaches the spine, that a header edit actually PERSISTS. Those
 // are exactly the joints where this codebase has historically shipped a feature that was silently
 // off. So: real build, real browser, real OPFS, real click.
 //
@@ -111,6 +111,10 @@ if (hasPanel) {
   await page.keyboard.type('Dear Ada, the draft is ready.')
   await page.waitForTimeout(1500)
 
+  const saveStatus = await page.locator('.iw-email-draft-save-status').textContent().catch(() => '')
+  ok('automatic draft save reports its local acknowledgement', /Saved locally just now/i.test(saveStatus || ''), saveStatus || '')
+  ok('local autosave is not mislabeled as Gmail sync', !/synced/i.test(saveStatus || ''), saveStatus || '')
+
   await page.reload({ waitUntil: 'load' })
   await page.waitForTimeout(3000)
   const toAfter = await page.locator('input[aria-label="To"]').inputValue().catch(() => '')
@@ -120,7 +124,7 @@ if (hasPanel) {
 
 // ── 5. Finalise → the spine. Assert the SUBMITTED digest is the v:3 bundleHash ─
 submitted.length = 0
-const recordBtn = page.getByRole('button', { name: /Record this draft/i })
+const recordBtn = page.getByRole('button', { name: /Snapshot this draft/i })
 if (await recordBtn.count()) {
   await recordBtn.click()
   await page.waitForTimeout(3000)

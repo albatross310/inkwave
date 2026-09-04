@@ -75,6 +75,7 @@ describe('EmailComposePanel Gmail integration', () => {
     expect(surface.contains(screen.getByTestId('message-editor'))).toBe(true)
     expect(screen.getByLabelText('Message body').contains(screen.getByTestId('message-editor'))).toBe(true)
     expect(screen.getByText(/Recording proves this exact draft existed by this time/)).toBeTruthy()
+    expect(screen.getByText(/Saved locally/)).toBeTruthy()
   })
 
   it('switches the same message editor between focus and contextual studio surfaces', () => {

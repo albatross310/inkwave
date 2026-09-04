@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useZoomScale } from '../editor/useZoomScale'
 import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
+import { relativeTime } from './relativeTime'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
 // it never grows leftward into the text). The pill text is decided by the caller so it reads clearly
@@ -8,16 +9,6 @@ import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom } from '.
 // not synced the pill is actionable (onClick connects / retries). Works for a local folder (Chromium)
 // or OneDrive (Firefox/Safari). Re-renders on a timer so the relative time stays fresh.
 const INK = '#302438'
-
-function relativeTime(t: number): string {
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000))
-  if (s < 5) return 'just now'
-  if (s < 60) return `${s} seconds ago`
-  const m = Math.round(s / 60)
-  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`
-  const h = Math.round(m / 60)
-  return `${h} hour${h === 1 ? '' : 's'} ago`
-}
 
 export function SyncStatus({
   label, synced, path, displayName, lastSync, tooltip, webUrl, onShowInFolder, onChangeFolder, onClick, compact, multiline,

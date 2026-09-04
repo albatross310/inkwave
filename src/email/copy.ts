@@ -21,8 +21,8 @@
 // copy.test.ts assert the forbidden claims are absent — but a test cannot check a sentence it has
 // never seen, so read the boundary before editing.
 
-/** The one-line label beside the finalise action. */
-export const FINALISE_LABEL = 'Record this draft'
+/** The explicit provenance action—not autosave and not future Gmail Draft synchronisation. */
+export const FINALISE_LABEL = 'Snapshot this draft'
 
 /** Always-visible honesty line on the focused email surface; the longer explanation is disclosed. */
 export const PROVENANCE_BRIEF =

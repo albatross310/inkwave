@@ -32,7 +32,7 @@ export interface FinaliseResult {
 
 /**
  * Finalise: snapshot the email (headers frozen + hashed into bundleHash) and submit that hash to
- * OpenTimestamps. `force: true` — a writer pressing "record this draft" must always get a marker,
+ * OpenTimestamps. `force: true` — a writer pressing “Snapshot this draft” must always get a marker,
  * even if the bytes are unchanged since the last snapshot.
  *
  * Anchoring is best-effort on the NETWORK only: an offline finalise still produces a persisted,

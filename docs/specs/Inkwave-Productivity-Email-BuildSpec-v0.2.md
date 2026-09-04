@@ -225,7 +225,7 @@ The primary reason to bring email in is **workflow integration**: for many users
 
 #### B2.2 Provenance (MVP — OTS only, no DKIM)
 
-- On "finalise"/send, Inkwave hashes the composed email (headers + body) and anchors it through the **existing OpenTimestamps spine**, exactly as it does for documents.
+- On explicit **“Snapshot this draft”** or send, Inkwave hashes the composed email (headers + body) and anchors it through the **existing OpenTimestamps spine**, exactly as it does for documents. Ordinary local autosave—and later Gmail Draft sync—remain automatic and separate from this provenance action.
 - This yields **draft-provenance**: a durable, independently-verifiable record that *this exact content existed by time T* (verifiable against Bitcoin at `inkwave/verify`, no inbox and no trust in Inkwave required).
 - **Honesty boundary (must be stated in-product):** OTS proves *content existed by time T*. It does **not** by itself prove *sending*, *delivery*, or *origin*. So MVP provenance is "I had written exactly this by this time," which is genuinely useful for priority/commitment/"I told you so on this date" cases — but it is not yet proof of sending. Do not market it as proof of sending until Phase 3 adds DKIM.
 
@@ -448,7 +448,7 @@ product task in the DKIM/Gmail timestamp integration, not optional copy polish.
 
 - Compose an email as an Inkwave document (`doc_type: email`) with header fields + body.
 - Email composition produces session rows in the ledger, so it appears in the productivity report.
-- On finalise, the email content is hashed and OTS-anchored (existing spine) → draft-provenance verifiable at `inkwave/verify`.
+- On “Snapshot this draft” or send, the email content is hashed and OTS-anchored (existing spine) → draft-provenance verifiable at `inkwave/verify`.
 - "Open in provider" handoff pre-fills the provider compose window for sending.
 - In-product copy accurately states what the MVP provenance proves (content existed by T) and does not claim proof of sending.
 
@@ -601,6 +601,11 @@ itself is the writing surface.
   the vertical resize.
 - The editable body begins immediately beneath the email header/actions inside that box. There is no
   second paper surface visibly continuing behind or beneath it.
+- A quiet bottom-right status reports the latest acknowledged persistence event. Before a provider
+  draft connection exists it says **“Saved locally …”**; it must not say “synced”. Once Gmail Draft
+  sync ships, **“Last synced …”** means Google acknowledged that revision, not merely that local
+  autosave ran. Saving and provider synchronisation are automatic; “Snapshot this draft” remains the
+  separate intentional provenance action.
 - To, Cc, Bcc, Subject, body, send state, and recorded-at state remain part of the active email
   subdoc's document state; layout does not create a parallel email store.
 - Long emails continue vertically within their email surface using the existing page/scroll rules.

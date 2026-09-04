@@ -449,6 +449,11 @@ or the tone.
   the new email gets a new document/session/SCAS identity and inherits no receipts, verdict state, or
   green anchors. Today it opens as a separate one-subdoc draft. The future workspace must reuse this
   constructor and place its result; it must not grow a second cloning path.
+- **Email save status distinguishes persistence from provider sync.** The bottom-right message says
+  `Saved locally …` only after the local save acknowledgement. `Last synced …` is reserved for a
+  future Gmail Draft revision Google has acknowledged. `EmailDraftSaveStatus` owns its own tiny
+  event/timer state so autosave does not re-render the full editor tree. “Snapshot this draft” is the
+  separate explicit provenance action; direct send snapshots automatically before transmission.
 - **TYPING COST IS THE DESIGN.** Capture rides the existing `onTransaction` stream and reuses
   `countSteps`: ~0.30µs/keystroke, flat from 200 to 40k words. Every O(doc) number is computed at
   session CLOSE — a session boundary IS an inactivity gap, so the word count at the previous close

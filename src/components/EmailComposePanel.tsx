@@ -16,6 +16,7 @@ import { authoriseGmailSend, gmailConfigured, gmailSender, preloadGmail } from '
 import { titleForEmail } from '../email/newEmail'
 import * as copy from '../email/copy'
 import { ApplicationSurface, ApplicationSurfaceModeSwitch, type ApplicationSurfaceMode } from './ApplicationSurface'
+import { EmailDraftSaveStatus } from './EmailDraftSaveStatus'
 
 interface Props {
   doc: InkwaveDocument
@@ -87,7 +88,7 @@ export function EmailComposePanel({
     try {
       const r = await finaliseEmail(getCurrentDoc())
       if (!r.snapshot) {
-        setStatus(r.reason ?? 'could not record this draft')
+        setStatus(r.reason ?? 'could not snapshot this draft')
       } else {
         setRecordedAt(r.snapshot.createdAt)
         setStatus(r.stamped ? null : (r.reason ?? null))
@@ -265,7 +266,7 @@ export function EmailComposePanel({
           onClick={onFinalise}
           disabled={busy}
         >
-          {busyAction === 'record' ? 'Recording…' : copy.FINALISE_LABEL}
+          {busyAction === 'record' ? 'Snapshotting…' : copy.FINALISE_LABEL}
         </button>
 
         {gmailConfigured() && (
@@ -274,7 +275,7 @@ export function EmailComposePanel({
             style={{ color: 'var(--iw-ink, #302438)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
             onClick={onGmailSend}
             disabled={busy || !ready}
-            title={ready ? 'Record this draft, then send it with Gmail' : 'Add a recipient first'}
+            title={ready ? 'Snapshot this draft, then send it with Gmail' : 'Add a recipient first'}
           >
             {busyAction === 'gmail' ? 'Working…' : 'Send with Gmail'}
           </button>
@@ -361,6 +362,7 @@ export function EmailComposePanel({
             <p>{copy.LEDGER_NOTE}</p>
           </div>
         </details>
+        <EmailDraftSaveStatus initialSavedAt={doc.updatedAt} />
       </div>
     </ApplicationSurface>
   )

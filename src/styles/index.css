@@ -1217,6 +1217,15 @@
     padding: 0.8rem var(--iw-application-inset) 1.25rem;
     border-top: 1px solid var(--iw-application-hair, rgba(48, 36, 56, 0.18));
   }
+  .iw-email-draft-save-status {
+    display: block;
+    margin-top: 0.65rem;
+    color: var(--iw-pill-fg, #78716c);
+    font-family: 'EB Garamond', 'IM Fell DW Pica', Georgia, serif;
+    font-size: 0.74rem;
+    line-height: 1.2;
+    text-align: right;
+  }
   .iw-application-surface__resize {
     position: absolute;
     z-index: 20;
