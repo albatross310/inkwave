@@ -81,10 +81,13 @@ export function Edit() {
   // ⚠ ONE PERSISTENT LOADING SHELL. Rendering the waves surface in three tree positions across a
   // load remounted `.inkwave-editor-surface` each swap and recreated the wave pseudo-layers — the
   // two flashes. One instance spans !doc + the editor chunk + the pre-reveal settle, renders ON TOP
-  // of the mounting editor, and unmounts in the SAME React commit the editor reveals.
+  // of the mounting editor, and unmounts in the SAME React commit the desktop editor reveals.
   // → docs/archive/panels-and-popovers.md#edit-one-shell
-  // 'up' → covering; 'fading' → 0.5s cross-fade; 'down' → unmounted.
-  const [shellUp, setShellUp] = useState<'up' | 'fading' | 'down'>('up')
+  // Do not cross-fade the two water surfaces. Even when their spatial clocks are identical, two
+  // translucent copies change the marks' brightness; fading the shell then makes the marks vanish
+  // before the editor copy returns. Desktop swaps ownership atomically. Phone deliberately keeps
+  // the shell until wave-rest (the separate ordering guard below).
+  const [shellUp, setShellUp] = useState<'up' | 'down'>('up')
   // ⚠ THE SHELL IS PRERENDERED (no window ⇒ phone=false) and React production hydration does NOT
   // correct attribute mismatches, so a phone ran the whole load DESKTOP-classed and switched the
   // wave rule-set under a RUNNING animation at reveal. Correct the class in the first
@@ -95,7 +98,6 @@ export function Edit() {
   // and restart the running wave animations.
   useLayoutEffect(() => { setShellPhone(isTouchDevice()) }, [])
   useEffect(() => {
-    let t = 0
     let t2 = 0
     let revealedAt = 0 // when the editor's 0.8s paper fade STARTED (phone ordering guard below)
     let restSeen = false
@@ -109,8 +111,10 @@ export function Edit() {
         if (restSeen) { clearTimeout(t2); t2 = window.setTimeout(() => setShellUp('down'), 850) } // rest landed first (starved boot): drop once the fade completes
         return
       }
-      setShellUp('fading')
-      t = window.setTimeout(() => setShellUp('down'), 1030) // 1s desktop fade
+      // The editor's setSettled(true) and this event occur in one task, so React commits the
+      // shell removal and editor-water uncover together. The page itself still performs its own
+      // 1s opacity reveal over that single, uninterrupted water owner.
+      setShellUp('down')
     }
     // ⚠ ORDERING GUARD: wave-rest is compositor-clocked while the reveal is a main-thread timer, so
     // on a slow phone the coast can END mid-fade and dropping the shell would flash parchment. Wait
@@ -133,7 +137,6 @@ export function Edit() {
     const onBegin = () => {
       revealedAt = 0
       restSeen = false
-      clearTimeout(t)
       clearTimeout(t2)
     }
     window.addEventListener('inkwave:open-begin', onBegin)
@@ -141,7 +144,6 @@ export function Edit() {
     window.addEventListener('inkwave:wave-rest', onRest)
     window.addEventListener('inkwave:load-watchdog', onWatchdog)
     return () => {
-      clearTimeout(t)
       clearTimeout(t2)
       window.removeEventListener('inkwave:open-begin', onBegin)
       window.removeEventListener('inkwave:editor-revealed', onRevealed)
@@ -415,7 +417,7 @@ export function Edit() {
         <EditorComp key={doc.id} doc={doc} onDocChange={handleDocChange} />
       )}
       {shellUp !== 'down' && (
-        <Scroll phone={shellPhone} fill revealed={false} fadingOut={shellUp === 'fading'}>
+        <Scroll phone={shellPhone} fill revealed={false}>
           <EmptyEditorSurface />
         </Scroll>
       )}

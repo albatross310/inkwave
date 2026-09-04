@@ -10,7 +10,7 @@ import {
   type WaveIntroMark,
   type WaveScrollMark,
 } from './waveSceneData'
-import { scrollMarkOpacity, WAVE_MARK_PLAYBACK_RATE, WAVE_MARK_TIMELINE_MS, WAVE_SCENE_LEFT_PX } from './waveTwinkle'
+import { handoffOpacity, scrollMarkOpacity, WAVE_MARK_PLAYBACK_RATE, WAVE_MARK_TIMELINE_MS, WAVE_SCENE_LEFT_PX } from './waveTwinkle'
 
 const all = [...WAVE_SCENE.intro, ...WAVE_SCENE.scroll]
 
@@ -120,5 +120,22 @@ describe('the absolute scroll loop', () => {
     expect(scrollMarkOpacity(mark, mark.phasePx)).toBe(mark.opacity)
     expect(scrollMarkOpacity(mark, mark.phasePx + WAVE_SCROLL_PERIOD_PX / 2)).toBe(0)
     expect(scrollMarkOpacity(mark, mark.phasePx)).toBe(scrollMarkOpacity(mark, mark.phasePx))
+  })
+})
+
+describe('the compositor-to-rest handoff', () => {
+  it('installs the resting opacity before cancelling the animation', () => {
+    const order: string[] = []
+    const target = {
+      style: {
+        get opacity() { return '' },
+        set opacity(value: string) { order.push(`opacity:${value}`) },
+      },
+    }
+    const animation = { cancel: () => order.push('cancel') }
+
+    handoffOpacity(target, animation, 0.47)
+
+    expect(order).toEqual(['opacity:0.47', 'cancel'])
   })
 })

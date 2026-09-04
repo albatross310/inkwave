@@ -188,13 +188,19 @@ return, the Suspense fallback, then the editor's own surface — and each swap R
 load. Now a single shell instance spans `!doc` + the lazy editor chunk + the editor's pre-reveal
 settle. It renders AFTER (so on top of) the mounting editor — both are opaque fixed surfaces, DOM
 order stacks them; the editor's floating chrome keeps its explicit z-indexes above, exactly as
-before — and unmounts in the SAME React commit the editor reveals (`inkwave:editor-revealed` is
-dispatched in the same task as `setSettled(true)`, so React batches shell-unmount + reveal + the
-wave coast start into one paint). The editor's surface underneath is phase-synced to the same wall
-clock (`--wave-phase`, set pre-paint), so the swap is pixel-identical.
+before — and unmounts in the SAME React commit the desktop editor reveals
+(`inkwave:editor-revealed` is dispatched in the same task as `setSettled(true)`, so React batches
+shell-unmount + reveal into one paint). The editor's surface underneath adopts the shell's literal
+animation start time, so the water swap is pixel-identical while the editor's own paper opacity
+transition reveals doc/text/pills over it.
 
-`'up'` → covering; `'fading'` → 0.5s opacity cross-fade (doc/text/pills fade in atomically
-underneath, over the still-coasting waves); `'down'` → unmounted.
+DESKTOP WATER HAS ONE VISIBLE OWNER. A former 1s whole-shell opacity cross-fade left the editor's
+water visible underneath. The translucent waves/marks therefore composited twice, changed
+brightness during the fade, and then changed again when the shell unmounted; hiding the editor copy
+instead made the marks fade away with the shell and return at unmount. Both are the same two-owner
+bug. Desktop now switches shell → editor atomically; only the parchment fades.
+
+`'up'` → covering; `'down'` → unmounted. Phone stays `'up'` through wave-rest as described below.
 
 THE SHELL IS PRERENDERED (build-time: no window → phone=false), and React production hydration
 does NOT correct attribute mismatches — so on a phone the shell used to run the whole load

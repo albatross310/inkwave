@@ -40,6 +40,8 @@ type Mode = 'anim' | 'coast' | 'off'
 
 type IntroNode = { mark: WaveIntroMark; el: HTMLElement; animation?: Animation }
 type ScrollNode = { mark: WaveScrollMark; el: HTMLElement; animation?: Animation }
+type OpacityTarget = { style: { opacity: string } }
+type Cancellable = { cancel: () => void }
 type HostState = {
   host: HTMLElement
   set: HTMLElement
@@ -246,6 +248,30 @@ function cancelIntro(state: HostState): void {
   state.epoch = null
 }
 
+/** Install an animation's resting value before removing the compositor track. Chrome and WebKit
+ * may present cancellation separately from a later inline write, so cancel-first creates one
+ * all-zero frame even when both operations occur in the same main-thread task. */
+export function handoffOpacity(
+  target: OpacityTarget,
+  animation: Cancellable | undefined,
+  opacity: number,
+): void {
+  target.style.opacity = String(opacity)
+  animation?.cancel()
+}
+
+function settleIntroAtRest(state: HostState, scrollTop: number, showScroll: boolean): void {
+  for (const item of state.intro) {
+    handoffOpacity(item.el, item.animation, 0)
+    item.animation = undefined
+  }
+  for (const item of state.scroll) {
+    handoffOpacity(item.el, item.animation, showScroll ? scrollMarkOpacity(item.mark, scrollTop) : 0)
+    item.animation = undefined
+  }
+  state.epoch = null
+}
+
 function setFieldRest(field: HTMLElement, group: Group, waveX: number): void {
   field.style.transform = group === 'a'
     ? `translate3d(${waveX.toFixed(2)}px, 0, 0)`
@@ -294,9 +320,14 @@ export function syncTwinkles(
   }
   if (want.mode === 'coast') return
 
-  if (previous !== 'off') cancelIntro(state)
-  for (const item of state.intro) item.el.style.opacity = '0'
   const surface = host.parentElement as HTMLElement
+  const restTop = surface?.scrollTop ?? state.scrollTop
+  state.scrollTop = restTop
+  // The resting inline opacity must exist BEFORE the fill-mode WAAPI tracks are cancelled. A
+  // cancel-first handoff briefly reveals makeMark's original `opacity: 0` on both browser engines,
+  // making the whole field disappear and then return at the very end of the slowdown.
+  if (previous !== 'off') settleIntroAtRest(state, restTop, !want.phone && want.dashes)
+  else for (const item of state.intro) item.el.style.opacity = '0'
   const waveX = parseFloat(surface?.style.getPropertyValue('--wave-x') || '') || 0
   for (const group of ['a', 'b'] as const) setFieldRest(state.fields[group], group, waveX)
   if (want.phone || !want.dashes) {

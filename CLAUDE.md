@@ -681,6 +681,13 @@ Returning to the same absolute scrollTop must reproduce the same state. Resize c
 exact two-tile offset from the viewport origin. Centring changes the 140px phase with viewport width
 and makes a correct stored tangent visibly non-parallel to the painted SVG.
 
+**DESKTOP SHELL → EDITOR IS AN ATOMIC WATER-OWNERSHIP SWAP, NEVER A CROSS-FADE.** The editor's paper
+may fade in, but two translucent copies of the waves/marks may not be visible together: they change
+brightness as they composite. Hiding the second copy while fading the first is equally wrong — the
+marks disappear with the shell and return when it unmounts. `inkwave:editor-revealed` is dispatched
+in the same task as `setSettled(true)`, so Edit.tsx drops the shell in that batched commit while the
+phase-synchronised editor water uncovers. Phone retains its separate keep-shell-until-rest rule.
+
 **The rebuild's rounds, the wave-video ladder, and the refuted desync hypothesis are in
 `docs/archive/wave-system-rounds.md`. EVERY RULE BELOW WAS A LIVE BUG** — none is preference.
 
