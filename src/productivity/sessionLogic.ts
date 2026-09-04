@@ -414,10 +414,15 @@ export function shouldOfferReflection(activeMsSinceLastReflection: number): bool
  * Extracted so the drop-up (which SHOWS the prompt) and the session-close watcher (which OPENS the
  * panel to it) read ONE rule — two copies of "what counts as unreflected" is exactly how the two
  * would drift. A row is spoken-for when it ends at/before the newest reflection's `to`.
+ *
+ * ⚠ §A6.1: MEASURED ROWS ONLY. The prompt shows these minutes back as "focused minutes" and the
+ * gate opens the panel on their total, so a remembered block reaching either one merges testimony
+ * into measurement — and asks the writer to recall a stretch they have already described.
  */
 export function unreflectedRows(rows: SessionRow[], reflections: Reflection[], todayLocal: string): SessionRow[] {
   const last = reflections.reduce<string>((a, r) => (r.to > a ? r.to : a), '')
-  return rows.filter((r) => localDayOf(r.start) === todayLocal && r.end > last)
+  const { measured } = splitByEntry(rows)
+  return measured.filter((r) => localDayOf(r.start) === todayLocal && r.end > last)
 }
 
 /**
