@@ -410,3 +410,92 @@ derived from the fallbacks call sites pass — a runtime-written property is fin
 COLOUR token is the bug (`--iw-panel-bg`, `--iw-score-gap`, `--iw-gap-rule`). Several of these must
 stay imperative for measured reasons: CLAUDE.md records that declaring `--iw-wave-x` as an
 inheriting custom property invalidated the whole page subtree, p50 417ms → 50ms.
+
+---
+
+## `components/pdfAnnotatedPages.ts` — the marked-up PDF, as pages
+
+<a id="pdfpages-one-mechanism"></a>
+### One mechanism behind both Print and Export, and why it re-renders
+
+Peter: "we need a three dots button with an export and print button that export/print the marked
+up pdf as a pdf … or to printer." The marks are not in the PDF bytes: highlights, underlines,
+strikes and sticky notes live on `_iw.highlights` and are drawn as DOM overlays (see
+pdfHighlights.ts). "Export the marked-up PDF" therefore means PRODUCING A NEW DOCUMENT that has
+them. This module makes that document once, as an array of page images, and Print and Export are
+two ways of handing the SAME pixels to the writer.
+
+⚠ IT DOES NOT REUSE THE ON-SCREEN CANVASES, and the brief's first candidate was exactly that.
+Three facts in PdfViewer.tsx rule it out, each of which would silently degrade or blank a page:
+
+1. Only pages near the viewport are rendered sharp at all; the rest hold a BASE canvas drawn at
+   0.2–0.45× (BASE_SCALE_MIN/MAX) — a print of that is a smear, and it is the state most pages
+   of a long PDF are in at any moment.
+2. On touch, `evictFarPages` frees far sharp canvases outright (iOS canvas-memory budget). A
+   print built from what happens to be resident would vary with how the reader scrolled.
+3. The on-screen canvas is sized for the READER'S ZOOM, which is a viewing choice, not a print
+   resolution — at fit-to-width on a small panel it is well under 150 dpi.
+
+So each page is re-rendered from the pdf.js document at a chosen print scale, sequentially, and
+released immediately after it is encoded. That also gives us the resolution guarantee the
+on-screen path cannot: see `planAnnotatedRender`.
+
+The marks are painted ONTO the page canvas rather than kept as overlay elements, so the exported
+bytes and the printed sheet are the same picture by construction — the divergence CLAUDE.md keeps
+recording as "two rules, one pane" is unrepresentable here.
+
+`planAnnotatedRender` is honest about limits rather than silently truncating (the brief's
+requirement, and this repo's standing rule that a failure must not be answered by quietly dropping
+the writer's work): a document too large to hold at the 72-dpi floor returns `ok: false` with a
+reason naming the page count, instead of exporting the first N pages and looking like it worked.
+
+<a id="pdfpages-marks-without-geometry"></a>
+### `marksWithoutGeometry` is about GEOMETRY, not about which view made the mark
+
+⚠ The difference matters, because the obvious assumption is wrong. A mark made in the READER view
+is identified by the text it covers, but `PdfReaderView.createFromSelection` also stores page rects
+from `pdfReflow.rectsForRange`, "so the two views agree by construction"; notes made there get
+rects too. So reader-made marks DO normally export. What cannot export is any mark whose `rects`
+came back EMPTY — `rectsForRange` returns `[]` when the block is missing, the page has no measured
+size, or no text segment overlaps the range — plus anything else that reaches storage without a
+rectangle.
+
+Such a mark is real and must not be deleted; it simply has no position to paint at. The caller
+COUNTS these and tells the writer, because the failure this avoids is the silent one: a marked-up
+export that is quietly missing marks looks exactly like a correct export.
+
+<a id="pdfpages-what-is-painted"></a>
+### What is painted, and what is editing furniture
+
+Deliberately NOT painted: the × delete handles and the selection outline. Those are editing
+furniture — controls that exist to change the document, not marks the reader made in it. A print
+with a red ✕ beside every highlight is a screenshot of the app, not the annotated source.
+
+Deliberately PAINTED: an EMPTY sticky note. It is a coloured box the writer placed on purpose,
+and omitting a mark because it happens to hold no words is exactly the deletion-by-omission this
+codebase refuses everywhere else. (It loses its on-screen dashed "type here" border: that is an
+affordance for a control, and there is nothing to click on paper.)
+
+`wrapNoteText` mirrors the on-screen note's CSS: `white-space: pre-wrap` (explicit newlines are
+kept) plus `overflow-wrap: break-word` (a single word longer than the box is broken rather than
+allowed to bleed out of it). Pure — `measure` is the only thing it needs from a canvas.
+
+<a id="pdfpages-sequential"></a>
+### Sequential and yielding, and one canvas at a time
+
+A `Promise.all` over 200 pages would allocate 200 canvases before the first encode and take the
+tab down on iOS (the same budget `evictFarPages` exists to respect). Each canvas is zeroed
+(`width = 0`) the instant its JPEG exists — the viewer's own eviction path uses that trick because
+GC alone is too late for iOS's canvas accounting. Peak canvas memory is therefore ONE page; the
+accumulating cost is the encoded JPEGs, which is what `planAnnotatedRender` budgets.
+
+<a id="pdfpages-print-html"></a>
+### The printable document — one size, and blob: URLs
+
+`@page size` can only name ONE size, so it takes page 1's; a PDF with mixed page sizes still
+prints, with the odd pages scaled to the sheet width by `width: 100%`. Stated rather than
+silently wrong — mixed-size PDFs are rare and a refusal would be worse than a scaled page.
+
+The images arrive as blob: URLs, not data: URLs. A 200-page data: document is tens of megabytes
+of base64 built on the main thread, which is the exact stall CLAUDE.md records for the old
+hand-rolled btoa in the PDF store.

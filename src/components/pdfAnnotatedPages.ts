@@ -1,28 +1,17 @@
 // THE MARKED-UP PDF, as pages — the ONE mechanism behind both Print and Export.
 //
-// Peter: "we need a three dots button with an export and print button that export/print the marked
-// up pdf as a pdf … or to printer." The marks are not in the PDF bytes: highlights, underlines,
-// strikes and sticky notes live on `_iw.highlights` and are drawn as DOM overlays (see
-// pdfHighlights.ts). "Export the marked-up PDF" therefore means PRODUCING A NEW DOCUMENT that has
-// them. This module makes that document once, as an array of page images, and Print and Export are
-// two ways of handing the SAME pixels to the writer.
+// The marks are not in the PDF bytes (they live on `_iw.highlights` as DOM overlays), so "export
+// the marked-up PDF" means PRODUCING A NEW DOCUMENT. This makes it once, as page images, and Print
+// and Export hand the SAME pixels to the writer.
 //
-// ⚠ IT DOES NOT REUSE THE ON-SCREEN CANVASES, and the brief's first candidate was exactly that.
-// Three facts in PdfViewer.tsx rule it out, each of which would silently degrade or blank a page:
-//   1. Only pages near the viewport are rendered sharp at all; the rest hold a BASE canvas drawn at
-//      0.2–0.45× (BASE_SCALE_MIN/MAX) — a print of that is a smear, and it is the state most pages
-//      of a long PDF are in at any moment.
-//   2. On touch, `evictFarPages` frees far sharp canvases outright (iOS canvas-memory budget). A
-//      print built from what happens to be resident would vary with how the reader scrolled.
-//   3. The on-screen canvas is sized for the READER'S ZOOM, which is a viewing choice, not a print
-//      resolution — at fit-to-width on a small panel it is well under 150 dpi.
-// So each page is re-rendered from the pdf.js document at a chosen print scale, sequentially, and
-// released immediately after it is encoded. That also gives us the resolution guarantee the on-
-// screen path cannot: see `planAnnotatedRender`.
-//
-// The marks are painted ONTO the page canvas rather than kept as overlay elements, so the exported
-// bytes and the printed sheet are the same picture by construction — the divergence CLAUDE.md keeps
-// recording as "two rules, one pane" is unrepresentable here.
+// ⚠ NEVER REUSE THE ON-SCREEN CANVASES. Three facts in PdfViewer.tsx rule it out, each of which
+// would silently degrade or blank a page: far pages hold a 0.2–0.45× BASE canvas (a smear, and the
+// state most pages are in); `evictFarPages` frees far sharp canvases on touch, so a print would
+// vary with how the reader scrolled; and the on-screen size follows the READER'S ZOOM, a viewing
+// choice that is well under 150 dpi at fit-to-width.
+// ⚠ THE MARKS ARE PAINTED ONTO THE PAGE CANVAS, not kept as overlays, so exported bytes and printed
+// sheet are the same picture BY CONSTRUCTION — "two rules, one pane" is unrepresentable here.
+// → docs/archive/panels-and-popovers.md#pdfpages-one-mechanism
 
 import type { PdfHighlight } from '../citations/pdfHighlights'
 import type { PdfImagePage } from './minimalPdf'
@@ -51,10 +40,9 @@ export type RenderPlan =
 /**
  * Choose the render scale for a whole-document export, or REFUSE.
  *
- * Honest about limits rather than silently truncating (the brief's requirement, and this repo's
- * standing rule that a failure must not be answered by quietly dropping the writer's work): a
- * document too large to hold at the 72-dpi floor returns `ok: false` with a reason naming the page
- * count, instead of exporting the first N pages and looking like it worked.
+ * ⚠ REFUSE RATHER THAN TRUNCATE: a document too large to hold at the 72-dpi floor returns
+ * `ok: false` naming the page count, instead of exporting the first N pages and looking like it
+ * worked.
  */
 export function planAnnotatedRender(
   pageCount: number,
@@ -87,18 +75,12 @@ export function planAnnotatedRender(
 /**
  * The marks this mechanism CANNOT burn in: the ones with no rectangle on the page.
  *
- * ⚠ THIS IS ABOUT GEOMETRY, NOT ABOUT WHICH VIEW MADE THE MARK — and the difference matters,
- * because the obvious assumption is wrong. A mark made in the READER view is identified by the text
- * it covers, but `PdfReaderView.createFromSelection` also stores page rects from
- * `pdfReflow.rectsForRange`, "so the two views agree by construction"; notes made there get rects
- * too. So reader-made marks DO normally export. What cannot export is any mark whose `rects` came
- * back EMPTY — `rectsForRange` returns `[]` when the block is missing, the page has no measured
- * size, or no text segment overlaps the range — plus anything else that reaches storage without a
- * rectangle.
- *
- * Such a mark is real and must not be deleted; it simply has no position to paint at. The caller
- * COUNTS these and tells the writer, because the failure this avoids is the silent one: a marked-up
- * export that is quietly missing marks looks exactly like a correct export.
+ * ⚠ ABOUT GEOMETRY, NOT ABOUT WHICH VIEW MADE THE MARK — the obvious assumption is wrong, since
+ * `PdfReaderView.createFromSelection` stores page rects too, so reader-made marks DO normally
+ * export. What cannot is any mark whose `rects` came back EMPTY. Such a mark is real and must NOT
+ * be deleted; it simply has no position to paint at. The caller COUNTS them and tells the writer,
+ * because an export quietly missing marks looks exactly like a correct one.
+ * → docs/archive/panels-and-popovers.md#pdfpages-marks-without-geometry
  */
 export function marksWithoutGeometry(marks: readonly PdfHighlight[]): PdfHighlight[] {
   return marks.filter(m => !m.rects?.length)
@@ -149,11 +131,8 @@ const NOTE_MIN_H = 20
 const NOTE_RADIUS = 4
 
 /**
- * Break a note's text into rendered lines.
- *
- * Mirrors the on-screen note's CSS: `white-space: pre-wrap` (explicit newlines are kept) plus
- * `overflow-wrap: break-word` (a single word longer than the box is broken rather than allowed to
- * bleed out of it). Pure — `measure` is the only thing it needs from a canvas.
+ * Break a note's text into rendered lines, mirroring the on-screen note's CSS: `pre-wrap` (explicit
+ * newlines kept) plus `overflow-wrap: break-word`. Pure — `measure` is all it needs from a canvas.
  */
 export function wrapNoteText(text: string, maxWidth: number, measure: (s: string) => number): string[] {
   const out: string[] = []
@@ -195,14 +174,11 @@ function roundRectPath(ctx: PaintCtx, x: number, y: number, w: number, h: number
 /**
  * Paint one page's annotations onto a rendered page canvas.
  *
- * Deliberately NOT painted: the × delete handles and the selection outline. Those are editing
- * furniture — controls that exist to change the document, not marks the reader made in it. A print
+ * ⚠ NOT PAINTED: the × delete handles and the selection outline — editing furniture, and a print
  * with a red ✕ beside every highlight is a screenshot of the app, not the annotated source.
- *
- * Deliberately PAINTED: an EMPTY sticky note. It is a coloured box the writer placed on purpose,
- * and omitting a mark because it happens to hold no words is exactly the deletion-by-omission this
- * codebase refuses everywhere else. (It loses its on-screen dashed "type here" border: that is an
- * affordance for a control, and there is nothing to click on paper.)
+ * ⚠ PAINTED: an EMPTY sticky note. It is a box the writer placed on purpose, and omitting a mark
+ * for holding no words is the deletion-by-omission this codebase refuses everywhere else.
+ * → docs/archive/panels-and-popovers.md#pdfpages-what-is-painted
  */
 export function paintAnnotations(
   ctx: PaintCtx,
@@ -313,12 +289,10 @@ function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Uint8
 /**
  * Render every page with its annotations burned in, one at a time.
  *
- * SEQUENTIAL AND YIELDING, on purpose: a `Promise.all` over 200 pages would allocate 200 canvases
- * before the first encode and take the tab down on iOS (the same budget `evictFarPages` exists to
- * respect). Each canvas is zeroed (`width = 0`) the instant its JPEG exists — the viewer's own
- * eviction path uses that trick because GC alone is too late for iOS's canvas accounting. Peak
- * canvas memory is therefore ONE page; the accumulating cost is the encoded JPEGs, which is what
- * `planAnnotatedRender` budgets.
+ * ⚠ SEQUENTIAL AND YIELDING: a `Promise.all` over 200 pages allocates 200 canvases before the first
+ * encode and takes the tab down on iOS. Each canvas is zeroed (`width = 0`) the instant its JPEG
+ * exists — GC alone is too late for iOS's canvas accounting — so peak canvas memory is ONE page.
+ * → docs/archive/panels-and-popovers.md#pdfpages-sequential
  */
 export async function renderAnnotatedPages(opts: AnnotatedRenderOptions): Promise<PdfImagePage[]> {
   const { doc, marks, scale, rotation = 0, quality = 0.82, onProgress, cancelled } = opts
@@ -358,13 +332,10 @@ function escapeHtml(s: string): string {
 /**
  * The printable document: one image per sheet, at the source's own page size, no margins.
  *
- * `@page size` can only name ONE size, so it takes page 1's; a PDF with mixed page sizes still
- * prints, with the odd pages scaled to the sheet width by `width: 100%`. Stated rather than
- * silently wrong — mixed-size PDFs are rare and a refusal would be worse than a scaled page.
- *
- * The images arrive as blob: URLs, not data: URLs. A 200-page data: document is tens of megabytes
- * of base64 built on the main thread, which is the exact stall CLAUDE.md records for the old
- * hand-rolled btoa in the PDF store.
+ * `@page size` can name only ONE size, so it takes page 1's; mixed-size PDFs still print, scaled to
+ * the sheet width — stated rather than silently wrong, since a refusal would be worse.
+ * ⚠ blob: URLs, never data: — a 200-page data: document is tens of MB of base64 on the main thread,
+ * the exact stall the PDF store's hand-rolled btoa caused.
  */
 export function buildPrintHtml(pages: Array<{ url: string; widthPt: number; heightPt: number }>, title: string): string {
   const first = pages[0]
