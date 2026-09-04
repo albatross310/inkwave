@@ -17,7 +17,7 @@ export function usesTransformMagnify({
   return fill && !phone && paperSize !== 'scroll' && presentation === 'document'
 }
 
-/** Application width is responsive up to the selected physical page width; document width is fixed. */
+/** Application layout owns its pixel width; document layout retains its selected physical width. */
 export function presentedPaperWidth(presentation: SurfacePresentation, physicalWidth: string): string {
-  return presentation === 'application' ? `min(100%, ${physicalWidth})` : physicalWidth
+  return presentation === 'application' ? '100%' : physicalWidth
 }

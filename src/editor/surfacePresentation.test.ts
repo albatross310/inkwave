@@ -7,9 +7,9 @@ describe('surface presentation sizing', () => {
     expect(presentedPaperWidth('document', '210mm')).toBe('210mm')
   })
 
-  it('makes application paper fluid instead of shrinking its typography with the window', () => {
+  it('gives application layout the available width instead of shrinking its typography with the window', () => {
     expect(usesTransformMagnify({ fill: true, phone: false, paperSize: 'a4', presentation: 'application' })).toBe(false)
-    expect(presentedPaperWidth('application', '210mm')).toBe('min(100%, 210mm)')
+    expect(presentedPaperWidth('application', '210mm')).toBe('100%')
   })
 
   it('keeps phone and continuous paper off the transform path', () => {

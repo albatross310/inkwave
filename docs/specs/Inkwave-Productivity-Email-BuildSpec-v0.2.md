@@ -571,17 +571,21 @@ An email must no longer look like a small panel placed on top of an unrelated pa
 work opens in **isolated mode** by default: when the active subdoc has `doc_type: email`, the email
 itself is the writing surface.
 
-- On desktop the isolated email is centred at 75% of the resolved ordinary-page width; on phone it
-  remains full-width. It grows to its content height and must not manufacture an empty page-height
-  tail after a short message. Its header, body,
-  record/send controls, status, and concise provenance disclosure form one continuous box.
-- The selected ordinary-page width is a maximum, not a transform target. When the editor window is
-  narrower, the application surface and its content reflow while every font retains its chosen CSS
-  size. Viewport width must never invoke the document paper's fit-to-width transform or otherwise
-  shrink application typography. Only the writer's explicit editor/font zoom changes text size.
+- On desktop the isolated email has a fixed **900px default width**, approximately half or slightly
+  more than a 16-inch laptop's logical screen width; it is not a percentage of the window or paper.
+  It remains centred, is safety-capped to the available window with 24px water on each side, and is
+  full-width on phone. It grows to its content height and must not manufacture an empty page-height
+  tail after a short message. Its header, body, record/send controls, status, and concise provenance
+  disclosure form one continuous box.
+- The ordinary document-page width does not constrain application width and is not a transform target.
+  When the editor window is narrower, the application surface and its content reflow while every font
+  retains its chosen CSS size. Viewport width must never invoke the document paper's fit-to-width
+  transform or otherwise shrink application typography. Only the writer's explicit editor/font zoom
+  changes text size.
 - The isolated box is resizable. Dragging either side changes both sides by the same amount around a
-  fixed horizontal centre, so the box never walks left or right as its width changes. Width is
-  clamped to the available editor window. A bottom-centre handle sets an optional minimum height;
+  fixed horizontal centre, so the box never walks left or right as its width changes. Resized width
+  is stored in pixels, not as a viewport percentage, and clamped to the available editor window. A
+  bottom-centre handle sets an optional minimum height;
   without that explicit resize, the box continues to end after its content. Double-click/Enter/Home
   resets the relevant axis, arrow keys provide a non-pointer equivalent, and the local preference is
   restored without changing document content or provenance. Phone keeps full width and exposes only
@@ -898,8 +902,8 @@ lives inside the box, application presentation suppresses visual page gaps witho
 and the detailed sending/provenance explanation is collapsed behind a concise visible statement.
 W2–W7 remain specification only.
 
-1. **W1 — Isolated surface:** make the default email one centred box, 75% of page width on desktop
-   and full-width on phone, that ends after its content;
+1. **W1 — Isolated surface:** make the default email one centred 900px-wide box on desktop and
+   full-width on phone, ending after its content;
    consolidate header, editor body, actions, status, and concise disclosures. No archive change.
 2. **W2 — Contextual studio:** retain the writing page as an explicit alternate presentation; place
    complete email subdocs with their bodies inside boxes, distinguish never-sent journal material,
@@ -923,9 +927,9 @@ multi-target fault injection proves that one unreadable destination cannot damag
 
 #### Surface and navigation
 
-- An email renders as one centred box at 75% of page width on desktop (full-width on phone) that grows
-  with its content, with its body inside it, no forced blank page-height tail, and no second paper
-  visibly behind it.
+- An email renders as one centred 900px-wide box on desktop (full-width on phone), capped safely by a
+  narrower window, and grows with its content, with its body inside it, no forced blank page-height
+  tail, and no second paper visibly behind it.
 - Pulling either side expands/contracts the opposite side equally and preserves the box's horizontal
   centre. Bottom resizing changes only its optional minimum height. Keyboard and reset paths work,
   and no resize operation changes the email's authored bytes or provenance.

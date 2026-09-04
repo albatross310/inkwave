@@ -58,15 +58,18 @@ signature/key, and versioned evidence bundle have been successfully verified and
 does not become permanent public proof, and delivery/read/Bcc remain outside the claim without their
 own evidence.
 
-The isolated email box is now 75% of the resolved page width on desktop and centred; phone remains
+The isolated email box now has a stable 900px desktop default (roughly half or slightly more than a
+16-inch laptop's logical width) and remains centred; it is not a percentage of the window or paper.
+A 24px-per-side safety cap lets narrower windows reflow it without scaling type. Phone remains
 full-width, and contextual application surfaces do not inherit the email-specific width.
 The same shared surface owns resize handles: either side adjusts total width at twice the pointer
 delta while CSS auto-margins keep its centre fixed, and the bottom adjusts only an optional minimum
-height. Width/height preferences stay local presentation state, have keyboard/reset paths, and never
+height. Resized width is persisted in pixels; width/height preferences stay local presentation state,
+have keyboard/reset paths, and never
 enter the document or its provenance.
 
 Application presentation is excluded from the document paper's fit-to-window transform. Its outer
-paper is fluid up to the selected physical page width, so a narrower editor window causes ordinary
+layout gives the fixed-pixel application box the available window, so a narrower editor causes ordinary
 text reflow while typography remains at the explicit editor/font zoom. Document presentation keeps
 the existing fixed-paper transform unchanged.
 

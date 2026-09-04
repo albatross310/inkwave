@@ -1657,8 +1657,8 @@ export function Scroll({
             const ps = getPaperSize()
             if (ps === 'scroll') return undefined
             // The SAME physical mm the break model (pageModel) and the print @page size use —
-            // one source of truth for document paper. Applications cap at that width but reflow
-            // below it, keeping type at its chosen size instead of transform-shrinking it.
+            // one source of truth for document paper. Applications own a stable pixel width inside
+            // the available window and reflow below it instead of transform-shrinking their type.
             return presentedPaperWidth(presentation, paperCssSize(ps, getOrientation()).width)
           })(),
           // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card

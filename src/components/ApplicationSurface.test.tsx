@@ -46,9 +46,10 @@ describe('ApplicationSurface', () => {
     expect(block).not.toContain('100dvh')
   })
 
-  it('makes isolated email 25% narrower on desktop while keeping contextual tools independent', () => {
+  it('gives isolated email a stable 900px desktop default while keeping contextual tools independent', () => {
     const block = css.match(/\[data-iw-application="email"\]\.iw-application-surface--isolated\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
-    expect(block).toContain('width: 75%')
+    expect(block).toContain('width: 900px')
+    expect(block).toContain('max-width: calc(100% - 48px)')
     expect(block).toContain('margin-inline: auto')
   })
 
@@ -59,7 +60,7 @@ describe('ApplicationSurface', () => {
     expect(screen.getByRole('separator', { name: /height from the bottom edge/ })).toBeTruthy()
   })
 
-  it('keeps keyboard width changes centred and persists them as a responsive percentage', () => {
+  it('keeps keyboard width changes centred and persists them in pixels', () => {
     render(<ApplicationSurface app="email" label="Email draft" resizable><p>Message</p></ApplicationSurface>)
     const surface = screen.getByRole('region', { name: 'Email draft' })
     Object.defineProperty(surface, 'getBoundingClientRect', { value: () => ({ width: 600, height: 400 }) })
@@ -67,7 +68,7 @@ describe('ApplicationSurface', () => {
 
     fireEvent.keyDown(screen.getByRole('separator', { name: /right edge/ }), { key: 'ArrowRight' })
 
-    expect(surface.style.width).toBe('78%')
-    expect(localStorage.getItem('inkwave:applicationSurface:email:isolated:width')).toBe('78')
+    expect(surface.style.width).toBe('624px')
+    expect(localStorage.getItem('inkwave:applicationSurface:email:isolated:widthPx')).toBe('624')
   })
 })

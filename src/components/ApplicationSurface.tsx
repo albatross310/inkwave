@@ -25,7 +25,7 @@ interface ApplicationSurfaceProps {
 const WIDTH_STEP_PX = 12
 const HEIGHT_STEP_PX = 16
 
-function storedSizeKey(app: string, mode: ApplicationSurfaceMode, axis: 'width' | 'height'): string {
+function storedSizeKey(app: string, mode: ApplicationSurfaceMode, axis: 'widthPx' | 'height'): string {
   return `inkwave:applicationSurface:${app}:${mode}:${axis}`
 }
 
@@ -42,11 +42,10 @@ export function ApplicationSurface({
   const removeDragListenersRef = useRef<(() => void) | null>(null)
 
   const persistWidth = useCallback((width: number) => {
-    const parentWidth = surfaceRef.current?.parentElement?.getBoundingClientRect().width ?? 0
-    if (parentWidth <= 0) return
-    const percent = Math.round((width / parentWidth) * 1000) / 10
-    surfaceRef.current!.style.width = `${percent}%`
-    try { localStorage.setItem(storedSizeKey(app, mode, 'width'), String(percent)) } catch { /* private mode */ }
+    if (!surfaceRef.current) return
+    const pixels = Math.round(width)
+    surfaceRef.current.style.width = `${pixels}px`
+    try { localStorage.setItem(storedSizeKey(app, mode, 'widthPx'), String(pixels)) } catch { /* private mode */ }
   }, [app, mode])
 
   const persistHeight = useCallback((height: number) => {
@@ -55,9 +54,9 @@ export function ApplicationSurface({
     try { localStorage.setItem(storedSizeKey(app, mode, 'height'), String(Math.round(height))) } catch { /* private mode */ }
   }, [app, mode])
 
-  const resetAxis = useCallback((axis: 'width' | 'height') => {
+  const resetAxis = useCallback((axis: 'widthPx' | 'height') => {
     if (!surfaceRef.current) return
-    if (axis === 'width') surfaceRef.current.style.removeProperty('width')
+    if (axis === 'widthPx') surfaceRef.current.style.removeProperty('width')
     else surfaceRef.current.style.removeProperty('min-height')
     try { localStorage.removeItem(storedSizeKey(app, mode, axis)) } catch { /* private mode */ }
   }, [app, mode])
@@ -65,9 +64,9 @@ export function ApplicationSurface({
   useEffect(() => {
     if (!resizable || !surfaceRef.current) return
     try {
-      const width = Number(localStorage.getItem(storedSizeKey(app, mode, 'width')))
+      const width = Number(localStorage.getItem(storedSizeKey(app, mode, 'widthPx')))
       const height = Number(localStorage.getItem(storedSizeKey(app, mode, 'height')))
-      if (Number.isFinite(width) && width >= 45 && width <= 100) surfaceRef.current.style.width = `${width}%`
+      if (Number.isFinite(width) && width >= 320) surfaceRef.current.style.width = `${width}px`
       if (Number.isFinite(height) && height >= 240) surfaceRef.current.style.minHeight = `${height}px`
     } catch { /* private mode */ }
   }, [app, mode, resizable])
@@ -82,7 +81,7 @@ export function ApplicationSurface({
     removeDragListenersRef.current?.()
     const startX = event.clientX
     const startWidth = surface.getBoundingClientRect().width
-    const limits = surfaceWidthLimits(parent.getBoundingClientRect().width)
+    const limits = surfaceWidthLimits(parent.getBoundingClientRect().width - 48)
     let currentWidth = startWidth
     const move = (moveEvent: globalThis.PointerEvent) => {
       currentWidth = symmetricSurfaceWidth({
@@ -139,13 +138,13 @@ export function ApplicationSurface({
   }
 
   const resizeWidthByKey = (event: KeyboardEvent<HTMLDivElement>, edge: ApplicationSurfaceResizeEdge) => {
-    if (event.key === 'Enter' || event.key === 'Home') { event.preventDefault(); resetAxis('width'); return }
+    if (event.key === 'Enter' || event.key === 'Home') { event.preventDefault(); resetAxis('widthPx'); return }
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
     const surface = surfaceRef.current
     const parent = surface?.parentElement
     if (!surface || !parent) return
     event.preventDefault()
-    const limits = surfaceWidthLimits(parent.getBoundingClientRect().width)
+    const limits = surfaceWidthLimits(parent.getBoundingClientRect().width - 48)
     const pointerDelta = event.key === 'ArrowRight' ? WIDTH_STEP_PX : -WIDTH_STEP_PX
     persistWidth(symmetricSurfaceWidth({
       startWidth: surface.getBoundingClientRect().width,
@@ -191,7 +190,7 @@ export function ApplicationSurface({
             tabIndex={0}
             onPointerDown={(event) => beginHorizontalResize(event, 'left')}
             onKeyDown={(event) => resizeWidthByKey(event, 'left')}
-            onDoubleClick={() => resetAxis('width')}
+            onDoubleClick={() => resetAxis('widthPx')}
           />
           <div
             className="iw-application-surface__resize iw-application-surface__resize--right"
@@ -202,7 +201,7 @@ export function ApplicationSurface({
             tabIndex={0}
             onPointerDown={(event) => beginHorizontalResize(event, 'right')}
             onKeyDown={(event) => resizeWidthByKey(event, 'right')}
-            onDoubleClick={() => resetAxis('width')}
+            onDoubleClick={() => resetAxis('widthPx')}
           />
           <div
             className="iw-application-surface__resize iw-application-surface__resize--bottom"
