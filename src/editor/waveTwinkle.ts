@@ -16,6 +16,7 @@ import {
   WAVE_SCENE_HEIGHT,
   WAVE_SCENE_WIDTH,
   WAVE_SCROLL_PERIOD_PX,
+  WAVE_TILE_PX,
   type WaveIntroMark,
   type WaveScrollMark,
 } from './waveSceneData'
@@ -26,6 +27,13 @@ export const SPARK_COLOR_NIGHT = '#9aa3af'
 export const SPARK_CORE_NIGHT = '#9aa3af'
 export const DASH_COLOR = '#f3edcf'
 export const DASH_COLOR_NIGHT = '#9aa3af'
+// One tuning knob for the independent intro flashes. It scales opacity choreography only; the
+// spatial field clocks must continue to match the 1.944s wave drift exactly.
+export const WAVE_MARK_PLAYBACK_RATE = 2
+export const WAVE_MARK_TIMELINE_MS = WAVE_INTRO_MS / WAVE_MARK_PLAYBACK_RATE
+// Exactly two whole tiles left of the viewport origin. A centred field changes its tile phase with
+// viewport width, so a mathematically correct stored tangent visibly misses the painted curve.
+export const WAVE_SCENE_LEFT_PX = -2 * WAVE_TILE_PX
 
 type Group = 'a' | 'b'
 type Mode = 'anim' | 'coast' | 'off'
@@ -68,7 +76,9 @@ function makeMark(kind: 'dash' | 'spark', x: number, y: number, angle: number, s
   el.style.opacity = '0'
   if (kind === 'dash') {
     el.style.width = `${size}px`
-    el.style.transform = `translateY(-50%) rotate(${angle}deg)`
+    // Generated x/y/angle describe the dash CENTRE on the curve. Centre the element on that point;
+    // treating x as its left edge samples the tangent half a dash-width away and visibly floats it.
+    el.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`
   } else {
     el.style.width = `${size}px`
     el.style.height = `${size}px`
@@ -89,9 +99,9 @@ function prepareHost(host: HTMLElement): HostState {
     field.className = `iw-twk-field iw-scene-field ${group === 'a' ? 'iw-twk-fa' : 'iw-twk-fb'}`
     field.style.width = `${WAVE_SCENE_WIDTH}px`
     field.style.height = `${WAVE_SCENE_HEIGHT}px`
-    field.style.left = '50%'
+    field.style.left = `${WAVE_SCENE_LEFT_PX}px`
     field.style.right = 'auto'
-    field.style.marginLeft = `${-WAVE_SCENE_WIDTH / 2}px`
+    field.style.marginLeft = '0'
     set.appendChild(field)
   }
 
@@ -216,12 +226,12 @@ function startIntro(state: HostState, epoch: number): void {
   cancelIntro(state)
   state.epoch = epoch
   for (const item of state.intro) {
-    const animation = item.el.animate(introFrames(item.mark), { duration: WAVE_INTRO_MS, fill: 'both' })
+    const animation = item.el.animate(introFrames(item.mark), { duration: WAVE_MARK_TIMELINE_MS, fill: 'both' })
     item.animation = animation
     stamp(animation, epoch)
   }
   for (const item of state.scroll) {
-    const animation = item.el.animate(overlapFrames(item.mark, state.scrollTop), { duration: WAVE_INTRO_MS, fill: 'both' })
+    const animation = item.el.animate(overlapFrames(item.mark, state.scrollTop), { duration: WAVE_MARK_TIMELINE_MS, fill: 'both' })
     item.animation = animation
     stamp(animation, epoch)
   }

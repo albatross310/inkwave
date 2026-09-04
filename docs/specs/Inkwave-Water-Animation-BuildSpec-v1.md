@@ -28,6 +28,14 @@ always parallel to that wave. It has no independent rotation animation. Sparkles
 around a wave. Every spatial object is carried by one of two shared fields, corresponding exactly to
 the two wave directions; individual objects never own movement transforms.
 
+For a dash, the generated coordinate is its centre point—never its left edge. Rendering centres both
+axes on that coordinate before applying the tangent rotation; otherwise the visible dash samples a
+different part of the curve by half its own width.
+
+The fixed scene field is anchored `-280px` from the viewport origin: exactly two complete 140px wave
+tiles. It must never be horizontally centred on the viewport, because a centred origin changes the
+field's tile phase with viewport width and makes the stored tangent disagree with the painted SVG.
+
 ## 3. Introductory series
 
 The introduction is finite and one-shot. Each introductory speck or sparkle:
@@ -42,6 +50,10 @@ or population swaps. The two shared spatial fields use the same drift and additi
 as the wave tiles, including the same start time and slowdown anchor. Spatial phase divergence is
 therefore structurally impossible rather than corrected after detection.
 
+The checked-in introductory time table is played at `2×`: its 1800ms base schedule completes in
+900ms. This multiplier applies only to each object's independent opacity choreography. It must not
+alter field movement, wave speed, coordinates, ordering, or the scroll-distance loop.
+
 ## 4. Scroll series
 
 A separate fixed population overlaps the tail of the introduction and then becomes the resting
@@ -55,7 +67,8 @@ the same absolute scroll position produces the same speck state. No scroll means
 
 Zoom-generated scroll corrections are excluded upstream and must not update the scroll series.
 Zoom never regenerates coordinates, changes the population, or re-phases visibility. A viewport
-resize may clip different portions of the fixed oversized scene but does not regenerate it.
+resize may clip different portions of the fixed oversized scene but does not regenerate or re-centre
+it.
 
 ## 5. Visual and lifecycle requirements
 

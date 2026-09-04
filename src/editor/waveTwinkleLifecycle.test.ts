@@ -6,10 +6,11 @@ import {
   WAVE_SCENE,
   WAVE_SCENE_WIDTH,
   WAVE_SCROLL_PERIOD_PX,
+  WAVE_TILE_PX,
   type WaveIntroMark,
   type WaveScrollMark,
 } from './waveSceneData'
-import { scrollMarkOpacity } from './waveTwinkle'
+import { scrollMarkOpacity, WAVE_MARK_PLAYBACK_RATE, WAVE_MARK_TIMELINE_MS, WAVE_SCENE_LEFT_PX } from './waveTwinkle'
 
 const all = [...WAVE_SCENE.intro, ...WAVE_SCENE.scroll]
 
@@ -53,7 +54,21 @@ describe('the checked-in water scene', () => {
   it('stores every dash at the exact tangent angle of its wave', () => {
     const dashes: Array<WaveIntroMark | WaveScrollMark> = all
       .filter((mark) => !('kind' in mark) || mark.kind === 'dash')
-    for (const mark of dashes) expect(mark.angle, mark.id).toBe(tangentAngle(mark.x))
+    for (const mark of dashes) {
+      expect(mark.angle, mark.id).toBe(tangentAngle(mark.x))
+      // The viewport wave pattern is phase-zero; a whole-tile field origin must keep the same
+      // tangent at the mark's painted screen coordinate.
+      expect(mark.angle, `${mark.id} screen phase`).toBe(tangentAngle(WAVE_SCENE_LEFT_PX + mark.x))
+    }
+    const source = readFileSync(resolve(__dirname, 'waveTwinkle.ts'), 'utf8')
+    expect(source).toContain('translate(-50%, -50%) rotate')
+  })
+
+  it('anchors the scene field on a whole-tile phase at every viewport width', () => {
+    expect(WAVE_TILE_PX).toBe(140)
+    expect(Math.abs(WAVE_SCENE_LEFT_PX % WAVE_TILE_PX)).toBe(0)
+    const source = readFileSync(resolve(__dirname, 'waveTwinkle.ts'), 'utf8')
+    expect(source).not.toContain("field.style.left = '50%'")
   })
 
   it('gives every intro object exactly one finite appearance window', () => {
@@ -62,6 +77,11 @@ describe('the checked-in water scene', () => {
       expect(mark.endMs, mark.id).toBeGreaterThan(mark.startMs)
       expect(mark.endMs, mark.id).toBeLessThanOrEqual(WAVE_INTRO_MS)
     }
+  })
+
+  it('plays the fixed intro flashes at double speed without changing the spatial wave clock', () => {
+    expect(WAVE_MARK_PLAYBACK_RATE).toBe(2)
+    expect(WAVE_MARK_TIMELINE_MS).toBe(WAVE_INTRO_MS / 2)
   })
 })
 

@@ -643,13 +643,19 @@ The marks are one immutable, checked-in scene (`waveSceneData.ts`), generated of
 `scripts/generate-wave-scene.mjs`. Runtime randomness, canvas rasterisation, asynchronous art decode,
 server-fed instructions, respawn and duplicate blink/rest populations are forbidden. The generator
 enforces ≥180px horizontal separation per wave band; every dash stores the exact local wave tangent.
-The browser mounts the whole table synchronously before the atomic gate opens.
+The browser mounts the whole table synchronously before the atomic gate opens. A dash's generated x/y
+is its CENTRE: render it with `translate(-50%, -50%)` before its rotation. Treating x as CSS `left`
+puts the rendered centre half a dash-width away from the sampled tangent and visibly detaches it.
 
 Intro objects have exactly one finite opacity window and never reappear. Every object owns opacity
 only; the two group fields own all spatial motion and use the SAME named CSS drift + additive coast
 animations as the two wave tiles. Sibling start-time adoption and the forward coast anchor therefore
 include waves and fields together. Never add a parent/field opacity transition: initial reveal is
 atomic, but every later appearance/disappearance is independent.
+
+The immutable 1800ms intro schedule plays through `WAVE_MARK_PLAYBACK_RATE = 2` (900ms effective).
+That knob scales mark opacity only. Never apply it to the fields or wave drift: replacement can be
+faster while every mark remains locked to its wave.
 
 The pre-gate CSS keeps all spatial animations paint-hidden and paused at currentTime 0 rather than
 `display:none`. `waveTwinkle.alignFieldClocks` binds each field once to its matching pseudo and
@@ -661,7 +667,9 @@ The overlapping rest population is a pure spatial loop: `scrollTop mod 2240px`. 
 deliberately independent of time, velocity, viewport, page geometry and editor zoom. Scroll.tsx calls
 `setScrollScene` only for genuine user/PDF scroll; zoom-held correction scrolls do not reach it.
 Returning to the same absolute scrollTop must reproduce the same state. Resize clips the fixed 2800px
-×1680px scene; it must not regenerate it.
+×1680px scene; it must not regenerate or horizontally centre it. The field starts at `-280px`, an
+exact two-tile offset from the viewport origin. Centring changes the 140px phase with viewport width
+and makes a correct stored tangent visibly non-parallel to the painted SVG.
 
 **The rebuild's rounds, the wave-video ladder, and the refuted desync hypothesis are in
 `docs/archive/wave-system-rounds.md`. EVERY RULE BELOW WAS A LIVE BUG** — none is preference.

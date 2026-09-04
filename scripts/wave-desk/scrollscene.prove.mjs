@@ -79,6 +79,39 @@ const repeated = await scrollTo(360 + 2240)
 const changed = first.opacity.some((value, index) => Math.abs(value - zero.opacity[index]) > 1e-8)
 const periodic = first.opacity.every((value, index) => Math.abs(value - repeated.opacity[index]) < 1e-8)
 
+// Geometry behind the visible "dash not parallel" regression: x/y is the dash centre and the
+// field origin must be congruent with the viewport-anchored 140px SVG tile.
+const geometry = await page.evaluate(() => {
+  const mod = (n, m) => ((n % m) + m) % m
+  const curve = (phase) => {
+    const second = phase >= 70
+    const t = (second ? phase - 70 : phase) / 70
+    const y = second ? 22 + 36 * t - 36 * t * t : 22 - 36 * t + 36 * t * t
+    const slope = second ? (36 - 72 * t) / 70 : (-36 + 72 * t) / 70
+    return { y, angle: Math.atan(slope) * 180 / Math.PI }
+  }
+  let maxAngleError = 0, maxYError = 0, count = 0
+  let phaseAligned = true, centreAnchored = true
+  for (const field of document.querySelectorAll('.iw-twk-field')) {
+    const fieldLeft = parseFloat(field.style.left)
+    phaseAligned &&= Math.abs(mod(fieldLeft, 140)) < 1e-8
+    const yOffset = field.classList.contains('iw-twk-fb') ? 70 : 0
+    for (const dash of field.querySelectorAll('.iw-scene-dash')) {
+      const x = parseFloat(dash.style.left), y = parseFloat(dash.style.top)
+      const match = /rotate\(([-.\d]+)deg\)/.exec(dash.style.transform)
+      const actualAngle = match ? Number(match[1]) : NaN
+      centreAnchored &&= dash.style.transform.startsWith('translate(-50%, -50%)')
+      const expected = curve(mod(fieldLeft + x, 140))
+      maxAngleError = Math.max(maxAngleError, Math.abs(actualAngle - expected.angle))
+      maxYError = Math.max(maxYError, Math.abs(mod(y, 140) - (expected.y + yOffset)))
+      count++
+    }
+  }
+  return { count, phaseAligned, centreAnchored, maxAngleError, maxYError }
+})
+const parallel = geometry.count > 0 && geometry.phaseAligned && geometry.centreAnchored
+  && geometry.maxAngleError <= 0.011 && geometry.maxYError <= 0.011
+
 // Put the pointer inside the text column so Ctrl-wheel resolves to editor-font zoom, not water zoom.
 await scrollTo(1200)
 const point = await page.evaluate(() => {
@@ -108,8 +141,9 @@ const zoomStable = beforeZoom.opacity.every((value, index) => Math.abs(value - a
 console.log(`── ${ENGINE} deterministic scroll scene ──`)
 console.log(`genuine scroll changed marks : ${changed ? '✓' : '✗'}`)
 console.log(`+2240px repeated scene       : ${periodic ? '✓' : '✗'}`)
+console.log(`dashes parallel to SVG waves : ${parallel ? '✓' : '✗'} (${geometry.count} dashes, angle error ${geometry.maxAngleError.toFixed(3)}°, y error ${geometry.maxYError.toFixed(3)}px)`)
 console.log(`editor zoom committed        : ${zoomed ? '✓' : '✗'} (${beforeZoom.zoom || '1'} → ${afterZoom.zoom || '1'})`)
 console.log(`zoom left marks unchanged    : ${zoomStable ? '✓' : '✗'} (scrollTop ${beforeZoom.top} → ${afterZoom.top})`)
 
 await browser.close()
-process.exit(changed && periodic && zoomed && zoomStable ? 0 : 1)
+process.exit(changed && periodic && parallel && zoomed && zoomStable ? 0 : 1)
