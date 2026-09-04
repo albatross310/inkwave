@@ -770,3 +770,307 @@ where the late ack arrives DURING the steal**, between the two waits.
 
 `releaseFraming`-style fire-and-forget applies to `requestSwitch` too: the message is given time to
 deliver before the channel is dropped.
+
+---
+
+# <a id="library"></a>`citations/library.ts` — the per-document source library
+
+Filed here rather than with the citation UI because everything below is the data-loss family in
+another costume: an absent-vs-error read, a blind whole-file replace, and a one-shot async signal.
+
+## <a id="lib-per-document"></a>⚠ IT USED TO BE ONE LIBRARY FOR THE WHOLE ORIGIN (2026-08-28)
+
+Peter: *"the references don't appear to be being saved in the studio doc but only in the OPFS which
+means if you start a new doc the old references are still there. Can we make it so they only save in
+the .studio doc and OPFS only for the doc that's open."*
+
+A single device-wide file meant every new document opened carrying the last one's bibliography — **a
+thesis's sources appearing in an unrelated essay** — and a .studio sent to someone else arrived
+without the library that made sense of it.
+
+Now: the per-document file is the WORKING store (no race with the document's own save — it is its own
+file, not a read-modify-write of `current.json`), and `document.library` in the export bundle is how
+it TRAVELS. Opening a .studio writes its library into that document's file.
+
+LEGACY, and it is deliberately NOT adopted automatically: the old device-wide file is left exactly
+where it is, untouched. **Auto-importing it into every document would reproduce the bug this fixes.**
+`legacyLibrarySize()` / `importLegacyLibrary()` exist so a writer can pull their old sources into the
+document that needs them, once, on purpose. An unreadable legacy file reports 0 rather than being
+advertised as importable, and the import MERGES — a source already saved here keeps its citekey and
+its re-verification history.
+
+The active document id is read at CALL time, never cached: a tab can switch documents
+(`storage/tabDoc.ts`), and a stale id would persist one document's sources into another's file — the
+bug this module was just fixed for, wearing a different hat.
+
+## <a id="lib-absent-vs-error"></a>The 2026-07-15 collapse, in the bibliography
+
+`readFile`'s old body ended `catch { return [] }` (and `Array.isArray? … : []`), so a transient OPFS
+fault, a corrupt/half-synced file, or a mid-read failure all answered "the library is empty" —
+indistinguishable from a first-time user who has none. Since `writeFile` is a blind whole-file
+replace, the next `addToLibrary` — **and the browser extension re-flushes its queue on every visit,
+with no user action** — then wrote the near-empty in-memory set OVER the real one.
+
+So: NotFound ⇒ `[]` (safe to write), everything else ⇒ THROW (the caller must NOT overwrite a library
+it could not read).
+
+Two consequences that are easy to miss:
+
+* **`setEntries` runs UNCONDITIONALLY, INCLUDING EMPTY** (2026-08-28). It was `if (items.length)`,
+  harmless while there was ONE device-wide library, because an empty read only ever meant first use.
+  With a library PER DOCUMENT an empty read means "this document has no sources", and skipping the
+  set leaves the PREVIOUS document's entries sitting in the tab-global provider — precisely the bug
+  being fixed. That line only runs on a SUCCESSFUL read; a failure throws past it.
+* **A failed hydration BLOCKS persists.** We do not know what the file holds and the writer's real
+  sources may be in it, so the change stays in memory and the write is refused; a later successful
+  `loadLibrary()` clears the flag. The flag starts false, because a fresh page that has not yet tried
+  to read has nothing on disk it could be shadowing.
+
+## <a id="lib-hydration-latch"></a>The hydration latch — caught on Peter's iPhone 8
+
+2026-07-17, `?btDebug=1`. The break-table signature hashes the bibliography's CONTENT (correctly — a
+citation's box changes the wrap, and an epoch counter could never survive a reload). But the library
+hydrates ASYNCHRONOUSLY from OPFS, so anything that builds before it lands bakes an EMPTY-library
+signature into the key: **measured `capa@0` at build and `capa@20` after the reload, on a device with
+20 entries. Every later lookup then misses, FOREVER, silently.** The signature was right; the caller
+asked too early.
+
+THE SHAPE OF THE DEFECT — the same one the wave video hit in the same minute — is A ONE-SHOT ASYNC
+SIGNAL WITH NO "HAS IT ALREADY HAPPENED?" CHECK. So readiness is a LATCH, not an event:
+
+* already done → resolves immediately (a late asker is never stranded)
+* in flight → waits on the SAME promise (no second read, no duplicate `setEntries`)
+* never started → STARTS it (a caller that only ever asks readiness cannot hang forever — which
+  would be the identical stranding bug, just relocated)
+
+It resolves on FAILURE too: the contract is "the initial attempt has COMPLETED", not "a library
+exists". A device with no library legitimately has 0 entries, and that 0 is a real state that must be
+allowed to sign a table. Both the read-failure branch and a `setEntries` throw on malformed data land
+in the same latch, so a builder waiting on `libraryReady()` is never stranded by either.
+
+**THE PROMISE ITSELF IS THE LATCH — that is the whole mechanism, and it is why there is no `_done`
+flag.** A resolved promise resolves every later `await` immediately, forever; an explicit "has it
+already happened?" check beside it would be redundant, and MUTATION TESTING PROVED IT: removing such
+a check left every test green, because it never did anything. **A guard no test can kill is not a
+guard — it is a comment that costs a branch.** What DOES need the check is the START: a caller that
+only ever awaits must not hang forever waiting for a load nobody kicked off. That mutation DOES kill
+tests, which is how we know the branch is load-bearing.
+
+`loadLibrary()` keeps its exact semantics — it still re-reads on every call, because callers use it
+to re-hydrate. Only the LATCH is memoised.
+
+## <a id="lib-reverification"></a>Re-capture preserves re-verification history
+
+`addToLibrary` keeps `changelog` / `lastVerified` / `deadUrl` when the SAME source is re-captured —
+the extension re-flushes its queue on every visit, and a fresh capture carries no changelog. `??`
+keeps the incoming values when present (so a real re-verify still updates the history) and otherwise
+falls back to the previous entry's, **so a re-flush never wipes it.**
+
+Two entries are "the same source" when they share a DOI, or, lacking one, an identical title — used
+to replace in place rather than mint a colliding citekey.
+
+---
+
+# <a id="cloud"></a>The two cloud providers — `storage/onedrive.ts` and `storage/gdrive.ts`
+
+They mirror each other's shape on purpose and they have drifted apart at least twice, each time with
+a data-loss bug on one side only. **The safety rule itself is `planWriteback` (`#writeback`), shared;
+each provider owns only the mapping of its own failure surface into `ArchiveRead`.**
+
+## <a id="od-scopes"></a>OneDrive: what leaves the browser, and why the folder is the writer's
+
+OneDrive sync via Microsoft Graph is the cross-browser cloud destination: File System Access is
+Chromium-only, so this gives Firefox/Safari writers a way to sync their record. Sign in with a
+Microsoft account (OAuth 2.0 PKCE via MSAL), then PUT the files into the chosen folder. **Only an
+access token + the file bytes leave the browser, straight to Microsoft Graph — no Inkwave server is
+involved.**
+
+Requires an Azure app registration (a public SPA client id) in `VITE_MS_CLIENT_ID`; the feature is
+hidden until that is configured. The client id is PUBLIC (it appears in OAuth redirects), so it is
+committed as the default and overridable. Redirect URIs registered: `https://iwsolo.me` +
+`https://www.iwsolo.me` + `http://localhost:5173`. Authority `/common` covers personal and
+work/school accounts, and the scope is `Files.ReadWrite` (full drive) so the writer can pick ANY
+folder to sync into — existing AppFolder-only sessions are re-prompted to consent on the next sync.
+
+MSAL is lazily imported so it is a separate client chunk and never enters the prerender/SSR graph.
+
+**THE ONEDRIVE FILENAME IS PINNED PER-DOCUMENT** the first time we sync. The slug is derived from the
+title, which is re-derived from the text on every edit — so without pinning, each sync would PUT a
+different name and create a new file every few seconds instead of overwriting the same one. It is
+exposed so "Save a copy" can point future syncs at a NEW filename, leaving the previous file
+untouched.
+
+Sign-in is a FULL-PAGE redirect in the same window, which is why `storage/tabDoc.ts` cannot carry the
+document id in the URL (see `#tabdoc-identity`).
+
+## <a id="cloud-status-map"></a>`404 ⇒ absent`, and everything else ⇒ error
+
+`mapGraphReadStatus` is PURE, exported and tested, because **this one line is the entire
+absent-vs-error decision**, and F16's lesson is that a perfectly-typed union guards the CONSUMER
+while the PRODUCER quietly decides the answer. `404 ⇒ absent` licenses a first write; a mistake in
+the other direction (a failure read as "not there") is the 2026-07-15 blind overwrite.
+
+**FAIL-SAFE BY DESIGN: everything that is not exactly 404 is an ERROR.** A Graph status we have never
+seen makes sync refuse to write, never destroy. That is also why 401/403 are errors and not "absent"
+— an expired token means we cannot SEE the file, not that it is gone. `readDriveArchive` mirrors the
+rule for Drive.
+
+Two arms of `readRemoteArchive` are worth stating in full:
+
+* **An EMPTY BODY is an established emptiness** — a placeholder the OneDrive desktop client created,
+  or a previous upload that never landed. Nothing there to lose. Treating it as a parse ERROR would
+  refuse every sync forever, since the merge gate only closes on a write.
+* **A body that PARSED is not a body we UNDERSTOOD.** `parseTraceFile` is JSON.parse + a marker slice,
+  so a 200 carrying any valid JSON that is not a record used to arrive as `snapshots: []` — an
+  established emptiness we never established. `archiveSnapshotsOf` decides that now (`#wb-is-a-record`).
+
+A parse failure is an ERROR, not an absence: a truncated or garbled download tells us nothing about
+what the file holds, and **"I could not decode it" must never license replacing it.**
+
+`readSmallFile` NEVER THROWS — and that used to be a lie (auditor F13): `getSilentToken()` sat OUTSIDE
+the try, so an MSAL failure threw straight through a function whose contract says it returns an error
+union. **The whole point of the union is that a caller cannot forget the failure case; a producer that
+throws instead of returning `error` hands the caller an exception it never wrote a branch for.**
+
+## <a id="cloud-sync-guard"></a>The .studio sync's own read — the guard that used to be unreachable
+
+GROW-ONLY: union the remote file's snapshots in before overwriting, so a short local set cannot
+truncate history — but only ONCE per session (the per-sync GET+parse of a big file adds lag).
+
+**THE READ MUST BE ABLE TO FAIL.** This block used to be `if (res.ok) { merge }` wrapped in a
+`catch { /* no remote yet → write local as-is */ }` — so a 500, a 429 throttle, an expired token or a
+corrupt body all read as "there is nothing there" and the PUT replaced the remote archive with the
+local set. That is the 2026-07-15 collapse (a failure wearing an absence's clothes) driving the
+2026-07-05 truncation (a short local set over a long archive), **in the live sync of Peter's thesis.**
+
+The .studio stays LEAN (no PDF bytes) so text edits don't re-upload megabytes; the cited PDFs go as
+sidecar files beside it, uploaded once and re-uploaded only if the PDF itself changes. Annotations
+live as JSON in the .studio, not in the PDF, so marking one up never triggers a re-upload.
+
+The .studio keeps `{ expect: 'any' }` — its PRE-EXISTING posture, **stated rather than defaulted.**
+Its cross-device race is mitigated differently (the metadata heartbeat + the once-per-session
+grow-only merge), and pinning it is a separate change with its own proof. Finding E is scoped to the
+LEDGER, whose file is cheap enough to reconcile on every write.
+
+And the OPFS self-heal after a successful sync is **NOT `void`ed, which is load-bearing**:
+`restoreSnapshotsFromBundle` READS the local archive, and that read now THROWS on a fault instead of
+lying `[]` — so `void` would be an unhandled rejection escaping a fire-and-forget shortcut, surfacing
+as an uncaught browser error at the exact moment storage is already misbehaving. The heal is genuinely
+best-effort (the remote already has the union), so the failure is LOGGED, not thrown.
+
+## <a id="cloud-warm-pass"></a>⚠ THE IDLE WARM PASS WAS THE LAST LIVE INSTANCE OF THE 2026-07-15 SHAPE
+
+Found and reproduced 2026-07-17, `cloudWriteback.test.ts`. Auditor B named it in the wrong function —
+`syncToGoogleDrive` does NOT do this (probed) — but the finding itself was real, and it lived in
+Drive's IDLE WARM PASS:
+
+    const text = await downloadGoogleDriveFile(fileId)   // ← `string | null`: null on 404,
+    if (text) { …restore… }                              //   AND on 500 / 429 / 401 / offline
+    markWritebackMerged(key)                             // ← RAN ANYWAY
+
+`downloadGoogleDriveFile` is the exact `catch { return null }` shape `archiveWriteback.ts` exists to
+abolish: it collapses "the file is not there" and "Drive is down" into one word. A 500 in the warm
+pass therefore CLOSED the once-per-session merge gate — and because **that gate sits UPSTREAM of the
+sync's own guard, the next checkpoint skipped `planWriteback` ENTIRELY** and PUT the short local set
+over the remote archive. *A guarded union that is never reached guards nothing.* Not "it never
+retries" — it never even asks.
+
+PROVED: a 4-snapshot remote + a 1-snapshot local + a 500 in the warm pass ⇒ the upload carried
+`['s5']`. **Four Bitcoin-anchored snapshots, gone, with no failure anywhere the writer could see.**
+OneDrive's `preMergeRemote` never had it (`if (!res.ok) return` sits BEFORE its mark) — the two
+providers had silently drifted, which is this repo's standing wound.
+
+THE FIX IS TO REUSE THE READ THAT ALREADY REPORTS WHAT HAPPENED. `readDriveArchive` is that module's
+own `ArchiveRead` adapter — the same one the sync path trusts. **One rule, one read, one place; a
+second private read of the same file is how these two drifted apart to begin with.** OneDrive's copy
+had the same second hole (a 200 carrying valid non-record JSON left `remote.snapshots` undefined,
+skipped the restore, and closed the gate anyway), and `readRemoteArchive` + `archiveSnapshotsOf` now
+decide both arms in one place, once.
+
+**AND THE GATE STILL CLOSES ON A GENUINE ABSENCE** — this is not "delete the mark". A 404 means there
+is nothing to merge, so closing is correct and saves the first sync a pointless second download of a
+file that isn't there. Only `error` leaves it open. **Guarding loss alone is how a lane ships an
+outage.** A restore FAILURE must not close it either: the merge did not happen, so the sync's own read
+is still the only thing between a short local set and the archive.
+
+## <a id="cloud-metadata-only"></a>Metadata, never the body
+
+The multi-device heartbeat and resume-on-load both used to fetch and parse the whole (possibly 20MB)
+file. They now read Graph/Drive METADATA only: the remote file having been modified well after OUR
+last upload means another device wrote it. The generous margin absorbs server-vs-local clock skew, and
+the guard is purely advisory.
+
+`putFile`'s preconditions are ⚠ STATED, NOT PROBED — and it FAILS SAFE, which is why it ships that
+way. Neither `@microsoft.graph.conflictBehavior=fail` nor `If-Match` has been exercised against real
+Graph (that needs Peter's account). **If either is wrong the write is REFUSED, never mis-applied: a
+rejected upload is a failed sync that retries, not a lost row.** The failure direction is what makes an
+unprobed API guess acceptable here — the same reasoning as `Graph 404 ⇒ absent`. A wrong guess costs a
+sync cycle; the bug it prevents costs the rows. 409 (conflictBehavior hit an existing file) and 412
+(If-Match failed) are the precondition doing its job — loud, not silent, and never a write.
+
+`mapPrecondition` is PURE and exported so it can be tested without a Microsoft account: **the DECISION
+is testable even where the SERVER's honouring of it is not.**
+
+## <a id="cloud-listing"></a>Listing traps, both providers
+
+**PAGINATION.** Graph pages children at `$top`, and every doc's PDF sidecars live in the SAME folder —
+past one page, .studio files sorting after the cut silently vanish from the picker (2026-07-11, "open
+file is not showing the studio files"). Follow `@odata.nextLink` to exhaustion, capped.
+
+**THE ENRICHED `$select` MUST DEGRADE.** The extra fields feed the open cache (change-tags) and the
+recency prefetch, but Graph's consumer (personal) drives are pickier about `$select`/`$orderby`
+combinations than the docs admit, and **a rejected field would 400 the WHOLE listing** — the picker
+regression of 2026-07-10 ("not seeing the files"). So any failure of the enriched request retries the
+proven minimal listing before erroring: files still list and open, and only the byte cache misses,
+which is safe. Drive's listing carries the identical retry.
+
+**THE OPENER LISTS BROADLY ON PURPOSE.** Real Inkwave files show up as `.studio.gz` (zipped exports),
+`.trace.json`/`.json` (pre-.studio era), or `.txt` (iOS "rename on share" mangling). The opener
+validates by CONTENT — `parseTraceFile` anchors on the record marker — so listing broadly is safe and a
+wrong pick errors.
+
+**CHANGE-TAGS.** OneDrive prefers cTag (Graph's CONTENT tag, so a rename does not invalidate the
+cache) and falls back to eTag; Drive prefers `md5Checksum` and falls back to `version`. Both fallbacks
+over-invalidate, **which is always the safe direction.** And the LIVE tag is fetched with a metadata
+GET when the picker's own listing came from cache, because a stale listing tag must never produce a
+false cache hit.
+
+**BYTES, NOT TEXT.** `downloadOneDriveFile` returns bytes: a `.studio.gz` is gzip binary, and
+text-decoding it corrupts the stream before `readStudioFile` can sniff the `1f 8b` magic.
+
+## <a id="cloud-sidecars"></a>PDF sidecars, and the iOS trap that made the self-heal necessary
+
+A cited source's PDF is stored beside the .studio as `<base>.<citekey>.pdf`, uploaded once and tracked
+per-doc by `pdfName`.
+
+The on-demand refetch exists because of a historical iOS trap: **`savePdf` threw on WebKit until the
+OPFS write shim (2026-07-08), so a doc's sidecar pass could "complete" with nothing stored.** The
+quiet-pass sweep and the single on-demand fetch heal that; both are idempotent and skip bytes already
+local.
+
+## <a id="gd-scope"></a>Google Drive: the `drive.file` scope, and the popup that must open inside a tap
+
+Auth is Google Identity Services (GIS) token flow with the per-file `drive.file` scope: **Inkwave can
+only ever see files IT creates — never the rest of your Drive.** One self-contained `.inkwave` file
+per document; its Drive file id is remembered so we UPDATE rather than duplicate on every sync. Gated
+on `VITE_GOOGLE_CLIENT_ID`.
+
+The consequence of that scope runs through the whole module: it cannot enumerate folders the app did
+not make (hence the custom picker over app-created folders), and it cannot see files OTHERS shared
+with you (for those, open via the mounted Drive folder on desktop).
+
+⚠ **WARM THE GIS CLIENT OFF THE CLICK PATH.** iOS Safari revokes a tap's transient activation while
+`ensureClient()` awaits the network script load, so `requestAccessToken` then runs WITHOUT a gesture
+and the consent popup is **silently blocked** — `getDriveToken` resolves null with no hint why. Firing
+the warm when the sync UI opens means `ensureClient()` resolves from cache and the popup opens inside
+the tap's activation window. A failed preload is un-cached so a flaky offline menu-open does not poison
+every later click.
+
+⚠ **`peekDriveToken` EXISTS BECAUSE `requestAccessToken` OPENS A POPUP WINDOW EVEN FOR
+`prompt:'none'`** (Chrome tolerates quiet ones; Firefox blocks and warns "prevented a popup"). Every
+background warm path must use the peek, never the getter.
+
+A 404 on update means the file was deleted in Drive — fall through and create a fresh one. And
+`readDriveArchive` is deliberately NOT built on `downloadGoogleDriveFile`: **that returns
+`string | null`, and a `null` meaning "no token" / "500" / "throttled" / "gone" indifferently is
+exactly the type-level ambiguity the 2026-07-15 loss turned on.** Same call, answers kept apart.

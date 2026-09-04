@@ -1,25 +1,17 @@
-// The native citation library — PER DOCUMENT, at library/<documentId>/citations.json.
-// This is the WHOLE library for one piece of writing (every source saved while working on it, cited
-// or not). It is NOT part of any provenance hash — only the mode-resolved DISPLAYED subset
-// (doc.bibliography) is hashed. See citations §3.
+// The native citation library — ⚠ PER DOCUMENT, at library/<documentId>/citations.json. Every source
+// saved while working on one piece of writing, cited or not. NOT part of any provenance hash — only
+// the mode-resolved DISPLAYED subset (doc.bibliography) is hashed. See citations §3.
 //
-// ⚠ IT USED TO BE ONE LIBRARY FOR THE WHOLE ORIGIN (2026-08-28). Peter: "the references don't
-// appear to be being saved in the studio doc but only in the OPFS which means if you start a new doc
-// the old references are still there. Can we make it so they only save in the .studio doc and OPFS
-// only for the doc that's open." A single device-wide file meant every new document opened carrying
-// the last one's bibliography — a thesis's sources appearing in an unrelated essay — and a .studio
-// sent to someone else arrived without the library that made sense of it.
+// It used to be ONE library for the whole origin, so every new document opened carrying the last
+// one's bibliography. The per-document file is the WORKING store (its own file, so no race with the
+// document's save) and `document.library` in the export bundle is how it TRAVELS.
 //
-// Now: the per-document file is the WORKING store (no race with the document's own save — this is
-// its own file, not a read-modify-write of current.json), and `document.library` in the export
-// bundle is how it TRAVELS. Opening a .studio writes its library into that document's file.
-//
-// LEGACY, and it is deliberately NOT adopted automatically: the old device-wide file is left
-// exactly where it is, untouched. Auto-importing it into every document would reproduce the bug
-// this fixes. `legacyLibrarySize()` / `importLegacyLibrary()` exist so a writer can pull their old
-// sources into the document that needs them, once, on purpose.
+// ⚠ THE LEGACY DEVICE-WIDE FILE IS NEVER ADOPTED AUTOMATICALLY — auto-importing it into every
+// document would reproduce the bug this fixes. `legacyLibrarySize()`/`importLegacyLibrary()` exist so
+// a writer can pull their old sources in, once, on purpose.
 //
 // bibProvider holds the in-memory mirror; this module hydrates it on load and persists on change.
+// → docs/archive/storage-and-sync.md#library
 
 import type { CSLItem, IwCitationMeta } from '../types/document'
 import { bibProvider } from './bibProvider'
@@ -31,9 +23,9 @@ import { tabDocId } from '../storage/tabDoc'
 const DIR = 'library'
 const FILE = 'citations.json'
 
-/** The document whose library is loaded. Read at CALL time, never cached: a tab can switch
- *  documents (storage/tabDoc.ts) and a stale id would persist one document's sources into
- *  another's file — the bug this module was just fixed for, wearing a different hat. */
+/** The document whose library is loaded. ⚠ Read at CALL time, NEVER cached: a tab can switch
+ *  documents, and a stale id would persist one document's sources into another's file — the bug
+ *  this module was just fixed for, wearing a different hat. */
 function libPath(): string[] {
   const id = tabDocId()
   return id ? [DIR, id, FILE] : [DIR, FILE] // no document yet ⇒ the legacy path, read-only in practice
@@ -52,15 +44,11 @@ async function getDir(create: boolean): Promise<FileSystemDirectoryHandle | null
 }
 
 /**
- * Read the persisted library — returning [] ONLY for a genuine ABSENCE, and THROWING on any other
- * failure (auditor, 2026-07-18). The old body ended `catch { return [] }` (and `Array.isArray? …
- * : []`), so a transient OPFS fault, a corrupt/half-synced file, or a mid-read failure all answered
- * "the library is empty" — indistinguishable from a first-time user who has none. Since `writeFile`
- * is a blind whole-file replace, the next `addToLibrary` (the browser extension re-flushes its
- * queue on every visit, no user action) then wrote the near-empty in-memory set OVER the real one.
- * That is the 2026-07-15 collapse in the bibliography. `absent` and `error` are different answers
- * with opposite consequences, so they must be different outcomes: NotFound ⇒ [] (safe to write),
- * everything else ⇒ throw (the caller must NOT overwrite a library it could not read).
+ * Read the persisted library — ⚠ `[]` ONLY for a genuine ABSENCE, THROWING on any other failure.
+ * `writeFile` is a blind whole-file replace, so a read that answered "empty" on a fault let the next
+ * `addToLibrary` — and the extension re-flushes its queue on every visit, with no user action —
+ * write the near-empty in-memory set OVER the writer's real sources.
+ * → docs/archive/storage-and-sync.md#lib-absent-vs-error
  */
 async function readFile(docId?: string | null): Promise<CSLItem[]> {
   const id = docId === undefined ? tabDocId() : docId
@@ -92,43 +80,25 @@ async function writeFile(items: CSLItem[]): Promise<void> {
 }
 
 // ─── HYDRATION READINESS ──────────────────────────────────────────────────────────────────────
-// CAUGHT ON PETER'S iPHONE 8 (2026-07-17, `?btDebug=1`). The break-table signature hashes the
-// bibliography's CONTENT (correctly — a citation's box changes the wrap, and an epoch counter could
-// never survive a reload). But the library hydrates ASYNCHRONOUSLY from OPFS, so anything that
-// builds before it lands bakes an EMPTY-library signature into the key: measured `capa@0` at build
-// and `capa@20` after the reload, on a device with 20 entries. Every later lookup then misses,
-// FOREVER, silently — bug 1's ghost wearing a correct signature. The signature was right; the
-// caller asked too early.
+// ⚠ READINESS IS A LATCH, NOT AN EVENT — a one-shot async signal with no "has it already happened?"
+// check strands every late asker, silently and forever (measured on Peter's iPhone 8: a break table
+// signed `capa@0` before the library landed missed for the rest of the session). So: already done ⇒
+// resolve now · in flight ⇒ the SAME promise · never started ⇒ START it, or a caller that only ever
+// awaits hangs on a load nobody kicked off. It resolves on FAILURE too, because the contract is
+// "the attempt COMPLETED", not "a library exists" — 0 entries is a real state that may sign a table.
 //
-// THE SHAPE OF THE DEFECT (the same one the wave video hit in the same minute): a ONE-SHOT ASYNC
-// SIGNAL WITH NO "HAS IT ALREADY HAPPENED?" CHECK. So readiness here is a latch, not an event:
-//   • already done  → resolves immediately (a late asker is never stranded)
-//   • in flight     → waits on the SAME promise (no second read, no duplicate setEntries)
-//   • never started → STARTS it (a caller that only ever asks readiness cannot hang forever —
-//                     which would be the identical stranding bug, just relocated)
-// It resolves on FAILURE too: the contract is "the initial attempt has COMPLETED", not "a library
-// exists". A device with no library legitimately has 0 entries, and that 0 is a real state that
-// must be allowed to sign a table.
-//
-// NB `loadLibrary()` keeps its exact semantics — it still re-reads on every call, because callers
-// use it to re-hydrate. Only the LATCH is memoised.
-// THE PROMISE ITSELF IS THE LATCH — that is the whole mechanism, and it is why there is no
-// `_done` flag here. A resolved promise resolves every later `await` immediately, forever; an
-// explicit "has it already happened?" check beside it would be redundant, and MUTATION TESTING
-// PROVED IT: removing such a check left every test green, because it never did anything. A guard
-// no test can kill is not a guard — it is a comment that costs a branch. What DOES need the check
-// is the START (below): a caller that only ever awaits must not hang forever waiting for a load
-// nobody kicked off — the identical stranding bug, relocated one level up. That mutation DOES kill
-// tests, which is how we know the branch is load-bearing.
+// THE PROMISE ITSELF IS THE LATCH, which is why there is no `_done` flag beside it: a resolved
+// promise already resolves every later await, and MUTATION TESTING PROVED such a check dead. The
+// START check below is the one that kills tests, so it is the one that is load-bearing.
+// → docs/archive/storage-and-sync.md#lib-hydration-latch
 let _libStarted = false
 let _libResolve: (() => void) | null = null
 let _libReady: Promise<void> = new Promise<void>((r) => { _libResolve = r })
 
 // TRUE once a hydration attempt FAILED to read the disk (as opposed to reading an empty/absent one).
-// `persistLibrary` refuses while this holds: we do not know what the file contains, and the writer's
-// real library may be sitting in it, so blind-overwriting it with the in-memory set is the wipe this
-// module now exists to prevent. A later SUCCESSFUL read clears it. Starts false — a fresh page that
-// has not yet tried to read has nothing on disk it could be shadowing (bibProvider is empty too).
+// ⚠ `persistLibrary` REFUSES while this holds: we do not know what the file contains and the
+// writer's real library may be in it. A later SUCCESSFUL read clears it. Starts false — a fresh page
+// that has not tried to read has nothing on disk it could be shadowing.
 let _libUnreadable = false
 
 /**
@@ -154,24 +124,19 @@ export async function loadLibrary(): Promise<void> {
   _libStarted = true
   try {
     const items = await readFile() // throws on a real read failure; [] ONLY on a genuine absence
-    // ⚠ SET UNCONDITIONALLY, INCLUDING EMPTY (2026-08-28). This was `if (items.length)`, which was
-    // harmless while there was ONE device-wide library — an empty read only ever meant first use.
-    // With a library PER DOCUMENT an empty read means "this document has no sources", and skipping
-    // the set leaves the PREVIOUS document's entries sitting in the tab-global provider: open a new
-    // piece and the old bibliography is still there, which is precisely the bug being fixed. This
-    // line only runs on a SUCCESSFUL read; a failure throws to the catch below and never clears.
+    // ⚠ SET UNCONDITIONALLY, INCLUDING EMPTY. With a library PER DOCUMENT an empty read means "this
+    // document has no sources", so an `if (items.length)` guard leaves the PREVIOUS document's
+    // entries in the tab-global provider — the bug being fixed. Only reached on a SUCCESSFUL read.
     bibProvider.setEntries(items, 'library')
     _libUnreadable = false // a completed, SUCCESSFUL read (even an empty one) — persist is safe now
   } catch {
-    // We could NOT read the library — do not hydrate (leave bibProvider as-is), and BLOCK persists
-    // so the next mutation cannot blind-overwrite a disk we never saw. The 2026-07-15 rule, applied
-    // to the bibliography. The change stays in memory; a later successful load re-enables writes.
+    // We could NOT read it — do not hydrate, and BLOCK persists so the next mutation cannot
+    // blind-overwrite a disk we never saw. The change stays in memory; a later successful load
+    // re-enables writes.
     _libUnreadable = true
   } finally {
-    // ALWAYS latch — a completed ATTEMPT, success OR failure. Both the read-failure branch above and
-    // a `setEntries` throw on malformed data land here, so a builder waiting on `libraryReady()` is
-    // never stranded by either. (Formerly this comment claimed readFile could not throw; the
-    // auditor's absent-vs-error fix makes it throw on a real fault, which is exactly the point.)
+    // ⚠ ALWAYS latch — a completed ATTEMPT, success OR failure. Both the catch above and a
+    // `setEntries` throw land here, so a builder awaiting `libraryReady()` is never stranded.
     _libResolve?.()
   }
 }
@@ -179,10 +144,8 @@ export async function loadLibrary(): Promise<void> {
 /** Write the current in-memory library to OPFS. */
 export async function persistLibrary(): Promise<void> {
   if (_libUnreadable) {
-    // The last hydration FAILED to read the disk, so we do not know what the library file holds —
-    // and the writer's real sources may be in it. Writing the in-memory set now would blind-
-    // overwrite them (the 2026-07-15 collapse). Keep the change in memory and refuse the write; a
-    // later successful loadLibrary() clears the flag and the next persist writes correctly.
+    // ⚠ The last hydration FAILED, so we do not know what the file holds and the writer's real
+    // sources may be in it. REFUSE the write; a later successful loadLibrary() clears the flag.
     console.warn('[inkwave] library not persisted — it could not be read this session; not overwriting it')
     return
   }
@@ -216,10 +179,10 @@ function freeCitekey(base: string, incoming: CSLItem): string {
 export async function addToLibrary(item: CSLItem): Promise<CSLItem> {
   const id = freeCitekey(item.id, item)
   let stored = id === item.id ? item : { ...item, id }
-  // Preserve re-verification history (changelog / lastVerified / deadUrl) when the SAME source is
-  // re-captured — e.g. the extension re-flushes its queue on every visit, and a fresh capture carries
-  // no changelog. `??` keeps the incoming values when present (so a real re-verify still updates the
-  // history) and otherwise falls back to the previous entry's, so a re-flush never wipes it.
+  // ⚠ PRESERVE re-verification history when the SAME source is re-captured — the extension reflushes
+  // its queue on every visit and a fresh capture carries no changelog, so `??` keeps a real re-verify
+  // while a re-flush falls back to the previous entry's.
+  // → docs/archive/storage-and-sync.md#lib-reverification
   const prev = bibProvider.get(id)
   const prevIw = (prev as { _iw?: IwCitationMeta } | undefined)?._iw
   if (prev && prevIw && sameSource(prev, stored) && (prevIw.changelog || prevIw.lastVerified || prevIw.deadUrl != null)) {
@@ -245,7 +208,7 @@ export async function removeFromLibrary(citekey: string): Promise<boolean> {
 
 
 // ── LEGACY DEVICE-WIDE LIBRARY (pre-2026-08-28) ──────────────────────────────────────────────────
-// Left on disk untouched. Nothing reads it automatically — that IS the fix — but a writer whose
+// Left on disk untouched. ⚠ NOTHING READS IT AUTOMATICALLY — that IS the fix — but a writer whose
 // sources are all in it needs a way to bring them into the document that needs them.
 
 /** How many sources sit in the old device-wide library. 0 when there isn't one (or it can't be
