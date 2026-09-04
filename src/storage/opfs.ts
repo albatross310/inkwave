@@ -1,8 +1,8 @@
 import type { InkwaveDocument, TiptapJSON } from '../types/document'
 import { writeOpfsFile } from './opfsWrite'
-// The boundary predicate lives alone and TESTED (notFound.test.ts): it is the single line
-// that separates 'absent' from 'could not find out', and a lenient edit to it makes the whole
-// DocRead union perfectly typed and perfectly wrong. See notFound.ts.
+// ⚠ The boundary predicate lives alone and TESTED (notFound.test.ts): it is the single line that
+// separates 'absent' from 'could not find out', and a lenient edit to it makes the whole DocRead
+// union perfectly typed and perfectly wrong. → docs/archive/storage-and-sync.md#opfs-failed-read
 import { isNotFound } from './notFound'
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
@@ -50,19 +50,10 @@ async function writeJson(
 /**
  * A read that FAILED — as opposed to a file that is not there.
  *
- * THE BUG THIS TYPE EXISTS TO KILL (forensics, 2026-07-15 11:19:40 — Peter's real thesis). This
- * function used to end `catch { return null }`, which made a transient read failure
- * INDISTINGUISHABLE FROM "no such document". Edit.tsx answers null by falling through to
- * `newDocument()` and REPOINTING the active-doc pointer at the blank — so one unlucky read
- * presented Peter with an empty page where his honours proposal had been (doc `978e0772`,
- * createdAt == updatedAt, 0 chars). He then opened a `.studio` backup to recover from the blank,
- * got the stale twin, and THAT blind-overwrote Wednesday's work. The read bug CAUSED the open.
- *
- * The defect is not that the error went unlogged — it is that THE TYPE ERASED IT. `null` is the
- * honest answer to "is there a document here?" and the only answer available to "did the disk just
- * fail?", and the caller cannot tell which it got. This file already insists that WRITES stay loud
- * ("autosave failures must stay loud" — saveDocument deliberately throws). The read path was
- * silent. Same asymmetry as `current.json` being unguarded while snapshots are grow-only.
+ * ⚠ A FAILED READ IS NOT AN ABSENT DOCUMENT. `null` answers "is there a document here?"; nothing
+ * answers "did the disk just fail?" — so a swallowed error reaches Edit.tsx as absence, which mints
+ * a blank over the writer's work. The type must keep the two apart.
+ * → docs/archive/storage-and-sync.md#opfs-failed-read
  */
 export class StorageReadError extends Error {
   constructor(public readonly path: string, public readonly cause: unknown) {
@@ -83,8 +74,8 @@ async function readJson<T>(
   root: FileSystemDirectoryHandle,
   filePath: string,
 ): Promise<T | null> {
-  // KNOWN-NEGATIVE seam: `window.__iwReadGuard = 'off'` restores the pre-fix swallow, so the
-  // reproduction can produce the blank-document failure in the SAME build it proves fixed.
+  // KNOWN-NEGATIVE seam: `window.__iwReadGuard = 'off'` restores the pre-fix swallow, so the repro
+  // produces the blank-document failure in the SAME build it proves fixed.
   const legacy = typeof window !== 'undefined'
     && (window as unknown as { __iwReadGuard?: string }).__iwReadGuard === 'off'
   let text: string
@@ -108,9 +99,8 @@ async function readJson<T>(
     return JSON.parse(text) as T
   } catch (err) {
     if (legacy) return null
-    // A corrupt file is emphatically NOT an absent one: answering null here would send Edit.tsx to
-    // newDocument() and repoint the pointer away from a document whose bytes are still on disk and
-    // may be recoverable (see OpfsInspector).
+    // ⚠ A CORRUPT FILE IS NOT AN ABSENT ONE — null here would send Edit.tsx to newDocument() and
+    // repoint the pointer away from bytes still on disk and still recoverable (OpfsInspector).
     throw new StorageReadError(filePath, err)
   }
 }
@@ -118,19 +108,17 @@ async function readJson<T>(
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 // App-level JSON (recent folders, open-cache listings/index) is ALWAYS best-effort convenience
-// state — so these never reject. In a private window `navigator.storage.getDirectory()` itself can
-// throw (it sits OUTSIDE readJson's catch), and that must degrade to "no cache, network-only", not
-// break the caller (the 2026-07-10 Firefox-private picker report). Document persistence
-// (saveDocument below) deliberately KEEPS throwing — autosave failures must stay loud.
+// state — so these never reject; `getRoot()` itself throws in a private window and that must
+// degrade to "no cache, network-only". Document persistence (saveDocument below) deliberately KEEPS
+// throwing — autosave failures must stay loud. → docs/archive/storage-and-sync.md#opfs-app-json
 
 /**
  * Read a small app-level JSON file from the OPFS root (e.g. recent-folder choices).
  *
  * ⚠ CONVENIENCE STATE ONLY — this collapses "I could not read it" into "it isn't there", which is
- * the 2026-07-15 defect, accepted HERE and only here because the answer feeds a cache or a picker
- * list: the cost of being wrong is a re-fetch, never a lost row. **If a failure could reach a
- * WRITE, this is the wrong function** — use `readAppJsonStrict`. The ledger used to read through
- * here, and that is exactly how a transient read turned into a destroyed month (see below).
+ * the 2026-07-15 defect, accepted here alone because the answer feeds a cache or a picker list and
+ * the cost of being wrong is a re-fetch. **If a failure could reach a WRITE, this is the wrong
+ * function** — use `readAppJsonStrict`.
  */
 export async function readAppJson<T>(name: string): Promise<T | null> {
   try { return await readJson<T>(await getRoot(), name) } catch { return null }
@@ -139,18 +127,11 @@ export async function readAppJson<T>(name: string): Promise<T | null> {
 /**
  * Read a small app-level JSON file that is NOT convenience state — the writer's own records.
  *
- * The OPPOSITE contract to `readAppJson`, deliberately, and named so the difference is visible at
- * the call site: returns null ONLY when the file genuinely does not exist, and THROWS on any other
- * failure. `getRoot()` is inside the throw path on purpose — in a private window it rejects, and
- * "storage is unavailable" is emphatically not "you have no sessions this month".
- *
- * WHY IT EXISTS (auditor, 2026-07-17): `loadLedger` read through `readAppJson`, so one transient
- * OPFS failure answered "you have no rows". Its callers are read-modify-WRITE — `flushMonth` then
- * wrote the buffered rows ALONE over the month (its own comment: "Union first, always — never
- * write `rows` alone"), and `saveReflection` wrote a 0-row ledger, so saving a reflection could
- * erase the month it belonged to. No race required; a single failed read did it. The repo had
- * already SEEN this and fixed the instance, not the class: `email/testOpfsShim.ts` records "the
- * ledger read as merely EMPTY" and repaired the shim.
+ * ⚠ THE OPPOSITE CONTRACT to `readAppJson`, and named so the difference is visible at the call site:
+ * null ONLY when the file genuinely does not exist, THROWS on any other failure. `getRoot()` is
+ * inside the throw path on purpose — "storage is unavailable" is not "you have no sessions this
+ * month". Anything read-modify-WRITE must read through here.
+ * → docs/archive/storage-and-sync.md#opfs-app-json
  */
 export async function readAppJsonStrict<T>(name: string): Promise<T | null> {
   return readJson<T>(await getRoot(), name)
@@ -174,20 +155,11 @@ function requestPersistence(): void {
 
 // ─── The single-open write freeze (the anti-overwrite invariant) ───────────────
 //
-// THE ONE THING THIS APP MUST NEVER DO (2026-07-15, twice, on Peter's real thesis): let two writers
-// on ONE document race and blind-overwrite each other. `saveDocument` is the whole-file replace with
-// no union and no generation check — it is THE loss vector every guard in this file circles. The
-// single-open lock (storage/tabDoc.ts + storage/singleOpen.ts) makes at most one live tab hold a
-// document, and its "Take over here" handoff transfers that hold to a second tab. The handoff is only
-// safe if the LOSING tab genuinely stops writing BEFORE the winning tab starts — otherwise the take-
-// over reproduces the exact overwrite it exists to prevent.
-//
-// This freeze is that stop, and it lives HERE, at the single write funnel, on purpose: a UI that goes
-// read-only is a promise; a `saveDocument` that refuses is a guarantee. When a tab surrenders a
-// document (Web Locks stolen, or a BroadcastChannel take-over), `freezeDocWrites(id)` is called and
-// from that instant NOTHING can persist a new body for that id from this tab. The winning tab only
-// begins after it has the surrender ACK, so "loser stopped before winner started" is enforced at the
-// bytes, not asserted in a comment.
+// ⚠ A TAKE-OVER IS ENFORCED AT THE BYTES, NOT ASSERTED. `saveDocument` is a whole-file replace with
+// no union and no generation check, so the "Take over here" handoff is only safe if the LOSING tab
+// stops writing BEFORE the winner starts. The freeze lives HERE, at the single write funnel, for
+// exactly that reason: a UI that goes read-only is a promise; a saveDocument that refuses is a
+// guarantee. → docs/archive/storage-and-sync.md#opfs-write-freeze
 const frozenDocIds = new Set<string>()
 
 /** Thrown by `saveDocument` for a document this tab has surrendered. Distinct so the autosave beat
@@ -201,13 +173,13 @@ export class DocWriteFrozenError extends Error {
 
 /**
  * Stop this tab persisting a new body for `id`. Idempotent. Called when this tab loses the document's
- * single-open lock — surrendering it to another tab that is taking over. It ALSO drops any debounced
- * save already queued for `id`, so a beat armed a moment before the surrender cannot fire past it.
+ * single-open lock. It MUST also drop any debounced save already queued for `id`, or a beat armed a
+ * moment before the surrender fires past it.
  */
 export function freezeDocWrites(id: string): void {
   frozenDocIds.add(id)
-  // A save queued for exactly this document must not slip through after the freeze. A beat for a
-  // DIFFERENT document (none, in practice — a tab edits one doc — but be exact) is left alone.
+  // A beat for a DIFFERENT document (none, in practice — a tab edits one doc — but be exact) is
+  // left alone.
   if (saveTimer !== null && pendingDoc !== null) {
     const queuedId = typeof pendingDoc === 'function' ? pendingDoc().id : pendingDoc.id
     if (queuedId === id) { clearTimeout(saveTimer); saveTimer = null; pendingDoc = null; pendingOnSaved = undefined }
@@ -226,11 +198,9 @@ export function isDocWriteFrozen(id: string): boolean {
 }
 
 export async function saveDocument(doc: InkwaveDocument): Promise<void> {
-  // THE INVARIANT, enforced at the funnel: a surrendered document is read-only here, no exceptions.
-  // Throwing (not silently dropping) keeps this loud for any DIRECT caller (snapshots, cloud, music)
-  // — none should reach a surrendered body; if one does, that is a bug worth a stack trace. The
-  // autosave beat below catches this specific error and stays quiet, because there the refusal is
-  // the intended read-only behaviour, not a failure to surface.
+  // THE INVARIANT, at the funnel: a surrendered document is read-only here, no exceptions. THROW
+  // rather than silently drop — a DIRECT caller (snapshots, cloud, music) reaching a surrendered
+  // body is a bug worth a stack trace; only the autosave beat below may treat it as quiet.
   if (frozenDocIds.has(doc.id)) throw new DocWriteFrozenError(doc.id)
   requestPersistence() // Safari evicts un-persisted storage after 7 days of non-use
   const root = await getRoot()
@@ -242,24 +212,12 @@ export async function saveDocument(doc: InkwaveDocument): Promise<void> {
 /**
  * The result of trying to read a document. **THERE IS NO `null` MEMBER, AND THAT IS THE POINT.**
  *
- * "There is no document here" and "I could not find out" are different facts with opposite
- * consequences — `absent` means it is safe to create/replace; `error` means NEVER write, because
- * the writer's work may be sitting right there. `readJson` used to answer `null` to both
- * (`catch { return null }`), Edit.tsx read that as absence, minted a blank document over the top of
- * Peter's honours proposal and repointed the active-doc pointer at it (2026-07-15 11:19:40). He
- * then opened a backup to recover from the blank, and THAT blind-overwrote Wednesday's work.
- *
- * **The defect was never a missing log — the TYPE erased the difference**, so every caller was one
- * honest mistake away from the bug, and the compiler had nothing to say. Throwing instead of
- * returning null is only half a fix: `await loadDocument(id).catch(() => null)` restores the bug in
- * eleven characters and still typechecks. (I wrote exactly that line while fixing this.)
- *
- * As a discriminated union the compiler forces every caller to say which of the three they mean.
- * Modelled on the ledger lane's `RemoteRead` (same shape, same reasoning, arrived at independently
- * for cloud sync). The shared RULE is: **never write to a target you have not just read, and never
- * treat a failed read as an absent one.** The shared rule is deliberately NOT a shared function — a
- * ledger is a SET (union it, grow-only), a document body is PROSE (it cannot be unioned; it needs a
- * staleness check). Making them look interchangeable is how the wrong one gets called.
+ * ⚠ NEVER WRITE TO A TARGET YOU HAVE NOT JUST READ, AND NEVER TREAT A FAILED READ AS AN ABSENT ONE.
+ * Throwing is only half the fix — `await loadDocument(id).catch(() => null)` restores the bug in
+ * eleven characters and still typechecks — so the union makes every caller say which it means.
+ * NOT shared with the ledger's `RemoteRead` on purpose: a ledger is a SET (union it), a document
+ * body is PROSE (it needs a staleness check), and making them interchangeable is how the wrong one
+ * gets called. → docs/archive/storage-and-sync.md#opfs-failed-read
  */
 export type DocRead =
   | { kind: 'found'; doc: InkwaveDocument }
@@ -269,13 +227,11 @@ export type DocRead =
 /**
  * The RAW bytes of a document's `current.json`, with no parse and no interpretation.
  *
- * THE LAST RESORT, and the one that matters most. A document whose JSON will not parse is exactly
- * the document whose words the writer most needs back — and it is the one case `readDocument`
- * cannot help with, because there is nothing to return but an error. The bytes are still sitting
- * on disk with the prose legible inside them. OpfsInspector offers this as "Download raw" so a
- * corrupt document is a file the writer can salvage by hand (or send to me), rather than a row
- * that says "unreadable" and offers nothing. A recovery surface that lists the problem and gives
- * no way out is a dead end at precisely the moment it exists for.
+ * THE LAST RESORT: a document whose JSON will not parse is the one whose words the writer most
+ * needs back, and the one case `readDocument` can only answer with an error. OpfsInspector offers
+ * these bytes as "Download raw" — a recovery surface that lists the problem and offers no way out
+ * is a dead end at precisely the moment it exists for.
+ * → docs/archive/storage-and-sync.md#opfs-raw-bytes
  */
 export async function readDocumentBytes(documentId: string): Promise<Blob | null> {
   try {
@@ -330,15 +286,11 @@ export interface OpfsDocEntry {
 /**
  * Enumerate `documents/` DIRECTLY — the ground truth of what this origin is storing.
  *
- * This deliberately does NOT consult the IndexedDB meta index (`listMeta`). An ORPHANED document
- * is precisely one that OPFS has and the index does not surface (2026-07-17: one origin-wide
- * `inkwave:activeDocumentId` pointer let one tab re-point another, stranding the other tab's file
- * intact-but-unreachable). A recovery listing built from the index could never show it. Reading
- * the directory is the only way to see what is really there.
- *
- * One file read per document: `size`/`lastModified` come from the same File handle as the bytes,
- * so this costs one pass, not three. Per-document failures degrade to `doc: null` rather than
- * losing the whole listing — a corrupt file is still a document the writer may want back.
+ * ⚠ NEVER build this listing from the IndexedDB meta index: an ORPHANED document is precisely one
+ * OPFS has and the index does not surface, so a recovery listing off the index could never show it.
+ * A per-document failure degrades to `doc: null` rather than losing the whole listing — a corrupt
+ * file is still a document the writer may want back.
+ * → docs/archive/storage-and-sync.md#opfs-list-direct
  */
 export async function listOpfsDocuments(): Promise<OpfsDocEntry[]> {
   let docsDir: FileSystemDirectoryHandle
@@ -365,18 +317,16 @@ export async function listOpfsDocuments(): Promise<OpfsDocEntry[]> {
 // ─── Debounced autosave ───────────────────────────────────────────────────────
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
-// PHONE INPUT PRIORITY (2026-07-09): the save beat is where the editor's LAZY doc build actually
-// runs — full getJSON + embedBibliography + JSON.stringify, all main-thread and O(doc). At 200ms it
-// fired in ordinary inter-word typing pauses on a phone CPU; 800ms waits for a genuine pause
-// (trailing — every edit re-arms it), and the crash-loss window stays under a second. Desktop keeps
-// 200ms. (Same coarse-pointer test as isTouchDevice — inlined so storage doesn't import editor code.)
+// PHONE INPUT PRIORITY: the beat is where the editor's LAZY doc build runs (getJSON +
+// embedBibliography + stringify, main-thread and O(doc)), so the phone waits for a genuine pause
+// and desktop keeps 200ms. → docs/archive/storage-and-sync.md#opfs-autosave-beat
 const AUTOSAVE_DELAY_MS =
   typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (hover: none)').matches
     ? 800
     : 200
 
-// The pending save, exposed so flushPendingSave() can force it through (settings toggles reload
-// the page — they MUST flush first; a debounced-away save was half an hour of Peter's work, 2026-07-10).
+// ⚠ The pending save, exposed so flushPendingSave() can force it through: anything that reloads the
+// page MUST flush first — a debounced-away save was half an hour of Peter's work.
 let pendingDoc: InkwaveDocument | (() => InkwaveDocument) | null = null
 let pendingOnSaved: (() => void) | undefined
 let deferSince = 0
@@ -397,19 +347,17 @@ export function scheduleSave(
   doc: InkwaveDocument | (() => InkwaveDocument),
   onSaved?: () => void,
 ): void {
-  // A surrendered document is read-only here (see freezeDocWrites). Drop the beat silently when we
-  // can tell cheaply — a plain doc carries its id. A thunk is NOT evaluated just to check (that is
-  // the expensive per-keystroke serialize this path exists to defer); its beat reaches saveDocument,
-  // which throws DocWriteFrozenError, which the beat's catch treats as the intended quiet refusal.
+  // A surrendered document is read-only here (see freezeDocWrites). Drop the beat only when we can
+  // tell CHEAPLY — a thunk is never evaluated just to check, since that is the per-keystroke
+  // serialize this path exists to defer; its beat reaches saveDocument and the throw does the work.
   if (typeof doc !== 'function' && frozenDocIds.has(doc.id)) return
   pendingDoc = doc
   pendingOnSaved = onSaved
   deferSince = 0
   if (saveTimer !== null) clearTimeout(saveTimer)
   saveTimer = setTimeout(async function beat() {
-    // ZOOM-GESTURE DEFERRAL — BOUNDED (2026-07-10): while a zoom gesture holds (__iwZoomHold,
-    // cleared at settle) push the beat back, but never beyond 3s total — a stuck flag must not
-    // become silent data loss.
+    // ZOOM-GESTURE DEFERRAL — BOUNDED: push the beat back while a zoom gesture holds, but ⚠ never
+    // beyond 3s total. A stuck flag must not become silent data loss.
     const holding = typeof window !== 'undefined' && (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold
     if (holding && (!deferSince || performance.now() - deferSince < 3000)) {
       if (!deferSince) deferSince = performance.now()
@@ -419,27 +367,26 @@ export function scheduleSave(
     deferSince = 0
     pendingDoc = null; pendingOnSaved = undefined
     try {
-      // A thunk defers building the document snapshot to SAVE time (200ms after the last edit) —
-      // the editor passes one so serialization never runs per keystroke (see ensureDocFresh).
+      // A thunk defers building the document snapshot to SAVE time, so serialization never runs
+      // per keystroke (see ensureDocFresh).
       await saveDocument(typeof doc === 'function' ? doc() : doc)
       onSaved?.()
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('inkwave:doc-saved'))
     } catch (err) {
-      // A surrendered document refusing to write is INTENDED read-only behaviour, not a failure to
-      // shout about — the tab already shows it is open elsewhere. Firing save-failed here would alarm
-      // the writer about the very thing they just chose ("Take over here" from the other window).
+      // A surrendered document refusing to write is INTENDED read-only behaviour — save-failed here
+      // would alarm the writer about the very thing they just chose ("Take over here").
       if (err instanceof DocWriteFrozenError) return
-      // NEVER swallow a genuinely failed autosave (iOS quota/handle errors) — the writer must not keep
-      // typing into a document that stopped persisting. UI listens on this event.
+      // ⚠ NEVER swallow a genuinely failed autosave (iOS quota/handle errors) — the writer must not
+      // keep typing into a document that stopped persisting. UI listens on this event.
       console.error('[inkwave] autosave failed:', err)
       window.dispatchEvent(new CustomEvent('inkwave:save-failed', { detail: { error: String((err as Error)?.message ?? err) } }))
     }
   }, AUTOSAVE_DELAY_MS)
 }
 
-// (The Week-3 appendEventLog stub that lived here was deleted 2026-07-08: zero callers, and its
-// read-whole-file-per-append pattern was an O(n²) trap. The provenance record is snapshots +
-// signed receipts; if a per-event log is ever needed, design it append-friendly from the start.)
+// (The Week-3 appendEventLog stub that lived here was deleted 2026-07-08 — if a per-event log is
+// ever needed, design it append-friendly from the start.
+// → docs/archive/storage-and-sync.md#opfs-deleted-eventlog)
 
 // ─── Helper: default empty TiptapJSON document ────────────────────────────────
 

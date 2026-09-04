@@ -189,3 +189,395 @@ observable HERE, with no polling. `singleOpen.ts` registers a handler that freez
 on that signal, which is the belt-and-braces backstop to the BroadcastChannel take-over handshake
 (and the ONLY signal on the degraded path where BroadcastChannel is unavailable). One callback, set
 once; never product-critical if unset.
+
+---
+
+# <a id="opfs"></a>`storage/opfs.ts` — document persistence
+
+## <a id="opfs-failed-read"></a>⚠ THE 2026-07-15 INCIDENT — a failed read answered as an absent document
+
+**This file used to tell this story TWICE** — once on `StorageReadError` (17 lines) and again on
+`DocRead` (22 lines), same forensics, same timestamp, same conclusion. It is told once here and both
+rules point at it.
+
+THE BUG (forensics, 2026-07-15 11:19:40 — Peter's real thesis). `readJson` used to end
+`catch { return null }`, which made a transient read failure INDISTINGUISHABLE FROM "no such
+document". Edit.tsx answers null by falling through to `newDocument()` and REPOINTING the active-doc
+pointer at the blank — so one unlucky read presented Peter with an empty page where his honours
+proposal had been (doc `978e0772`, createdAt == updatedAt, 0 chars). He then opened a `.studio`
+backup to recover from the blank, got the stale twin, and THAT blind-overwrote Wednesday's work.
+**The read bug CAUSED the open.**
+
+**The defect is not that the error went unlogged — it is that THE TYPE ERASED IT.** `null` is the
+honest answer to "is there a document here?" and the only answer available to "did the disk just
+fail?", and the caller cannot tell which it got. This file already insists that WRITES stay loud
+("autosave failures must stay loud" — `saveDocument` deliberately throws). The read path was silent.
+Same asymmetry as `current.json` being unguarded while snapshots are grow-only.
+
+**AND THROWING IS ONLY HALF A FIX.** `await loadDocument(id).catch(() => null)` restores the bug in
+eleven characters and still typechecks — *I wrote exactly that line while fixing this.* So the result
+is a discriminated union with **no `null` member**, and the compiler forces every caller to say which
+of the three it means:
+
+* `found` — the document is here.
+* `absent` — genuinely not on disk, so it is safe to create or replace.
+* `error` — could not find out, so NEVER write: the writer's work may be sitting right there.
+
+Modelled on the ledger lane's `RemoteRead` (same shape, same reasoning, arrived at independently for
+cloud sync). The shared RULE is: **never write to a target you have not just read, and never treat a
+failed read as an absent one.** The shared rule is deliberately NOT a shared function — a ledger is a
+SET (union it, grow-only), a document body is PROSE (it cannot be unioned; it needs a staleness
+check). Making them look interchangeable is how the wrong one gets called.
+
+`readJson`'s two catch arms are both load-bearing. The second one — a corrupt file — is emphatically
+NOT an absent one: answering null there would send Edit.tsx to `newDocument()` and repoint the
+pointer away from a document whose bytes are still on disk and may be recoverable (see
+OpfsInspector). The KNOWN-NEGATIVE seam `window.__iwReadGuard = 'off'` restores the pre-fix swallow
+so the reproduction can produce the blank-document failure in the SAME build it proves fixed.
+
+The boundary predicate lives alone and TESTED (`notFound.test.ts`): it is the single line that
+separates 'absent' from 'could not find out', and a lenient edit to it makes the whole `DocRead`
+union perfectly typed and perfectly wrong.
+
+## <a id="opfs-app-json"></a>Two app-level readers with OPPOSITE contracts, and the month one destroyed
+
+App-level JSON (recent folders, open-cache listings/index) is ALWAYS best-effort convenience state —
+so `readAppJson` never rejects. In a private window `navigator.storage.getDirectory()` itself can
+throw (it sits OUTSIDE `readJson`'s catch), and that must degrade to "no cache, network-only", not
+break the caller (the 2026-07-10 Firefox-private picker report). Document persistence (`saveDocument`)
+deliberately KEEPS throwing — autosave failures must stay loud.
+
+That convenience collapse is the 2026-07-15 defect, accepted THERE and only there because the answer
+feeds a cache or a picker list: the cost of being wrong is a re-fetch, never a lost row.
+
+**WHY `readAppJsonStrict` EXISTS (auditor, 2026-07-17).** `loadLedger` read through `readAppJson`, so
+one transient OPFS failure answered "you have no rows". Its callers are read-modify-WRITE —
+`flushMonth` then wrote the buffered rows ALONE over the month (its own comment: "Union first, always
+— never write `rows` alone"), and `saveReflection` wrote a 0-row ledger, so saving a reflection could
+erase the month it belonged to. **No race required; a single failed read did it.** The repo had
+already SEEN this and fixed the instance, not the class: `email/testOpfsShim.ts` records "the ledger
+read as merely EMPTY" and repaired the shim.
+
+The strict version has the OPPOSITE contract, and is named so the difference is visible at the call
+site: null ONLY when the file genuinely does not exist, THROWS on any other failure. `getRoot()` is
+inside the throw path on purpose — in a private window it rejects, and "storage is unavailable" is
+emphatically not "you have no sessions this month".
+
+## <a id="opfs-write-freeze"></a>The take-over freeze lives at the write funnel, not in the UI
+
+THE ONE THING THIS APP MUST NEVER DO (2026-07-15, twice, on Peter's real thesis): let two writers on
+ONE document race and blind-overwrite each other. `saveDocument` is the whole-file replace with no
+union and no generation check — it is THE loss vector every guard in this file circles. The
+single-open lock (`storage/tabDoc.ts` + `storage/singleOpen.ts`) makes at most one live tab hold a
+document, and its "Take over here" handoff transfers that hold to a second tab. The handoff is only
+safe if the LOSING tab genuinely stops writing BEFORE the winning tab starts — otherwise the take-over
+reproduces the exact overwrite it exists to prevent.
+
+This freeze is that stop, and it lives at the single write funnel on purpose: **a UI that goes
+read-only is a promise; a `saveDocument` that refuses is a guarantee.** When a tab surrenders a
+document (Web Locks stolen, or a BroadcastChannel take-over), `freezeDocWrites(id)` is called and from
+that instant NOTHING can persist a new body for that id from this tab. The winning tab only begins
+after it has the surrender ACK, so "loser stopped before winner started" is enforced at the bytes, not
+asserted in a comment.
+
+Consequences that look like details and are not:
+
+* `freezeDocWrites` ALSO drops any debounced save already queued for `id`, so a beat armed a moment
+  before the surrender cannot fire past it. A beat for a DIFFERENT document (none, in practice — a
+  tab edits one doc — but be exact) is left alone.
+* `saveDocument` THROWS rather than silently dropping, so a DIRECT caller (snapshots, cloud, music)
+  reaching a surrendered body gets a stack trace. None should.
+* The autosave beat catches `DocWriteFrozenError` and stays QUIET, because there the refusal is the
+  intended read-only behaviour: firing `save-failed` would alarm the writer about the very thing they
+  just chose ("Take over here" from the other window). Every other error stays loud — the writer must
+  not keep typing into a document that stopped persisting.
+* `scheduleSave` drops the beat early only when it can tell cheaply. A THUNK is not evaluated just to
+  check (that is the expensive per-keystroke serialize this path exists to defer); its beat reaches
+  `saveDocument` and the throw does the work.
+
+## <a id="opfs-raw-bytes"></a>`readDocumentBytes` — the last resort
+
+THE ONE THAT MATTERS MOST. A document whose JSON will not parse is exactly the document whose words
+the writer most needs back — and it is the one case `readDocument` cannot help with, because there is
+nothing to return but an error. The bytes are still sitting on disk with the prose legible inside
+them. OpfsInspector offers this as "Download raw" so a corrupt document is a file the writer can
+salvage by hand (or send to me), rather than a row that says "unreadable" and offers nothing.
+**A recovery surface that lists the problem and gives no way out is a dead end at precisely the moment
+it exists for.**
+
+## <a id="opfs-list-direct"></a>`listOpfsDocuments` enumerates the directory, never the index
+
+Enumerate `documents/` DIRECTLY — the ground truth of what this origin is storing.
+
+This deliberately does NOT consult the IndexedDB meta index (`listMeta`). An ORPHANED document is
+precisely one that OPFS has and the index does not surface (2026-07-17: one origin-wide
+`inkwave:activeDocumentId` pointer let one tab re-point another, stranding the other tab's file
+intact-but-unreachable). A recovery listing built from the index could never show it. Reading the
+directory is the only way to see what is really there.
+
+One file read per document: `size`/`lastModified` come from the same File handle as the bytes, so
+this costs one pass, not three. Per-document failures degrade to `doc: null` rather than losing the
+whole listing — a corrupt file is still a document the writer may want back.
+
+## <a id="opfs-autosave-beat"></a>The autosave beat — phone delay, and the bounded zoom deferral
+
+PHONE INPUT PRIORITY (2026-07-09): the save beat is where the editor's LAZY doc build actually runs —
+full `getJSON` + `embedBibliography` + `JSON.stringify`, all main-thread and O(doc). At 200ms it fired
+in ordinary inter-word typing pauses on a phone CPU; 800ms waits for a genuine pause (trailing — every
+edit re-arms it), and the crash-loss window stays under a second. Desktop keeps 200ms. (Same
+coarse-pointer test as `isTouchDevice` — inlined so storage doesn't import editor code.)
+
+`flushPendingSave` exists because settings toggles reload the page and MUST flush first: a
+debounced-away save was half an hour of Peter's work (2026-07-10). It THROWS on failure so a caller
+about to reload can abort.
+
+ZOOM-GESTURE DEFERRAL — BOUNDED (2026-07-10): while a zoom gesture holds (`__iwZoomHold`, cleared at
+settle) the beat is pushed back, but never beyond 3s total — **a stuck flag must not become silent
+data loss.**
+
+A thunk defers building the document snapshot to SAVE time (200ms after the last edit) — the editor
+passes one so serialization never runs per keystroke (see `ensureDocFresh`).
+
+## <a id="opfs-deleted-eventlog"></a>The deleted `appendEventLog` stub
+
+The Week-3 stub that lived at the foot of this file was deleted 2026-07-08: zero callers, and its
+read-whole-file-per-append pattern was an O(n²) trap. The provenance record is snapshots + signed
+receipts; if a per-event log is ever needed, design it append-friendly from the start.
+
+---
+
+# <a id="snapshots"></a>`provenance/snapshots.ts` — the append-only archive
+
+A snapshot is a content-addressed record of the document at a moment: its contentHash, the
+Bitcoin-anchored bundleHash, and an OTS proof slot. Stored in OPFS beside the document at
+`documents/<id>/snapshots.json`.
+
+## <a id="snap-archive-read"></a>⚠ `[]` MEANS "THIS DOCUMENT HAS NO HISTORY" AND MAY MEAN NOTHING ELSE
+
+`readSnapshotsFromDisk` used to end `catch { return [] }` — the 2026-07-15 shape
+(`catch { return null }` erasing "there is nothing there" from "I could not find out") pointed at the
+provenance spine itself. Every consumer reads-then-writes the WHOLE array, so a transient OPFS fault,
+a corrupt gzip or a worker failure made this happen:
+
+    const snaps = await readSnapshotsFile(doc.id)          // ← [] on ANY failure
+    await writeSnapshotsFile(doc.id, [...snaps, snapshot]) // ← ONE snapshot over the archive
+
+Every OTS proof and signed receipt for the document — **Peter's evidence that he wrote his thesis
+himself** — replaced by a single snapshot. No race: one failed read did it.
+`clearAllSnapshotSummaries` was a second vector on the same lie (`[]` → writes `[]` over the archive).
+
+So the boundary is `storage/notFound.ts`, the same predicate the document body already hangs off: a
+NotFoundError is the ONE honest `[]` (a new document has no snapshots.json and must still get a blank
+archive, not an error screen); everything else THROWS and the write paths refuse.
+
+**A NON-ARRAY parse is a failure, NOT an emptiness**, for exactly the reason a corrupt JSON body is:
+the bytes are still on disk and may be recoverable, and answering `[]` would invite the next snapshot
+to write over them. Same for a gzip that won't inflate. **Both catch arms are load-bearing and
+mutation-proved: with only the open arm, collapsing the parse arm to `return []` left the probe fully
+green.**
+
+## <a id="snap-known-negative"></a>THE LIVE KNOWN-NEGATIVE — `window.__iwArchiveGuard = 'off'`
+
+It restores the `catch { return [] }` collapse, so a browser probe can destroy the archive in the
+SAME BUILD it then proves fixed. The precedents are `__iwReadGuard` (opfs.ts) and `__iwOpenGuard`
+(openDoc.ts) and the reason is theirs: "a probe that only ever runs against the fixed build cannot
+tell 'the guard works' from 'the probe cannot see the bug'".
+
+**THE PREVIOUS LANE DELIBERATELY LEFT THIS OUT, and was right to**: it had no probe, and a live
+off-switch for the provenance archive with no consumer is only a way to turn provenance off. It
+arrives WITH its consumer — `scripts/archguard-probe/repro.mjs`, which REQUIRES this cell to truncate
+a real 4-snapshot archive in real OPFS before it will read the fixed verdict (it exits 2 if the
+control fails to reproduce). **Do not keep this seam if that probe goes**: the rule the previous lane
+wrote still binds, in both directions.
+
+It is checked FIRST, before `isNotFound`, exactly like opfs.ts's — the legacy shape had no
+NotFoundError branch at all, so honouring one here would make the control a partial fiction.
+
+## <a id="snap-read-union"></a>`SnapshotRead` has no `[]` on the failure arm — and no 'absent' arm either
+
+The archive read is an outcome a caller must branch on rather than a value it can mistake for
+emptiness — the same shape as `DocRead` in storage/opfs.ts. The whole bug was that `[]` answered two
+different questions.
+
+WHY THERE IS NO 'absent' ARM, when `DocRead` has one. For a DOCUMENT, absent is a real third answer:
+it is what makes `newDocument()` legal, so it must stay distinct from `found`. For an ARCHIVE the two
+collapse — "no snapshots.json" and "a snapshots.json holding []" mean the identical thing to every
+caller ("this document has no history"), and both are safe to append to. Splitting them would buy
+nothing and cost a dead branch at every call site, which is its own kind of rot. The distinction that
+DOES matter is the one this union keeps: established emptiness vs failed read.
+
+`readSnapshotArchive` is for the callers that must tell an empty history from a failed read: the
+open-time ancestry guard above all (openDoc.ts), and every action that would publish or overwrite the
+record. Prefer it to try/catch around `listSnapshots` — it cannot be forgotten.
+
+And on `listSnapshots` itself: the failure is invisible to the compiler, so an unguarded
+`await listSnapshots(id)` in a click handler is a button that silently does nothing, and
+`.catch(() => [])` around it walks the original bug right back in. It stays exported because it is
+the honest primitive and the tests drive it directly.
+
+## <a id="snap-cache"></a>The in-memory cache, and why a failure is never cached
+
+One parsed copy per document per session. A single doc open used to gunzip + JSON.parse the whole
+archive up to 5 times (eager list, receipt recovery ×2, folder link, cloud resume) — 100ms–1s each on
+a big archive. Every mutation funnels through `writeSnapshotsFile` (and the editor serialises snapshot
+work through one queue), so a write-through cache is safe. Reads hand out a shallow COPY so a caller's
+in-place edits can't alias the cached array. (A second tab writing the same doc's OPFS bypasses this
+cache — but concurrent same-doc tabs already race on the file itself; the grow-only merge protects
+sync targets either way.)
+
+**A FAILED READ MUST NOT BE CACHED.** When this cache held `[]` from a failed read, the lie persisted
+for the whole session — every later reader was told "no history" long after the transient fault had
+passed. **Caching the REJECTION instead would be the same mistake wearing the other hat**: one blip
+and provenance is off until reload. So evict on failure and let the next reader retry the disk; only
+a resolved read is worth keeping.
+
+## <a id="snap-write-chain"></a>Cache-first, serialised disk writes — and the caveat that is load-bearing
+
+The write-through cache updates SYNCHRONOUSLY (before the disk write lands) and is the in-session
+authority; the gzip+stringify+write is chained per-document so writes can never land out of order.
+Grow-only safety: the cache is a SUPERSET of disk *for every read that succeeded* (only intentional
+deletes shrink it), and every write-back (cloud sync, folder mirror) reads through the cache — so if a
+deferred disk write fails, disk merely didn't grow (never truncated) and every sync target still gets
+the full union.
+
+**THE CAVEAT IS LOAD-BEARING, and this comment used to assert the invariant flatly. It was FALSE**: a
+failed read cached `[]`, so the "superset" was a lie for the rest of the session and every sync target
+got that lie unioned into nothing. The read now throws instead of returning `[]` and a failure is never
+cached — which is what makes the sentence above true. **A comment asserting parity is a reason nobody
+checks parity; this one earns it or it goes.**
+
+The per-doc chain also means a deferred open-time restore write and a subsequent snapshot append
+serialise: disk always converges to the latest cache state. The compress stays INSIDE the chain, after
+`prev`, so the write-through cache remains the synchronous in-session authority and disk writes still
+land in order — the grow-only invariant depends on that ordering. `writeOpfsFile` works on iOS too
+(worker sync-access).
+
+## <a id="snap-stale-cache"></a>THE STALE-CACHE GUARD (2026-08-20) — 79 snapshots, twice, in one session
+
+`_snapCache` is MODULE state, so it is per TAB, and everything above treats it as the in-session
+authority. Across two tabs that is false: a tab that loaded when the archive held 4 snapshots keeps
+`cache = 4` for its whole life, and if another tab then grows the archive to 79 this one still unions
+against its own stale 4 and writes that over the top. **Peter lost 79 snapshots to exactly this,
+twice, in one session** — his count fell back to 4 while he worked and /snapshot then said the history
+"isn't on this device".
+
+`mergeSnapshots` did not catch it because it guards against a SHORT read; **this read is not short, it
+is STALE** — it succeeds and returns a confidently outdated answer. Same family as the 2026-07-15 and
+archiveReadFail bugs, one question further along: not "could I read it" but "is what I read still
+current".
+
+The check is a SIZE comparison, not a re-read: if the file is exactly the length we last wrote, no one
+else has touched it and the outgoing set is already a superset. Only a surprise triggers the gunzip,
+so the single-tab path pays one metadata read. `_lastWrittenSize` is what makes that cheap — a file's
+`size` comes from its metadata, so it costs no gunzip and no parse in the overwhelmingly common
+single-tab case, and `archiveSizeOnDisk` answers null for absent-or-unreadable so the caller re-reads
+rather than assuming.
+
+**A genuine read failure THROWS there and the write is ABANDONED — deliberately: losing one new
+snapshot is recoverable, overwriting an archive we could not read is not.** That is the same rule
+`readSnapshotsFromDisk` already enforces for its own callers.
+
+And `deleteSnapshot` must ask for `allowShrink`. It defaults false so a new write path cannot silently
+acquire the power to truncate — it has to ask for it. Everything else is append/update and is merged
+grow-only against disk first.
+
+## <a id="snap-merge"></a>`mergeSnapshots` is GROW-ONLY, and the write-back merge runs once per target
+
+Union two snapshot lists by id. Provenance history is append-only, so no write-back (OPFS restore,
+folder mirror, cloud sync) may ever SHRINK it just because the local OPFS set is momentarily short — a
+fresh login, cleared site data, or a sync racing ahead of a restore. The richer copy wins on an id
+clash (more signed receipts = more evidence); ordering is by createdAt. On the write path the OUTGOING
+set wins id clashes, so OTS and summary updates survive.
+
+The grow-only "read the existing file and union its snapshots" pass on write-back only needs to run
+ONCE per target per session — enough to fold in another device's snapshots. After that the local OPFS
+set is the superset (snapshots are append-only), so a save just grows it; re-reading and parsing the
+(possibly 20 MB) file on EVERY save is pure lag. Callers gate on `needsWritebackMerge()` and call
+`markWritebackMerged()` only on a successful read, so a failed read retries next time.
+
+⚠ Note the deliberate asymmetry with the productivity ledger, which takes READ-MERGE-WRITE on EVERY
+write: a month of rows is tens of KB and the file's cheapness buys the stronger invariant. **Do not
+copy this once-per-session gate there.**
+
+## <a id="snap-restore-bundle"></a>Restoring from a bundle, and the deferred open-path write
+
+`restoreSnapshotsFromBundle` restores into OPFS only when OPFS has FEWER snapshots than the bundle.
+Local OPFS always wins: if the machine already has the full history, leave it untouched. Called when
+opening a .studio file so provenance survives device transfers. The write is a union, so it never
+drops local-only snapshots either.
+
+`deferDiskWrite` (the OPEN path): the union lands in the write-through cache synchronously — the
+editor's eager snapshot list right after open sees the FULL union — while the heavy stringify+gzip+write
+runs behind the reveal (the wave-decay dead time) on the per-doc write chain. GROW-ONLY holds either
+way: a failed deferred write leaves disk un-grown (never truncated), the cache stays the superset every
+write-back unions from, and the bundle's copy still exists at its source.
+
+## <a id="snap-drain-writes"></a>`_drainSnapshotWrites` — why the tests need it
+
+The open path restores with `deferDiskWrite: true` — a fire-and-forget write on `_writeChain` that
+outlives the call that queued it (`restoreSnapshotsFromBundle` → `void write.catch(...)`). A test that
+swaps its in-memory OPFS root between cases (`installOpfsShim`) must first let those writes DRAIN, or
+the previous case's deferred write resolves `getDirectory()` against the NEXT case's fresh root and
+materialises a stray document in a disk that should have been clean. A fixed `setTimeout` cannot bound
+an off-thread gzip under CPU load; this awaits the actual chain. It loops because a chain can enqueue a
+successor while we await the first.
+
+## <a id="snap-gzip"></a>Gzip: the capability floor, and why the compress runs off-thread
+
+Snapshots JSON is highly repetitive (same contentJson structure, receipt fields) and compresses ~75%,
+keeping storage manageable as the list grows. Capability floor: `CompressionStream` is iOS/Safari
+16.4+. Older WebKit can't write the gzip archive, so `createSnapshotIfChanged` degrades to a no-op
+(warn once) instead of throwing on the first resolved nudge — **writing keeps working, provenance is
+disabled**. entry.client shows a banner.
+
+THE COMPRESS RUNS OFF-THREAD (`gzipJsonOffThread`, workers/parseClient.ts). Every snapshot embeds the
+whole document body, so the archive is N × the whole thesis and JSON.stringify + gzip of it is
+O(N×doc) — it used to run on the main thread inside `queueSnapshotsWrite`, stalling keystrokes ~1s per
+checkpoint on a large doc (Peter's report). The READ was already off-thread (`gunzipJsonOffThread`);
+this is the missing sibling. Falls back inline where there is no Worker (node/vitest/prerender).
+*"We should be able to make snapshots while continuing to type."*
+
+Legacy uncompressed files fall through to a plain UTF-8 decode inline; gzip is detected by the magic
+bytes 0x1f 0x8b.
+
+## <a id="snap-meta-diet"></a>The metadata projection — the snapshot memory diet
+
+React state must never hold the full snapshot array — every Snapshot embeds its whole contentJson
+(+ receipts + frozen bibliography), so hundreds of snapshots would keep hundreds of MB resident just to
+render a 210px list. The cache keeps the full array ONCE (unavoidable — rapid scrubbing needs it hot);
+UI state holds only the cheap projection, which drops contentJson / receipts / bibliography and keeps a
+receipt COUNT (all the panel ever shows).
+
+`listSnapshotMeta` THROWS on an unreadable archive, exactly like `listSnapshots` — never `[]`. **A
+caller that answers the failure by rendering an empty list has moved the lie from storage into the UI.**
+
+## <a id="snap-bundlehash-versions"></a>The bundleHash's v:1 → v:4 forms — every existing anchor must still verify
+
+`bundleHash` commits to content, the DISPLAYED bibliography (v:2), the EMAIL HEADERS (v:3), the
+ATTACHED MUSIC (v:4), AND the live-composition receipt chain, so the OTS proof anchors the whole signed
+record to Bitcoin. **Each addition is conditional for one reason: a document without that thing keeps
+its older form and every anchor already on Bitcoin still verifies.**
+
+* **Bibliography (v:2).** Freeze the DISPLAYED bibliography — the mode-resolved cited subset
+  `resolve.ts` embedded — and hash it deterministically. Only when there is ≥1 displayed entry;
+  otherwise `bibHash` stays undefined and the bundle keeps its v:1 form (pre-citation docs hash exactly
+  as before). See citations §12.
+* **Email headers (v:3).** Frozen the same way, and only on an email document. The body needs no
+  special handling: it IS `contentJson`, already committed via `contentHash`. The headers are
+  canonicalised before hashing so one header set has exactly one anchored hash. For an email the claim
+  is exactly §B2.2's — headers + body existed by time T.
+* **Attached music (v:4).** Only on a document that carries a score. The MusicXML BYTES are not frozen
+  (a master lives in OPFS, like a PDF sidecar); its sha256 is, which is what actually pins the
+  notation: correct the score under an anchored analysis and this stops matching. For a music essay the
+  claim is §B5's — this analysis, of these bars of this notation, existed by time T.
+
+## <a id="snap-ots-reread"></a>OTS patches re-read before writing
+
+Each mutation re-reads the file before writing, so callers that serialise them (the editor's snapshot
+queue) never lose a concurrent append.
+
+## <a id="snap-countwords"></a>`countWords` is re-exported, not defined here
+
+The word notion lives in `./countWords`, a leaf that imports nothing — see its header for why
+`bundle.ts` could not simply import it from here. It is imported for local use AND re-exported, so the
+four existing callers keep importing `countWords` from this module exactly as before.
