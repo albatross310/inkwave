@@ -24,7 +24,7 @@ describe('readerInk casts a stroke and never a fill', () => {
     expect(readerInk('#991b1b')).toBe('var(--iw-reader-ink-red, #991b1b)')
     expect(readerInk('#1e3a8a')).toBe('var(--iw-reader-ink-blue, #1e3a8a)')
     expect(readerInk('#166534')).toBe('var(--iw-reader-ink-green, #166534)')
-    expect(readerInk('#35283e')).toBe('var(--iw-reader-accent, #35283e)')
+    expect(readerInk('#302438')).toBe('var(--iw-reader-accent, #302438)')
   })
 
   it('passes an unknown colour through untouched', () => {
@@ -51,6 +51,6 @@ describe('readerInk casts a stroke and never a fill', () => {
     // A table entry for a colour nothing stores is dead weight that reads like coverage. Three are
     // SourceBrowser's TEXT_COLORS, one is the app ink they include, one is the highlighter glyph.
     expect(new Set(CASTABLE_INKS)).toEqual(
-      new Set(['#991b1b', '#1e3a8a', '#166534', '#35283e', '#8a6a04']))
+      new Set(['#991b1b', '#1e3a8a', '#166534', '#302438', '#8a6a04']))
   })
 })

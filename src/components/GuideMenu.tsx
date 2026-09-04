@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 // Each section is an array of { k: shortcut, d: description }.
 const CITATIONS: Array<{ k: string; d: string }> = [
@@ -100,7 +100,7 @@ export function GuideMenu() {
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${open ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
         title="Guide"
       >
         <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">i</span>
@@ -130,7 +130,7 @@ export function GuideMenu() {
             {/* Drag handle */}
             <div onMouseDown={onHeaderDown}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', cursor: 'move', userSelect: 'none' }}>
-              <h2 style={{ fontSize: '1.1rem', fontFamily: 'serif', color: 'var(--iw-ink, #35283e)', margin: 0 }}>Guide</h2>
+              <h2 style={{ fontSize: '1.1rem', fontFamily: 'serif', color: 'var(--iw-ink, #302438)', margin: 0 }}>Guide</h2>
               <button type="button" aria-label="Close" onMouseDown={e => e.stopPropagation()} onClick={() => setOpen(false)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--iw-pill-fg, #78716c)', fontSize: '1.4rem', lineHeight: 1 }}>×</button>
             </div>
@@ -151,7 +151,7 @@ export function GuideMenu() {
                   <div style={{ gridColumn: '1 / -1', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.09em', color: 'var(--iw-pill-fg, #78716c)', margin: '14px 0 3px' }}>{sec.title}</div>
                   {sec.rows.map(({ k, d }) => (
                     <Fragment key={k}>
-                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.92rem', color: 'var(--iw-ink, #35283e)', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>{k}</span>
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.92rem', color: 'var(--iw-ink, #302438)', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>{k}</span>
                       <span style={{ fontSize: '1.02rem', color: 'var(--iw-panel-fg, #4a4035)', lineHeight: 1.4 }}>{d}</span>
                     </Fragment>
                   ))}

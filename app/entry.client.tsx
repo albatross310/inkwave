@@ -3,7 +3,7 @@ import { hydrateRoot } from 'react-dom/client'
 import { HydratedRouter } from 'react-router/dom'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
-console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:#35283e;font-weight:bold')
+console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:#302438;font-weight:bold')
 
 // Apply the saved theme (night/day) before hydration so a night-mode reader doesn't flash light.
 import { applyTheme } from '../src/editor/theme'
@@ -317,8 +317,8 @@ if (typeof CompressionStream === 'undefined') {
       bar.style.cssText =
         'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom, 0px) + 12px);transform:translateX(-50%);' +
         'z-index:400;max-width:min(30rem,calc(100vw - 2rem));display:flex;align-items:flex-start;gap:10px;' +
-        'background:#fff;color:#44403c;border:1px solid rgba(53, 40, 62, 0.45);border-radius:12px;' +
-        'padding:10px 12px;font:0.8rem/1.45 system-ui,sans-serif;box-shadow:0 6px 24px rgba(53, 40, 62, 0.18);'
+        'background:#fff;color:#44403c;border:1px solid rgba(48, 36, 56, 0.45);border-radius:12px;' +
+        'padding:10px 12px;font:0.8rem/1.45 system-ui,sans-serif;box-shadow:0 6px 24px rgba(48, 36, 56, 0.18);'
       const msg = document.createElement('span')
       msg.textContent =
         "This browser is too old for Inkwave's history features — update iOS/Safari (16.4+) or use another browser; " +

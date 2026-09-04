@@ -22,7 +22,7 @@ import { pageBoxPx } from '../editor/pageModel'
 import { getPaperSize, getOrientation } from '../editor/pageSettings'
 import { tabDocId } from '../storage/tabDoc'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 // ─── THE THREE BUTTONS THIS FILE HANDS TO THE PDF TOOLBAR ────────────────────────────────────────
 // ⛶ full screen, ⇤/⇥ dock side, ▭/▯ dock orientation — they RENDER INSIDE PdfViewer's bottom bar
@@ -31,9 +31,9 @@ const INK = '#35283e'
 // day values already were the reader family's, byte for byte. See the header of PdfViewer.tsx.
 const CTL = 'var(--iw-reader-ctl, #fff)'
 const EDGE = 'var(--iw-reader-edge, #d6cfe0)'
-const BAR_INK = 'var(--iw-reader-accent, #35283e)'
+const BAR_INK = 'var(--iw-reader-accent, #302438)'
 const BAR_MUTED = 'var(--iw-reader-muted, #6b645f)'
-const LIT = 'rgb(var(--iw-reader-accent-rgb, 53 40 62) / 0.122)'
+const LIT = 'rgb(var(--iw-reader-accent-rgb, 48 36 56) / 0.122)'
 const MIN_W = 320, MIN_H = 200
 const ORIENT_KEY = 'inkwave:pdfPanelOrientation'
 const DOCK_SIDE_KEY = 'inkwave:pdfDockSide' // side dock on the 'left' or 'right' screen edge
@@ -311,7 +311,7 @@ export function PdfSidePanel() {
                 This source’s PDF isn’t on this device yet.
                 <button type="button"
                   onClick={() => void startOneDriveSignIn()}
-                  style={{ display: 'block', marginTop: 12, padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)', cursor: 'pointer', fontSize: '0.9rem' }}>
+                  style={{ display: 'block', marginTop: 12, padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--iw-ink, #302438)', color: 'var(--iw-on-ink, #fff)', cursor: 'pointer', fontSize: '0.9rem' }}>
                   Sign in to OneDrive to fetch it
                 </button>
               </>

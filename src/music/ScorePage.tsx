@@ -409,7 +409,7 @@ function GapBand({ top, height, index, confidence, onResize }: {
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            'repeating-linear-gradient(to bottom, transparent, transparent 11px, var(--iw-gap-rule, rgba(53, 40, 62, 0.10)) 11px, var(--iw-gap-rule, rgba(53, 40, 62, 0.10)) 12px)',
+            'repeating-linear-gradient(to bottom, transparent, transparent 11px, var(--iw-gap-rule, rgba(48, 36, 56, 0.10)) 11px, var(--iw-gap-rule, rgba(48, 36, 56, 0.10)) 12px)',
         }}
       />
       {/* A boundary the detector was unsure about is SHOWN as unsure rather than applied silently —
@@ -443,7 +443,7 @@ function GapBand({ top, height, index, confidence, onResize }: {
       >
         <div
           className="absolute left-1/2 h-[3px] w-10 -translate-x-1/2 rounded-full"
-          style={{ top: HANDLE_H / 2 - 1.5, background: 'var(--iw-light, #484965)', opacity: 0.5 }}
+          style={{ top: HANDLE_H / 2 - 1.5, background: 'var(--iw-light, #41425b)', opacity: 0.5 }}
         />
       </div>
     </div>
@@ -471,7 +471,7 @@ function StickyNote({ x, y, colour, text, author, onText, onDelete }: {
         className="w-full resize-none bg-transparent font-serif outline-none"
         // 16px FLOOR: iOS auto-zooms (and stays zoomed) on any control under 16px. CLAUDE.md's iOS
         // invariants — this is a real bug, not a preference.
-        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, color: 'var(--iw-ink, #35283e)' }}
+        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, color: 'var(--iw-ink, #302438)' }}
         rows={2}
       />
       <button

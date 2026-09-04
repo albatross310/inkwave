@@ -617,7 +617,7 @@ measure the artifact per block, not the coincidence.
 Muted indigo→teal gradient, two 140px SVG wave tiles drifting at 72px/s, a precomputed pool of
 glitters and wave-marks, and an S-curve slow-down at reveal. The day palette is deliberately more
 serious than the former saturated cyan: `--iw-water-gradient` is the single background source
-(`#35283e` → reflective indigo `#484965` by 18% → blue-teal `#416b76` by 88% → `#427b82`), with blue-grey
+(`#302438` → reflective indigo `#41425b` by 18% → blue-teal `#3b606a` by 88% → `#3b6f75`), with blue-grey
 wave marks and parchment-white glints. The early indigo reflection keeps the surface glossy, while
 holding the blue-teal arrival until 88% lets the indigo influence extend roughly a third farther into
 the teal. Before the atomic water reveal, day mode paints pure white (not parchment or a partial
@@ -1301,9 +1301,9 @@ block; components don't change.
    fills — all automatic. This is the single most important step; a panel without it renders white-on-
    white in night mode.
 2. For any CUSTOM inline colour, use a theme **token var with a day fallback**, NOT a hard-coded hex:
-   - `var(--iw-ink, #35283e)` — primary black-plum text/icons; exactly the day water's top-left
-   - `var(--iw-light, #484965)` — reflective-indigo secondary accent from the same gradient
-   - `var(--iw-cite-color, #35283e)` — citation/link colour (light blue in night)
+   - `var(--iw-ink, #302438)` — primary black-plum text/icons; exactly the day water's top-left
+   - `var(--iw-light, #41425b)` — reflective-indigo secondary accent from the same gradient
+   - `var(--iw-cite-color, #302438)` — citation/link colour (light blue in night)
    - `var(--iw-pill-fg, #78716c)` — muted label/pill text
    - `var(--iw-nightable-border, …)` — inline borders (light in night)
    - `var(--iw-verified, #15803d)`, `var(--iw-newbtn-fg, …)`, `var(--iw-addbtn-*)` — specific accents
@@ -1336,7 +1336,7 @@ drop-up). When you add a panel, add it here too.
 **RENDERED NOTATION CANNOT USE var() — which is why it needs MORE care, not less (2026-07-17).**
 `src/music/theme.ts` + `ScoreView.tsx`: OpenSheetMusicDisplay GENERATES the notation SVG and its
 engraving rules accept only concrete `#rrggbb` strings, so the charts' trick (write `var(--iw-ink,
-#35283e)` straight into a `fill` and let the night block remap it) is UNAVAILABLE — a `var()` handed
+#302438)` straight into a `fill` and let the night block remap it) is UNAVAILABLE — a `var()` handed
 to OSMD is written into the SVG verbatim and renders nothing. So the colours still live ONLY as
 tokens (`--iw-score-ink/cursor/paper/highlight/title`, defined in BOTH themes in index.css) and
 `theme.ts` RESOLVES them against the live DOM at draw time; a `data-theme` MutationObserver redraws
@@ -1362,10 +1362,10 @@ and `await import('vitest')` both fail — build the recorder inside the factory
 functions (see `ScoreView.test.tsx`).
 
 **Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
-`fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #35283e)`), never a bare hex, so the
+`fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #302438)`), never a bare hex, so the
 night block remaps them for free — `judged.test.ts` asserts that structurally (a bare hex in
 SERIES_STYLE fails the build). Verified both themes render distinctly: panel bg #fff → #454e59,
-`--iw-ink` #35283e → #cbb8f2.
+`--iw-ink` #302438 → #cbb8f2.
 
 ### THE READING SURFACES HAVE THEIR OWN NIGHT — and the paper-never-inverts rule is RETIRED (2026-08-30)
 
@@ -1666,7 +1666,7 @@ src/
 
 Match the surrounding code: terse purposeful comments explaining *why*, section dividers
 (`// ─── … ───`), single-responsibility modules. Calm visual identity: ink/purple
-(`#35283e` / `#484965`), parchment/cream, serif body (IM Fell DW Pica / EB Garamond).
+(`#302438` / `#41425b`), parchment/cream, serif body (IM Fell DW Pica / EB Garamond).
 Commit messages: `feat:` / `fix:` / `refactor:` prefixes, present tense.
 
 ## The specs are IN THE REPO (2026-07-17) — `docs/specs/`

@@ -3,7 +3,7 @@
 //
 // ─── Why this file exists at all ─────────────────────────────────────────────────────────────
 // The charts lane (`productivity/charts/`) themes its SVG the easy way: every `fill`/`stroke` is
-// literally `var(--iw-ink, #35283e)`, so the night block remaps it for free. We CANNOT do that here.
+// literally `var(--iw-ink, #302438)`, so the night block remaps it for free. We CANNOT do that here.
 // OSMD generates the notation SVG itself and writes CONCRETE colour values into it (its engraving
 // rules take `#rrggbb` strings, not CSS functions). A `var(...)` handed to OSMD is not a colour it
 // understands — it would be written into the SVG verbatim and the notation would render black, or
@@ -15,7 +15,7 @@
 // theme change the score re-renders (see ScoreView), which is the same "one switch, no per-component
 // overrides" contract, just resolved late because the engine forces it.
 //
-// The day values below are FALLBACKS, in the exact sense of `var(--iw-ink, #35283e)`: what to use
+// The day values below are FALLBACKS, in the exact sense of `var(--iw-ink, #302438)`: what to use
 // when the token is missing. They are not a second source of truth, and `theme.test.ts` asserts that
 // every token here is actually defined in BOTH themes in index.css — a token this file resolves but
 // the stylesheet never defines would silently render every score in its day colour, in both themes,
@@ -43,11 +43,11 @@ export const SCORE_STYLE = {
   /** Staves, noteheads, stems, clefs — the engraving itself. */
   music: { token: '--iw-score-ink', day: '#1c1917' },
   /** The playback cursor (§B3). */
-  cursor: { token: '--iw-score-cursor', day: '#35283e' },
+  cursor: { token: '--iw-score-cursor', day: '#302438' },
   /** The page the notation sits on. */
   paper: { token: '--iw-score-paper', day: '#ffffff' },
   /** A bar highlighted because an annotation or a citation points at it (§B4). */
-  highlight: { token: '--iw-score-highlight', day: '#484965' },
+  highlight: { token: '--iw-score-highlight', day: '#41425b' },
   /** Title/composer text above the score. */
   title: { token: '--iw-score-title', day: '#44403c' },
 } as const satisfies Record<string, ScoreToken>

@@ -19,7 +19,7 @@ import type { MediaAsset } from '../media/types'
 import { mb } from '../media/mediaStore'
 import { TYPE } from './typeScale'
 
-const INK_COLOURS = ['#35283e', '#b4342b', '#1d6b3a', '#1a4f8a', '#8a6a1a']
+const INK_COLOURS = ['#302438', '#b4342b', '#1d6b3a', '#1a4f8a', '#8a6a1a']
 const STICKY_COLOURS = ['#fff3b0', '#ffd6d6', '#d6f0ff', '#e2ffd6']
 
 /** The demo piece's fixed id — see the load effect. Stable so a reload reopens it, marks and all. */
@@ -232,7 +232,7 @@ export function MusicStudio({ demo, documentId, mediaAssets }: {
           />
         ) : (
           <div className="text-center">
-            <p style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #35283e)' }}>This document isn’t a score.</p>
+            <p style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #302438)' }}>This document isn’t a score.</p>
             <p className="mt-2" style={{ fontSize: TYPE.label }}>
               To make one, import a <b>Photo</b> of a score with the media button on the toolbar, then come
               back here — you’ll be offered “make this a music score”. To write ABOUT a published score
@@ -253,7 +253,7 @@ export function MusicStudio({ demo, documentId, mediaAssets }: {
           value={piece.title}
           onChange={e => update({ ...piece, title: e.target.value })}
           className="w-full bg-transparent font-serif outline-none"
-          style={{ fontSize: TYPE.title, color: 'var(--iw-ink, #35283e)' }}
+          style={{ fontSize: TYPE.title, color: 'var(--iw-ink, #302438)' }}
           aria-label="Piece title"
         />
         <p className="font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>
@@ -283,8 +283,8 @@ export function MusicStudio({ demo, documentId, mediaAssets }: {
               className="rounded-full px-3 py-1 font-serif"
               style={{
                 fontSize: TYPE.label,
-                background: screen === s ? 'var(--iw-light, #484965)' : 'transparent',
-                color: screen === s ? '#fff' : 'var(--iw-ink, #35283e)',
+                background: screen === s ? 'var(--iw-light, #41425b)' : 'transparent',
+                color: screen === s ? '#fff' : 'var(--iw-ink, #302438)',
                 border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))',
               }}
             >
@@ -377,8 +377,8 @@ function Toolbar({ tool, setTool, colour, setColour, symbol, setSymbol, onFiles 
             className="h-11 w-11 rounded-full font-serif"
             style={{
               fontSize: TYPE.heading,
-              background: tool === t ? 'var(--iw-light, #484965)' : 'transparent',
-              color: tool === t ? '#fff' : 'var(--iw-ink, #35283e)',
+              background: tool === t ? 'var(--iw-light, #41425b)' : 'transparent',
+              color: tool === t ? '#fff' : 'var(--iw-ink, #302438)',
             }}
           >
             {glyph}
@@ -391,12 +391,12 @@ function Toolbar({ tool, setTool, colour, setColour, symbol, setSymbol, onFiles 
             onClick={() => setColour(c)}
             aria-label={`Ink ${c}`}
             className="h-7 w-7 rounded-full"
-            style={{ background: c, outline: colour === c ? '2px solid var(--iw-ink, #35283e)' : 'none', outlineOffset: 2 }}
+            style={{ background: c, outline: colour === c ? '2px solid var(--iw-ink, #302438)' : 'none', outlineOffset: 2 }}
           />
         ))}
         <label
           className="ml-1 flex h-11 cursor-pointer items-center rounded-full px-3 font-serif"
-          style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #35283e)' }}
+          style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #302438)' }}
         >
           + page
           {/* NO `accept` LIST ON TOUCH: unregistered UTIs grey out every file in the iOS picker
@@ -415,7 +415,7 @@ function Toolbar({ tool, setTool, colour, setColour, symbol, setSymbol, onFiles 
                 onClick={() => { setSymbol(s); setPalette(false) }}
                 aria-label={s}
                 className="h-10 w-10 rounded font-serif italic"
-                style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #35283e)', fontWeight: 700 }}
+                style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #302438)', fontWeight: 700 }}
               >
                 {SYMBOL_GLYPHS[s]}
               </button>
@@ -453,7 +453,7 @@ function PhotoToScore({ photos, onCreated }: {
 
   return (
     <div>
-      <p className="text-center" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #35283e)' }}>
+      <p className="text-center" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #302438)' }}>
         Turn a photo into a score
       </p>
       <p className="mt-1 mb-5 text-center" style={{ fontSize: TYPE.label }}>
@@ -468,9 +468,9 @@ function PhotoToScore({ photos, onCreated }: {
             className="iw-nightable flex items-center gap-3 rounded-lg p-3"
             style={{ border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))' }}
           >
-            <span aria-hidden="true" style={{ fontSize: TYPE.heading, color: 'var(--iw-light, #484965)' }}>❐</span>
+            <span aria-hidden="true" style={{ fontSize: TYPE.heading, color: 'var(--iw-light, #41425b)' }}>❐</span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #35283e)' }}>
+              <span className="block truncate" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #302438)' }}>
                 {asset.name}
               </span>
               <span className="block" style={{ fontSize: TYPE.meta }}>{mb(asset.size)}</span>
@@ -484,7 +484,7 @@ function PhotoToScore({ photos, onCreated }: {
                 minHeight: 44,
                 fontSize: TYPE.label,
                 color: '#fff',
-                background: 'var(--iw-light, #484965)',
+                background: 'var(--iw-light, #41425b)',
               }}
             >
               {converting === asset.id ? 'Reading the score…' : 'Make this a music score'}
@@ -509,7 +509,7 @@ function ImportPrompt({ onFiles }: { onFiles: (f: FileList | null) => void }) {
       className="iw-nightable flex cursor-pointer flex-col items-center rounded-lg p-10 text-center font-serif"
       style={{ border: '1px dashed var(--iw-nightable-border, rgba(0,0,0,0.2))', color: 'var(--iw-pill-fg, #78716c)' }}
     >
-      <span style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #35283e)' }}>Photograph or import your score</span>
+      <span style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #302438)' }}>Photograph or import your score</span>
       <span className="mt-1" style={{ fontSize: TYPE.label }}>Images or a PDF. Inkwave finds the systems and makes room to write.</span>
       {/* `capture` asks the phone for the camera directly (§A1's "camera capture"); on a desktop it
           is ignored and this stays an ordinary file picker. */}

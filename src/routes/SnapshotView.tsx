@@ -50,7 +50,7 @@ import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 // `var(…, <day literal>)`, so a missing stylesheet still yields the day design rather than nothing.
 // KEEP THE INDIRECTION: an inline literal here is a night bug by construction, because these panes
 // sit outside every scope that remaps one.
-const INK = 'var(--iw-snap-ink, #35283e)'
+const INK = 'var(--iw-snap-ink, #302438)'
 const INK_HOVER = 'var(--iw-snap-ink-hover, #7a3fb5)'
 const ON_INK = 'var(--iw-snap-on-ink, #ffffff)'   // text ON an INK fill — never a literal white
 const CARD = 'var(--iw-snap-card, #ffffff)'
@@ -58,11 +58,11 @@ const PANE_BG = 'var(--iw-snap-pane, #f9f7f4)'
 const SIDE_BG = 'var(--iw-snap-side, #fbfaf6)'
 const TEXT = 'var(--iw-snap-text, #3a3a3a)'
 const MUTED = 'var(--iw-snap-muted, #6f6a7d)'
-const EDGE = 'var(--iw-snap-edge, rgba(53, 40, 62, 0.2))'
-const CARD_EDGE = 'var(--iw-snap-card-edge, rgba(53, 40, 62, 0.4))'
-const CHIP_BG = 'var(--iw-snap-chip-bg, rgba(53, 40, 62, 0.08))'
-const CHIP_BG_ON = 'var(--iw-snap-chip-bg-on, rgba(53, 40, 62, 0.16))'
-const CHIP_EDGE = 'var(--iw-snap-chip-edge, rgba(53, 40, 62, 0.35))'
+const EDGE = 'var(--iw-snap-edge, rgba(48, 36, 56, 0.2))'
+const CARD_EDGE = 'var(--iw-snap-card-edge, rgba(48, 36, 56, 0.4))'
+const CHIP_BG = 'var(--iw-snap-chip-bg, rgba(48, 36, 56, 0.08))'
+const CHIP_BG_ON = 'var(--iw-snap-chip-bg-on, rgba(48, 36, 56, 0.16))'
+const CHIP_EDGE = 'var(--iw-snap-chip-edge, rgba(48, 36, 56, 0.35))'
 const DANGER = 'var(--iw-snap-danger, #b91c1c)'
 const DANGER_BG = 'var(--iw-snap-danger-bg, rgba(185,28,28,0.07))'
 const DANGER_EDGE = 'var(--iw-snap-danger-edge, rgba(185,28,28,0.25))'
@@ -70,15 +70,15 @@ const ADD_FG = 'var(--iw-snap-add-fg, #166534)'
 const ADD_BG = 'var(--iw-snap-add-bg, rgba(22,163,74,0.16))'
 const DEL_FG = 'var(--iw-snap-del-fg, #b91c1c)'
 const DEL_BG = 'var(--iw-snap-del-bg, rgba(185,28,28,0.07))'
-const RULE = 'var(--iw-snap-rule, rgba(53, 40, 62, 0.32))'
-const MIDLINE = 'var(--iw-snap-midline, rgba(53, 40, 62, 0.38))'  // the golden-ratio reading line
-const PAGE_NUM = 'var(--iw-snap-page-num, rgba(53, 40, 62, 0.85))'
+const RULE = 'var(--iw-snap-rule, rgba(48, 36, 56, 0.32))'
+const MIDLINE = 'var(--iw-snap-midline, rgba(48, 36, 56, 0.38))'  // the golden-ratio reading line
+const PAGE_NUM = 'var(--iw-snap-page-num, rgba(48, 36, 56, 0.85))'
 const CARD_SHADOW = 'var(--iw-snap-map-shadow, rgba(80,50,10,0.15))'
 
 const NAV_H = 'clamp(38px, 6vh, 50px)' // shared height for BOTH nav pairs (editor + diff panel)
 const NAV_BG = 'var(--iw-snap-nav-bg, rgba(140, 90, 200, 0.35))'
 const NAV_BG_DIS = 'var(--iw-snap-nav-bg-off, rgba(140, 90, 200, 0.06))'
-const NAV_FG = 'var(--iw-snap-nav-fg, rgba(53, 40, 62, 0.85))'
+const NAV_FG = 'var(--iw-snap-nav-fg, rgba(48, 36, 56, 0.85))'
 const NAV_FG_DIS = 'var(--iw-snap-nav-fg-off, rgba(140, 90, 200, 0.25))'
 const NAV_EDGE = 'var(--iw-snap-nav-edge, rgba(140, 90, 200, 0.28))'
 const NAV_EDGE_DIS = 'var(--iw-snap-nav-edge-off, rgba(140, 90, 200, 0.10))'
@@ -651,7 +651,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
               })}
             </div>
             {/* logo + number in the clear bottom margin */}
-            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.1 /* number hugs its wave-seal (Peter, 2026-07-11) */, color: 'var(--iw-snap-map-num, rgba(53, 40, 62, 0.8))', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
+            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 3, zIndex: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: numFont * 0.1 /* number hugs its wave-seal (Peter, 2026-07-11) */, color: 'var(--iw-snap-map-num, rgba(48, 36, 56, 0.8))', fontSize: numFont, fontWeight: 700, fontFamily: 'Georgia, "Times New Roman", serif', lineHeight: 1, pointerEvents: 'none' }}>
               <img src="/inkwave-logo-v7.png" alt="" style={{ width: numFont * 0.85, height: numFont * 0.85, opacity: 0.66 }} />
               {p + 1}
             </div>
@@ -2433,18 +2433,18 @@ function SplitDiffView({
   ) => (
     <div style={{
       gridArea: area, width: '100%', height: '100%', minWidth: 0, minHeight: 0, zIndex: 10,
-      background: draggable ? 'var(--iw-snap-divider, rgba(53, 40, 62, 0.10))' : 'var(--iw-snap-divider-fixed, rgba(53, 40, 62, 0.14))',
+      background: draggable ? 'var(--iw-snap-divider, rgba(48, 36, 56, 0.10))' : 'var(--iw-snap-divider-fixed, rgba(48, 36, 56, 0.14))',
       cursor: draggable ? (orient === 'row' ? 'row-resize' : 'col-resize') : 'default',
       display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.12s', userSelect: 'none',
     }}
       onMouseDown={draggable ? (e) => { e.preventDefault(); onDown(e.clientX, e.clientY) } : undefined}
       onTouchStart={draggable ? (e) => { e.preventDefault(); onDown(e.touches[0].clientX, e.touches[0].clientY) } : undefined}
-      onMouseEnter={draggable ? (e) => (e.currentTarget.style.background = 'var(--iw-snap-divider-hover, rgba(53, 40, 62, 0.28))') : undefined}
-      onMouseLeave={draggable ? (e) => { if (!isDrag.current) e.currentTarget.style.background = 'var(--iw-snap-divider, rgba(53, 40, 62, 0.10))' } : undefined}
+      onMouseEnter={draggable ? (e) => (e.currentTarget.style.background = 'var(--iw-snap-divider-hover, rgba(48, 36, 56, 0.28))') : undefined}
+      onMouseLeave={draggable ? (e) => { if (!isDrag.current) e.currentTarget.style.background = 'var(--iw-snap-divider, rgba(48, 36, 56, 0.10))' } : undefined}
       title={draggable ? title : undefined}>
       {draggable && (
         <div style={{ display: 'flex', flexDirection: orient === 'row' ? 'row' : 'column', gap: 3, pointerEvents: 'none' }}>
-          {[0, 1, 2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--iw-snap-divider-grip, rgba(53, 40, 62, 0.4))' }} />)}
+          {[0, 1, 2].map(n => <div key={n} style={{ width: 3, height: 3, borderRadius: '50%', background: 'var(--iw-snap-divider-grip, rgba(48, 36, 56, 0.4))' }} />)}
         </div>
       )}
     </div>

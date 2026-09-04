@@ -62,7 +62,7 @@ function BarButton({ label, onClick }: { label: string; onClick: () => void }): 
       style={{
         fontSize: TYPE.label,
         borderColor: 'var(--iw-nightable-border, #e7e5e4)',
-        color: 'var(--iw-ink, #35283e)',
+        color: 'var(--iw-ink, #302438)',
       }}
     >
       {label}
@@ -142,7 +142,7 @@ function MusicPanelOverlay({ view, phone, documentId, mediaAssets, onClose }: {
           className="flex items-center justify-between px-4 py-2 border-b"
           style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
         >
-          <span className="font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #35283e)' }}>{title}</span>
+          <span className="font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #302438)' }}>{title}</span>
           <button
             type="button"
             onClick={onClose}

@@ -34,7 +34,7 @@ import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, pmToText } f
 import { readSnapshotArchive } from '../provenance/snapshots'
 import type { InkwaveDocument } from '../types/document'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 interface Row {
   id: string
@@ -224,17 +224,17 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
       >
         <div className="flex items-start justify-between px-5 pt-4">
           <div>
-            <h2 className="text-lg" style={{ color: 'var(--iw-ink, #35283e)' }}>Documents on this device</h2>
+            <h2 className="text-lg" style={{ color: 'var(--iw-ink, #302438)' }}>Documents on this device</h2>
             <p className="text-xs mt-0.5" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
               Everything Inkwave is storing here, read straight from storage. Nothing is deleted from this panel.
             </p>
           </div>
           <button type="button" aria-label="Close" onClick={onClose}
-            className="text-stone-400 hover:text-[#35283e] text-2xl leading-none -mt-1">×</button>
+            className="text-stone-400 hover:text-[#302438] text-2xl leading-none -mt-1">×</button>
         </div>
 
         {error && (
-          <p className="mx-5 mt-3 text-xs px-3 py-2" style={{ color: 'var(--iw-ink, #35283e)', border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 8 }}>{error}</p>
+          <p className="mx-5 mt-3 text-xs px-3 py-2" style={{ color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 8 }}>{error}</p>
         )}
 
         <div className="flex-1 overflow-auto px-5 py-3 flex flex-col gap-2">
@@ -246,7 +246,7 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
               style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 10 }}
             >
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="truncate" style={{ color: 'var(--iw-ink, #35283e)' }}>{r.title}</span>
+                <span className="truncate" style={{ color: 'var(--iw-ink, #302438)' }}>{r.title}</span>
                 {r.isThisTab && <Badge kind="tab">this tab’s document</Badge>}
                 {r.busyElsewhere && <Badge kind="busy">open in another tab</Badge>}
                 {r.orphaned && <Badge kind="orphan">not in the index</Badge>}
@@ -309,7 +309,7 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
           </span>
           <button type="button" onClick={() => void scan()}
             className="text-xs px-2.5 py-1 rounded-full transition-colors"
-            style={{ color: 'var(--iw-ink, #35283e)', border: '1px solid var(--iw-nightable-border, #35283e44)' }}
+            style={{ color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #30243844)' }}
           >
             Rescan
           </button>
@@ -327,7 +327,7 @@ function Badge({ kind, children }: { kind: 'tab' | 'orphan' | 'busy'; children: 
     ? 'var(--iw-verified, #15803d)'
     : kind === 'busy'
       ? 'var(--iw-pill-fg, #78716c)'
-      : 'var(--iw-ink, #35283e)'
+      : 'var(--iw-ink, #302438)'
   return (
     <span className="text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap"
       style={{ color, border: `1px solid ${color}` , opacity: kind === 'busy' ? 0.8 : 1 }}>
@@ -342,7 +342,7 @@ function RowButton({ onClick, disabled, children, testid, title }: {
   return (
     <button type="button" onClick={onClick} disabled={disabled} data-testid={testid} title={title}
       className="text-xs px-3 py-1 transition-colors disabled:opacity-40"
-      style={{ color: 'var(--iw-ink, #35283e)', border: '1px solid var(--iw-nightable-border, #35283e55)', borderRadius: 8 }}
+      style={{ color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #30243855)', borderRadius: 8 }}
     >
       {children}
     </button>

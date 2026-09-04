@@ -2964,7 +2964,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       {id === 'bib' && (
         <button ref={inRow ? bibBtnRef : undefined} type="button"
           onClick={() => setBibPanelOpen(o => !o)}
-          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
           title="Bibliography / citations"
         >
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-xs leading-none font-serif" style={{ fontStyle: 'italic' }}>‟</span>
@@ -2973,7 +2973,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
       {id === 'receipt' && (
         <button type="button"
           data-iw-bar="review" onClick={() => toggleBar('review')}
-          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
           title="Review — comments & track changes"
         >
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
@@ -2986,7 +2986,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           aria-pressed={styleBarOpen}
           data-iw-bar="style"
           onClick={() => toggleBar('style')}
-          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
           title="Style"
         >
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">S</span>
@@ -3021,7 +3021,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           aria-pressed={activeBar === 'music'}
           data-iw-bar="music"
           onClick={() => toggleBar('music')}
-          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${activeBar === 'music' ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${activeBar === 'music' ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
           title="Music — turn a photo into a piece"
         >
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">♪</span>
@@ -3095,7 +3095,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                   // have to carry a day value that disagrees with --iw-subtle-bg's #fcfcfb, which
                   // is drift for no gain: this variant is already themed by the class.
                   borderBottom: '1px solid var(--iw-nightable-border, #e7e5e4)',
-                  color: 'var(--iw-ink, #35283e)',
+                  color: 'var(--iw-ink, #302438)',
                 }
               : { background: 'var(--iw-alert-bg, #fef2f2)', borderBottom: '1px solid var(--iw-alert-edge, #fca5a5)', color: 'var(--iw-alert-fg, #991b1b)' }}
           >
@@ -3482,7 +3482,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
               <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
                   onClick={() => { setToolbarPickerOpen(o => !o); closeBarLayer('style') }}
-                  className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+                  className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
                   title="Customise toolbar"
                 >
                   <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
@@ -3501,7 +3501,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                       <div className="flex items-center">
                         <button type="button"
                           onClick={() => setOppsOpen(o => !o)}
-                          className="flex items-center justify-center min-w-[44px] min-h-[44px] text-stone-400 hover:text-[#35283e] transition-colors"
+                          className="flex items-center justify-center min-w-[44px] min-h-[44px] text-stone-400 hover:text-[#302438] transition-colors"
                           title="More options coming">
                           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-base leading-none">+</span>
                         </button>
@@ -3524,7 +3524,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                           <button type="button"
                             onClick={() => { setReceiptOpen(o => !o); setToolbarPickerOpen(false) }}
                             className="flex items-center justify-center min-w-[44px] min-h-[44px]"
-                            style={{ color: '#35283e' }}
+                            style={{ color: '#302438' }}
                             title="Provenance record — snapshots"
                           >
                             <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.75)] text-sm">◈</span>
@@ -3618,7 +3618,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                       style={{
                         top: -1, right: -1, width: 15, height: 15, fontSize: 10, lineHeight: 1,
                         fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-                        background: 'var(--iw-ink, #35283e)',
+                        background: 'var(--iw-ink, #302438)',
                         color: 'var(--iw-hotkey-hint-fg, #fff)',
                       }}
                     >
@@ -3710,4 +3710,4 @@ function kdSyncEnabled(): boolean {
 }
 
 
-const INK = '#35283e'
+const INK = '#302438'

@@ -32,7 +32,7 @@
 import { Link } from 'react-router'
 import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
-const INK = '#35283e'
+const INK = '#302438'
 const UPDATED = '17 July 2026'
 
 const pill = 'inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors hover:brightness-110'
@@ -265,7 +265,7 @@ export function Privacy() {
           </Section>
         </div>
 
-        <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: 'rgba(53, 40, 62, 0.14)' }}>
+        <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: 'rgba(48, 36, 56, 0.14)' }}>
           <Link to="/" className={pill} style={{ background: INK, color: '#fff' }}>Start writing</Link>
           <Link to="/about" className={pill} style={{ background: INK, color: '#fff' }}>About Inkwave</Link>
         </footer>

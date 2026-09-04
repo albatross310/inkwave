@@ -62,7 +62,7 @@ export function TimeRing({ size = 132, stroke = 3 }: { size?: number; stroke?: n
       <circle
         ref={ref}
         cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} strokeLinecap="round"
-        stroke="var(--iw-light, #484965)"
+        stroke="var(--iw-light, #41425b)"
         strokeDasharray={c} strokeDashoffset={c}
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
         style={{ transition: 'stroke-dashoffset 0.9s linear' }}

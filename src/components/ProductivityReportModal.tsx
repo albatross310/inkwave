@@ -50,7 +50,7 @@ const FS = {
   title: '1.3em',    // the panel title
 } as const
 
-const INK = '#35283e'
+const INK = '#302438'
 const ink = `var(--iw-ink, ${INK})`
 const muted = 'var(--iw-pill-fg, #78716c)'
 const border = `var(--iw-nightable-border, ${INK}33)`
@@ -136,7 +136,7 @@ function MeasuredJudgedChart({ days, judgedFor }: {
               {j && (
                 <div title={`AI assessment: ${j.phase}, ${j.effort}`}
                   className="w-full rounded-sm"
-                  style={{ height: 8, color: `var(--iw-light, #484965)`, backgroundImage: HATCH }} />
+                  style={{ height: 8, color: `var(--iw-light, #41425b)`, backgroundImage: HATCH }} />
               )}
               <div className="w-full rounded-t-sm" title={`${d.active_minutes} active minutes (measured)`}
                 style={{ height: `${(d.active_minutes / max) * 84}px`, background: ink, minHeight: 1 }} />
@@ -151,7 +151,7 @@ function MeasuredJudgedChart({ days, judgedFor }: {
           Measured by Inkwave — active minutes
         </span>
         <span className="flex items-center gap-1.5">
-          <span style={{ width: 14, height: 8, borderRadius: 2, display: 'inline-block', color: `var(--iw-light, #484965)`, backgroundImage: HATCH }} />
+          <span style={{ width: 14, height: 8, borderRadius: 2, display: 'inline-block', color: `var(--iw-light, #41425b)`, backgroundImage: HATCH }} />
           AI assessment — interpretation, not measurement
         </span>
       </div>
@@ -530,11 +530,11 @@ export function ProductivityReportModal({ onClose }: { onClose: () => void }) {
 
                 {parsed.narrative && (
                   <div className="mt-4">
-                    <div className=" uppercase tracking-wide mb-1" style={{ fontSize: FS.meta, color: `var(--iw-light, #484965)` }}>
+                    <div className=" uppercase tracking-wide mb-1" style={{ fontSize: FS.meta, color: `var(--iw-light, #41425b)` }}>
                       AI assessment — your AI's words, not a measurement
                     </div>
                     <div className=" leading-relaxed whitespace-pre-wrap rounded p-3"
-                      style={{ fontSize: FS.body, borderLeft: `3px solid var(--iw-light, #484965)`, background: `${INK}08` }}>
+                      style={{ fontSize: FS.body, borderLeft: `3px solid var(--iw-light, #41425b)`, background: `${INK}08` }}>
                       {parsed.narrative}
                     </div>
                   </div>

@@ -70,7 +70,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* viewport-fit=cover: extend under the iOS notch/home-indicator so env(safe-area-inset-*)
             is non-zero and the footer toolbar can pad itself clear of them (landscape phones). */}
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
-        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#427b82" />
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#3b6f75" />
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141313" />
         <meta name="google-site-verification" content="h79VCdHP57BlmRzPhYg_vgOKBj1iMfKkq4J1gpAIvR4" />
         <meta name="robots" content="index, follow" />

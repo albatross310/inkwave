@@ -55,11 +55,11 @@ export function syncPrintPageStyle(): void {
   // !important here restores the canonical wrapping when printing from a phone.
   const side = getSideMarginPx()
   // The chrome box: logo + a space + the page counter, styled like the editor footer
-  // (.inkwave-sheet-num — EB Garamond 0.9rem #484965 beside the 22px mark). Falls back to the
+  // (.inkwave-sheet-num — EB Garamond 0.9rem #41425b beside the 22px mark). Falls back to the
   // static number-only box in index.css until the logo data-URI is ready.
   const chrome = logoUri
     ? `@bottom-center{content:url("${logoUri}") " " counter(page);` +
-      `font-family:'EB Garamond',Georgia,serif;font-size:0.9rem;color:#484965;margin-bottom:16px;}`
+      `font-family:'EB Garamond',Georgia,serif;font-size:0.9rem;color:#41425b;margin-bottom:16px;}`
     : ''
   const css =
     `@media print{` +

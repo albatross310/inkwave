@@ -19,7 +19,7 @@ import type { Score } from './score'
 // Peter 2026-07-17: "every font proportionally up" — sizes come from the ONE ramp (typeScale.ts),
 // never from a Tailwind text-* class. Scrolling is fine; do not shrink to avoid it.
 const muted = { color: 'var(--iw-pill-fg, #78716c)', ...type_('meta') }
-const ink = { color: 'var(--iw-ink, #35283e)' }
+const ink = { color: 'var(--iw-ink, #302438)' }
 const captionInk = { ...ink, ...type_('meta') }
 
 export function MusicPanel({ demo = false }: { demo?: boolean }) {

@@ -149,7 +149,7 @@ export function GoalsSection({ goals: g, docLabel, onChange }: {
           <button
             type="button" onClick={add} title="Add goal"
             className="shrink-0 rounded-md px-2.5 transition-all hover:brightness-110 active:scale-[0.98]"
-            style={{ fontSize: TYPE.body, minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)' }}
+            style={{ fontSize: TYPE.body, minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #302438)', color: 'var(--iw-on-ink, #fff)' }}
           >
             +
           </button>
@@ -206,7 +206,7 @@ function GoalRow({ goals, goal, today, onChange }: {
           className="rounded-md px-1.5 py-1"
           style={{ fontSize: TYPE.meta, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent', color: 'var(--iw-pill-fg, #78716c)' }}
         />
-        <button type="button" onClick={save} className="shrink-0 px-1.5" style={{ fontSize: TYPE.body, minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, color: 'var(--iw-ink, #35283e)' }}>✓</button>
+        <button type="button" onClick={save} className="shrink-0 px-1.5" style={{ fontSize: TYPE.body, minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, color: 'var(--iw-ink, #302438)' }}>✓</button>
       </li>
     )
   }
@@ -227,7 +227,7 @@ function GoalRow({ goals, goal, today, onChange }: {
           title="Double-click to edit"
           style={{
             fontSize: TYPE.body,
-            color: done ? 'var(--iw-pill-fg, #a8a29e)' : 'var(--iw-ink, #35283e)',
+            color: done ? 'var(--iw-pill-fg, #a8a29e)' : 'var(--iw-ink, #302438)',
             textDecoration: done ? 'line-through' : undefined,
           }}
         >

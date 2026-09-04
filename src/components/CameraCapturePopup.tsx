@@ -23,7 +23,7 @@ import { importMedia } from '../media/mediaStore'
 import type { MediaAsset } from '../media/types'
 import { TOUCH_MIN, TYPE } from '../music/typeScale'
 
-const INK = 'var(--iw-ink, #35283e)'
+const INK = 'var(--iw-ink, #302438)'
 const ON_INK = 'var(--iw-on-ink, #ffffff)'
 
 type Phase =

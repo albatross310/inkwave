@@ -114,7 +114,7 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
         {cats.map((c) => (
           <li key={c.doc_type}>
             <label className="mb-1 flex items-baseline justify-between gap-2">
-              <span style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #35283e)' }}>{CATEGORY_LABEL[c.doc_type]}</span>
+              <span style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #302438)' }}>{CATEGORY_LABEL[c.doc_type]}</span>
               <span className="shrink-0 tabular-nums" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
                 {c.minutes}m
               </span>
@@ -124,7 +124,7 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
                 stretch so the categories read against each other at a glance. */}
             <div className="mb-1.5 h-2 w-full overflow-hidden rounded-full" style={{ background: 'var(--iw-nightable-border, #f0eeec)' }}>
               <div className="h-full rounded-full transition-[width] duration-500"
-                style={{ width: `${Math.round((c.minutes / maxMinutes) * 100)}%`, minWidth: 4, background: 'var(--iw-light, #484965)', opacity: 0.75 }} />
+                style={{ width: `${Math.round((c.minutes / maxMinutes) * 100)}%`, minWidth: 4, background: 'var(--iw-light, #41425b)', opacity: 0.75 }} />
             </div>
             <input
               value={text[c.doc_type] ?? ''}
@@ -143,7 +143,7 @@ export function ReflectionPrompt({ rows, onSave, onSkip }: {
         <button
           type="button" onClick={save}
           className="rounded-full px-4 py-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
-          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)' }}
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #302438)', color: 'var(--iw-on-ink, #fff)' }}
         >
           Save
         </button>

@@ -32,7 +32,7 @@ import { type_ } from './typeScale'
 
 // Peter 2026-07-17: every font proportionally up. Sizes from typeScale.ts, never a text-* class.
 const muted = { color: 'var(--iw-pill-fg, #78716c)', ...type_('meta') }
-const ink = { color: 'var(--iw-ink, #35283e)' }
+const ink = { color: 'var(--iw-ink, #302438)' }
 const border = { border: '1px solid var(--iw-nightable-border, #d6d3d1)' }
 
 /** How many rows to show at once. The Lieder corpus is 1462 scores; a full list is unreadable. */

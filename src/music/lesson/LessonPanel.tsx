@@ -124,7 +124,7 @@ function ConsentGate({ onBegin, onCancel }: { onBegin: (who: string) => void; on
   const [who, setWho] = useState('')
   return (
     <div>
-      <h2 className="text-lg mb-2" style={{ color: 'var(--iw-ink, #35283e)' }}>
+      <h2 className="text-lg mb-2" style={{ color: 'var(--iw-ink, #302438)' }}>
         {copy.CONSENT_TITLE}
       </h2>
       {/* The explainer and its limit sit at the SAME weight — a limit the reader has to go looking
@@ -149,7 +149,7 @@ function ConsentGate({ onBegin, onCancel }: { onBegin: (who: string) => void; on
         </button>
         <button
           className="px-3 py-1 text-sm rounded"
-          style={{ background: 'var(--iw-ink, #35283e)', color: '#fff' }}
+          style={{ background: 'var(--iw-ink, #302438)', color: '#fff' }}
           onClick={() => onBegin(who.trim())}
         >
           {copy.CONSENT_CONFIRM}
@@ -191,7 +191,7 @@ function NotesScreen({
   return (
     <div>
       <div className="flex items-baseline justify-between mb-1">
-        <h2 className="text-lg" style={{ color: 'var(--iw-ink, #35283e)' }}>
+        <h2 className="text-lg" style={{ color: 'var(--iw-ink, #302438)' }}>
           {copy.PANEL_TITLE}
         </h2>
         <button className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }} onClick={onEnd}>
@@ -215,7 +215,7 @@ function NotesScreen({
               <span className="flex-1">{l.text}</span>
               <button
                 className="text-xs"
-                style={{ color: 'var(--iw-light, #484965)' }}
+                style={{ color: 'var(--iw-light, #41425b)' }}
                 onClick={() => {
                   session.distil(l.id)
                   onNotes(session.notes())
@@ -249,7 +249,7 @@ function NotesScreen({
         />
         <button
           className="px-3 py-1 text-sm rounded"
-          style={{ background: 'var(--iw-ink, #35283e)', color: '#fff' }}
+          style={{ background: 'var(--iw-ink, #302438)', color: '#fff' }}
           onClick={add}
         >
           Add
@@ -263,7 +263,7 @@ function NotesScreen({
                 is gone. Show the LABEL the teacher gave — never `bar_index`, which is a 0-based
                 machine key and would read as the wrong bar number to a human. */}
             {n.anchor?.kind === 'bar' && n.anchor.bar_label && (
-              <span className="mr-2 text-xs" style={{ color: 'var(--iw-light, #484965)' }}>
+              <span className="mr-2 text-xs" style={{ color: 'var(--iw-light, #41425b)' }}>
                 bar {n.anchor.bar_label}
               </span>
             )}
@@ -278,7 +278,7 @@ function NotesScreen({
         </span>
         <button
           className="px-3 py-1 text-sm rounded"
-          style={{ border: '1px solid var(--iw-ink, #35283e)', color: 'var(--iw-ink, #35283e)' }}
+          style={{ border: '1px solid var(--iw-ink, #302438)', color: 'var(--iw-ink, #302438)' }}
           onClick={onRecap}
         >
           Hand to your teacher →
@@ -319,7 +319,7 @@ function RecapScreen({
 
   return (
     <div>
-      <h2 className="text-lg mb-2" style={{ color: 'var(--iw-ink, #35283e)' }}>
+      <h2 className="text-lg mb-2" style={{ color: 'var(--iw-ink, #302438)' }}>
         {copy.RECAP_TITLE}
       </h2>
       <p className="text-sm mb-2 text-stone-700">{copy.RECAP_EXPLAINER}</p>
@@ -343,7 +343,7 @@ function RecapScreen({
       </p>
 
       <div className="mb-2">
-        <div className="text-sm mb-1" style={{ color: 'var(--iw-ink, #35283e)' }}>
+        <div className="text-sm mb-1" style={{ color: 'var(--iw-ink, #302438)' }}>
           {copy.ASSIGNMENT_ADD}
         </div>
         <p className="text-xs mb-1" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
@@ -380,7 +380,7 @@ function RecapScreen({
           // §1's Assignment has no id — keyed by position, which is stable here because the list is
           // append-only within a recap and is never reordered.
           <li key={`${a.kind}:${i}`} className="py-0.5">
-            <span className="mr-2 text-xs" style={{ color: 'var(--iw-light, #484965)' }}>
+            <span className="mr-2 text-xs" style={{ color: 'var(--iw-light, #41425b)' }}>
               {a.kind}
             </span>
             {a.ref}
@@ -394,7 +394,7 @@ function RecapScreen({
         </button>
         <button
           className="px-3 py-1 text-sm rounded"
-          style={{ background: 'var(--iw-ink, #35283e)', color: '#fff' }}
+          style={{ background: 'var(--iw-ink, #302438)', color: '#fff' }}
           onClick={finish}
         >
           Done — hand back

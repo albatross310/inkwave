@@ -9,7 +9,7 @@ import { signingPublicKeys } from '../provenance/receipts'
 import { parseTraceFile } from '../provenance/bundle'
 import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 // Open verification page (M5). Drop in an Inkwave export bundle; everything runs in YOUR browser
 // against the published signing key — no Inkwave login, nothing sent anywhere.

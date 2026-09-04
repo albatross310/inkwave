@@ -29,7 +29,7 @@ function ProfileSync() {
 function Row({ onClick, disabled, children }: { onClick?: () => void; disabled?: boolean; children: React.ReactNode }) {
   return (
     <button type="button" role="menuitem" disabled={disabled} onClick={onClick}
-      className="w-full text-left px-4 py-1 hover:bg-stone-100 hover:text-[#35283e] transition-colors disabled:opacity-50">
+      className="w-full text-left px-4 py-1 hover:bg-stone-100 hover:text-[#302438] transition-colors disabled:opacity-50">
       {children}
     </button>
   )
@@ -121,11 +121,11 @@ function InsigniaModal({ onClose }: { onClose: () => void }) {
       <div role="dialog" aria-modal="true" aria-label="Insignia" onMouseDown={(e) => e.stopPropagation()}
         className="relative iw-nightable bg-white rounded-xl shadow-xl p-6 w-full max-w-md max-h-[85vh] overflow-auto font-serif">
         <button type="button" aria-label="Close" onClick={onClose}
-          className="absolute top-3 right-3 text-stone-400 hover:text-[#35283e] text-2xl leading-none z-10">×</button>
+          className="absolute top-3 right-3 text-stone-400 hover:text-[#302438] text-2xl leading-none z-10">×</button>
         <div className="flex items-center justify-center gap-2">
-          <h2 className="text-4xl font-bold text-[#35283e]">Insignia</h2>
+          <h2 className="text-4xl font-bold text-[#302438]">Insignia</h2>
           <button type="button" aria-label="About Insignia" onClick={() => setInfo((i) => !i)}
-            className="w-5 h-5 flex items-center justify-center rounded-full border border-stone-300 text-stone-400 text-xs leading-none hover:text-[#35283e] hover:border-[#35283e]">i</button>
+            className="w-5 h-5 flex items-center justify-center rounded-full border border-stone-300 text-stone-400 text-xs leading-none hover:text-[#302438] hover:border-[#302438]">i</button>
         </div>
         {info && (
           <p className="text-sm text-stone-500 text-left mt-2 max-w-sm mx-auto leading-relaxed">
@@ -141,7 +141,7 @@ function InsigniaModal({ onClose }: { onClose: () => void }) {
         )}
         <p className="text-sm text-stone-500 text-center mt-2 mb-4">$15 AUD per month</p>
         {done ? (
-          <p className="text-center text-[#35283e] py-10">✓ Payment received — activating Insignia…</p>
+          <p className="text-center text-[#302438] py-10">✓ Payment received — activating Insignia…</p>
         ) : (
           <>
             {/* PayPal first — its own gold-branded button (PayPal can't embed; opens its popup). */}
@@ -170,7 +170,7 @@ function AccountItems({ clerk, onClose }: { clerk: ClerkActions; onClose: () => 
   return (
     <>
       {active
-        ? <div className="px-4 py-1.5 text-[#35283e]">✓ Insignia active</div>
+        ? <div className="px-4 py-1.5 text-[#302438]">✓ Insignia active</div>
         : <Row onClick={() => setShowInsignia(true)}>Insignia</Row>}
       <Row onClick={() => { onClose(); clerk.openUserProfile() }}>Account</Row>
       <Row onClick={() => { onClose(); void clerk.signOut({ redirectUrl: '/' }) }}>Sign out</Row>

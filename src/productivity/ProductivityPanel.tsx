@@ -1,7 +1,7 @@
 // The productivity report panel — build-spec §A3.3, §A5, §A6.1, §A6.2, §A8, §C3.
 //
 // THEMING (CLAUDE.md, mandatory): the outer container carries `iw-nightable`, and every custom
-// colour is a theme token with a day fallback — `var(--iw-ink, #35283e)` etc. A panel without
+// colour is a theme token with a day fallback — `var(--iw-ink, #302438)` etc. A panel without
 // `iw-nightable` renders white-on-white in night mode.
 //
 // LOAD PERFORMANCE (CLAUDE.md, sacred): nothing here runs on the load path. The panel is reached
@@ -54,7 +54,7 @@ export function ProductivityPanel({ aggregates, sessions, judged, demo }: Produc
       style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)' }}
     >
       <header className="flex items-baseline justify-between gap-4 flex-wrap mb-4">
-        <h1 className="text-lg" style={{ color: 'var(--iw-ink, #35283e)' }}>Your writing</h1>
+        <h1 className="text-lg" style={{ color: 'var(--iw-ink, #302438)' }}>Your writing</h1>
         <nav className="flex gap-1" role="tablist" aria-label="Report window">
           {(['day', 'week', 'month'] as ReportWindow[]).map(w => (
             <button
@@ -63,7 +63,7 @@ export function ProductivityPanel({ aggregates, sessions, judged, demo }: Produc
               className="px-3 py-1 text-xs rounded-full border transition-colors"
               style={{
                 borderColor: 'var(--iw-nightable-border, #e7e5e4)',
-                background: window === w ? 'var(--iw-ink, #35283e)' : 'transparent',
+                background: window === w ? 'var(--iw-ink, #302438)' : 'transparent',
                 color: window === w ? 'var(--iw-paper, #fff)' : 'var(--iw-pill-fg, #78716c)',
               }}
             >
@@ -94,7 +94,7 @@ export function ProductivityPanel({ aggregates, sessions, judged, demo }: Produc
 function DayView({ day }: { day: DayAggregate }) {
   return (
     <section aria-label="Today">
-      <p className="text-base mb-1" style={{ color: 'var(--iw-ink, #35283e)' }}>{dayHeadline(day)}</p>
+      <p className="text-base mb-1" style={{ color: 'var(--iw-ink, #302438)' }}>{dayHeadline(day)}</p>
       <ul className="text-xs mb-4 space-y-0.5" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
         {dayDetail(day).map(line => <li key={line}>{line}</li>)}
       </ul>
@@ -125,7 +125,7 @@ function WeekView({ week, sessions, judged }: { week: WeekAggregate; sessions?: 
 
   return (
     <section aria-label="This week">
-      <p className="text-base mb-3" style={{ color: 'var(--iw-ink, #35283e)' }}>
+      <p className="text-base mb-3" style={{ color: 'var(--iw-ink, #302438)' }}>
         {formatMinutes(week.activeMinutes)} of focused writing over {week.daysWritten} {week.daysWritten === 1 ? 'day' : 'days'} · {week.wordsAdded.toLocaleString()} words written
       </p>
 
@@ -166,7 +166,7 @@ function MonthView({ month }: { month: MonthAggregate }) {
 
   return (
     <section aria-label="This month">
-      <p className="text-base mb-3" style={{ color: 'var(--iw-ink, #35283e)' }}>
+      <p className="text-base mb-3" style={{ color: 'var(--iw-ink, #302438)' }}>
         {formatMinutes(month.activeMinutes)} across {month.daysWritten} {month.daysWritten === 1 ? 'day' : 'days'} · {month.wordsAdded.toLocaleString()} words written
       </p>
 

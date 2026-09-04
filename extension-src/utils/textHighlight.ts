@@ -171,7 +171,7 @@ export function highlightQuote(quote: string): boolean {
         const mark = document.createElement('span')
         mark.className = 'inkwave-source-mark'
         // Inline CSSOM styles — exempt from page CSP, and paint reliably from the isolated world.
-        mark.style.cssText = 'background-color:rgba(53, 40, 62, 0.9);color:#fff;border-radius:2px;box-shadow:0 0 0 2px rgba(53, 40, 62, 0.9)'
+        mark.style.cssText = 'background-color:rgba(48, 36, 56, 0.9);color:#fff;border-radius:2px;box-shadow:0 0 0 2px rgba(48, 36, 56, 0.9)'
         r.surroundContents(mark)
         marks.push(mark)
       } catch { /* skip nodes that resist wrapping */ }

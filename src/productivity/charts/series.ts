@@ -35,15 +35,15 @@ export interface SeriesStyle {
  */
 export const SERIES_STYLE: Record<Provenance, SeriesStyle> = {
   measured: {
-    fill: 'var(--iw-ink, #35283e)',
-    stroke: 'var(--iw-ink, #35283e)',
+    fill: 'var(--iw-ink, #302438)',
+    stroke: 'var(--iw-ink, #302438)',
     dash: '',
     hatch: null,
     legend: 'measured — counted from your own writing record',
   },
   estimated: {
     fill: 'none',
-    stroke: 'var(--iw-light, #484965)',
+    stroke: 'var(--iw-light, #41425b)',
     dash: '3 2',
     hatch: null,
     legend: 'estimated — a rule applied to the measured numbers, not a measurement',

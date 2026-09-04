@@ -87,7 +87,7 @@ export function dockPanelPos(o: {
   fullscreen?: boolean; fullscreenWidth?: number
 }): Record<string, string | number> {
   // ⚠ THE DIVIDING LINE PETER ASKED FOR ALREADY EXISTED — as a literal, and it was invisible in the
-  // theme that needed it (2026-08-30: "make sure … there's a dividing line between"). `#35283e33` is
+  // theme that needed it (2026-08-30: "make sure … there's a dividing line between"). `#30243833` is
   // a 20%-alpha DARK purple: over cream it reads as a faint edge, over the night panel it composites
   // to very nearly the panel itself, so a docked reader butted onto the night editor with nothing
   // between them. It is a token now, and the night value is a LIGHT grey-blue.

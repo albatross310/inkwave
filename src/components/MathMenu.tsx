@@ -13,7 +13,7 @@ const MATH_ITEMS = [
   { label: 'Block math',   hint: 'Alt+⇧+=',  action: (e: Editor) => e.commands.insertMathBlock()  },
 ] as const
 
-const INK = '#35283e'
+const INK = '#302438'
 
 // MathLive inline shortcuts reference — type sequence then space to expand
 // [sequence, rendered symbol or name, description]
@@ -149,7 +149,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
         type="button"
         onClick={() => (open ? setOpen(false) : openMenu())}
         onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
-        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
         title="Insert math"
       >
         <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none" style={{ fontFamily: 'serif' }}>Σ</span>

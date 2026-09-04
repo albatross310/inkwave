@@ -181,7 +181,7 @@ export function EmailComposePanel({
         {!showCc && (
           <button
             className="text-xs hover:opacity-70"
-            style={{ color: 'var(--iw-ink, #35283e)' }}
+            style={{ color: 'var(--iw-ink, #302438)' }}
             onClick={() => setShowCc(true)}
           >
             Cc/Bcc
@@ -233,7 +233,7 @@ export function EmailComposePanel({
       <div className="px-3 py-2.5 flex flex-wrap items-center gap-2">
         <button
           className="text-xs px-2.5 py-1 rounded border disabled:opacity-40"
-          style={{ color: 'var(--iw-ink, #35283e)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
+          style={{ color: 'var(--iw-ink, #302438)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
           onClick={onFinalise}
           disabled={busy}
         >
@@ -243,7 +243,7 @@ export function EmailComposePanel({
         {gmailConfigured() && (
           <button
             className="text-xs px-2.5 py-1 rounded border disabled:opacity-40"
-            style={{ color: 'var(--iw-ink, #35283e)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
+            style={{ color: 'var(--iw-ink, #302438)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
             onClick={onGmailSend}
             disabled={busy || !ready}
             title={ready ? 'Record this draft, then send it with Gmail' : 'Add a recipient first'}
@@ -255,7 +255,7 @@ export function EmailComposePanel({
         <div className="relative" ref={handoffRef}>
           <button
             className="text-xs px-2.5 py-1 rounded border disabled:opacity-40"
-            style={{ color: 'var(--iw-ink, #35283e)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
+            style={{ color: 'var(--iw-ink, #302438)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
             onClick={() => setHandoffOpen((v) => !v)}
             disabled={!ready}
             title={ready ? undefined : 'Add a recipient first'}
@@ -310,7 +310,7 @@ export function EmailComposePanel({
         <p>{copy.PROVENANCE_BRIEF}</p>
         {!hasRecipient(headers) && <p className="mt-1">Add a recipient to hand this draft to your provider.</p>}
         <details className="mt-1.5">
-          <summary className="cursor-pointer" style={{ color: 'var(--iw-ink, #35283e)' }}>
+          <summary className="cursor-pointer" style={{ color: 'var(--iw-ink, #302438)' }}>
             How recording and sending work
           </summary>
           <div className="mt-1.5 space-y-1">

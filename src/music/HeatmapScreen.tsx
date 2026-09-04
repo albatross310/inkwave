@@ -45,7 +45,7 @@ export function HeatmapScreen({ piece, onChange }: {
   return (
     <div className="mx-auto w-full max-w-3xl pb-32">
       <header className="mb-3">
-        <h2 className="font-serif" style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #35283e)' }}>
+        <h2 className="font-serif" style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}>
           What needs work
         </h2>
         <p className="font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-pill-fg, #78716c)' }}>
@@ -138,13 +138,13 @@ function BarRow({
         </span>
         <BarThumb piece={piece} bar={bar} />
         {entry?.label && (
-          <span className="font-serif" style={{ fontSize: TYPE.meta, color: 'var(--iw-ink, #35283e)' }}>{entry.label}</span>
+          <span className="font-serif" style={{ fontSize: TYPE.meta, color: 'var(--iw-ink, #302438)' }}>{entry.label}</span>
         )}
         {entry?.author === 'teacher' && (
           // §A2: the teacher's marks are a shared lesson artifact — attributed, visibly.
           <span
             className="rounded-full px-1.5 font-serif"
-            style={{ fontSize: TYPE.meta, background: 'var(--iw-light, #484965)', color: '#fff' }}
+            style={{ fontSize: TYPE.meta, background: 'var(--iw-light, #41425b)', color: '#fff' }}
             title={`Marked by your teacher, ${new Date(entry.ts).toLocaleString()}`}
           >
             teacher
@@ -256,7 +256,7 @@ function Toolbar({ colour, setColour, label, setLabel, author, setAuthor }: {
             aria-pressed={colour === s.colour}
             title={s.suggested}
             className="h-9 w-9 rounded-full"
-            style={{ background: s.colour, outline: colour === s.colour ? '2px solid var(--iw-ink, #35283e)' : 'none', outlineOffset: 2 }}
+            style={{ background: s.colour, outline: colour === s.colour ? '2px solid var(--iw-ink, #302438)' : 'none', outlineOffset: 2 }}
           />
         ))}
         <input
@@ -277,8 +277,8 @@ function Toolbar({ colour, setColour, label, setLabel, author, setAuthor }: {
           className="h-9 rounded-full px-3 font-serif"
           style={{
             fontSize: TYPE.label,
-            background: author === 'teacher' ? 'var(--iw-light, #484965)' : 'transparent',
-            color: author === 'teacher' ? '#fff' : 'var(--iw-ink, #35283e)',
+            background: author === 'teacher' ? 'var(--iw-light, #41425b)' : 'transparent',
+            color: author === 'teacher' ? '#fff' : 'var(--iw-ink, #302438)',
             border: '1px solid var(--iw-nightable-border, rgba(0,0,0,0.12))',
           }}
         >
@@ -295,7 +295,7 @@ function NoBars({ piece }: { piece: Piece }) {
   const anyGrand = piece.pages.some(p => p.systems.some(s => s.is_grand_stave))
   return (
     <div className="mx-auto max-w-md py-10 text-center font-serif" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
-      <p style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #35283e)' }}>No bars to colour yet</p>
+      <p style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #302438)' }}>No bars to colour yet</p>
       {/* HONEST, and specific about WHY — "no bars" on a page full of bars would read as a bug.
           Inkwave finds barlines only where it can be certain (a grand stave's barlines cross between
           the staves; on a single stave a note stem looks the same). Tapping is §A4's own MVP. */}

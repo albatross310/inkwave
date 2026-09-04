@@ -1873,7 +1873,7 @@ function PageGuides({ sheetRef }: { sheetRef: RefObject<HTMLDivElement> }) {
       {/* A dashed rule at every measured break, page n+1's number just below it */}
       {active && breaks.map((y, i) => (
         <div key={`break-${i}`} style={{ position: 'absolute', top: y, left: 0, right: 0 }}>
-          <div style={{ borderTop: '1px dashed rgba(53, 40, 62, 0.45)' }} />
+          <div style={{ borderTop: '1px dashed rgba(48, 36, 56, 0.45)' }} />
           <div className="font-serif" style={{ position: 'absolute', right: 24, top: 14, fontSize: pageNumSize, fontWeight: 'bold', color: 'var(--iw-page-num, #000000)' }}>
             {i + 2}
           </div>

@@ -11,19 +11,19 @@ const twinkles = readFileSync(resolve(repo, 'src/editor/waveTwinkle.ts'), 'utf8'
 describe('day water palette', () => {
   it('has one shared muted indigo-to-teal background definition', () => {
     expect(css.match(/--iw-water-gradient:/g)).toHaveLength(1)
-    expect(css).toContain('--iw-water-base: #427b82')
-    expect(css).toContain('--iw-water-gradient: linear-gradient(98.5deg, #35283e 0%, #484965 18%, #416b76 88%, #427b82 100%)')
+    expect(css).toContain('--iw-water-base: #3b6f75')
+    expect(css).toContain('--iw-water-gradient: linear-gradient(98.5deg, #302438 0%, #41425b 18%, #3b606a 88%, #3b6f75 100%)')
     expect(css).not.toMatch(/#00b4d8|#00bfa8|%2300b4d8|%2300bfa8/i)
   })
 
   it('routes every day water surface through the shared palette', () => {
-    expect(css.match(/background-color: var\(--iw-water-base, #427b82\)/g)?.length).toBeGreaterThanOrEqual(5)
+    expect(css.match(/background-color: var\(--iw-water-base, #3b6f75\)/g)?.length).toBeGreaterThanOrEqual(5)
     expect(css.match(/background-image: var\(--iw-water-gradient\)/g)?.length).toBeGreaterThanOrEqual(4)
     expect(css).toContain('var(--iw-wave-a), var(--iw-wave-b), var(--iw-water-gradient)')
   })
 
   it('keeps the browser chrome colour aligned with the shared water base', () => {
-    expect(root).toContain('media="(prefers-color-scheme: light)" content="#427b82"')
+    expect(root).toContain('media="(prefers-color-scheme: light)" content="#3b6f75"')
   })
 
   it('holds a pure-white first paint until the complete water field is ready', () => {

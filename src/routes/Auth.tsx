@@ -2,7 +2,7 @@ import { SignIn, ClerkLoading, ClerkLoaded } from '@clerk/clerk-react'
 import { Link } from 'react-router'
 import { authEnabled } from '../auth/config'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 // /login — paid-tier sign-in (Clerk). Hidden behind authEnabled() (the publishable key). When the
 // key is set we render Clerk's <SignIn>, but guard it with ClerkLoading/ClerkLoaded so the page
@@ -29,7 +29,7 @@ export function AuthPage() {
           </p>
         </div>
       )}
-      <Link to="/" className="inline-block mt-6 text-sm underline" style={{ color: '#484965' }}>← back to writing</Link>
+      <Link to="/" className="inline-block mt-6 text-sm underline" style={{ color: '#41425b' }}>← back to writing</Link>
     </div>
   )
 }

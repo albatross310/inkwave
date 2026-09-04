@@ -27,7 +27,7 @@ const INK_TOKEN: Record<string, string> = {
   '#991b1b': '--iw-reader-ink-red',
   '#1e3a8a': '--iw-reader-ink-blue',
   '#166534': '--iw-reader-ink-green',
-  '#35283e': '--iw-reader-accent',
+  '#302438': '--iw-reader-accent',
   // The highlighter TOOL's glyph — a dark gold that says "yellow highlighter" on a white control
   // face and dies on a dark one (measured 2.37:1 against the night control face, below the 3:1 a
   // glyph needs). Not a mark's stored colour, but the same kind of thing: a stroke whose colour is

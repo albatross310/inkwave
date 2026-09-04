@@ -114,10 +114,10 @@ function Pill({ active, onClick, children, title }: {
         // shadow tint works in both themes (the ink shifts, the shadow stays its family).
         fontWeight: active ? 500 : 400,
         border: '1px solid var(--iw-nightable-border, #e7e5e4)',
-        background: active ? 'var(--iw-ink, #35283e)' : 'transparent',
+        background: active ? 'var(--iw-ink, #302438)' : 'transparent',
         // NOT #fff: --iw-ink is light purple in night, so white text on it is illegible (measured).
         color: active ? 'var(--iw-on-ink, #fff)' : 'var(--iw-pill-fg, #78716c)',
-        borderColor: active ? 'var(--iw-ink, #35283e)' : undefined,
+        borderColor: active ? 'var(--iw-ink, #302438)' : undefined,
         boxShadow: active ? '0 1px 5px rgb(var(--iw-ink-rgb) / 0.25)' : 'none',
       }}
     >
@@ -134,7 +134,7 @@ function PrimaryButton({ onClick, children }: { onClick: () => void; children: R
       // it a little dimension, a soft purple cast lifts it off the panel, and it rises a hair on hover
       // and presses back on click. Nothing loud — the app's whole argument is calm.
       className="rounded-full px-6 py-2 transition-all hover:brightness-[1.07] hover:-translate-y-px active:translate-y-0 active:scale-[0.98]"
-      style={{ fontSize: TYPE.label, fontWeight: 500, letterSpacing: '0.01em', minHeight: TOUCH_MIN, background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 2px 10px rgb(var(--iw-ink-rgb) / 0.3)' }}
+      style={{ fontSize: TYPE.label, fontWeight: 500, letterSpacing: '0.01em', minHeight: TOUCH_MIN, background: 'var(--iw-ink, #302438)', color: 'var(--iw-on-ink, #fff)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 2px 10px rgb(var(--iw-ink-rgb) / 0.3)' }}
     >
       {children}
     </button>
@@ -237,7 +237,7 @@ export function ClockSlotButton({ open, onToggle }: { open: boolean; onToggle: (
       // The drop-up finds its anchor by this attribute, so it works from the row OR from ▲.
       data-iw-ledger-btn=""
       onClick={onToggle}
-      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open || running ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+      className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open || running ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
       title={running ? 'Pomodoro running — your ledger' : 'Pomodoro & your ledger'}
     >
       <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
@@ -383,7 +383,7 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
         <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
           <button type="button" onClick={() => setView('home')} aria-label="Back"
             className="flex items-center justify-center rounded-full transition-colors hover:bg-stone-50"
-            style={{ minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, fontSize: TYPE.heading, color: 'var(--iw-ink, #35283e)' }}
+            style={{ minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}
           >
             ‹
           </button>
@@ -429,12 +429,12 @@ function NavRow({ glyph, label, desc, accent, onClick }: {
       style={{ minHeight: TOUCH_MIN, borderTop: '1px solid var(--iw-nightable-border, #f0eeec)' }}
     >
       <span className="flex shrink-0 items-center justify-center rounded-full"
-        style={{ width: 38, height: 38, border: '1.5px solid var(--iw-ink, #35283e)', color: 'var(--iw-ink, #35283e)' }}
+        style={{ width: 38, height: 38, border: '1.5px solid var(--iw-ink, #302438)', color: 'var(--iw-ink, #302438)' }}
       >
         {glyph}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate" style={{ fontSize: TYPE.body, fontWeight: accent ? 500 : 400, color: 'var(--iw-ink, #35283e)' }}>{label}</span>
+        <span className="block truncate" style={{ fontSize: TYPE.body, fontWeight: accent ? 500 : 400, color: 'var(--iw-ink, #302438)' }}>{label}</span>
         <span className="block truncate" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>{desc}</span>
       </span>
       <span className="shrink-0" style={{ fontSize: TYPE.body, color: 'var(--iw-pill-fg, #a8a29e)' }}>›</span>
@@ -457,11 +457,11 @@ function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection }: {
     <div className="pb-2">
       {/* A quiet header + the running-timer glance, so opening from a running block shows its state. */}
       <div className="flex items-center justify-between px-4 pb-1 pt-4">
-        <span style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #35283e)' }}>Your writing time</span>
+        <span style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}>Your writing time</span>
         {running && (
           <button type="button" onClick={() => onNavigate('work')}
             className="flex items-center gap-1.5 rounded-full px-3 transition-colors hover:opacity-80"
-            style={{ minHeight: TOUCH_MIN, background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)' }}
+            style={{ minHeight: TOUCH_MIN, background: 'var(--iw-ink, #302438)', color: 'var(--iw-on-ink, #fff)' }}
           >
             <TimeFace className="tabular-nums" style={{ fontSize: TYPE.label }} />
           </button>
@@ -564,7 +564,7 @@ function WorkView({ onSummarised }: { onSummarised: () => void }): JSX.Element {
         className="relative transition-transform active:scale-[0.99]" style={{ width: 132, height: 132 }}>
         <TimeRing size={132} />
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <TimeFace className="tabular-nums" style={{ fontSize: TYPE.title, color: 'var(--iw-ink, #35283e)', letterSpacing: '0.01em' }} />
+          <TimeFace className="tabular-nums" style={{ fontSize: TYPE.title, color: 'var(--iw-ink, #302438)', letterSpacing: '0.01em' }} />
           <span className="mt-0.5" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>{phaseLabel}</span>
         </div>
       </button>
@@ -594,7 +594,7 @@ function WorkView({ onSummarised }: { onSummarised: () => void }): JSX.Element {
         <div className="mt-3 flex items-center gap-1.5" title={`${s.completed} block${s.completed === 1 ? '' : 's'} today`}>
           {Array.from({ length: Math.min(s.completed, 8) }).map((_, i) => (
             <span key={i} className="inline-block rounded-full"
-              style={{ width: 5, height: 5, background: 'var(--iw-light, #484965)', opacity: 0.75 }} />
+              style={{ width: 5, height: 5, background: 'var(--iw-light, #41425b)', opacity: 0.75 }} />
           ))}
           {s.completed > 8 && <span style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>+{s.completed - 8}</span>}
         </div>
@@ -686,7 +686,7 @@ function SummaryPrompt({ pending, onDone }: { pending: PendingSummary; onDone: (
   const [text, setText] = useState('')
   return (
     <div className="mb-4 w-full rounded-lg px-3 py-3" style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'var(--iw-slot-drag-bg, #faf8ff)' }}>
-      <p className="mb-1" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #35283e)' }}>Block done — what did you do?</p>
+      <p className="mb-1" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #302438)' }}>Block done — what did you do?</p>
       {pending.intention && (
         <p className="mb-2" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
           You set out to: {pending.intention}
@@ -703,7 +703,7 @@ function SummaryPrompt({ pending, onDone }: { pending: PendingSummary; onDone: (
       <div className="flex items-center gap-2">
         <button type="button" onClick={() => { void submitSummary(text); onDone() }}
           className="rounded-full px-4 py-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
-          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)' }}
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #302438)', color: 'var(--iw-on-ink, #fff)' }}
         >
           Save
         </button>
@@ -775,7 +775,7 @@ function ChimeSelect(): JSX.Element {
         value={value}
         onChange={(e) => onPick(e.target.value)}
         className="flex-1 rounded-md px-2 py-1.5"
-        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent', color: 'var(--iw-ink, #35283e)' }}
+        style={{ fontSize: TYPE.body, minHeight: TOUCH_MIN, border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: 'transparent', color: 'var(--iw-ink, #302438)' }}
       >
         {CHIME_VOICES.map((v) => <option key={v.id} value={v.id}>{v.label} — {v.hint}</option>)}
         <option value="silent">Silent</option>
@@ -811,7 +811,7 @@ function ReadingDot({ state }: { state: PdfReadingState }): JSX.Element {
       className="inline-block shrink-0 rounded-full"
       style={{
         width: 6, height: 6,
-        background: state === 'annotating' ? 'var(--iw-ink, #35283e)' : 'var(--iw-light, #484965)',
+        background: state === 'annotating' ? 'var(--iw-ink, #302438)' : 'var(--iw-light, #41425b)',
         opacity: state === 'annotating' ? 0.9 : 0.6,
       }}
     />
@@ -839,7 +839,7 @@ function ReadingSection(): JSX.Element | null {
           <li key={p.citekey} className="flex items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-2">
               <ReadingDot state={p.state} />
-              <span className="truncate" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #35283e)' }}>{pdfNameOf(p.citekey)}</span>
+              <span className="truncate" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #302438)' }}>{pdfNameOf(p.citekey)}</span>
             </span>
             <span className="shrink-0" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
               {p.state === 'annotating' ? 'annotating' : 'reading'}
@@ -966,7 +966,7 @@ function PostHocAdd({ onAdded }: { onAdded: () => void }): JSX.Element {
           className="rounded-full px-4 py-1.5 transition-all hover:brightness-110 active:scale-[0.98]"
           // --iw-on-ink, never a literal white: --iw-ink is LIGHT purple in night mode, where white
           // text on it vanishes. A hard-coded #fff here is a night-mode bug by construction.
-          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)' }}
+          style={{ fontSize: TYPE.label, minHeight: TOUCH_MIN, background: 'var(--iw-ink, #302438)', color: 'var(--iw-on-ink, #fff)' }}
         >
           Add {minutes}m
         </button>
@@ -998,12 +998,12 @@ function SessionCard({ row, onSaved }: { row: SessionRow; onSaved: () => void })
   return (
     <li className="rounded-lg px-3 py-2" style={{ border: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
-        <span className="truncate" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #35283e)' }}>
+        <span className="truncate" style={{ fontSize: TYPE.body, color: 'var(--iw-ink, #302438)' }}>
           {/* A post-hoc block has no document — `doc_id: 'post-hoc'` — so "A document" would be a
               small lie. It says what it is. THE FLAG IS THE FEATURE (Peter: "then it's flagged
               post-hoc"): a remembered block must never be able to pass for a timed one on screen. */}
           {postHoc ? 'Added from memory' : (row.doc_label ?? 'A document')}
-          {row.pomodoro && <span className="ml-1.5" style={{ fontSize: TYPE.meta, color: 'var(--iw-light, #484965)' }}>●</span>}
+          {row.pomodoro && <span className="ml-1.5" style={{ fontSize: TYPE.meta, color: 'var(--iw-light, #41425b)' }}>●</span>}
         </span>
         <span className="shrink-0 tabular-nums" style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #a8a29e)' }}>
           {/* No start–end times on a remembered block: we derived that span from a rough duration,
@@ -1086,7 +1086,7 @@ function TitleRow({ docId, label }: { docId: string; label?: string }): JSX.Elem
   const [hidden, setHidden] = useState(() => isLabelSuppressed(docId))
   return (
     <li className="flex items-center justify-between gap-2">
-      <span className="truncate" style={{ fontSize: TYPE.body, color: hidden ? 'var(--iw-pill-fg, #a8a29e)' : 'var(--iw-ink, #35283e)' }}>
+      <span className="truncate" style={{ fontSize: TYPE.body, color: hidden ? 'var(--iw-pill-fg, #a8a29e)' : 'var(--iw-ink, #302438)' }}>
         {hidden ? <em>title hidden</em> : (label ?? <em>untitled</em>)}
       </span>
       <Pill onClick={() => { const next = !hidden; setLabelSuppressed(docId, next); setHidden(next) }}>

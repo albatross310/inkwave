@@ -8,7 +8,7 @@ import { parseDefinition, setSymbol, getSymbols, applyCustomSymbols } from './ma
 import { loadMathLive } from './mathLiveLoader'
 import { pendingMathEdit } from './mathActivation'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 type Align = 'aligned' | 'center' | 'left'
 
@@ -192,7 +192,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
         // internally; without this the formula appears ~17% smaller than the KaTeX render).
         'display:inline-block;width:max-content;background:transparent;border:none;',
         'outline:none;font-size:1.21em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
-        '--caret-color:#35283e;',
+        '--caret-color:#302438;',
         '--selection-background-color:rgba(72, 73, 101, 0.25);',
       ].join('')
 

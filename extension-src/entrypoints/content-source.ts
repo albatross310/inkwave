@@ -235,11 +235,11 @@ function showCapturePanel(capture: CaptureMsg) {
         <label class="iwcp-fill-row">
           <span class="iwcp-fill-label">${escAttr(FIELD_LABELS[key] ?? key)}</span>
           <input class="iwcp-fill-input" name="${escAttr(key)}" placeholder="${escAttr(FIELD_PLACEHOLDERS[key] ?? '')}" autocomplete="off"
-            style="all:unset;box-sizing:border-box;display:block;width:100%;font-size:11px;font-family:Georgia,serif;border:1px solid rgba(53, 40, 62, 0.25);border-radius:5px;padding:3px 7px;background:#fff;color:#3a3a3a" />
+            style="all:unset;box-sizing:border-box;display:block;width:100%;font-size:11px;font-family:Georgia,serif;border:1px solid rgba(48, 36, 56, 0.25);border-radius:5px;padding:3px 7px;background:#fff;color:#3a3a3a" />
         </label>`).join('')}
       <div class="iwcp-fill-footer">
         <button type="submit" class="iwcp-fill-save"
-          style="all:unset;box-sizing:border-box;display:inline-block;margin:0;padding:3px 10px;background:#35283e;color:#fff;border-radius:5px;font-size:10px;font-family:Georgia,serif;cursor:pointer;line-height:1.5;white-space:nowrap">Save to library</button>
+          style="all:unset;box-sizing:border-box;display:inline-block;margin:0;padding:3px 10px;background:#302438;color:#fff;border-radius:5px;font-size:10px;font-family:Georgia,serif;cursor:pointer;line-height:1.5;white-space:nowrap">Save to library</button>
         <span class="iwcp-fill-status" id="iwcp-fill-status"></span>
       </div>
     </form>` : ''}
@@ -267,7 +267,7 @@ function showCapturePanel(capture: CaptureMsg) {
     const input = document.createElement('input')
     input.className = 'iwcp-edit-input'
     input.value = current
-    input.style.cssText = 'all:unset;box-sizing:border-box;display:block;flex:1;min-width:0;font-size:11px;font-family:Georgia,serif;border:1px solid rgba(53, 40, 62, 0.45);border-radius:5px;padding:2px 6px;background:#fff;color:#3a3a3a'
+    input.style.cssText = 'all:unset;box-sizing:border-box;display:block;flex:1;min-width:0;font-size:11px;font-family:Georgia,serif;border:1px solid rgba(48, 36, 56, 0.45);border-radius:5px;padding:2px 6px;background:#fff;color:#3a3a3a'
     valueSpan.style.display = 'none'
     valueSpan.after(input)
     input.focus(); input.select()
@@ -466,7 +466,7 @@ function injectStyles(): void {
       z-index: 2147483647;
       width: 300px;
       background: #fbf5ec;
-      border: 1px solid rgba(53, 40, 62, 0.35);
+      border: 1px solid rgba(48, 36, 56, 0.35);
       border-radius: 12px;
       box-shadow: 0 4px 24px rgba(0,0,0,0.14);
       font-family: Georgia, serif;
@@ -477,7 +477,7 @@ function injectStyles(): void {
     #inkwave-capture-panel.iwcp-fade { opacity: 0; }
     .iwcp-header {
       padding: 9px 12px 8px;
-      border-bottom: 1px solid rgba(53, 40, 62, 0.12);
+      border-bottom: 1px solid rgba(48, 36, 56, 0.12);
     }
     .iwcp-header-top {
       display: flex;
@@ -487,7 +487,7 @@ function injectStyles(): void {
     }
     .iwcp-logo {
       font-size: 10px;
-      color: #484965;
+      color: #41425b;
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
@@ -500,7 +500,7 @@ function injectStyles(): void {
       line-height: 1;
       padding: 0;
     }
-    .iwcp-close:hover { color: #35283e; }
+    .iwcp-close:hover { color: #302438; }
     .iwcp-type-row {
       display: flex;
       align-items: center;
@@ -511,8 +511,8 @@ function injectStyles(): void {
       font-size: 9px;
       padding: 1px 6px;
       border-radius: 10px;
-      background: rgba(53, 40, 62, 0.1);
-      color: #35283e;
+      background: rgba(48, 36, 56, 0.1);
+      color: #302438;
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
@@ -547,7 +547,7 @@ function injectStyles(): void {
     }
     .iwcp-has-quote { cursor: pointer; }
     .iwcp-has-quote:hover, .iwcp-has-quote:focus {
-      background: rgba(53, 40, 62, 0.07);
+      background: rgba(48, 36, 56, 0.07);
       border-radius: 6px;
     }
     .iwcp-auto-found { cursor: pointer; }
@@ -555,12 +555,12 @@ function injectStyles(): void {
       background: rgba(180,83,9,0.06);
       border-radius: 6px;
     }
-    .iwcp-check { font-size: 10px; color: #484965; flex-shrink: 0; width: 12px; }
+    .iwcp-check { font-size: 10px; color: #41425b; flex-shrink: 0; width: 12px; }
     .iwcp-field:not(.iwcp-has-quote):not(.iwcp-auto-found) .iwcp-check { color: #c4b5d4; }
     .iwcp-auto-found .iwcp-check { color: #b45309; }
     .iwcp-label {
       font-size: 9px;
-      color: #484965;
+      color: #41425b;
       text-transform: uppercase;
       letter-spacing: 0.05em;
       flex-shrink: 0;
@@ -591,14 +591,14 @@ function injectStyles(): void {
       padding: 5px 12px 8px;
       font-size: 9px;
       color: #9b8fa8;
-      border-top: 1px solid rgba(53, 40, 62, 0.08);
+      border-top: 1px solid rgba(48, 36, 56, 0.08);
     }
     .iwcp-fill {
       padding: 6px 12px 10px;
       display: flex;
       flex-direction: column;
       gap: 5px;
-      border-top: 1px solid rgba(53, 40, 62, 0.08);
+      border-top: 1px solid rgba(48, 36, 56, 0.08);
     }
     .iwcp-fill-row {
       display: flex;
@@ -607,14 +607,14 @@ function injectStyles(): void {
     }
     .iwcp-fill-label {
       font-size: 9px;
-      color: #484965;
+      color: #41425b;
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
     .iwcp-fill-input {
       font-size: 11px;
       font-family: Georgia, serif;
-      border: 1px solid rgba(53, 40, 62, 0.25);
+      border: 1px solid rgba(48, 36, 56, 0.25);
       border-radius: 5px;
       padding: 3px 7px;
       background: #fff;
@@ -622,7 +622,7 @@ function injectStyles(): void {
       outline: none;
       width: 100%;
     }
-    .iwcp-fill-input:focus { border-color: #35283e; }
+    .iwcp-fill-input:focus { border-color: #302438; }
     .iwcp-fill-footer {
       display: flex;
       align-items: center;
@@ -634,7 +634,7 @@ function injectStyles(): void {
       display: inline-block;
       margin: 0;
       padding: 3px 9px;
-      background: #35283e;
+      background: #302438;
       color: #fff;
       border: none;
       border-radius: 5px;

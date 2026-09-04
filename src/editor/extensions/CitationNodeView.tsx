@@ -28,7 +28,7 @@ import { sourceUrlOf, openSourceAtPinpoint } from '../../citations/sourceLink'
 import type { CSLItem, InkwaveDocument } from '../../types/document'
 import type { CitationAttrs } from './CitationNode'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 // The page input lives inside the editor DOM, so native editing events must be stopped before they
 // bubble to ProseMirror (React handlers fire too late). Same fix as the bibliography notes field.
@@ -249,7 +249,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
           // splitting mid-label — which is what you usually want typographically anyway.
           whiteSpace: 'nowrap',
           // via a CSS var so night mode can recolour citations (light blue) without an inline override.
-          color: hasMissing ? 'var(--iw-danger, #b91c1c)' : 'var(--iw-cite-color, #35283e)',
+          color: hasMissing ? 'var(--iw-danger, #b91c1c)' : 'var(--iw-cite-color, #302438)',
           background: selected ? `${INK}18` : undefined,
           borderRadius: 3,
           // margin, not padding: margins are OUTSIDE the hit box, so a click immediately beside the
@@ -277,7 +277,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                       <span
                         id={citeAnchorId(s.key, s.occ)}
                         className="iw-cite-link"
-                        style={{ color: 'var(--iw-cite-color, #35283e)' }}
+                        style={{ color: 'var(--iw-cite-color, #302438)' }}
                         title={s.hasPdf ? 'Click: open the source where you left off · Click & hold: set page(s)' : 'Click: go to the reference · Click & hold: set page(s)'}
                         onPointerDown={e => {
                           e.stopPropagation()
@@ -328,7 +328,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                         <>
                           {`, pp. ${s.plainPages}, `}
                           {s.hasPdf ? (
-                            <span className="iw-cite-link" style={{ color: 'var(--iw-cite-color, #35283e)' }}
+                            <span className="iw-cite-link" style={{ color: 'var(--iw-cite-color, #302438)' }}
                               title="Click: open the source at the linked page · Click & hold: edit / delete the page reference"
                               onPointerDown={e => {
                                 e.stopPropagation()
@@ -354,7 +354,7 @@ export function CitationNodeView({ node, editor, selected, getPos, updateAttribu
                         s.hasPdf ? (
                           <>
                             {', '}
-                            <span className="iw-cite-link" style={{ color: 'var(--iw-cite-color, #35283e)' }}
+                            <span className="iw-cite-link" style={{ color: 'var(--iw-cite-color, #302438)' }}
                               title="Click: open the source here · Click & hold: edit / delete the page reference"
                               onPointerDown={e => {
                                 e.stopPropagation()

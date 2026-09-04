@@ -302,7 +302,7 @@ describe('THE READER PANEL’S OWN CHROME — Peter’s "the top bar’s fonts a
   })
 
   it('its day values are the app’s own — nothing about the day header moves', () => {
-    expect(token('--iw-reader-chrome-fg', 'day')).toBe('#35283e')
+    expect(token('--iw-reader-chrome-fg', 'day')).toBe('#302438')
     expect(token('--iw-reader-chrome-dim', 'day')).toBe('#d6d3d1')
   })
 

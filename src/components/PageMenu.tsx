@@ -14,7 +14,7 @@ import {
   getOrientation, setOrientation, type Orientation,
 } from '../editor/pageSettings'
 
-const INK = '#35283e'
+const INK = '#302438'
 const isPhone = isTouchDevice()
 
 // 96 CSS px = 1 inch = 2.54 cm (96 DPI reference)
@@ -165,7 +165,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
         onMouseDown={() => { parFocusRef.current = Boolean(editor?.isFocused) }}
         onClick={() => setOpen(o => !o)}
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif
-          ${open ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+          ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
         title="Page settings">
         <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">P</span>
       </button>
@@ -184,10 +184,10 @@ export function PageMenu({ editor }: { editor?: Editor }) {
               <div className="flex items-center gap-2">
                 {parFocus && editor ? (
                   <>
-                    <span className="text-[11px] italic" style={{ color: 'var(--iw-ink, #35283e)' }}>↳ paragraph</span>
+                    <span className="text-[11px] italic" style={{ color: 'var(--iw-ink, #302438)' }}>↳ paragraph</span>
                     <button type="button" onMouseDown={e => e.preventDefault()} onClick={applyToAll}
                       className="text-[11px] px-2 py-0.5 rounded-full transition-colors"
-                      style={{ background: 'transparent', color: 'var(--iw-ink, #35283e)', border: '1px solid var(--iw-nightable-border, #d1d5db)' }}>
+                      style={{ background: 'transparent', color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #d1d5db)' }}>
                       Apply to all
                     </button>
                   </>
@@ -329,9 +329,9 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
       onMouseDown={e => e.preventDefault()}
       className="px-3 py-0.5 rounded-full text-xs transition-colors whitespace-nowrap"
       style={{
-        background: active ? 'var(--iw-ink, #35283e)' : 'transparent',
+        background: active ? 'var(--iw-ink, #302438)' : 'transparent',
         color: active ? 'var(--iw-on-ink, #ffffff)' : 'var(--iw-pill-fg, #78716c)',
-        border: `1px solid ${active ? 'var(--iw-ink, #35283e)' : 'var(--iw-nightable-border, #d1d5db)'}`,
+        border: `1px solid ${active ? 'var(--iw-ink, #302438)' : 'var(--iw-nightable-border, #d1d5db)'}`,
       }}>
       {label}
     </button>
@@ -362,7 +362,7 @@ function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onC
 
   const inputStyle: React.CSSProperties = readOnly
     ? { color: 'var(--iw-pill-fg, #78716c)', cursor: 'default' }
-    : { color: 'var(--iw-ink, #35283e)' }
+    : { color: 'var(--iw-ink, #302438)' }
 
   return (
     <div className="flex items-center px-5 py-2 gap-3">
@@ -403,12 +403,12 @@ function MRow({ label, presets, conv, value, minCm, maxCm, readOnly = false, onC
           />
           <div className="flex flex-col shrink-0" style={{ width: 16, borderLeft: '1px solid var(--iw-nightable-border, #e7e5e4)' }}>
             <button type="button" onClick={inc} onMouseDown={e => e.preventDefault()} tabIndex={-1}
-              className={`flex items-center justify-center border-b border-stone-200 ${readOnly ? 'cursor-default text-stone-200' : 'hover:text-[#35283e] hover:bg-stone-50'}`}
+              className={`flex items-center justify-center border-b border-stone-200 ${readOnly ? 'cursor-default text-stone-200' : 'hover:text-[#302438] hover:bg-stone-50'}`}
               style={{ height: 13, fontSize: 7, color: readOnly ? undefined : 'var(--iw-pill-fg, #78716c)' }}>
               ▲
             </button>
             <button type="button" onClick={dec} onMouseDown={e => e.preventDefault()} tabIndex={-1}
-              className={`flex items-center justify-center ${readOnly ? 'cursor-default text-stone-200' : 'hover:text-[#35283e] hover:bg-stone-50'}`}
+              className={`flex items-center justify-center ${readOnly ? 'cursor-default text-stone-200' : 'hover:text-[#302438] hover:bg-stone-50'}`}
               style={{ height: 13, fontSize: 7, color: readOnly ? undefined : 'var(--iw-pill-fg, #78716c)' }}>
               ▼
             </button>

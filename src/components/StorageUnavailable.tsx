@@ -71,7 +71,7 @@ export function StorageUnavailable({
       <div style={{ maxWidth: 460 }}>
         {unavailable ? (
           <>
-            <h1 style={{ color: 'var(--iw-ink, #35283e)', fontSize: 20, fontWeight: 600, marginBottom: 10 }}>
+            <h1 style={{ color: 'var(--iw-ink, #302438)', fontSize: 20, fontWeight: 600, marginBottom: 10 }}>
               This looks like a private window — Inkwave can&rsquo;t save here
             </h1>
             <p style={{ color: 'var(--iw-pill-fg, #78716c)', fontSize: 14, lineHeight: 1.55, marginBottom: 10 }}>
@@ -86,7 +86,7 @@ export function StorageUnavailable({
           </>
         ) : (
           <>
-            <h1 style={{ color: 'var(--iw-ink, #35283e)', fontSize: 20, fontWeight: 600, marginBottom: 10 }}>
+            <h1 style={{ color: 'var(--iw-ink, #302438)', fontSize: 20, fontWeight: 600, marginBottom: 10 }}>
               Your writing is still here — this device just couldn&rsquo;t open it
             </h1>
             <p style={{ color: 'var(--iw-pill-fg, #78716c)', fontSize: 14, lineHeight: 1.55, marginBottom: 10 }}>
@@ -106,7 +106,7 @@ export function StorageUnavailable({
             className="rounded px-3.5 py-2"
             style={{
               color: 'var(--iw-newbtn-fg, #fff)',
-              background: 'var(--iw-ink, #35283e)',
+              background: 'var(--iw-ink, #302438)',
               fontSize: 13,
               fontWeight: 600,
             }}
@@ -120,7 +120,7 @@ export function StorageUnavailable({
               onClick={() => setStorageOpen(true)}
               className="rounded px-3.5 py-2"
               style={{
-                color: 'var(--iw-ink, #35283e)',
+                color: 'var(--iw-ink, #302438)',
                 border: '1px solid var(--iw-nightable-border, #e7e5e4)',
                 fontSize: 13,
                 fontWeight: 600,

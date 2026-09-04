@@ -14,7 +14,7 @@ import { isTouchDevice } from '../editor/isTouchDevice'
 import { cameraSupported } from '../media/camera'
 import { CameraCapturePopup } from './CameraCapturePopup'
 
-const INK = 'var(--iw-ink, #35283e)'
+const INK = 'var(--iw-ink, #302438)'
 
 // Peter's three, each its own tap. One "import" button opening a file picker for everything would
 // be fewer taps and worse: on iOS the picker's source (camera / photo library / files) follows the
@@ -141,7 +141,7 @@ export function MediaMenu({ assets, onImported }: {
         type="button"
         aria-pressed={open}
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${open ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
+        className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
         title="Import a photo, audio or video"
       >
         <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">❐</span>

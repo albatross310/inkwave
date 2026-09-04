@@ -14,7 +14,7 @@ import { getPaperSize, getOrientation, getTopMarginPx, MARGIN_BOTTOM } from '../
 import { pageBoxPx } from '../editor/pageModel'
 import { scaleFor, unscale } from '../editor/magnify'
 
-const INK = '#35283e'
+const INK = '#302438'
 const STYLE_ID = 'iw-citation-nav-styles'
 
 // ── Anchor ids ────────────────────────────────────────────────────────────────
@@ -33,14 +33,14 @@ export function ensureNavStyles(): void {
     /* user-select/touch-callout off: these are click-&-HOLD controls — without this, an iOS long-press
        starts text selection + the callout instead of the hold action (M1/M2 in the iOS audit). */
     .iw-cite-link { cursor: pointer; border-radius: 3px; text-decoration: none; transition: background-color 120ms ease; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-    .iw-cite-link:hover { background-color: rgba(53, 40, 62, 0.14); }
+    .iw-cite-link:hover { background-color: rgba(48, 36, 56, 0.14); }
     /* Destination flash: a DARK purple wash that decays roughly exponentially over ~1.6s to orient the
        reader after a jump. The keyframe stops approximate e^-t (big early drop, long tail). */
     .iw-cite-flash { animation: iw-cite-flash-kf 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) forwards; border-radius: 3px; }
     @keyframes iw-cite-flash-kf {
-      0%   { background-color: rgba(53, 40, 62, 0.42); color: #fff; box-shadow: 0 0 0 3px rgba(53, 40, 62, 0.42); }
-      25%  { background-color: rgba(53, 40, 62, 0.24); box-shadow: 0 0 0 3px rgba(53, 40, 62, 0.24); }
-      55%  { background-color: rgba(53, 40, 62, 0.10); box-shadow: 0 0 0 3px rgba(53, 40, 62, 0.10); }
+      0%   { background-color: rgba(48, 36, 56, 0.42); color: #fff; box-shadow: 0 0 0 3px rgba(48, 36, 56, 0.42); }
+      25%  { background-color: rgba(48, 36, 56, 0.24); box-shadow: 0 0 0 3px rgba(48, 36, 56, 0.24); }
+      55%  { background-color: rgba(48, 36, 56, 0.10); box-shadow: 0 0 0 3px rgba(48, 36, 56, 0.10); }
       100% { background-color: transparent; color: inherit; box-shadow: 0 0 0 3px transparent; }
     }
     .iw-backref-group { margin-left: 0.5em; font-size: 1em; color: var(--iw-doc-muted, ${INK}99); user-select: none; white-space: nowrap; }
@@ -51,7 +51,7 @@ export function ensureNavStyles(): void {
       border: 1px solid var(--iw-doc-muted, ${INK}44); border-radius: 4px; background: transparent; padding: 0 0.35em;
       user-select: none; transition: background-color 120ms ease, border-color 120ms ease;
     }
-    .iw-note-add:hover { background-color: rgba(53, 40, 62, 0.12); border-color: ${INK}88; }
+    .iw-note-add:hover { background-color: rgba(48, 36, 56, 0.12); border-color: ${INK}88; }
     .iw-esp { font-style: italic; color: var(--iw-doc-muted, #3a1e5e); font-size: 0.95em; }
     /* ⤵ bib button: a circle ~as tall as a capital letter, sitting on the text baseline (bottom fixed),
        roomy sides, outlined in --iw-doc-accent (the page's own accent, which IS light at night —
@@ -66,7 +66,7 @@ export function ensureNavStyles(): void {
       border: 1px solid var(--iw-doc-accent, #9a7dc0); border-radius: 50%; background: transparent;
       transition: background-color 120ms ease;
     }
-    .iw-cite-biblink:hover { background-color: rgba(53, 40, 62, 0.14); }
+    .iw-cite-biblink:hover { background-color: rgba(48, 36, 56, 0.14); }
     .iw-biblink-arrow { font-size: 0.66em; line-height: 1; display: block; margin-top: -0.08em; }
     /* First-few-words preview shown after each back-ref number, to jog the reader's memory. */
     .iw-backref-quote { font-style: italic; color: var(--iw-doc-muted, #3a1e5e); font-size: 0.86em; font-weight: 500; }
@@ -133,7 +133,7 @@ function showBackChip(): void {
     chip.setAttribute('style', [
       'position:fixed', 'left:50%', 'transform:translateX(-50%)', 'bottom:6.5rem', 'z-index:250',
       'font-family:system-ui,sans-serif', 'font-size:12px', 'padding:6px 12px', 'border-radius:9999px',
-      'border:1px solid rgba(53, 40, 62, 0.45)', 'background:#fff', 'color:#35283e', 'cursor:pointer',
+      'border:1px solid rgba(48, 36, 56, 0.45)', 'background:#fff', 'color:#302438', 'cursor:pointer',
       'box-shadow:0 3px 12px rgba(0,0,0,0.14)', 'opacity:0', 'transition:opacity 160ms ease',
     ].join(';'))
     chip.addEventListener('click', () => { goToLastPosition(); hideBackChip() })

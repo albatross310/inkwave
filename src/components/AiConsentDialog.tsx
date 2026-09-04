@@ -5,7 +5,7 @@
 import { createPortal } from 'react-dom'
 import type { AiFeature } from '../editor/aiSettings'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 const COPY: Record<AiFeature, { title: string; body: string }> = {
   summaries: {
@@ -58,7 +58,7 @@ export function AiConsentDialog({ feature, onYes, onNo }: {
           {/* Jazzed privacy pill, pushed to the right. */}
           <a href="/privacy" target="_blank" rel="noopener"
             className="ml-auto px-3.5 py-1.5 rounded-full text-sm font-medium shadow-sm transition-transform hover:scale-105"
-            style={{ color: '#fff', background: `linear-gradient(135deg, #484965, ${INK})`, textDecoration: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            style={{ color: '#fff', background: `linear-gradient(135deg, #41425b, ${INK})`, textDecoration: 'none', cursor: 'pointer', whiteSpace: 'nowrap' }}>
             Privacy ↗
           </a>
         </div>

@@ -159,7 +159,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       const w = c.synonyms[slot]
       if (w === DELETE_SENTINEL) return null
       return { top: centreTop + delta * rowH, left: left + slotLefts[slot], rowH,
-               text: displayFor(w, mobile), color: w === c.synonyms[0] ? '#484965' : '#40344a',
+               text: displayFor(w, mobile), color: w === c.synonyms[0] ? '#41425b' : '#40344a',
                fontFamily, fontSize: `${fsz}px` }
     }
     return [row(-1), row(1)].filter(Boolean) as Array<NonNullable<ReturnType<typeof row>>>
@@ -852,7 +852,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
           // Original word dark, secondary/candidate words the lighter purple — a committed
           // secondary word KEEPS this lighter colour (the page text matches it, see
           // .scas-secondary), so the colour never changes between reel, commit and page.
-          color: isOrig ? '#484965' : '#40344a',   // original = lighter; candidate synonyms = mid purple
+          color: isOrig ? '#41425b' : '#40344a',   // original = lighter; candidate synonyms = mid purple
           // On commit keep the chosen word opaque and fade the neighbours to 0 over the glide, so
           // they ease away in step with the reel settling rather than vanishing with the card.
           opacity: committing ? (ring === base ? 1 : 0) : opacity,

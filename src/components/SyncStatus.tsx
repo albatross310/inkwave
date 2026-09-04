@@ -7,7 +7,7 @@ import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
 // in every state — "Synced to folder", "OneDrive — not yet syncing", "OneDrive disconnected". When
 // not synced the pill is actionable (onClick connects / retries). Works for a local folder (Chromium)
 // or OneDrive (Firefox/Safari). Re-renders on a timer so the relative time stays fresh.
-const INK = '#35283e'
+const INK = '#302438'
 
 function relativeTime(t: number): string {
   const s = Math.max(0, Math.round((Date.now() - t) / 1000))
@@ -126,19 +126,19 @@ export function SyncStatus({
           })()}
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
             {webUrl && (
-              <a href={webUrl} target="_blank" rel="noreferrer" className="underline hover:text-[#35283e]" style={{ color: INK }}>
+              <a href={webUrl} target="_blank" rel="noreferrer" className="underline hover:text-[#302438]" style={{ color: INK }}>
                 Open in folder ↗
               </a>
             )}
             {onChangeFolder && (
-              <button type="button" onClick={onChangeFolder} className="underline hover:text-[#35283e]" style={{ color: INK }}>
+              <button type="button" onClick={onChangeFolder} className="underline hover:text-[#302438]" style={{ color: INK }}>
                 Change folder
               </button>
             )}
             {!synced && onClick && (
               <button type="button" onClick={onClick}
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-white font-medium shadow-sm hover:shadow transition-all"
-                style={{ background: 'linear-gradient(135deg, #484965, #35283e)' }}>
+                style={{ background: 'linear-gradient(135deg, #41425b, #302438)' }}>
                 ☁ Sync now
               </button>
             )}
@@ -179,7 +179,7 @@ export function SyncStatus({
             // same `--iw-pill-fg` token, so the pair stays matched through a night-mode switch instead
             // of one being a hard-coded amber. NB this drops the amber "needs attention" tint the
             // unsynced state used to carry — the ⚠ glyph in those labels is what signals it now.
-            color: 'var(--iw-pill-fg, #35283e)',
+            color: 'var(--iw-pill-fg, #302438)',
             // Purple outline (Peter, 2026-08-20) matching the footer toolbar pill and the snaps pill
             // on the opposite side — the same token, so night mode remaps all three together rather
             // than leaving this one a hard-coded day colour.

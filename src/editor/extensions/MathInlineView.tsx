@@ -8,7 +8,7 @@ import { parseDefinition, setSymbol, getSymbols, applyCustomSymbols } from './ma
 import { loadMathLive } from './mathLiveLoader'
 import { pendingMathEdit } from './mathActivation'
 
-const INK = '#35283e'
+const INK = '#302438'
 
 const MATHLIVE_MACROS: Record<string, string> = {
   '\\imaginaryI':    'i',
@@ -143,7 +143,7 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
         // left:-1px + translateY(-50% - 1px) zero out the constant residual offsets measured
         // between MathLive's .ML__base and KaTeX's glyph box (ML sits ~1px right / ~1px low).
         'position:absolute;top:50%;left:-1px;transform:translateY(calc(-50% - 1px));',
-        '--caret-color:#35283e;',
+        '--caret-color:#302438;',
         '--selection-background-color:rgba(72, 73, 101, 0.25);',
       ].join('')
 
