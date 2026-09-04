@@ -1035,3 +1035,132 @@ payload — contentJson, the receipts array, and the frozen bibliography can eac
 hundreds of snapshots × full content in React state was hundreds of MB resident (GC pauses). The
 full array lives ONCE in the snapshots.ts cache; consumers fetch it via `listSnapshots()` at
 action time (export, verify, diff). Derived via `toSnapshotMeta()` in provenance/snapshots.ts.
+
+---
+
+## `productivity/sessionLogic.ts` — boundaries and row arithmetic (§A2, §A4)
+
+Everything in the module is a pure function of its arguments (clock injected), so the boundary
+rules and the arithmetic are unit-testable without an editor, a DOM or a disk. The impure
+orchestration (timers, the edit stream, disk writes) lives in `capture.ts`.
+
+<a id="session-typing-shape"></a>
+### The typing-performance shape — why `words_start` is carried in, not counted
+
+The editor's per-keystroke path may do NO O(doc) work. So a session's `words_start` is NOT counted
+when the session opens — it is carried in from the previous close's baseline. That is exact, not an
+approximation: a session boundary IS an inactivity gap (or an explicit start/stop, or a doc switch),
+and the document cannot change while nobody is editing it. So the word count at the previous close
+is the word count at the next open, and a keystroke costs O(steps). See capture.ts for the baseline.
+
+<a id="session-active-cap"></a>
+### `ACTIVE_GAP_CAP_MS` — the one judgement call in the arithmetic
+
+`active_minutes` is "time actually editing (excludes idle within session)" (§A3.2), so it is the
+sum of gaps BETWEEN consecutive edits, each capped: a writer who types, thinks for 3 minutes
+(under the 5-minute boundary) and types again was not editing for those 3 minutes. The cap is the
+one judgement call in the arithmetic — it is deliberately a named constant so the number it
+produces is explainable ("we count up to 60s of thinking between two keystrokes as working
+time"), never a black box.
+
+<a id="session-open-edits"></a>
+### `openDraft(edits)` — 1 for a keystroke, 0 for the timer
+
+`edits` is how many edit events the OPENING itself represents: 1 when a keystroke opened the
+session (the ordinary case), and **0 when the TIMER did** — a Pomodoro block opens a session with
+no edit behind it (Peter: reading printed paper), and counting a phantom keystroke there would put
+a fictional `edit_events: 1` on a session in which nothing was typed.
+
+<a id="session-local-day"></a>
+### Local day / local hour (§A9) — the one time rule, and the mirror that was retired
+
+`isoWithOffset` emits the UTC instant AND the writer's local offset, e.g.
+`2026-07-17T09:14:03.000+10:00`. §A9 requires UTC + offset so aggregation can happen in the
+writer's LOCAL day; a bare `Z` string loses the offset and with it the local day. `offsetMin` is
+minutes to ADD to UTC to get local time (Brisbane = +600), i.e. the negation of
+`Date.prototype.getTimezoneOffset()`. Injected so tests are timezone-independent.
+
+Aggregates roll up by the WRITER'S local day, not by UTC day — a 9pm Brisbane session belongs to
+that evening, not to the next UTC date. The offset in the ISO string is the source of truth when
+present, so aggregation is a pure function of the ledger's own bytes and does NOT depend on the
+machine's TZ. (A test suite that silently passes only in Australia/Brisbane is the kind of check
+that can't see its own failure — the fixtures therefore carry explicit offsets.)
+
+MERGED 2026-07-17 (feat/prod-integrate): `feat/prod-graphs` shipped these same five functions in
+its placeholder `ledger.ts` mirror. That mirror is retired and its implementations live HERE, the
+module that already owned `localDayOf`/`localMonthOf` — one rule for one question. The graphs
+lane's version is the one kept: it is strictly stronger than this module's original
+`iso.slice(0, 10)`, which agreed with it on every offset-bearing ISO the ledger emits (the date
+part as written IS the local day) but answered garbage-in-garbage-out on unparseable input.
+
+<a id="session-ispost-hoc"></a>
+### `isPostHoc` / `splitByEntry` — the positive question, and the second implementation that lied
+
+THE ONE PLACE `entered` IS READ, and it asks the POSITIVE question deliberately: "did this row SAY
+post-hoc?". A row must CLAIM to be testimony to be treated as testimony. Legacy rows (written
+before the field existed) predate the manual add entirely, so they are timer rows as a matter of
+history — not because absence defaults to anything. Keeping that reasoning in one named function is
+what stops it being silently re-derived as `!row.entered` somewhere else.
+
+It lives in `sessionLogic.ts`, beside the builders, rather than in `aggregate.ts`, because the panel
+needs it too and must not drag the whole rollup layer in to ask a one-field question.
+`aggregate.ts` re-exports.
+
+`splitByEntry` is exported rather than kept private to the aggregates because ⚠ THE DROP-UP'S
+`daySummary` IS A REAL CALLER. It sums the day's minutes independently, it reduced over ALL rows,
+and it reported 45 remembered minutes to the writer as "focused minutes" while every unit test
+stayed green — the tests guard `aggregate.ts`, and the panel never calls it. Caught by driving the
+real UI. A guard on one implementation of a rule says nothing about the other.
+
+<a id="session-posthoc-row"></a>
+### `buildPostHocRow` — do not make him precise
+
+**DO NOT MAKE HIM PRECISE.** A form demanding start/end times won't get used on a Tuesday, and this
+whole feature dies if the ritual becomes data entry. So the input is a rough duration and a rough
+category, and we derive the span: it ENDS when he told us and reaches back by the duration he said.
+That span is not a measurement and does not pretend to be one — `entered: 'post-hoc'` flags the
+entire row as testimony, so every field on it, the span included, is read as his word rather than
+ours. It lands in the local day he is standing in, which is the day he means.
+
+Every MEASURED field is ZERO, deliberately, and that is not missing data — it is the true value.
+We did not see him type, so `words_added: 0` is exactly right: nothing was measured. The minutes
+live in `active_minutes` and are kept out of the measured bars by `entered`, never by being blank.
+
+`break_before_min` is 0: a break is a gap between two MEASURED sessions, and we have no idea what
+ran before something we never saw.
+
+`doc_id` is the literal `'post-hoc'`, not the open document: he is repairing the RECORD, and the
+work he forgot to time may not have been in Inkwave at all (a printed article, a library
+afternoon). Attributing it to whatever happened to be on screen when he remembered would be a guess
+wearing a measurement's clothes.
+
+<a id="session-recordable"></a>
+### `isRecordable` — a Pomodoro block counts with no edits at all
+
+ANY real edit counts — a thinking-heavy, low-output session is still work, and discarding it is
+exactly the judgement §A5 forbids.
+
+**AND A POMODORO BLOCK COUNTS WITH NO EDITS AT ALL** (Peter, 2026-07-17). This used to be
+`editEvents > 0`, which threw away the paper-reading case entirely: reading a printed article for
+25 minutes produces zero events, so the block was measured, closed, and then SILENTLY DROPPED on
+its way to the ledger. Starting the timer is the writer saying *count this*; a rule that requires
+a keystroke to believe them is the tracker calling a real day thin.
+
+<a id="session-reflection"></a>
+### `REFLECT_AFTER_ACTIVE_MS = 25 minutes` — every part of the number is a decision
+
+- NOT per Pomodoro block — a toll booth every 25 minutes of clock time kills the ritual it is
+  meant to be. This counts ACTIVE minutes, which accrue slower than the clock.
+- NOT at day's close — you cannot remember by then, and the chart only works as a recall prompt
+  while the stretch is still warm.
+- Once per stretch, never re-prompted, always skippable. A skipped reflection is not a failure
+  and nothing anywhere may treat it as one.
+
+The bar for all of it: would he fill this in on a bad Tuesday?
+
+Asking is OFFERING — `shouldOfferReflection` returns true at most once per stretch because
+accepting or skipping resets the accumulator (the caller marks the stretch), never because we track
+whether they complied. `unreflectedRows` is extracted so the drop-up (which SHOWS the prompt) and
+the session-close watcher (which OPENS the panel to it) read ONE rule — two copies of "what counts
+as unreflected" is exactly how the two would drift. A row is spoken-for when it ends at/before the
+newest reflection's `to`.
