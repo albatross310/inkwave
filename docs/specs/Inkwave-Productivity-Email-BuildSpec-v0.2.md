@@ -575,6 +575,10 @@ itself is the writing surface.
   remains full-width. It grows to its content height and must not manufacture an empty page-height
   tail after a short message. Its header, body,
   record/send controls, status, and concise provenance disclosure form one continuous box.
+- The selected ordinary-page width is a maximum, not a transform target. When the editor window is
+  narrower, the application surface and its content reflow while every font retains its chosen CSS
+  size. Viewport width must never invoke the document paper's fit-to-width transform or otherwise
+  shrink application typography. Only the writer's explicit editor/font zoom changes text size.
 - The isolated box is resizable. Dragging either side changes both sides by the same amount around a
   fixed horizontal centre, so the box never walks left or right as its width changes. Width is
   clamped to the available editor window. A bottom-centre handle sets an optional minimum height;
@@ -925,6 +929,8 @@ multi-target fault injection proves that one unreadable destination cannot damag
 - Pulling either side expands/contracts the opposite side equally and preserves the box's horizontal
   centre. Bottom resizing changes only its optional minimum height. Keyboard and reset paths work,
   and no resize operation changes the email's authored bytes or provenance.
+- Narrowing the editor window reflows the email without changing computed or visually rendered font
+  sizes; widening it restores available line width rather than changing type scale.
 - New email work defaults to isolated mode; switching to contextual studio mode preserves the same
   email identity, bytes, history, memberships, and send state.
 - Contextual studio mode keeps every message body inside its email box and allows clearly separate

@@ -1129,8 +1129,9 @@
 
   /* ── Reusable application surface ─────────────────────────────────────────
      A focused tool replaces the paper; it is not a panel sitting ON a document. Scroll keeps the
-     canonical page width, zoom and loading choreography, while this frame supplies the visible
-     object. Email is the first consumer; music/future tools reuse the same mode classes and slots. */
+     selected page width as a responsive maximum plus explicit font zoom/loading choreography,
+     while this frame supplies the visible object. Email is the first consumer; music/future tools
+     reuse the same mode classes and slots. */
   .scroll-paper.iw-application-paper {
     background: transparent !important;
     box-shadow: none !important;

@@ -4,6 +4,7 @@ import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getC
 import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
+import { presentedPaperWidth, usesTransformMagnify, type SurfacePresentation } from './surfacePresentation'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
 import { probePerf, notePerf } from './perflog'
@@ -207,9 +208,9 @@ export function Scroll({
   phone?: boolean // touch device: paper fills the screen, no background (see isTouchDevice())
   fill?: boolean  // the live editor: make the surface a fixed, full-region scroll container (desktop).
                   // Off for the snapshot view, where the surface must stay in-flow inside its split pane.
-  /** `application` keeps the canonical page box/zoom machinery but lets a reusable tool surface
-      replace the parchment itself. Email is the first consumer; future tools use the same seam. */
-  presentation?: 'document' | 'application'
+  /** `application` keeps the shared Scroll/loading/explicit editor-zoom machinery, but replaces
+      fixed transform-scaled paper with a responsive tool surface. Email is the first consumer. */
+  presentation?: SurfacePresentation
   revealed?: boolean
   /** The live editor while the OPAQUE loading shell still covers it: its water must not paint —
       the two wave copies are never pixel-identical mid-boot (the editor's fixed pseudos anchor to
@@ -266,11 +267,13 @@ export function Scroll({
     return () => window.removeEventListener('inkwave:page-settings-changed', onChanged)
   }, [])
 
-  // HYBRID ZOOM scope: only the desktop LIVE editor (fill) with a fixed-size paper gets the
-  // transform-magnify + fit-to-width cap. Phone has its own model (canonically-narrower render +
-  // pinch font zoom); SnapshotView's in-flow Scroll and 'scroll' paper (no mm width) stay plain.
+  // HYBRID ZOOM scope: only the desktop LIVE DOCUMENT (fill) with fixed-size paper gets the
+  // transform-magnify + fit-to-width cap. Application surfaces reflow inside a responsive capped
+  // width so narrowing the window never shrinks their type. Phone has its own model
+  // (canonically-narrower render + pinch font zoom); SnapshotView's in-flow Scroll and 'scroll'
+  // paper (no mm width) stay plain.
   // getPaperSize() is re-read on the page-settings rerender above, so switching paper flips this.
-  const hybrid = fill && !phone && getPaperSize() !== 'scroll'
+  const hybrid = usesTransformMagnify({ fill, phone, paperSize: getPaperSize(), presentation })
 
   // ── Magnify plumbing (hybrid only) ──────────────────────────────────────────────────────────
   // ONE subscriber applies the module's effective magnify to the DOM: the --iw-magnify var (the
@@ -1654,8 +1657,9 @@ export function Scroll({
             const ps = getPaperSize()
             if (ps === 'scroll') return undefined
             // The SAME physical mm the break model (pageModel) and the print @page size use —
-            // one source of truth, so screen wrapping = print wrapping.
-            return paperCssSize(ps, getOrientation()).width
+            // one source of truth for document paper. Applications cap at that width but reflow
+            // below it, keeping type at its chosen size instead of transform-shrinking it.
+            return presentedPaperWidth(presentation, paperCssSize(ps, getOrientation()).width)
           })(),
           // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card
           // rendered inside doesn't feed its pixels into the shadow — drop-shadow re-rasterises

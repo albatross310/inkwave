@@ -65,6 +65,11 @@ delta while CSS auto-margins keep its centre fixed, and the bottom adjusts only 
 height. Width/height preferences stay local presentation state, have keyboard/reset paths, and never
 enter the document or its provenance.
 
+Application presentation is excluded from the document paper's fit-to-window transform. Its outer
+paper is fluid up to the selected physical page width, so a narrower editor window causes ordinary
+text reflow while typography remains at the explicit editor/font zoom. Document presentation keeps
+the existing fixed-paper transform unchanged.
+
 ---
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT ON since 2026-07-18)
