@@ -390,3 +390,274 @@ The hash itself is FNV-1a over the serialized entries. Not cryptographic — thi
 regenerable cache, and a collision costs a stale-looking hit on byte-identical-but-for-a-collision
 data. Cheap and stable is what matters; the entries are sorted so Map iteration order can never
 move the signature.
+
+---
+
+## The snapshot pane, and the rules it shares with the editor
+
+<a id="static-pane"></a>
+### `staticPagination.ts` — canonical gapped pages for static content
+
+CANONICAL GAPPED PAGES FOR STATIC CONTENT — the snapshot view's document pane.
+
+The live editor's PaginationExtension measures line layout inside a forced canonical context
+and places gap widgets at page-break DOCUMENT POSITIONS. The snapshot doc pane renders STATIC
+HTML (FullDiffView / DocView — no ProseMirror), so this module re-implements the same pipeline
+against plain DOM:
+
+1. measure line rects in the SAME forced canonical context (canonicalMeasure: mm paper width,
+   desktop side margins, zoom 1, base font — plus the pane's own CSS-`zoom` wrapper forced
+   to 1), inside one synchronous no-paint window;
+2. compute breaks with the SAME page box (pageModel) and the SAME overflow rules as
+   PaginationExtension.compute() — INCLUDING its retirement of the widow/orphan snap. That
+   sentence used to say "orphan-snap rules" and this file still snapped after the editor
+   stopped, which is precisely how a claim of sameness outlives the sameness. It is now
+   MEASURED rather than asserted: halvesbisect.prove.mjs reads the model, the LIVE EDITOR's own
+   gap widgets and this pane from ONE document and requires all three to agree.
+3. insert the SAME gap elements (pageGap.ts) at the break points — recorded as text-node
+   CHARACTER OFFSETS, the static analog of a ProseMirror document position, so breaks ride
+   any live reflow (diff zoom, phone width, editor-zoom var) exactly like the editor's
+   widgets ride theirs.
+
+The sheet panels + aqua bands reuse the editor's CSS classes (.inkwave-gapped /
+.inkwave-sheets / .inkwave-sheet / .inkwave-page-gap-band), so day/night theming and the phone
+band styling apply unchanged. Ungapped mode inserts the zero-height break MARKERS instead; the
+pane's PageGuides (Scroll.tsx) pick them up off 'inkwave:pagination-measured' and draw the
+dashed rules — full parity with the editor's two page modes.
+
+Break specs are cached per (snapshot, page settings, font state) as {block, charOffset} — so
+scrubbing back through visited snapshots re-inserts gaps with NO canonical re-measure (zero
+forced hypothetical reflows; just the insertion itself).
+
+### The probe seam — the line list, not the breaks, and a callback rather than a buffer
+
+PROBE SEAM (the `window.__iwPerf` contract in perflog.ts, one step up): a harness assigns
+`window.__iwStaticLinesHook = (root, lines) => {…}` and this hands it the line list this pane
+ACTUALLY measured. A single property check otherwise, zero cost.
+
+WHY THE LINE LIST AND NOT THE BREAKS. The breaks are already in the DOM as `.inkwave-page-gap`
+widgets and any probe can walk them — that is what halvesbisect does. But a 3.000px error in
+this list only reaches those widgets when a boundary lands within 3px of the overflow cliff, so
+reading the gaps measures a coincidence rather than the rule. MEASURED: with the pre-fix rule
+restored, halvesbisect moves NOT ONE of 25 breaks on a lists fixture.
+
+WHY A CALLBACK AND NOT AN ARRAY. It is invoked HERE, still inside the FORCED CANONICAL WINDOW
+(paper width, side margins, zoom 1 — see the caller). These tops mean nothing in the pane's
+live layout, which wraps at a different width and may carry a fit-capped CSS zoom: comparing
+canonical tops against live rects is trap #8, "the verdict is unreadable off-canonical". A
+buffer would hand the probe numbers it could only read after the context was restored. A hook
+lets the probe's own comparison run in the coordinate system the numbers belong to — and keeps
+the probe's logic in the probe.
+
+<a id="container-rects"></a>
+### A container's element children are not lines — the same bug, found twice
+
+**MERGED ENTRY.** This story was told twice, ~33 lines each, in
+`extensions/PaginationExtension.ts` (the editor's copy) and `staticPagination.ts` (the pane's).
+It is one principle with two authorities, so it is one entry. Both files now carry a short rule
+pointing here.
+
+THE PRINCIPLE: a rect may only be admitted if it IS a line. `range.selectNodeContents(el)
+.getClientRects()` returns, per CSSOM-View, the border box of every element the range SELECTS whose
+parent it does not — i.e. the range container's own element children — and not only text-line
+rects. For a `<p>` that is harmless: its element children are inline mark spans whose per-line
+fragment boxes coincide with the text rects and are eaten by the 3px dedup. For a `<ul>` or a
+`<blockquote>` it is not — a `<li>` box is a CONTAINER of lines.
+
+**In the editor** (2026-07-17, the list break fix). MEASURED in the real editor
+(scripts/textrender-probe/rectdiag.mjs, canonical 18px, 3-item list):
+
+    raw rects 9 = 3 li boxes (h 58.219) + 6 text rects (h 23) — the li box at 725.188 and its own
+    first text rect at 728.188, exactly 3.000 apart, so `top - lastTop <= 3` DROPS THE ITEM'S
+    FIRST TEXT LINE and the li's box stands in for it.
+
+The count survives (6 kept for 6 lines), which is why every count-based check passed — but the
+SAMPLE POINT does not. collectLines samples `r.top + r.height/2`; for a text rect that is the
+line's own middle, for a 58px li box it is **the middle of the ITEM** — i.e. on line 2. So the
+break attributed to the item's FIRST line resolves, via posAtCoords, to the SECOND line's doc
+position. MEASURED: the model breaks at 25306 (the item's line 1, which genuinely overflows —
+used 951.9 + 29.1 > textArea 954.5) while the live editor's gap goes in at 25383, one line later,
+so the page carries 26.5px MORE than its own text area allows and the gap's declared botMargin
+(77.6) describes a page that ends 26.5px lower than it says.
+
+The mid-line audit could not see it: 25383 IS a line start — just the wrong one. And it only
+bites items of 2-ish lines: a 1-line item's box centre lands on its only line (right answer by
+luck) and a 3-line item's box is 87px > the 80px cut (dropped, right answer by the old filter).
+
+**In the pane** (2026-07-17, the pane's copy of the fix). MEASURED in the REAL /snapshot pane
+(scripts/textrender-probe/panerect.mjs, DocView's own DOM, 8-chapter fixture) against the DOM's own
+TEXT-NODE rects — a text node has no border box, so its rects are lines by construction and cannot
+contain a container's box:
+
+    529 shipped lines / 529 true lines — the COUNT TELESCOPES, which is why every count- and
+    height-based check in this file passed — and **24 of them sit exactly 3.000px too high**:
+    UL 8 · OL 8 · BLOCKQUOTE 8. The first `<ul>`'s raw rects, verbatim:
+      relTop 0     h 58.219   ← the `<li>`'s BORDER BOX (a 2-line item), admitted as a line
+      relTop 3     h 23       ← the item's OWN first text rect — DELETED by `top - lastTop <= 3`
+      relTop 32.109 h 23      ← the item's second line
+      relTop 62.718 h 87.328  ← a 3-line item's box: over the 80px cut, dropped — right by luck
+
+The 3.000px is the half-leading: (lineHeight 29.109 − text 23) / 2 = 3.05. It is not a list
+constant, which is why `<blockquote>`'s `<p>` box does the identical thing.
+
+THE 80px CUT WAS THE ONLY THING STANDING HERE, AND IT IS A COINCIDENCE, NOT A RULE. It admits a
+container box of ≤80px and drops one over it, so whether this pane paginates correctly depended
+on how many lines an item happened to wrap to: a 2-line `<li>` (58.219px) broke it, a 3-line one
+(87.328px) did not. The old comment on that line — "skip tall boxes (nested element border-boxes,
+not text lines)" — NAMED this exact class while the constant let the short half of it through.
+
+**TWO AUTHORITIES, ONE RULE.** PaginationExtension asks ProseMirror (`child.isTextblock`) what a
+textblock is. The pane HAS NO PM TREE — DocView and FullDiffView render plain DOM — so it asks the
+other authority that is actually present: the LAYOUT ENGINE, via `getComputedStyle().display`.
+Never a tag name and never a CSS class: either would silently miss the next container the schema
+grows, which is the whole reason this bug reached three copies. An element with no block-level
+element child IS a textblock and takes the byte-identical single `selectNodeContents` call it
+always did — which is what keeps every prose document's breaks bit-for-bit unchanged
+(breaks.prove.mjs: [2403,4856,7205,9476,…], identical).
+
+An EMPTY computed display means the element has no resolved box at all (an unrendered subtree —
+and jsdom, whose UA stylesheet sets no `display` on `<em>`/`<span>`/`<code>`). Treat it as inline:
+something with no box cannot be a container whose box is mistaken for a line, and the only
+alternative — descending into it — would fabricate structure the engine says is absent. This is
+also what lets the jsdom gate exercise the REAL predicate.
+
+An EMPTY textblock (a blank list item, a blank paragraph inside a blockquote) has no text rect but
+still occupies a line. Without the fallback it would vanish from the line list and every break
+below it would shift — a missing block is not a smaller block.
+
+The inline run case (text between block-level children, an anonymous block box) cannot arise in
+DocView, which wraps every block node in an element — but "it cannot arise today" is exactly the
+reasoning that let this rule rot in three copies, and an anonymous block box has no element to ask,
+so its lines would simply be LOST rather than mismeasured.
+
+Downstream, `keepLineRects` applies `isLineRect`/`sameLine` (lineRects.ts) — the SAME predicate in
+ONE place instead of two. The pane used to carry its own copy of `w < 1 || h < 1 || h > 80 * s ||
+top - lastTop <= 3`, its own `80` and its own `3`, under a comment claiming they were "the same
+80px filter as the editor" — and the container-box bug then had to be found and fixed twice, once
+per copy. `keepLineRects` is extracted verbatim from collectLines so a test exercises the REAL
+filter rather than a copy of it: a comparison where both sides run through the same stale copy
+cancels its own error. breaks.prove.mjs is the live control on that restatement.
+
+### The live known-negative — because this bug is invisible to a rate
+
+THE LIVE KNOWN-NEGATIVE (the `__iwOpenGuard` / `__iwTabDocRule` / `__iwReadGuard` contract).
+`window.__iwStaticLineRule = 'range'` restores the PRE-FIX rule verbatim — ONE
+`selectNodeContents` over the whole block, container boxes and all.
+
+IT EXISTS BECAUSE THIS BUG IS INVISIBLE TO A RATE. The artifact is a 3.000px error on a ~29px
+line grid, so it moves a page break only when a boundary happens to land within 3px of the
+overflow cliff. MEASURED: with the bug fully restored, `halvesbisect` on a 6k-word / 25-break
+lists fixture still prints "OFFSETS IDENTICAL" — not one break moves. A probe that waited for a
+break to move would therefore certify this bug as fixed while it sat there, which is exactly
+what the pre-existing `+ lists` row did for as long as it existed.
+
+So `panerect.mjs` measures the ARTIFACT instead — every line's top, against the DOM's own
+text-node rects — and this seam is what lets it prove, against the REAL production path and in
+ONE build, that it can still SEE the bug. A negative that cannot fire is not a negative.
+
+<a id="three-copies"></a>
+### The break rule exists in three copies — and the orphan snap drifted in two of them
+
+**MERGED ENTRY.** The same incident was written out three times: in `staticPagination.ts` (19
+lines), in `arithmeticLayout.ts`'s `paginate()` header (24 lines) and in
+`PaginationExtension.ts`'s `_computeBreaksForTest` seam (12 lines). One incident, one entry.
+
+THE ORPHAN SNAP IS GONE — because it is gone in the editor (2026-07-17).
+
+There are three copies of the break rule: `PaginationExtension.computeBreaks` (the original — the
+editor's own rule and the definition of canonical pagination), `arithmeticLayout.paginate`, and
+`staticPagination.computeBreakPicks`. When production retired the widow/orphan snap
+(`const snap = false`, PaginationExtension: "a straddling paragraph is broken at the overflow line
+wherever it falls"), `paginate()`'s default was corrected and THE PANE'S COPY WAS MISSED — while
+the comment above it claimed "identical policy (and 0.22 constant) to the editor" and that file's
+header claimed "the SAME overflow / orphan-snap rules as PaginationExtension.compute()". Both were
+false, and the claim is exactly why nobody looked.
+
+MEASURED (halvesbisect.prove.mjs, three corners from ONE document — the canvas model, the LIVE
+EDITOR's own gap widgets, and this pane): the pane was +2 pages on a 25-page document, on PLAIN
+PROSE — no lists, no citations, no refList. canvas === EDITOR on every shape, so the pane was the
+outlier. Snapping pushes a small orphan onto the next page, which the editor stopped doing, so
+/snapshot had shown page numbers the editor disagreed with since staticPagination was written
+(2026-07-10) — the minimap's and the diff panel's included.
+
+Canonical pagination's whole claim is "the same text on page N at every zoom, on phone, and in
+print". A pane that mirrors the editor may not carry a rule the editor retired.
+
+`blockIdx` is all the block tracking the pane's rule needs now: `blockStartUsed`/`blockFirstLine`
+existed ONLY to feed the orphan snap, and typecheck flagged them the moment it went — which is its
+own small confirmation that the snap was the only thing reading them.
+
+**In `arithmeticLayout.paginate`** the same drift was found + fixed 2026-07-16 by the textRender
+pixel diff. It snapped small orphans (≤22% of the text area) to the block start; a consumer taking
+the old default got DIFFERENT PAGES than the editor renders — measured on a 4k-word doc: first
+break at 2141 vs the live 2403, 17 pages vs 16. THE DEFAULT NOW MATCHES PRODUCTION
+(`snapOrphans = false`); anything wanting the retired rule must opt IN. Rationale for flipping
+rather than preserving the old default: that function's ONLY job is to model computeBreaks — a
+"compatible" default that models a deleted rule is not compatibility, it is a bug every caller
+inherits. Blast radius checked before flipping: NOTHING in production calls `paginate()`
+(PaginationExtension owns computeBreaks and imports only `makeCanvasMeasure` from there;
+arithMeasure doesn't import it) — the callers are this repo's prover and tests.
+
+WHY NO PROVER CAUGHT IT: the prover runs arith-sourced lines AND DOM-sourced lines through THE
+SAME function, so a stale rule cancels on both sides and byte-identity still passes. The splitter
+is a shared constant in that comparison, and a shared constant is invisible to it — the divergence
+only becomes observable against the LIVE editor's own gap widgets
+(scripts/textrender-probe/breaks.prove.mjs). Same shape as the `canvasShapingMatchesEditor`
+lesson: a check that cannot see a class of error reports success anyway.
+
+AND THE UNIT TESTS WERE STRUCTURALLY BLIND TO IT: arithmeticLayout.test.ts gives every line its own
+block with `blocks[i].start === lines[i].pos`, so snapping to the block start yields the IDENTICAL
+number and the assertions pass under both rules. A test can only see a rule it varies.
+
+THE TEST SEAMS (2026-07-18 — F19). `PaginationExtension._computeBreaksForTest` exports THE
+original: the editor's own break rule, and until then the ONE copy of three that no test could
+reach. The other two each mirror it, each was pinned against its OWN fixture, and each passed while
+the pane ran +2 pages for a week — because self-consistency is what the disease preserves. `sig`
+is already the shared vocabulary: `paginate` emits the same `at:round(botMargin)|…|pages:N` string
+"so a prover can compare" (its own header). The seam was designed and never used. Exporting it
+changes no behaviour — the function is untouched and the live path still calls it directly — and it
+costs nothing, because PaginationExtension imports cleanly under vitest's node env (PROBED, not
+assumed: the module was imported in-process and its exports enumerated; the browser dependency is
+in the VIEW, not the module).
+
+`staticPagination._computeBreakPicksForTest` is the same move for the pane: the function is PURE —
+lines in, picks out, no DOM — so the rule it carries can be pinned in the GATE in milliseconds
+instead of only by a hand-run browser probe. That distinction is not academic: the orphan snap
+survived here for a week after the editor retired it, with every suite green, because its only
+possible witness was a browser comparison nobody ran. A proof that ran once is not a guard.
+
+<a id="band-geometry"></a>
+### Band geometry — derive the content extent in ONE layout pass
+
+**MERGED ENTRY.** The same rule and the same measurement are written in both
+`staticPagination.ts` and `PaginationExtension.ts`'s `readBands`.
+
+SINGLE-PASS content height (round-4, Peter: "zoom is slow now"): the old read hid the panel layer
++ cleared minHeight to take `sheet.scrollHeight` — a SECOND forced full layout on every paint pass,
+cache miss and atomic exit. Same rule staticPagination already proved (2026-07-12 swipe round):
+derive the content extent from the IN-FLOW children's rects in the SAME layout pass as the band
+reads. In the pane that was roughly half of every band repaint's cost on a thesis-sized doc
+(probed 2026-07-11); content bottom = the editor root's rect bottom + the sheet's own bottom
+padding.
+
+⚠ Every ABSOLUTELY-positioned child must be skipped, not just the sheet layer: they are inset:0
+overlays (the panel layer AND `.iw-page-guides`) that STRETCH to the sheet's minHeight, so reading
+their bottom folds our own full-final-page minHeight straight back into `total` → a per-paint +padB
+RATCHET (last panel grows every zoom cycle; bug 2026-07-15). Only the real in-flow content (the
+.ProseMirror wrapper) may set the extent, so minHeight can never enter a rect read — the old
+ratchet fixpoints stay impossible by construction. The panels are absolutely positioned and
+minHeight never moves the ROOT, so this equals the old hidden-layer scrollHeight by construction:
+the "never retracts" fixpoint and the minHeight ratchet both only ever inflated scrollHeight, never
+the root's bottom.
+
+PHASE PROBES (zero cost unless a harness defines `window.__iwPerf`). They are what turned "zoom is
+slow" into a fix: `zoom-rbFirstRect` reads 0.0ms, which is the load-bearing fact — the layout is
+ALREADY clean there (Scroll.tsx forced it for its anchor read), so `zoom-rbBandLoop`'s cost is not
+layout but the per-gap display lock. See the `.inkwave-page-gap` content-visibility exemption in
+index.css.
+
+FULL FINAL PAGE (MS-Word style, Peter 2026-07-10): a barely-filled last page still paints as a
+whole sheet. Full height = the average of the previous ≤5 page regions in this SAME geometry —
+derived from the geometry alone, so step-cache hits reproduce it exactly, and it is correct under
+font zoom / phone reflow where the canonical pageH wouldn't match the live layout. Single-page docs
+fall back to the canonical pageH.
