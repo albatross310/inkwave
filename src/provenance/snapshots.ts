@@ -17,6 +17,14 @@ import { writeOpfsFile } from '../storage/opfsWrite'
 import { isNotFound } from '../storage/notFound'
 import { StorageReadError } from '../storage/opfs'
 
+/** Result of the one global explicit snapshot action, shared by document and application UIs. */
+export interface ManualSnapshotResult {
+  snapshot: Snapshot | null
+  /** Submitted to OTS (pending or confirmed), not necessarily Bitcoin-confirmed yet. */
+  stamped: boolean
+  reason?: string
+}
+
 async function getRoot(): Promise<FileSystemDirectoryHandle> {
   return navigator.storage.getDirectory()
 }

@@ -108,6 +108,14 @@ it never launders that local write into “synced”. When connected Gmail draft
 is reserved for Google's acknowledged revision. Its state is isolated in a small child component so
 the autosave beat does not re-render the full editor tree.
 
+**One snapshot system (2026-09-05).** “Snapshot this draft” and the global “save version” control now
+call the same editor-owned manual-snapshot operation. That one operation serialises against other
+snapshot writes, updates the global ◈ count/history immediately, stamps through OTS, mirrors active
+targets, and schedules the usual diff summary. The email panel no longer carries its own
+`recordedAt` state or alternate recorded-copy branch; it only reports the result of the global
+operation. Gmail send passes the exact frozen document used for its outgoing bytes through that
+same operation before transmission.
+
 ---
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT ON since 2026-07-18)
@@ -608,8 +616,9 @@ is kept in memory only. The browser constructs the UTF-8 RFC 5322 message and PO
 `users/me/messages/send`, so neither the token nor message content crosses an Inkwave server.
 
 The visible action deliberately orders its boundaries: Google authorization first (the popup needs
-the click gesture), then `finaliseEmail` creates the durable local snapshot, then Gmail receives the
-message. If the snapshot cannot be created, nothing is sent. The existing Gmail/Outlook/`mailto:`
+the click gesture), then the editor's one global manual-snapshot funnel creates the durable local
+snapshot, then Gmail receives the message. If the snapshot cannot be created, nothing is sent. The
+existing Gmail/Outlook/`mailto:`
 handoff stays available as fallback. Configuration is `VITE_GOOGLE_CLIENT_ID`; without it direct
 send is absent rather than a dead control. Google Cloud still needs the Gmail API, OAuth consent
 screen, authorized JavaScript origins, and production verification before public rollout.
@@ -738,7 +747,7 @@ whichever lands second should import from `types/document.ts` rather than keep t
 
 **Live probe:** `scripts/email.prove.mjs` (headless, own port, nothing on Peter's screen) drives the
 REAL built app: flag-off → no panel, `?email=1` → menu → panel, the copy, header PERSISTENCE across
-a reload, finalise → frozen canonical headers + emailHash, and asserts the digest the browser
+a reload, global snapshot → frozen canonical headers + emailHash, and asserts the digest the browser
 submits to `/api/ots` is the v:3 bundleHash and NOT the contentHash. 16/16. It caught two bugs the
 unit tests structurally could not: a header edit never called `scheduleSave` (autosave is driven by
 the editor's own update handler, which a header field never fires — headers lived in React state and

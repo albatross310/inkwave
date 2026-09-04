@@ -9,7 +9,7 @@ import type { InkwaveDocument } from '../types/document'
 
 const calls: string[] = []
 const authorise = vi.fn()
-const finalise = vi.fn()
+const snapshotDraft = vi.fn()
 const send = vi.fn()
 const draftFor = vi.fn()
 
@@ -20,10 +20,9 @@ vi.mock('../email/gmail', () => ({
   gmailSender: () => ({ send }),
 }))
 
-vi.mock('../email/finalise', () => ({
+vi.mock('../email/draft', () => ({
   draftFor: (...args: unknown[]) => draftFor(...args),
   canHandOff: () => true,
-  finaliseEmail: (...args: unknown[]) => finalise(...args),
 }))
 
 import { EmailComposePanel } from './EmailComposePanel'
@@ -50,7 +49,7 @@ beforeEach(() => {
   draftFor.mockReset().mockReturnValue({
     headers: { to: ['ada@example.com'], cc: [], bcc: [], subject: 'S' }, body: 'Body',
   })
-  finalise.mockReset().mockImplementation(async () => {
+  snapshotDraft.mockReset().mockImplementation(async () => {
     calls.push('record')
     return { snapshot: { id: 'snap-1', createdAt: '2026-08-31T00:01:00+10:00' }, stamped: true }
   })
@@ -65,7 +64,7 @@ afterEach(cleanup)
 describe('EmailComposePanel Gmail integration', () => {
   it('places the editable message inside the default isolated application surface', () => {
     render(
-      <EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}}>
+      <EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} onSnapshotDraft={snapshotDraft}>
         <div data-testid="message-editor">Editable body</div>
       </EmailComposePanel>,
     )
@@ -86,6 +85,7 @@ describe('EmailComposePanel Gmail integration', () => {
           doc={doc}
           getCurrentDoc={() => doc}
           onDocChange={() => {}}
+          onSnapshotDraft={snapshotDraft}
           surfaceMode={mode}
           onSurfaceModeChange={setMode}
         >
@@ -120,6 +120,7 @@ describe('EmailComposePanel Gmail integration', () => {
         doc={doc}
         getCurrentDoc={getCurrentDoc}
         onDocChange={() => {}}
+        onSnapshotDraft={snapshotDraft}
         onDuplicateAsNew={duplicate}
       />,
     )
@@ -129,22 +130,40 @@ describe('EmailComposePanel Gmail integration', () => {
     expect(getCurrentDoc).toHaveBeenCalledOnce()
   })
 
+  it('routes Snapshot this draft through the supplied global snapshot action', async () => {
+    render(
+      <EmailComposePanel
+        doc={doc}
+        getCurrentDoc={() => doc}
+        onDocChange={() => {}}
+        onSnapshotDraft={snapshotDraft}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Snapshot this draft' }))
+
+    await screen.findByText(/Snapshot created and submitted for Bitcoin timestamping/i)
+    expect(snapshotDraft).toHaveBeenCalledWith(doc)
+    expect(screen.queryByText(/^Recorded /)).toBeNull()
+  })
+
   it('authorises, records, and only then sends', async () => {
-    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} onSnapshotDraft={snapshotDraft} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     await screen.findByText(/Sent with Gmail/)
     expect(calls).toEqual(['authorise', 'record', 'send'])
-    expect(screen.getByText(/Recorded/)).toBeTruthy()
+    expect(snapshotDraft).toHaveBeenCalledWith(doc)
+    expect(screen.queryByText(/^Recorded /)).toBeNull()
   })
 
   it('does not send when the provenance record cannot be created', async () => {
-    finalise.mockImplementationOnce(async () => {
+    snapshotDraft.mockImplementationOnce(async () => {
       calls.push('record')
       return { snapshot: null, stamped: false, reason: 'storage unavailable' }
     })
 
-    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} onSnapshotDraft={snapshotDraft} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     await waitFor(() => expect(screen.getByText(/Nothing was sent/)).toBeTruthy())
@@ -158,12 +177,12 @@ describe('EmailComposePanel Gmail integration', () => {
       throw new Error('Google’s authorization window was closed. Your draft was not sent.')
     })
 
-    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} onSnapshotDraft={snapshotDraft} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     await screen.findByText(/authorization window was closed.*not sent/i)
     expect(calls).toEqual(['authorise'])
-    expect(finalise).not.toHaveBeenCalled()
+    expect(snapshotDraft).not.toHaveBeenCalled()
     expect(send).not.toHaveBeenCalled()
   })
 
@@ -175,13 +194,13 @@ describe('EmailComposePanel Gmail integration', () => {
     } as InkwaveDocument
     const getCurrentDoc = vi.fn(() => fresh)
 
-    render(<EmailComposePanel doc={doc} getCurrentDoc={getCurrentDoc} onDocChange={() => {}} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={getCurrentDoc} onDocChange={() => {}} onSnapshotDraft={snapshotDraft} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     await screen.findByText(/Sent with Gmail/)
     expect(getCurrentDoc).toHaveBeenCalledOnce()
     expect(draftFor).toHaveBeenCalledWith(fresh)
-    expect(finalise).toHaveBeenCalledWith(fresh)
+    expect(snapshotDraft).toHaveBeenCalledWith(fresh)
   })
 
   it('does not call a lost Gmail response a failure or invite a blind duplicate retry', async () => {
@@ -190,7 +209,7 @@ describe('EmailComposePanel Gmail integration', () => {
       return { kind: 'unknown', reason: 'Gmail did not return a final response' }
     })
 
-    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} onSnapshotDraft={snapshotDraft} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     const status = await screen.findByText(/send status is unknown/i)

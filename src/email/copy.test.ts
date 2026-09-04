@@ -97,18 +97,6 @@ describe('the copy makes the claims §B2.2 REQUIRES it to make', () => {
     expect(copy.PROVENANCE_LIMIT).toMatch(/came from/i)
   })
 
-  it('the recorded state still denies sending in the past tense', () => {
-    expect(copy.PROVENANCE_RECORDED).toMatch(/not that it was sent/i)
-  })
-
-  it('the recorded state does NOT claim a CONFIRMED Bitcoin anchor — it is pending for hours', () => {
-    // The OTS proof is 'pending' at this moment (unstamped → pending → confirmed). Saying "is
-    // anchored to Bitcoin" would be true only later. A provenance product that rounds "submitted"
-    // up to "anchored" has already started lying.
-    expect(copy.PROVENANCE_RECORDED).toMatch(/submitted|confirmation takes/i)
-    expect(/is anchored to Bitcoin/i.test(copy.PROVENANCE_RECORDED)).toBe(false)
-  })
-
   it('the storage claim says on-device + zero-retention, and disclaims E2E mail', () => {
     expect(copy.STORAGE_CLAIM).toMatch(/stored on your device/i)
     expect(copy.STORAGE_CLAIM).toMatch(/we never hold it/i)

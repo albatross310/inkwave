@@ -454,6 +454,10 @@ or the tone.
   future Gmail Draft revision Google has acknowledged. `EmailDraftSaveStatus` owns its own tiny
   event/timer state so autosave does not re-render the full editor tree. “Snapshot this draft” is the
   separate explicit provenance action; direct send snapshots automatically before transmission.
+- **Email owns no snapshot mechanism or snapshot state.** “Snapshot this draft”, global “save
+  version”, and Gmail's mandatory pre-send snapshot all use TiptapEditor's one
+  `createManualSnapshot` queue. It updates the ordinary ◈ history/counter, OTS state, mirrors and diff
+  summary. Do not restore an email `recordedAt` state or a second finalise/snapshot module.
 - **TYPING COST IS THE DESIGN.** Capture rides the existing `onTransaction` stream and reuses
   `countSteps`: ~0.30µs/keystroke, flat from 200 to 40k words. Every O(doc) number is computed at
   session CLOSE — a session boundary IS an inactivity gap, so the word count at the previous close

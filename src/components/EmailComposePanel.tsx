@@ -10,13 +10,14 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react'
 import type { InkwaveDocument, EmailHeaders } from '../types/document'
 import { parseAddressList, suspectAddresses, hasRecipient } from '../email/headers'
-import { finaliseEmail, draftFor, canHandOff } from '../email/finalise'
+import { draftFor, canHandOff } from '../email/draft'
 import { handoffSender, fits, type HandoffSenderId } from '../email/sender'
 import { authoriseGmailSend, gmailConfigured, gmailSender, preloadGmail } from '../email/gmail'
 import { titleForEmail } from '../email/newEmail'
 import * as copy from '../email/copy'
 import { ApplicationSurface, ApplicationSurfaceModeSwitch, type ApplicationSurfaceMode } from './ApplicationSurface'
 import { EmailDraftSaveStatus } from './EmailDraftSaveStatus'
+import type { ManualSnapshotResult } from '../provenance/snapshots'
 
 interface Props {
   doc: InkwaveDocument
@@ -27,6 +28,8 @@ interface Props {
   /** Presentation only. The same email subdoc/data path serves both modes. */
   surfaceMode?: ApplicationSurfaceMode
   onSurfaceModeChange?: (mode: ApplicationSurfaceMode) => void
+  /** The ordinary global manual-snapshot funnel; email owns no parallel history. */
+  onSnapshotDraft: (source: InkwaveDocument) => Promise<ManualSnapshotResult>
   /** Create a fresh email identity from the exact current editor state. */
   onDuplicateAsNew?: (source: InkwaveDocument) => Promise<void>
   children?: ReactNode
@@ -44,13 +47,13 @@ export function EmailComposePanel({
   onDocChange,
   surfaceMode = 'isolated',
   onSurfaceModeChange,
+  onSnapshotDraft,
   onDuplicateAsNew,
   children,
 }: Props) {
   const headers = doc.email
   const [showCc, setShowCc] = useState(() => !!(headers?.cc?.length || headers?.bcc?.length))
   const [status, setStatus] = useState<string | null>(null)
-  const [recordedAt, setRecordedAt] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<'record' | 'gmail' | 'duplicate' | null>(null)
   const [handoffOpen, setHandoffOpen] = useState(false)
   const handoffRef = useRef<HTMLDivElement>(null)
@@ -86,12 +89,13 @@ export function EmailComposePanel({
     setBusyAction('record')
     setStatus(null)
     try {
-      const r = await finaliseEmail(getCurrentDoc())
+      const r = await onSnapshotDraft(getCurrentDoc())
       if (!r.snapshot) {
-        setStatus(r.reason ?? 'could not snapshot this draft')
+        setStatus(r.reason ?? 'Could not snapshot this draft')
       } else {
-        setRecordedAt(r.snapshot.createdAt)
-        setStatus(r.stamped ? null : (r.reason ?? null))
+        setStatus(r.stamped
+          ? 'Snapshot created and submitted for Bitcoin timestamping.'
+          : (r.reason ?? 'Snapshot created locally; timestamping will retry later.'))
       }
     } finally {
       setBusyAction(null)
@@ -131,12 +135,11 @@ export function EmailComposePanel({
         return
       }
       setStatus('Recording before send…')
-      const record = await finaliseEmail(current)
+      const record = await onSnapshotDraft(current)
       if (!record.snapshot) {
         setStatus(`${record.reason ?? 'Could not record this draft'}. Nothing was sent.`)
         return
       }
-      setRecordedAt(record.snapshot.createdAt)
 
       setStatus('Sending with Gmail…')
       const outcome = await gmailSender(token).send(draft)
@@ -328,11 +331,6 @@ export function EmailComposePanel({
           )}
         </div>
 
-        {recordedAt && (
-          <span className="text-xs" style={{ color: 'var(--iw-verified, #15803d)' }}>
-            Recorded {new Date(recordedAt).toLocaleString()}
-          </span>
-        )}
         {status && (
           <span className="text-xs" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{status}</span>
         )}
@@ -355,7 +353,7 @@ export function EmailComposePanel({
             How recording and sending work
           </summary>
           <div className="mt-1.5 space-y-1">
-            <p>{recordedAt ? copy.PROVENANCE_RECORDED : copy.PROVENANCE_EXPLAINER}</p>
+            <p>{copy.PROVENANCE_EXPLAINER}</p>
             <p>{copy.PROVENANCE_LIMIT}</p>
             <p>{gmailConfigured() ? copy.GMAIL_SEND_EXPLAINER : copy.HANDOFF_EXPLAINER}</p>
             <p>{copy.STORAGE_CLAIM}</p>

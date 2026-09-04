@@ -29,7 +29,7 @@ export const PROVENANCE_BRIEF =
   'Recording proves this exact draft existed by this time — not that it was sent, delivered, or read.'
 
 /**
- * The primary explanation, shown before the user finalises. States the claim and its limit in the
+ * The primary explanation, shown before the user snapshots. States the claim and its limit in the
  * same breath — the limit is never a footnote or a tooltip, because a limit the reader has to go
  * looking for is a limit the product is hiding.
  */
@@ -47,20 +47,6 @@ export const PROVENANCE_LIMIT =
   'It does not prove that you sent the email, that it arrived, or who it came from. It proves you ' +
   'had written exactly this, by this time — which is what matters for showing priority, or that a ' +
   'commitment was made on a given date.'
-
-/**
- * Shown once the draft is recorded. TWO precisions, both load-bearing:
- *
- * 1. Tense. At this moment the OpenTimestamps proof is PENDING, not confirmed — Bitcoin takes hours
- *    (`OtsProofState`: unstamped → pending → confirmed, and the ◈ ReceiptPanel is where that status
- *    actually lives). "Is anchored to Bitcoin" would be true only later, so it is not said here. A
- *    provenance product that rounds "submitted" up to "anchored" has already started lying.
- * 2. Still not sending. Same boundary as everywhere else, in the past tense.
- */
-export const PROVENANCE_RECORDED =
-  'This draft is recorded, and its timestamp has been submitted to the Bitcoin blockchain — ' +
-  'confirmation takes a few hours, and the ◈ panel shows the status. It records that this content ' +
-  'existed by the time shown, not that it was sent.'
 
 /**
  * Shown at the handoff. The provenance is of the INKWAVE DRAFT; the user can edit in the provider's

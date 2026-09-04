@@ -78,7 +78,7 @@ beforeEach(async () => {
   verifyMod = await import('../verify/index')
 })
 
-describe('an email finalises through the EXISTING spine (probed, not assumed)', () => {
+describe('an email snapshots through the EXISTING global spine (probed, not assumed)', () => {
   it('the real createSnapshotIfChanged freezes the headers and hashes them', async () => {
     const doc = emailDoc()
     const snap = await snapshots.createSnapshotIfChanged(doc, 'manual', [], undefined, true)
@@ -132,7 +132,7 @@ describe('an email finalises through the EXISTING spine (probed, not assumed)', 
     expect(submitted[0]).not.toBe(snap!.contentHash)
   })
 
-  it('an offline finalise still RECORDS the draft (unstamped), never discards it', async () => {
+  it('an offline snapshot still RECORDS the draft (unstamped), never discards it', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
     const doc = emailDoc()
     const snap = await snapshots.createSnapshotIfChanged(doc, 'manual', [], undefined, true)

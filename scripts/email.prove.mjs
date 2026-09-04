@@ -122,16 +122,34 @@ if (hasPanel) {
   ok('headers PERSIST across a reload', toAfter === 'ada@example.com' && subAfter === 'Re: the proposal', `to="${toAfter}" subject="${subAfter}"`)
 }
 
-// ── 5. Finalise → the spine. Assert the SUBMITTED digest is the v:3 bundleHash ─
+// ── 5. Global snapshot → the spine. Assert the SUBMITTED digest is the v:3 bundleHash ─
 submitted.length = 0
 const recordBtn = page.getByRole('button', { name: /Snapshot this draft/i })
+const globalSnapPill = page.getByTitle('Provenance record (held by you)')
+const globalSnapCountBefore = Number((await globalSnapPill.textContent().catch(() => '') || '').match(/\d+/)?.[0] ?? 0)
 if (await recordBtn.count()) {
   await recordBtn.click()
-  await page.waitForTimeout(3000)
+  await page.waitForFunction(
+    ({ selector, before }) => {
+      const text = document.querySelector(selector)?.textContent || ''
+      const count = Number(text.match(/\d+/)?.[0] ?? 0)
+      return count > before
+    },
+    { selector: 'button[title="Provenance record (held by you)"]', before: globalSnapCountBefore },
+    { timeout: 10000 },
+  ).catch(() => {})
+  await page.getByText(/Snapshot created (and submitted|locally)/i).waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
 }
 
+const globalSnapCountAfter = Number((await globalSnapPill.textContent().catch(() => '') || '').match(/\d+/)?.[0] ?? 0)
+ok('Snapshot this draft increments the ordinary global snapshot history',
+  globalSnapCountAfter === globalSnapCountBefore + 1,
+  `${globalSnapCountBefore} → ${globalSnapCountAfter}`)
+
 const snap = await page.evaluate(async () => {
-  const id = localStorage.getItem('inkwave:activeDocumentId')
+  // Per-tab session identity is authoritative; activeDocumentId is only a recency hint and another
+  // tab may change it while this probe is open (storage/tabDoc.ts).
+  const id = sessionStorage.getItem('inkwave:tabDocumentId')
   const root = await navigator.storage.getDirectory()
   const docs = await root.getDirectoryHandle('documents')
   const dir = await docs.getDirectoryHandle(id)
@@ -149,7 +167,7 @@ const snap = await page.evaluate(async () => {
   return s && { email: s.email, emailHash: s.emailHash, bundleHash: s.bundleHash, contentHash: s.contentHash, ots: s.ots }
 }).catch((e) => ({ error: String(e) }))
 
-ok('finalise created a snapshot', !!snap && !snap.error, snap?.error || '')
+ok('the global snapshot action persisted its snapshot', !!snap && !snap.error, snap?.error || '')
 if (snap && !snap.error) {
   ok('the snapshot FROZE the canonicalised headers', snap.email?.to?.[0] === 'ada@example.com' && snap.email?.subject === 'Re: the proposal', JSON.stringify(snap.email))
   ok('the snapshot carries an emailHash', /^[0-9a-f]{64}$/.test(snap.emailHash || ''), snap.emailHash)
@@ -185,13 +203,13 @@ ok('"Open in provider" → a pre-filled Gmail compose URL',
   flat.slice(0, 150))
 
 // ── 7. Duplicate as new → preserve the message, replace the identity ─────────
-const originalId = await page.evaluate(() => localStorage.getItem('inkwave:activeDocumentId'))
+const originalId = await page.evaluate(() => sessionStorage.getItem('inkwave:tabDocumentId'))
 const duplicateBtn = page.getByRole('button', { name: 'Duplicate as new email' })
 ok('the duplicate-as-new action is available', (await duplicateBtn.count()) === 1)
 if (await duplicateBtn.count()) {
   await duplicateBtn.click()
   await page.waitForFunction(
-    (id) => localStorage.getItem('inkwave:activeDocumentId') !== id,
+    (id) => sessionStorage.getItem('inkwave:tabDocumentId') !== id,
     originalId,
     { timeout: 20000 },
   ).catch(() => {})
@@ -199,7 +217,7 @@ if (await duplicateBtn.count()) {
 }
 
 const duplicated = await page.evaluate(async (sourceId) => {
-  const copyId = localStorage.getItem('inkwave:activeDocumentId')
+  const copyId = sessionStorage.getItem('inkwave:tabDocumentId')
   const root = await navigator.storage.getDirectory()
   const docs = await root.getDirectoryHandle('documents')
   const read = async (id) => {

@@ -606,6 +606,10 @@ itself is the writing surface.
   sync ships, **“Last synced …”** means Google acknowledged that revision, not merely that local
   autosave ran. Saving and provider synchronisation are automatic; “Snapshot this draft” remains the
   separate intentional provenance action.
+- “Snapshot this draft” is the ordinary global manual-snapshot action applied to an email document,
+  not an email-specific record type. It must immediately appear in the same ◈ count, history,
+  snapshot view, OTS queue, export and sync mirrors as “save version”. The panel may report the
+  action's result, but it owns no parallel `recordedAt` state or second snapshot archive.
 - To, Cc, Bcc, Subject, body, send state, and recorded-at state remain part of the active email
   subdoc's document state; layout does not create a parallel email store.
 - Long emails continue vertically within their email surface using the existing page/scroll rules.

@@ -39,7 +39,7 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
+import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary, type ManualSnapshotResult } from '../provenance/snapshots'
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
@@ -1997,16 +1997,23 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return off
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Manual "save version" — always creates a snapshot regardless of whether content changed.
-  function saveVersion() {
-    enqueueSnapshotWork(async () => {
+  // ONE global manual-snapshot funnel. The ordinary "save version" control and an email's
+  // "Snapshot this draft" both come here, so the archive, live counter, OTS state, mirrors and diff
+  // summary can never drift into application-specific implementations. When `source` is supplied it
+  // is the exact frozen message also sent to Gmail; later typing stays live and is never overwritten.
+  function createManualSnapshot(source?: InkwaveDocument): Promise<ManualSnapshotResult> {
+    const action = snapQueueRef.current.then(async (): Promise<ManualSnapshotResult> => {
+      const snapshotDoc = source ?? ensureDocFresh()
+      if (snapshotDoc.id !== docRef.current.id) {
+        return { snapshot: null, stamped: false, reason: 'The active document changed before it could be snapshotted' }
+      }
       // Guarded for the same reason as the word-nudge path: a "Save version" that silently did
       // nothing is the worst possible answer at the moment the writer is deliberately marking work.
       const before = await snapshotsForAction('this version')
-      if (!before) return
+      if (!before) return { snapshot: null, stamped: false, reason: 'Snapshot history is temporarily unavailable' }
       const prevSnap = before[before.length - 1] ?? null
-      const snap = await createSnapshotIfChanged(docRef.current, 'manual', sessionRef.current?.receipts ?? [], undefined, true)
-      if (!snap) return
+      const snap = await createSnapshotIfChanged(snapshotDoc, 'manual', sessionRef.current?.receipts ?? [], undefined, true)
+      if (!snap) return { snapshot: null, stamped: false, reason: 'Provenance snapshots are unavailable on this browser' }
       setSnapshots((prev) => [...prev, toSnapshotMeta(snap)])
       const stamped = await stampSnapshot(snap.documentId, snap.id)
       if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? toSnapshotMeta(stamped) : s)))
@@ -2017,7 +2024,25 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         await patchSnapshotDiffSummary(snap.documentId, snap.id, ds)
         setSnapshots((prev) => prev.map((s) => s.id === snap.id ? { ...s, diffSummary: ds } : s))
       })
+      const final = stamped ?? snap
+      return {
+        snapshot: final,
+        stamped: final.ots.status === 'pending' || final.ots.status === 'confirmed',
+        reason: stamped ? undefined : 'Snapshot created locally; timestamping will retry later',
+      }
     })
+    snapQueueRef.current = action
+      .then(() => undefined)
+      .catch((error) => { console.warn('[inkwave] snapshot work failed:', error) })
+    return action.catch((error) => ({
+      snapshot: null,
+      stamped: false,
+      reason: error instanceof Error ? error.message : 'Could not create the snapshot',
+    }))
+  }
+
+  function saveVersion() {
+    void createManualSnapshot()
   }
 
   // Manual "check Bitcoin" — upgrade pending proofs toward confirmation (also runs on load).
@@ -2954,6 +2979,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 writeApplicationSurfaceMode('email', doc.id, mode)
                 setEmailSurfaceMode(mode)
               }}
+              onSnapshotDraft={createManualSnapshot}
               onDuplicateAsNew={onDuplicateEmail}
               onDocChange={(updated) => {
                 // ⚠ A header edit is a document edit and NOTHING else saves it — autosave is driven
