@@ -106,3 +106,27 @@ describe('isExplicitDocIntent — who gets the blocked screen', () => {
     expect(td.isExplicitDocIntent('none')).toBe(false)
   })
 })
+
+describe('blank Untitled collision bypass', () => {
+  const empty = { type: 'doc', content: [{ type: 'paragraph' }] }
+
+  it('recognises only the untouched ordinary-document default', async () => {
+    const td = await import('./tabDoc')
+    expect(td.isBlankUntitledDocument({ title: 'Untitled', contentJson: empty })).toBe(true)
+    expect(td.isBlankUntitledDocument({ title: ' untitled ', contentJson: empty })).toBe(true)
+  })
+
+  it('never bypasses the warning once Untitled contains writing', async () => {
+    const td = await import('./tabDoc')
+    expect(td.isBlankUntitledDocument({
+      title: 'Untitled',
+      contentJson: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep me' }] }] },
+    })).toBe(false)
+  })
+
+  it('does not classify named documents or email drafts as the disposable blank default', async () => {
+    const td = await import('./tabDoc')
+    expect(td.isBlankUntitledDocument({ title: 'My notes', contentJson: empty })).toBe(false)
+    expect(td.isBlankUntitledDocument({ title: 'Untitled email', contentJson: empty })).toBe(false)
+  })
+})

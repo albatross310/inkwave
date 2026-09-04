@@ -37,11 +37,37 @@ const textOf = (p) => p.evaluate((s) => document.querySelector(s)?.innerText.tri
 const type = async (p, t) => { await p.click(EDITOR); await p.keyboard.type(t); await p.waitForTimeout(1400) }
 
 try {
+  // Duplicating an untouched default document used to show the three-way collision warning. There
+  // is no writing to protect in that special case: the duplicate should silently become its own
+  // blank document, while the original blank keeps its own id and lock.
+  const blankA = await open()
+  const blankAId = await docOf(blankA)
+  const blankB = await ctx.newPage()
+  await blankB.goto(`${base}/?doc=${blankAId}`, { waitUntil: 'domcontentloaded' })
+  await waitEditor(blankB, 'duplicate of untouched Untitled')
+  const blankBId = await docOf(blankB)
+  check(blankBId !== blankAId, 'duplicating untouched Untitled opens a fresh blank without the warning', `A=${blankAId} B=${blankBId}`)
+  check((await textOf(blankB)) === '', 'the replacement document is blank')
+  await blankA.close(); await blankB.close()
+  await new Promise((r) => setTimeout(r, 800))
+
   // Tab A writes something.
   const A = await open()
   await type(A, 'ALPHA-DOCUMENT')
   const idA = await docOf(A)
   check(!!idA, 'tab A has a document', idA ?? '')
+
+  // Its title is still the default "Untitled", but it now contains writing. Title alone must
+  // never bypass the lock: a second explicit open gets the safety screen as before.
+  const guarded = await ctx.newPage()
+  await guarded.goto(`${base}/?doc=${idA}`, { waitUntil: 'domcontentloaded' })
+  const guardedResult = await Promise.race([
+    guarded.waitForFunction(() => /open in another window/i.test(document.body.innerText), null, { timeout: 60000 })
+      .then(() => 'blocked').catch(() => 'timeout'),
+    guarded.waitForSelector(EDITOR, { timeout: 60000 }).then(() => 'editor').catch(() => 'timeout'),
+  ])
+  check(guardedResult === 'blocked', 'written-but-Untitled still gets the collision warning', guardedResult)
+  await guarded.close()
 
   // ⚠ CLOSE TAB A FIRST. The first cut of this probe kept it open, and the one-live-tab LOCK then
   // prevented the collision by itself — so the pre-fix build passed every cell and the probe proved

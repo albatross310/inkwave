@@ -191,11 +191,16 @@ keep them out of the conversation by default so earlier chat remains readable.
     read rule above is load-bearing for this guard.
   - **Document identity is PER TAB** (`storage/tabDoc.ts`), carried in sessionStorage, never the URL
     — OneDrive sign-in returns to a bare `/` and any `?doc=` is gone. Precedence: `?doc=` ??
-    sessionStorage ?? last-doc hint (new tabs only); the URL is a reflection, never load-bearing.
+    sessionStorage ?? fresh blank; the URL is a reflection, never load-bearing.
   - **ONE LIVE TAB PER DOCUMENT**, via Web Locks, name from the ONE exported `DOC_LOCK_PREFIX` (the
     OpfsInspector badge queries it; a private copy of that string would put the badge silently to
     sleep). `claimDocLock` RETRIES past the reload unload-race, or a plain refresh intermittently
     hands the writer a blank page. No Web Locks ⇒ never block the writer.
+  - **A collided untouched `Untitled` is replaced, not warned.** A duplicated tab inherits the
+    source tab's explicit identity, but if that held document is still exactly the canonical empty
+    paragraph, `Edit.tsx` mints a different blank id silently. The original remains held and
+    untouched. Title alone never bypasses the guard: an `Untitled` containing writing still gets
+    the full switch/copy/take-over screen.
   - **An effect that takes a lock needs a cancellation token that also RELEASES it.** React's
     StrictMode double-invoke is a real second claimant: skipping the stale `setState` alone still
     leaks the lock.

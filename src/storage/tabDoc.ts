@@ -25,18 +25,19 @@
 // not trusting the URL: /snapshot's local-first nav rewrites it, and a flag read from the URL died
 // mid-session.)
 //
-// PRECEDENCE — url ?? session ?? last-doc hint:
+// PRECEDENCE — url ?? session ?? blank:
 //   1. `?doc=<id>`  an EXPLICIT request for a document (a link, a bookmark, a duplicated tab).
 //                   Absent means "no opinion" — NOT "no document" — which is exactly the state the
 //                   OAuth return lands in, so an absent param must never clear the tab's identity.
 //   2. sessionStorage  THIS TAB's own document. Survives reload AND the OAuth round-trip.
-//   3. localStorage    the last document touched by ANY tab — used ONLY to give a brand-new tab
-//                      something to open. Never consulted once this tab has an identity of its own.
+//   3. no identity     open a fresh blank. The origin-wide last-document value remains useful to
+//                      Storage/recent-document UI, but never decides what a new tab edits.
 
 import { flushPendingSave } from './opfs'
+import type { InkwaveDocument } from '../types/document'
 
 const TAB_KEY = 'inkwave:tabDocumentId' // sessionStorage — per tab, the source of truth
-const LAST_KEY = 'inkwave:activeDocumentId' // localStorage — a hint for NEW tabs only
+const LAST_KEY = 'inkwave:activeDocumentId' // localStorage — recency metadata, never a boot pointer
 const URL_PARAM = 'doc'
 
 export type DocIdSource = 'url' | 'tab' | 'last-hint' | 'none'
@@ -50,6 +51,25 @@ export type DocIdSource = 'url' | 'tab' | 'last-hint' | 'none'
  */
 export function isExplicitDocIntent(source: DocIdSource): boolean {
   return source === 'url' || source === 'tab'
+}
+
+/**
+ * A held document for which a collision screen adds no safety: the untouched ordinary-document
+ * default. A duplicate/new tab should get its own fresh id instead of asking the writer to switch,
+ * copy or steal an empty page.
+ *
+ * Title alone is deliberately insufficient. A writer can leave a real document named Untitled;
+ * once it contains anything, the one-live-writer protection applies exactly as before.
+ */
+export function isBlankUntitledDocument(
+  doc: Pick<InkwaveDocument, 'title' | 'contentJson'>,
+): boolean {
+  if (doc.title.trim().toLowerCase() !== 'untitled') return false
+  const content = doc.contentJson
+  const children = content?.content
+  if (content?.type !== 'doc' || !Array.isArray(children) || children.length !== 1) return false
+  const only = children[0]
+  return only?.type === 'paragraph' && (!Array.isArray(only.content) || only.content.length === 0)
 }
 
 /**

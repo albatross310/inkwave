@@ -28,7 +28,7 @@ import type { InkwaveDocument } from '../types/document'
 import { readDocument, saveDocument, emptyTiptapDoc, StorageReadError } from '../storage/opfs'
 import { listMeta, upsertMeta } from '../storage/indexeddb'
 import { withScasDefaults } from '../scas/defaults'
-import { resolveTabDocId, claimTabDoc, claimDocLock, releaseDocLock, switchTabToDocument, isExplicitDocIntent } from '../storage/tabDoc'
+import { resolveTabDocId, claimTabDoc, claimDocLock, releaseDocLock, switchTabToDocument, isExplicitDocIntent, isBlankUntitledDocument } from '../storage/tabDoc'
 import { installHolder, requestSwitch, takeOverHere } from '../storage/singleOpen'
 import { StorageUnavailable } from '../components/StorageUnavailable'
 import { DocumentOpenElsewhere, SurrenderedBanner } from '../components/DocumentOpenElsewhere'
@@ -208,6 +208,12 @@ export function Edit() {
 
     async function init() {
       try {
+        const openFresh = () => {
+          const fresh = newDocument()
+          claimTabDoc(fresh.id)
+          claimedId = null
+          setDoc(fresh)
+        }
         // 1. THIS TAB's own document — `?doc=`, else the per-tab sessionStorage identity, else
         //    (brand-new tab only) the last-doc hint. See storage/tabDoc.ts for why the per-tab
         //    identity is authoritative and the URL is not: OneDrive's sign-in redirect returns to a
@@ -236,6 +242,14 @@ export function Edit() {
               // nothing is written on the strength of it.
               const busy = await readDocument(storedId)
               if (cancelled) return
+              // A duplicated tab inherits the source tab's URL/session identity. If that identity
+              // names a brand-new untouched page, the lock is protecting no writing: silently give
+              // this tab its own blank id. The held blank remains untouched in the original tab.
+              // A written-but-still-named-Untitled document does NOT qualify (predicate is structural).
+              if (busy.kind === 'absent' || (busy.kind === 'found' && isBlankUntitledDocument(busy.doc))) {
+                openFresh()
+                return
+              }
               setBlocked({ id: storedId, title: busy.kind === 'found' ? busy.doc.title : 'This document' })
               return
             }
@@ -309,10 +323,7 @@ export function Edit() {
         //    that inference, drawn from a failure, is the whole 2026-07-15 bug. Fail loudly instead.
         if (sawReadFailure) throw new StorageReadError('documents', new Error('one or more documents could not be read'))
         if (cancelled) return
-        const fresh = newDocument()
-        claimTabDoc(fresh.id)
-        claimedId = null // committed
-        setDoc(fresh)
+        openFresh()
       } catch (err) {
         if (cancelled) return
         // A READ FAILED. We do NOT know that the writer has no work — we know the opposite is
