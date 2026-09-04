@@ -1,68 +1,28 @@
 // The in-product copy for the lesson layer — ONE source of truth, deliberately not inlined in JSX.
 //
-// WHY THIS FILE EXISTS, AND WHY IT MATTERS MORE HERE THAN ANYWHERE ELSE IN THE APP.
+// ⚠ THIS BOUNDARY PROTECTS A THIRD PARTY WHO IS NOT HOLDING THE DEVICE. Every other honesty rule in
+// Inkwave protects the writer from an overclaim about their own work; a teacher agreed to something
+// on the strength of a sentence we wrote. If it is not literally true, this has not merely
+// overclaimed — it has obtained consent that was not informed.
 //
-// Every other honesty boundary in Inkwave protects the writer from an overclaim about their own
-// work. This one protects A THIRD PARTY WHO IS NOT HOLDING THE DEVICE. A lesson note is someone
-// else's voice, distilled — a teacher who agreed to something on the strength of a sentence we
-// wrote. §A3's whole thesis is that "there is provably no keepable recording of them" is what
-// removes their self-consciousness. If that sentence is not literally true, the feature is not
-// merely overclaiming; it has obtained consent that was not informed.
+// FOUR THINGS THIS COPY MAY NOT SAY, all verified in the code rather than assumed:
+//  1. NOT that the teacher is transcribed on-device. This build does not transcribe them AT ALL,
+//     and the honest sentence is stronger than the spec's: there was never any audio.
+//  2. NOT "encrypted". opfs.ts writes plaintext JSON; there is no crypto library. A plan is not a
+//     property, and COPY TRACKS THE CODE.
+//  3. NOT "unrecoverable" / "securely erased". `end()` drops a JS reference — unreachable from the
+//     app, with no copy in any Inkwave store, which is exactly what may be said. The GC decides
+//     when the bytes are reused and we do not control the heap.
+//  4. NOT "we cannot read it". Zero-knowledge claims this build does not get to make.
 //
-// ─── WHAT WE PROBED, AND WHAT WE THEREFORE MAY NOT SAY (2026-07-17) ──────────────────────────
+// ⚠️ AND THE MICROPHONE CLAIM IS SCOPED TO THIS SCREEN, DELIBERATELY. "Inkwave does not record
+// audio" is APP-WIDE and §A5's practice recordings will make it FALSE. "Nothing on this screen can
+// reach a microphone" is what the teacher needs, what the firebreak guarantees, and it survives §A5
+// — a sentence that will expire is a sentence that will be forgotten and go on being read.
 //
-// The spec (§0, §A3, §C1) says the transcription is "on-device (Apple Speech / whisper.cpp small/
-// base; iPhone-12-capable) — audio processed locally, never uploaded". IN A PWA THAT IS NOT
-// ACHIEVABLE TODAY, and the details are in stt.ts. In short:
-//
-//   · Inkwave has no access to the Apple Speech framework. It is not a native app.
-//   · Safari's `webkitSpeechRecognition` sits on SFSpeechRecognizer and WebKit asks for on-device
-//     ONLY `if ([_recognizer supportsOnDeviceRecognition])`. Otherwise the audio goes to APPLE'S
-//     SERVERS, silently — and `processLocally`/`available()`, the API that could require or reveal
-//     it, is Chrome-only (Safari: not supported). The page cannot require it, query it, or observe
-//     it. On Peter's own iPhone 8 (A11) `supportsOnDeviceRecognition` is false — and §A3b hands
-//     THAT PHONE to the teacher.
-//   · whisper.cpp via WASM WOULD be provable (we would ship the weights; there is no request to
-//     make), but it is not built. See the report for its real price.
-//
-// SO THIS BUILD DOES NOT TRANSCRIBE THE TEACHER AT ALL, and none of the copy below says it does.
-// What it says instead is TRUE AND STRUCTURAL, and is a stronger sentence than the spec's: the
-// spec promises the audio is deleted when the lesson ends; the honest version is that there was
-// never any audio. THREE things make that true, and none of them is a promise in a comment:
-// `Permissions-Policy: microphone=()` (vercel.json — the mic is off at the HTTP header for the
-// whole origin), no capture API in this module's source, and nothing mic-capable REACHABLE from it.
-// See `micBoundary.ts`; `micBoundary.test.ts` asserts all three and fires if any moves.
-//
-// ⚠️ THE CLAIM IS SCOPED TO THIS SCREEN, DELIBERATELY — "Inkwave does not record audio" would be an
-// APP-WIDE claim, and §A5's bar-anchored practice recordings will make it FALSE (a student
-// recording themselves is consensual, theirs, and storable — a different feature keeping a
-// different promise). "Nothing on this screen can reach a microphone" is what the teacher actually
-// needs to know, it is what the firebreak actually guarantees, and it stays true after §A5 ships.
-// A sentence that will expire is a sentence that will be forgotten and go on being read.
-//
-// ─── THE OTHER THREE THINGS THIS COPY MAY NOT SAY ────────────────────────────────────────────
-//
-// 1. NOT "encrypted". VERIFIED IN THE CODE 2026-07-17, independently of the email lane which hit
-//    this same wall: `storage/opfs.ts` writes `JSON.stringify(data)` in PLAINTEXT, there is no
-//    `crypto.subtle.encrypt`/AES-GCM anywhere in src (only `.digest` for hashing), and package.json
-//    carries no crypto library. §0 and §1 of the music spec BOTH list "encryption at rest" as
-//    reused from the existing engine. IT IS NOT TRUE — it is design intent, and a plan is not a
-//    property. Copy tracks the CODE.
-// 2. NOT "unrecoverable" / "securely erased" / "wiped". `end()` drops a JavaScript reference. That
-//    makes the transcript unreachable from the app and leaves no copy in any Inkwave store — which
-//    is exactly what may be said. It is NOT a secure erase of physical memory; the engine's GC
-//    decides when those bytes are reused, and we do not control the heap. "Deleted forever" would
-//    be the same species of overclaim as "encrypted", in a place where a teacher is relying on it.
-// 3. NOT "we cannot read it" / "nobody can hear it". Zero-knowledge claims this build does not get
-//    to make (the email lane's rule, for the same reason).
-//
-// WHAT IS TRUE, and is what the strings below say: nothing here is sent anywhere (zero-retention is
-// real — there is no server to hold it); the live panel is gone when the lesson ends and Inkwave
-// keeps no copy; only the student's own notes stay with the piece.
-//
-// The temptation is always the better-sounding sentence. If a change here starts sounding stronger
-// than this comment, it is wrong. `copy.test.ts` asserts the forbidden claims are absent — but a
-// test cannot check a sentence it has never seen, so read the boundary before editing.
+// The temptation is always the better-sounding sentence. `copy.test.ts` asserts the forbidden claims
+// are absent, but a test cannot check a sentence it has never seen — read the boundary before
+// editing. → docs/archive/music-module-build.md#lessoncopy
 
 // ─── Consent (§A3: "Consent first") ──────────────────────────────────────────
 
@@ -70,12 +30,9 @@
 export const CONSENT_TITLE = 'Ask your teacher first'
 
 /**
- * The ask. §A3: "Recording a teacher is socially — and often legally — sensitive. The teacher must
- * know and agree."
- *
- * Note the second sentence does the work the spec expected the on-device claim to do — and does it
- * without claiming anything about a pipeline we cannot see, because there is no pipeline: the
- * reassurance is a fact about what this screen is, not a promise about where audio goes.
+ * The ask. §A3: "Recording a teacher is socially — and often legally — sensitive." Its second
+ * sentence does the work the spec expected the on-device claim to do, without claiming anything
+ * about a pipeline we cannot see: it is a fact about what this screen IS.
  */
 export const CONSENT_EXPLAINER =
   'Show your teacher this screen before you begin. Inkwave is not recording this lesson — nothing ' +
@@ -94,20 +51,17 @@ export const CONSENT_CONFIRM = 'My teacher knows and agrees'
 export const PANEL_TITLE = 'Lesson notes'
 
 /**
- * What the panel IS. §A3's model is a source panel the student distils from in real time; with no
- * transcript to distil, the panel is their own notes — which §A3 already says is the only thing
- * that survives ("The only thing that persists is the student's own curated notes").
+ * What the panel IS. §A3's model is a source panel the student distils from; with no transcript to
+ * distil, the panel is their own notes — which §A3 already says is the only thing that survives.
  */
 export const PANEL_EXPLAINER =
   'Write what your teacher tells you as the lesson happens, and pin each note to the bar it is ' +
   'about. Tap a bar number to attach the note to it.'
 
 /**
- * THE SESSION-SCOPED PROMISE, stated exactly.
- *
- * Every clause is literally true of the code: the working notes live in the session object (nothing
- * writes them to storage), `end()` drops the reference and Inkwave holds no copy, and `toRecord()`
- * emits only kept notes + the recap. What it does NOT say is "unrecoverable" — see the header.
+ * THE SESSION-SCOPED PROMISE, stated exactly. Every clause is literally true of the code: nothing
+ * writes the working notes to storage, `end()` drops the reference, `toRecord()` emits only kept
+ * notes + the recap. ⚠ It does NOT say "unrecoverable" — see the header.
  */
 export const SESSION_SCOPE_NOTE =
   'When you end the lesson, the working panel is cleared and Inkwave keeps no copy of it. The ' +
@@ -124,12 +78,9 @@ export const END_LESSON_CONFIRM =
 export const RECAP_TITLE = 'A note for your student'
 
 /**
- * §A3b's insight, and the sentence that carries it: "The recap flips the dynamic from 'being
- * recorded' to 'leaving a note for my student' — friendlier for the teacher and a cleaner consent
- * posture."
- *
- * The copy is addressed TO THE TEACHER, because at this moment they are holding the device. That is
- * the whole design of §A3b, and writing it in the third person would throw it away.
+ * §A3b flips the dynamic from "being recorded" to "leaving a note for my student".
+ * ⚠ ADDRESSED TO THE TEACHER, because at this moment they are holding the device — writing it in the
+ * third person throws away the whole design. → docs/archive/music-module-build.md#copy-voice
  */
 export const RECAP_EXPLAINER =
   'Your student has handed you their device. Leave them a short summary of today, and add anything ' +
@@ -137,19 +88,18 @@ export const RECAP_EXPLAINER =
   'the device over.'
 
 /**
- * THE DISTINCTION THAT IS THE WHOLE FEATURE, said to the person it protects. A recap is kept
- * BECAUSE the teacher chose to leave it — and the sentence says so, so the teacher knows which side
- * of the line they are on.
+ * THE DISTINCTION THAT IS THE WHOLE FEATURE, said to the person it protects: a recap is kept BECAUSE
+ * the teacher chose to leave it, and the sentence says so, so they know which side of the line they
+ * are on.
  */
 export const RECAP_STORABLE_NOTE =
   'This summary is saved with the piece, because you chose to leave it. You can delete it before ' +
   'you hand the device back.'
 
 /**
- * The dictation hint. NOTE WHAT IT DOES NOT DO: it does not offer Inkwave-run speech recognition,
- * and it does not claim anything about where the keyboard's dictation sends audio. The teacher's
- * keyboard is the teacher's own tool — their device shows its own indicator and their OS vendor
- * makes its own disclosure. Inkwave stays out of a claim it cannot keep.
+ * The dictation hint. ⚠ It offers no Inkwave-run speech recognition and claims nothing about where
+ * the keyboard's dictation sends audio: the teacher's keyboard is their own tool, and their OS makes
+ * its own disclosure. Inkwave stays out of a claim it cannot keep.
  */
 export const RECAP_DICTATE_HINT =
   'Type it, or use the mic key on your own keyboard if you would rather speak it.'
@@ -163,11 +113,10 @@ export const ASSIGNMENT_EXPLAINER =
 // ─── Storage ─────────────────────────────────────────────────────────────────
 
 /**
- * The storage claim. Says the true thing (zero-retention IS real — there is no server holding it)
- * and does NOT say the false one. §0/§1's "encryption at rest" is design intent for the WHOLE app;
- * when it ships, this sentence can grow the word, and not before. A module-local crypto scheme over
- * an app-wide gap would be worse than the gap: it would make the sentence true of one file and
- * imply it of all of them.
+ * The storage claim: the true thing (zero-retention IS real) without the false one. ⚠ When app-wide
+ * encryption ships this sentence can grow the word, and not before — a module-local crypto scheme
+ * over an app-wide gap would be worse than the gap, making the sentence true of one file and
+ * implying it of all of them. → docs/archive/music-module-build.md#copy-three-bans
  */
 export const STORAGE_CLAIM =
   'Your lesson notes are stored on your device, like any other Inkwave document — we never hold ' +
