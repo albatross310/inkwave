@@ -1,23 +1,14 @@
-// THE READER↔EXTENSION WIRE, DECLARED ONCE.
+// THE READER↔EXTENSION WIRE, DECLARED ONCE — so the source reader's fetch can happen in the
+// WRITER'S OWN BROWSER instead of a Vercel function.
 //
-// Peter, 2026-08-28: "is it possible for us to run the window from the user's IP?" — yes, and this
-// is the seam. The source reader's fetch can happen in the WRITER'S OWN BROWSER, through the
-// extension this repo already ships, instead of in a Vercel function. MEASURED reason it matters:
-// against the DEPLOYED endpoint duckduckgo / lite-ddg / mojeek answer "fetch failed", searx.be
-// answers "Verifying your browser…", priv.au a captcha, marginalia 5 blocks and zero links —
-// while wikipedia and plato.stanford.edu are served normally. Search engines serve people, not
-// data centres. The extension is a person's browser, so it is served.
+// ⚠ ONE CHANNEL, NOT A SECOND ONE. The bridge already exists (window.postMessage to
+// content-inkwave.ts, then runtime.sendMessage to the worker); `cite/visitSource` is the precedent
+// this follows verbatim. A parallel port is a second thing to keep in sync with the first.
 //
-// ⚠ ONE CHANNEL, NOT A SECOND ONE. The bridge already exists: the app talks to
-// extension-src/entrypoints/content-inkwave.ts with window.postMessage (citations/extensionChannel.ts
-// is the other end of it), and that content script talks to the background worker with
-// runtime.sendMessage. `cite/visitSource` → `inkwave:watchPanel` is the precedent this follows
-// verbatim. A parallel port would be a second thing to keep in sync with the first.
-//
-// ⚠ AND THE NAMES LIVE HERE, IN src/, BECAUSE THE EXTENSION IMPORTS FROM src/ AND NEVER THE
-// REVERSE (the `@inkwave/citations` alias in extension-src/wxt.config.ts). A copy of these strings
-// on the extension side is how a rename becomes a feature that silently stops answering — which,
-// on this channel, is indistinguishable from the extension not being installed.
+// ⚠ AND THE NAMES LIVE HERE, IN src/, BECAUSE THE EXTENSION IMPORTS FROM src/ AND NEVER THE REVERSE.
+// A copy of these strings on the extension side is how a rename becomes a feature that silently
+// stops answering — which, on this channel, is indistinguishable from "not installed".
+// → docs/archive/reader-panels.md#extensionprotocol
 
 /** Messages the extension's content script posts INTO the page. */
 export const EXT_SOURCE = 'inkwave-ext'
@@ -49,9 +40,9 @@ export type FetchPageResult =
   | { ok: true; finalUrl: string; html: string }
   | { ok: false; error: string }
 
-/** The one error the UI must ACT on rather than merely report: the extension is installed but has
- *  not been granted permission to fetch, which one click in its popup fixes. Everything else on
- *  this path is an ordinary failure and falls back to the server. */
+/** The one error the UI must ACT on rather than merely report: installed but not granted permission
+ *  to fetch, which one click in its popup fixes. Everything else here is an ordinary failure and
+ *  falls back to the server. */
 export const NEEDS_PERMISSION = 'needs-permission'
 
 /** Bytes past which the extension refuses to hand a page over. The server core caps at 4MB; this is
@@ -60,13 +51,11 @@ export const NEEDS_PERMISSION = 'needs-permission'
 export const EXT_MAX_BYTES = 2_000_000
 
 // ── SHAPE GUARDS ────────────────────────────────────────────────────────────────────────────────
-// The page listens on `window`, so anything in this origin could post one of these. That is the
-// same trust boundary citations/extensionChannel.ts already sits on, and it is not the interesting
-// one: a script running in this origin already holds the writer's thesis and their signing session.
-// What these guards are actually for is the ordinary case — a message from some other library that
-// happens to share a field name must never be read as an answer to OUR question, and an answer to
-// an EARLIER question must never satisfy a later one (hence the uuid, checked here and not by the
-// caller).
+// NOT a trust boundary — a script in this origin already holds the thesis and the signing session.
+// They are for the ordinary case: a message from another library that shares a field name must never
+// read as an answer to OUR question, and an answer to an EARLIER question must never satisfy a later
+// one (hence the uuid, checked here rather than by the caller).
+// → docs/archive/reader-panels.md#ep-shape-guards
 
 function isRecord(d: unknown): d is Record<string, unknown> {
   return !!d && typeof d === 'object'
@@ -85,12 +74,10 @@ export function isReaderFetched(d: unknown, uuid: string): d is FetchPageResult 
 
 /**
  * ⚠ THE GRANT CANNOT HAPPEN IN THE APP, AND NO AMOUNT OF UI HERE CHANGES THAT.
- * `permissions.request()` is honoured only from a user gesture inside an EXTENSION PAGE — not from
- * a web page, not from a content script (which has no `permissions` API at all), not from the
- * background worker. So the most the reader can do at the moment the permission would help is ask
- * the extension to open its own popup, where the real button lives. `ok:false` is an ordinary
- * answer — `action.openPopup()` is recent and may refuse — and the UI must therefore carry the
- * manual instruction whether or not this succeeds, rather than depending on it.
+ * `permissions.request()` is honoured only from a gesture inside an EXTENSION PAGE. So the most the
+ * reader can do is ask the extension to open its own popup — and `ok:false` is an ordinary answer,
+ * so the UI must carry the manual instruction rather than depending on this.
+ * → docs/archive/reader-panels.md#ep-grant
  */
 export function isReaderGranted(d: unknown, uuid: string): d is { ok: boolean } {
   return isRecord(d) && d.source === EXT_SOURCE && d.type === READER_GRANTED
@@ -98,29 +85,18 @@ export function isReaderGranted(d: unknown, uuid: string): d is { ok: boolean } 
 }
 
 // ── LIVE VIEW: LETTING A PAGE BE FRAMED AT ALL ──────────────────────────────────────────────────
-// Peter, 2026-08-30: "build the extension." Reader mode extracts an article's TEXT; live view shows
-// the page itself, and most of the web refuses to be framed — `X-Frame-Options` and CSP
-// `frame-ancestors` are enforced by the BROWSER, so no web app can opt out of another site's
-// refusal. An extension can, by removing those response headers before the browser reads them.
+// `X-Frame-Options` and `frame-ancestors` are enforced by the BROWSER, so no web app can opt out of
+// another site's refusal; an extension can, by removing them before the browser reads them.
 //
-// MEASURED (headed Chromium, with a canary rule proving the ruleset live and a control run proving
-// refusals detectable — docs/SEARCH-AND-THE-EXTENSION.md): google, youtube/watch, abc.net.au and
-// facebook all go REFUSED → framed. abc.net.au renders 14,921 chars of real page; youtube renders
-// its actual watch page. No framebusting script fired on any of them.
+// ⚠ AND THE HONEST HALF: `SameSite=Lax` (the default) and `Strict` are BOTH dropped in a third-party
+// frame, so a logged-in site frames and renders SIGNED OUT — the browser's own rule, not a header.
+// The UI must SAY this, because a signed-out page with no explanation reads as Inkwave being broken.
 //
-// ⚠ AND THE HONEST HALF, MEASURED IN THE SAME RUN: `SameSite=Lax` — which is what a cookie gets
-// when it does not say otherwise — and `Strict` are BOTH dropped in a third-party frame; only
-// `SameSite=None` survives. So a logged-in site frames and renders SIGNED OUT, and no header we
-// remove can change that: it is the browser's third-party context rule, not a header. Facebook
-// additionally refuses in the BODY, where there is nothing to strip. The UI must say this, because
-// a signed-out page with no explanation reads as Inkwave being broken.
-//
-// ⚠ WHY THIS IS SCOPED AND NOT A STANDING RULESET. Removing framing protection browser-wide would
-// make every site the writer visits clickjackable — a citation tool turning into a hazard on pages
-// it has nothing to do with. So the rule is (a) SESSION-scoped, added when the reader opens a live
-// page and removed when it closes, (b) restricted by `initiatorDomains` to Inkwave's own origins,
-// so it can only ever apply to a frame THIS APP created, and (c) restricted to `sub_frame`. A rule
-// that outlives the panel is the bug this shape exists to prevent.
+// ⚠ SCOPED, NEVER A STANDING RULESET — removing framing protection browser-wide makes every site the
+// writer visits clickjackable. The rule is SESSION-scoped, `initiatorDomains`-restricted to our own
+// origins so it can only apply to a frame THIS APP created, and `sub_frame` only. A rule that
+// outlives the panel is the bug this shape exists to prevent.
+// → docs/archive/reader-panels.md#ep-framing
 
 // page ↔ content script
 export const READER_FRAME = 'reader/frame'
@@ -134,32 +110,23 @@ export const BG_CLEAR_FRAME = 'inkwave:clearFrame'
 // The rule's own shape — and APP_INITIATORS — live in ./framingRule.ts, next to the scoping
 // argument they exist to enforce. This file stays the WIRE: names and shape guards only.
 
-/** ⚠ Answering `ok:true` means a rule was INSTALLED, never that the page will render. A site can
- *  still refuse in its body (facebook does), serve a CAPTCHA (google did), or render signed out
- *  (anything behind a login). Callers must not report success on the strength of this. */
+/** ⚠ `ok:true` means a rule was INSTALLED, never that the page will render — a site can still refuse
+ *  in its body, serve a CAPTCHA, or render signed out. Callers must not report success on this. */
 export function isReaderFramed(d: unknown, uuid: string): d is { ok: boolean; error?: string } {
   return isRecord(d) && d.source === EXT_SOURCE && d.type === READER_FRAMED
     && d.uuid === uuid && typeof d.ok === 'boolean'
 }
 
-// ── FETCHING A FILE, NOT A PAGE (2026-08-30) ────────────────────────────────────────────────────
-// Peter: "also can we have a downloads", said while browsing in the source panel. The reading that
-// serves the writing is "the PDF I am looking at becomes a source I can cite" — see
-// src/reader/pdfAddress.ts for why, and for the observability boundary that decides its shape.
+// ── FETCHING A FILE, NOT A PAGE ─────────────────────────────────────────────────────────────────
+// ⚠ A SECOND MESSAGE, NOT A FLAG ON `reader/fetch`. That exchange is DEFINED to return text
+// (`decodeHtml` throws `not html`), and widening it would make one message whose reply is sometimes
+// a string and sometimes bytes. The separate pair keeps a page fetch STRUCTURALLY INCAPABLE of
+// returning a binary blob.
 //
-// ⚠ WHY THIS IS A SECOND MESSAGE AND NOT A FLAG ON `reader/fetch`. That exchange is DEFINED to
-// return text: `decodeHtml` (fetchRules.ts) throws `not html` on anything else, deliberately — "the
-// reader has a separate answer for a PDF", as its own comment already said. Widening it would make
-// one message whose reply is sometimes a string and sometimes bytes, and every existing caller
-// would have to learn the difference. A separate pair keeps `FetchPageResult` exactly as narrow as
-// it is, and keeps a page fetch structurally incapable of returning a binary blob.
-//
-// ⚠ AND WHY THE BYTES ARE BASE64. `runtime.sendMessage` serialises as JSON — it is NOT structured
-// clone — so an ArrayBuffer cannot cross the content-script↔worker hop intact. base64 is the honest
-// cost of that boundary, and it is why PDF_MAX_BYTES exists at all. The page decodes it with
-// `base64ToBlob` (citations/pdfStore.ts), the same native data-URL decode every other binary path
-// here uses — never a hand-rolled atob loop, which was a 20M-iteration main-thread stall the last
-// time somebody wrote one.
+// ⚠ AND THE BYTES ARE BASE64 because `runtime.sendMessage` serialises as JSON, not structured clone.
+// Decode with `base64ToBlob` (citations/pdfStore.ts) — never a hand-rolled atob loop, which was a
+// 20M-iteration main-thread stall the last time somebody wrote one.
+// → docs/archive/reader-panels.md#ep-file-message
 
 // page ↔ content script
 export const READER_FILE = 'reader/file'
