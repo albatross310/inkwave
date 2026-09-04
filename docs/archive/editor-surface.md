@@ -692,3 +692,124 @@ reported "YES (real decode)" for a video holding NO DATA — Peter's 8:15am over
 `readyState 0 (NOT decoded)` next to `advancing YES (real decode)`, a physically impossible
 pair that cost real time to see through. Require decoded data AND a genuine delta against a
 previous sample; `last = -1` now means "no sample yet", which can never look like motion.
+
+---
+
+## `waveTwinkle.ts` — the precomputed pool and the scroll-time system
+
+<a id="twinkle-model"></a>
+### The model, in full
+
+v3 (Peter, 2026-07-11 — the strip-down): *"it's just sine waves, some stochastic glitters and
+wave marks from a precalculated data pool, and an S-curve slow down — all of which on a
+different workflow to whatever has to load so it doesn't get interrupted."*
+
+THE LOAD UNIT. Everything the loading animation will ever do is computed BEFORE playback:
+
+- A pool of instances — sparks (glitters) and dashes (wave marks) — with positions drawn
+  through the never-strike-twice sampler (memPick), canvas-rastered art (never SVG URIs —
+  Chromium's per-URI IsolatedSVGDocumentHost cost is measured ~4.3s at ~600 URIs), and a
+  per-instance SCHEDULE: a cycle of blink envelopes (dash: 0.3s S rise / 0.4s hold / 0.3s S
+  fall), each at a fresh lattice slot.
+- Playback = WAAPI animations started once (an opacity track + a transform track per
+  instance, both looping over the ~46.7s cycle) + the tiles' CSS drift. NOTHING runs per
+  frame on the main thread during the load — no rAF driver, no respawns, no style writes —
+  so main-thread starvation is PHYSICALLY INCAPABLE of touching the animation (that's the
+  "different workflow": the compositor thread).
+
+HOW AN INSTANCE RIDES ITS WAVE WITH ZERO MAINTENANCE. The tile pattern drifts at exactly
+72 px/s (140px per 1.944s loop). A blink instance's transform track bakes that motion in:
+during each lit envelope the track moves linearly at the drift velocity, holding the instance
+at a CONSTANT wave-space position (its art phase, wrap140 — so the mark always lies on its
+crest/midline); between envelopes (opacity 0) the track glides invisibly to the next slot.
+Slots are drawn on the instance's own 140px lattice (same phase ⇒ the SAME art stays exactly
+valid) through the shared band memory — a strike never lands where one recently sat, and the
+rotation only repeats after the full cycle (~47s ≫ any load). The track loops seamlessly:
+its duration is a multiple of the 1.944s tile loop and its value is periodic by construction.
+
+ONE CLOCK, SET ONCE. Wave-space validity needs the tracks' startTime ≡ the tile drift's
+startTime (mod 1944ms). alignTracks() reads the tile animation's literal startTime (at the
+atomic-water gate on boot; at anim re-entry on later loads — waiting on its `ready` promise
+when pending, which resolves before the first visible frame) and batch-sets every track, once
+per load, with a random whole-loop cycle offset so each load plays a different window of the
+pool. No epoch globals, no per-frame re-anchoring, no resync.
+
+THE S-CURVE SLOW DOWN (SETTLE → rest). The tiles' coast is an additive brake (see Scroll.tsx);
+the twinkle FIELDS get the SAME injected brake keyframes via CSS the moment .iw-wave-coast
+lands — zero value + zero velocity at start, so every layer decelerates in lockstep with the
+water, continuous by construction. Over the coast the blinking layer FADES OUT and the static
+rest layer FADES IN (both pure CSS, the coast's S-curve): the twinkling calms exactly as the
+water slows, ending on the resting texture. Statics ride a WAAPI drift clocked to the tiles
+(created once, at coast start — they are invisible before it) so they decelerate on their
+crests too. At rest everything is handed to the scroll-time system in one commit.
+
+THE SCROLL-TIME SYSTEM (post-reveal, unchanged in spirit): static texture between scrolls;
+scroll velocity drives dash blink playbackRate (driven WAAPI); relocations are raster-free
+140px-lattice moves through the same never-twice memory (2026-07-11 scroll-jank round: the
+full-art respawn re-rastered PNGs on the scroll path — deleted); sway = literal field
+transforms via swayFields() (the --wave-x inheritance firebreak — see index.css).
+
+During the LOAD the fields carry no inline transform at all: the coast brake is a pure CSS
+animation (`.iw-wave-coast .iw-twk-field` — the same injected keyframes the tiles composite), so
+every twinkle layer decelerates in exact lockstep with the water, main-thread-free. At REST
+the fields take literal sway transforms (`swayFields` — never `var(--wave-x)`: a var-consuming
+field put the whole instance subtree inside the sway's invalidation set; see the firebreak).
+
+<a id="twinkle-later-host"></a>
+### The covered editor's copy is built in idle slices
+
+A LATER host (the covered editor under the shell): its copy is invisible until the
+reveal, so its ~330 track animations (~250ms measured) move OFF the boot's critical
+path — created in CHUNKED idle slices (each ~35 elements ≈ 25ms), so the editor boot's
+fonts/pagination work interleaves and the reveal never waits on a long task. Complete
+long before the uncover on any healthy load; clock-exact either way (startTracks stamps
+trackT0 at creation).
+
+<a id="twinkle-rest-drift"></a>
+### The static rest layer's coast ramp
+
+The static rest layer fades in over the coast and must decelerate ON its crests. Each rest
+wrapper gets a NON-wrapping WAAPI drift ramp anchored to its enclosing field's CSS brake:
+the brake's `ready` resolves at the coast's first painted frame with its literal startTime
+t0c — the SAME clock Scroll's resolve stamps — and the ramp starts at the drift's wrapped
+pose at t0c, exactly the tx0 the brake keyframes were snapped against. Standing pose at the
+hold = tx0 − d = the handed-off --wave-x, so the rest commit swaps in identical pixels BY
+CONSTRUCTION. (A looping 140px ramp would visibly teleport the lit statics at every wrap;
+an anchor at settle-time had a wrap ambiguity against the resolve — both real.) Statics are
+near-invisible for the ramp's ≤1-frame pending window (their fade-in starts at 0).
+
+Pending until the forward anchor plays it (~1 rAF + slack) — `ready` + a poll fallback;
+whichever lands first wins (start() is idempotent). Statics are near-invisible that
+early in their fade, and the anchor stays EXACT (t0c is the literal startTime,
+however late we read it).
+
+<a id="twinkle-clock-gate"></a>
+### Never create-then-re-clock on visible water
+
+Batch re-clock of anims created BEFORE the clock resolved. Only the pre-gate boot mounts
+ever get here with existing tracks (they are display-hidden until the same recalc that
+starts the drift, so the batch is invisible); on VISIBLE water, track creation is gated on
+`clockReady()` — a late batch re-clock of live marks was a MASS TELEPORT of the whole
+field (Peter's live *"backward tick just before the slowdown"*, 2026-07-12: +24-62px phase
+steps on the screencast, ~40ms before reveal-imminent — the batch landed as the editor
+mount drained, right before the settle gate fired).
+
+Surviving rest elements (and zoom-reseeded ones) get THIS load's tracks only once the new
+load's clock exists — creating them on a provisional clock and re-timing later teleported
+every visible mark at once (the live backward tick). The wrappers fade out (taking the old
+rest texture with them, gently), the tracks land aligned, then the layer eases back in.
+
+Entry fade for mark tracks created on VISIBLE water: hold the layer at 0, create, then fade
+in over the CSS transition — deferred creation must never pop the whole layer in one frame.
+ON THE FIELD, not the blink wrapper: the coast's paused fade ANIMATION overrides any wrapper
+inline opacity the moment the coast class lands (first keyframe = 1 — measured re-pop); the
+field only ever animates TRANSFORM, so its inline opacity survives every phase.
+
+<a id="twinkle-rest-commit"></a>
+### The rest commit
+
+ONE commit, same flush as the surface's wave classes dropping: cancel the load playback
+(blinkers fall to var(--twk-static) — invisible: their layer just faded to 0 through the
+coast), stop the rest layer's drift (its enclosing field's brake vanishes with the class in
+this same recalc; total pose = the tiles' handed-off --wave-x, identical by construction),
+and put the fields on literal sway transforms at that exact value.
