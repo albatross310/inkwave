@@ -1,19 +1,18 @@
 // ─── Annotation-space reflow: the CV (build-spec §A1 — the distinctive feature) ───
 //
-// "Detect the whitespace gaps *between systems* (row-darkness / projection profile — easy CV, no
-// note recognition), slice the image at those gaps, and insert blank space so the student has room
-// to write. Keep grand staves (piano treble+bass) together; never split a system."
+// Detect the whitespace gaps BETWEEN systems, slice there, insert blank space to write in — and
+// never split a system.
 //
 // ⚠️ THE HARD NON-GOAL: **NO OMR. NOTHING HERE RECOGNISES A NOTE.** (§0, repeatedly.) Every signal
-// below is barline/whitespace GEOMETRY: how much ink is in a row, how long a horizontal run is, how
-// long a vertical run is. There is no glyph classification, no template matching, no pitch, no
-// duration — and none may be added. If a future change needs to know WHAT a mark is rather than
-// WHERE ink sits, it is out of scope and belongs in a conversation with Peter, not in this file.
+// below is GEOMETRY — ink per row, longest horizontal run, longest vertical run. No glyph
+// classification, no template matching, no pitch, no duration, and none may be added. A change that
+// needs to know WHAT a mark is rather than WHERE ink sits is out of scope and belongs in a
+// conversation with Peter.
 //
-// PURE BY DESIGN: this module takes a plain buffer and returns plain data — no DOM, no canvas, no
-// ImageData. That is what lets the whole detector be tested in node against synthetic fixtures with
-// KNOWN GROUND TRUTH (`fixtures.ts`), including the ones where it is *supposed* to be hard. The
-// browser adapter (`capture.ts`) is the only place that touches a canvas.
+// PURE BY DESIGN — a plain buffer in, plain data out — which is what lets the whole detector be
+// tested in node against fixtures with KNOWN GROUND TRUTH, including the ones that are meant to be
+// hard. `capture.ts` is the only place that touches a canvas.
+// → docs/archive/music-module-build.md#reflow
 
 // ─── Image types ─────────────────────────────────────────────────────────────
 
@@ -33,10 +32,9 @@ export interface BinaryImage {
 
 // ─── Binarisation ────────────────────────────────────────────────────────────
 //
-// LOCAL, not global (Bradley–Roth: compare each pixel to the mean of its own neighbourhood via an
-// integral image). A photographed page — which is the whole point of §A1 — has a lighting gradient
-// and often a shadow from the phone itself; a single global threshold turns the dark corner into
-// solid ink and loses the staves there entirely. Local thresholding is O(n) and immune to that.
+// ⚠ LOCAL, not global (Bradley–Roth), because a photographed page has a lighting gradient and often
+// the phone's own shadow: one global threshold turns the dark corner into solid ink and loses the
+// staves there entirely. → docs/archive/music-module-build.md#reflow-binarise
 
 export interface BinariseOptions {
   /** Neighbourhood side length in px. Default: ~1/24 of the short edge, min 15, forced odd. */
@@ -95,10 +93,9 @@ export function rowDarkness(bin: BinaryImage): Float64Array {
 /**
  * Per row, the LONGEST horizontal ink run, as a fraction of the width.
  *
- * This is the signal that separates a STAFF LINE from everything else, and it is why row-darkness
- * alone is not enough: a row crossing a dense chord or a line of lyrics can carry as much total ink
- * as a stave line, but it carries it in short broken pieces. A stave line is one long unbroken run.
- * Still pure geometry — it does not know or care what the ink depicts.
+ * ⚠ THIS, not row-darkness, is what finds a staff line: a row crossing a dense chord or a line of
+ * lyrics carries as much total ink, but in short broken pieces. A stave line is one long unbroken
+ * run. Still pure geometry. → docs/archive/music-module-build.md#reflow-longest-run
  */
 export function rowLongestRun(bin: BinaryImage, tolerance = 2): Float64Array {
   const { width: w, height: h, ink } = bin
@@ -118,14 +115,10 @@ export function rowLongestRun(bin: BinaryImage, tolerance = 2): Float64Array {
 
 // ─── Deskew (§A1 "messy/skewed photos") ──────────────────────────────────────
 //
-// A photographed page is never square to the camera. Skew smears every staff line across many rows,
-// which flattens the projection profile until the peaks that ARE the staves stop being peaks — so
-// deskew is not cosmetic, it is what makes the rest of the pipeline work at all on real input.
-//
-// MODEL: a small rotation ≈ a vertical shear (y' = y + (x − cx)·tanθ). Exact enough below ~8°, and
-// it makes the search a cheap profile computation rather than a resample per candidate angle.
-// SCORE: variance of the row profile. Aligned staff lines concentrate ink into few rows ⇒ high
-// variance; skewed ones spread it ⇒ low. Classic, and it needs no notion of what a note is.
+// Not cosmetic: skew smears every staff line across many rows until the peaks that ARE the staves
+// stop being peaks, so this is what makes the rest of the pipeline work on real input. A small
+// rotation ≈ a vertical shear (exact enough below ~8°), scored by the row profile's variance.
+// → docs/archive/music-module-build.md#reflow-deskew
 
 export interface SkewOptions {
   /** Search ±this many degrees. Default 6. */
@@ -195,21 +188,12 @@ export function dilateVertical(bin: BinaryImage, r = 1): BinaryImage {
 /**
  * Resample `bin` to remove `deg` of skew (vertical shear about the horizontal centre).
  *
- * ⚠️ THE `repair` STEP IS NOT OPTIONAL POLISH — WITHOUT IT DESKEW MAKES THINGS WORSE, SILENTLY.
- * MEASURED (the skewedPhoto fixture, 2.4°): the skew estimate came back EXACT (2.40 vs a truth of
- * 2.4) and detection still found **0 staves**, because a binary shear rounds each column's shift to
- * a whole row — so a staff line lands on row N for ~24 columns, then N+1 for the next ~24, and no
- * single ROW carries a long run any more. Longest run collapsed to 0.15 of the width, under any
- * usable threshold. The 1px vertical dilation stitches the wobble back into one line: 0 staves → 4,
- * at exactly the fixture's truth positions.
- *
- * This is why the repair lives HERE and not in `detectStaves`: the wobble is an artefact this
- * function's own quantisation introduces, so this function cleans it up. Detection then sees one
- * kind of image whether or not the page was skewed — rather than two rules for one pipeline, which
- * is the shape of CLAUDE.md's round-11 bug.
- *
- * The cost is a staff line thickened by ±1px, which `detectStaves` already absorbs (it merges
- * vertically-adjacent candidate rows into one line at the run-weighted centre).
+ * ⚠️ THE `repair` STEP IS NOT OPTIONAL POLISH — WITHOUT IT DESKEW MAKES THINGS WORSE, SILENTLY. A
+ * binary shear quantises each column to a whole row, so an EXACT skew estimate still detected 0
+ * staves (measured); the 1px vertical dilation stitches the wobble back into one line and gives 4.
+ * It lives HERE, not in `detectStaves`, because the wobble is this function's own artefact — two
+ * rules for one pipeline is the round-11 bug.
+ * → docs/archive/music-module-build.md#reflow-deskew
  */
 export function deskew(bin: BinaryImage, deg: number, opts: { repair?: boolean } = {}): BinaryImage {
   const { width: w, height: h, ink } = bin
@@ -309,20 +293,12 @@ function median(a: number[]): number {
 
 // ─── The connector test — how a grand stave is kept together ─────────────────
 //
-// THIS IS THE LOAD-BEARING IDEA, and gap size alone is not a substitute for it.
-//
-// The obvious heuristic — "a small gap means one system, a big gap means a break" — fails exactly
-// where it matters. Engravers tighten system spacing to fit a page, and on a cramped piano score the
-// treble→bass gap and the system→system gap can be nearly the same size. A heuristic that only ranks
-// gaps by size will then cut a grand stave in half: it splits the pianist's left hand from the right
-// and inserts writing space between them. That is the one outcome §A1 forbids ("never split a
-// system"), and `reflow.test.ts` has a fixture built to make it happen.
-//
-// The robust signal is STRUCTURAL and still pure geometry: staves inside one system are JOINED — by
-// barlines running through the gap, and by the brace/bracket at the left edge. Between systems,
-// nothing crosses. So: look in the gap for a column carrying a long vertical ink run. That is a
-// barline test — explicitly the "easy CV" §A1 sanctions — and it reads the same on a cramped page as
-// on a spacious one, because it measures the engraver's INTENT rather than their spacing budget.
+// ⚠ THIS IS THE LOAD-BEARING IDEA, AND GAP SIZE ALONE IS NOT A SUBSTITUTE. Engravers cramp system
+// spacing to fit a page, so ranking gaps by size cuts a grand stave in half — the pianist's hands
+// separated by writing space, the one outcome §A1 forbids. The robust signal is STRUCTURAL and still
+// pure geometry: staves inside one system are JOINED by barlines crossing the gap, and between
+// systems nothing crosses. It measures the engraver's INTENT rather than their spacing budget.
+// → docs/archive/music-module-build.md#reflow-connector
 
 export interface ConnectorOptions {
   /** A column counts as a connector if ink covers ≥ this fraction of the gap's height. Default 0.8. */
@@ -336,12 +312,10 @@ export interface ConnectorOptions {
 /**
  * Does anything connect the two staves across `[y0, y1]`?
  *
- * NOTE ON THE LEFT MARGIN: a brace/bracket also spans the gap, at the very left edge — and it is a
- * *curve*, so it drifts across columns rather than filling one. It is a real connector and a real
- * signal, but a fragile one to measure, so the barlines (which are dead vertical and appear at every
- * bar) do the work and the left `braceMargin` is excluded to keep the brace from being counted as a
- * half-height smear. If a system somehow has no interior barline in the band, the gap-size vote in
- * `groupStavesIntoSystems` is the fallback.
+ * The left `braceMargin` is EXCLUDED: a brace spans the gap too, but it is a curve that drifts
+ * across columns rather than filling one, and counting it reads as a half-height smear. The
+ * barlines — dead vertical, at every bar — do the work.
+ * → docs/archive/music-module-build.md#reflow-connector
  */
 export function hasVerticalConnector(
   bin: BinaryImage, y0: number, y1: number, opts: ConnectorOptions = {},
@@ -387,21 +361,16 @@ export interface GroupOptions extends ConnectorOptions, BarlineOptions {
   /**
    * Use the vertical-connector test. Default TRUE.
    *
-   * Exposed ONLY so the test suite can run the detector WITHOUT it and prove that the grand-stave
-   * fixture then splits — i.e. that the fixture is genuinely hard and the connector test is what
-   * carries it. A negative that cannot fail is not a negative. Do not turn this off in the app.
+   * ⚠ Exposed ONLY so the suite can run WITHOUT it and watch the grand-stave fixture split — a
+   * negative that cannot fail is not a negative. NEVER turn this off in the app.
    */
   connectorTest?: boolean
 }
 
 /**
- * Group detected staves into systems (§A1's atomic unit).
- *
- * TWO VOTES, and the connector wins when they disagree:
- *  1. CONNECTOR (structural): ink crosses the gap ⇒ same system. Right even on cramped spacing.
- *  2. GAP SIZE (statistical): the gap is small relative to the page's gaps ⇒ probably same system.
- *     Only decides when there is nothing crossing — a real system break, or an engraving with no
- *     barline in the band.
+ * Group detected staves into systems (§A1's atomic unit). TWO VOTES, and ⚠ the CONNECTOR wins when
+ * they disagree — the gap-size vote only decides when nothing crosses.
+ * → docs/archive/music-module-build.md#reflow-connector
  */
 export function groupStavesIntoSystems(
   bin: BinaryImage, staves: DetectedStave[], opts: GroupOptions = {},
@@ -412,10 +381,9 @@ export function groupStavesIntoSystems(
   const gaps: number[] = []
   for (let i = 1; i < staves.length; i++) gaps.push(staves[i].top - staves[i - 1].bottom)
 
-  // The gap-size vote's cut-point. Not a magic constant: split the observed gaps at the widest
-  // jump between consecutive SORTED gaps (a 1-D 2-means by inspection). On a page whose gaps are
-  // all alike — one system, or uniform spacing — there is no meaningful jump, so the cut sits above
-  // everything and the vote abstains rather than inventing a boundary.
+  // The gap-size vote's cut-point — not a magic constant, but the widest jump between consecutive
+  // SORTED gaps. ⚠ On a page whose gaps are all alike there is no jump, so the vote ABSTAINS rather
+  // than inventing a boundary.
   const cut = gapCutPoint(gaps)
 
   const groups: DetectedStave[][] = [[staves[0]]]
@@ -432,9 +400,8 @@ export function groupStavesIntoSystems(
       groups.push([staves[i]])
       breakConf.push(confidenceFor(gap, gaps, connected))
     } else {
-      // Nothing crosses, and the gap is on the small side. Without a connector there is no positive
-      // evidence of a join, so treat it as a break but say so quietly — this is exactly the case the
-      // manual adjust handles exist for.
+      // Nothing crosses and the gap is small: no positive evidence of a join, so treat it as a break
+      // but say so QUIETLY — exactly the case the manual adjust handles exist for.
       groups.push([staves[i]])
       breakConf.push(0.35)
     }
@@ -446,9 +413,9 @@ export function groupStavesIntoSystems(
     bottom: g[g.length - 1].bottom,
     isGrandStave: g.length > 1,
     confidence: i < breakConf.length ? breakConf[i] : 1,
-    // MULTI-STAVE ONLY unless explicitly overridden — see detectBarlines' banner. A single stave
-    // cannot separate a barline from a note stem by geometry, and a hallucinated bar mis-anchors
-    // everything pinned to it. Empty means "the student taps them" (§A4's MVP), not "no bars".
+    // ⚠ MULTI-STAVE ONLY unless explicitly overridden — a single stave cannot separate a barline
+    // from a note stem by geometry, and a hallucinated bar mis-anchors everything pinned to it.
+    // Empty means "the student taps them" (§A4's MVP), NOT "no bars".
     barlines: (g.length > 1 || opts.singleStave)
       ? detectBarlines(bin, g[0].top, g[g.length - 1].bottom, opts)
       : [],
@@ -477,45 +444,21 @@ function confidenceFor(gap: number, gaps: number[], connected: boolean): number 
 
 // ─── Barline detection (§A2's optional bar pre-detection) ────────────────────
 //
-// §A2 sanctions this explicitly and bounds it precisely: "CV may *optionally* pre-detect bar regions
-// (barline/staff detection — the easy CV, no note recognition) to make selection easier, but the
-// colours/heat are always the user's call."
-//
-// STILL NO OMR. This asks one question per column: does ink run the FULL height of the system here?
-// That is the same vertical-run measurement `countVerticalConnectors` already makes — it does not
-// know or care what any mark depicts.
+// STILL NO OMR: one question per column — does ink run the FULL height of the system here? The same
+// vertical-run measurement `countVerticalConnectors` makes.
 //
 // ⚠️⚠️ THIS RUNS ON MULTI-STAVE SYSTEMS ONLY, AND THE REFUSAL IS THE DESIGN. READ BEFORE "FIXING".
+// A note stem on a bottom-line note reaches the top line, so on a SINGLE stave a stem is not
+// separable from a barline by geometry (measured: stems scored 0.848–0.939 coverage against a
+// barline's 1.000, and one system hallucinated FOUR extra bars). The only cut that separates them
+// exists BECAUSE a synthetic barline is geometrically perfect — calibrating there would be circular,
+// and a real photographed barline fades and would be rejected. A multi-stave system is different in
+// KIND: its barlines cross the gap BETWEEN staves and a stem is trapped inside one.
 //
-// A NOTE STEM IS A LONG VERTICAL LINE INSIDE THE STAVE, and on a single stave it is not reliably
-// distinguishable from a barline by geometry alone. A stem on a note sitting on the bottom line
-// reaches ~3.5 stave-spaces up — i.e. to the top line. That is not a fixture artifact; that is what
-// real engraving does. MEASURED on `cleanThreeSystems` (single staves, with notes):
-//     real barlines   coverage 1.000   longest-run 1.000
-//     stems           coverage 0.848–0.939   longest-run 0.879–**1.000**
-// System 2 hallucinated FOUR extra barlines. Longest-run does not separate them either — a stem
-// bridging its 1px gaps to the staff lines runs the full height.
-//
-// So the ONLY separator on a single stave is a coverage cut somewhere in (0.939, 1.000) — and that
-// margin exists **only because a synthetic barline is geometrically perfect**. A photographed
-// barline fades, breaks and blurs; a cut at 0.97 would reject real barlines on real paper. Tuning
-// it here would be calibrating a threshold on data invented by the same author who chose it —
-// precisely the circularity CLAUDE.md records for `phase.variants` (F1): a synthetic fixture can
-// prove a rule INSENSITIVE; it cannot CALIBRATE a cut-point. So it is not calibrated. It refuses.
-//
-// A MULTI-STAVE SYSTEM IS DIFFERENT IN KIND, not in degree: its barlines cross the gap BETWEEN the
-// staves and a stem is trapped inside one of them, so a stem scores ~0.35 against a barline's ~1.0.
-// That is a structural margin — the same signal `hasVerticalConnector` already relies on — and it
-// holds on cramped and spacious pages alike. Measured exact (5/5) on `crampedGrandStaves`.
-//
-// The single-stave case is therefore left to the student, which is where §A4 already put it: bar
-// pre-detection is "OPTIONAL … to make selection easier", and the MVP is that "the student marks
-// barlines by tapping their positions on the photo (robust on any image)". Inventing four bars that
-// aren't there would mis-anchor every heatmap range, lesson note and recording pinned to them —
-// and it would look exactly like a correct answer. Refusing is the honest half of the feature.
-//
-// (Resolving a single stave properly needs to know that a line is attached to a NOTEHEAD. That is
-// note recognition. It is an explicit, repeated non-goal. Do not add it.)
+// ⚠ A HALLUCINATED BAR MIS-ANCHORS EVERY HEATMAP RANGE, LESSON NOTE AND RECORDING PINNED TO IT, AND
+// LOOKS EXACTLY LIKE A CORRECT ANSWER. §A4 already puts the single-stave case with the student.
+// (Doing it properly needs to know a line is attached to a NOTEHEAD. That is note recognition, an
+// explicit non-goal. Do not add it.) → docs/archive/music-module-build.md#reflow-barline-refusal
 
 export interface BarlineOptions {
   /** Ink must cover ≥ this fraction of the system's height. Default 0.9. */
@@ -523,10 +466,9 @@ export interface BarlineOptions {
   /** Merge detected columns closer than this fraction of the page width. Default 0.008. */
   mergeWithin?: number
   /**
-   * Run detection on SINGLE-stave systems too. Default FALSE, and the default is load-bearing —
-   * see the banner above. Exposed ONLY so `reflow.test.ts` can turn it on and watch the detector
-   * hallucinate bars, which is what proves the refusal is earning its place rather than being
-   * timidity. Do not turn this on in the app.
+   * Run detection on SINGLE-stave systems too. Default FALSE, and ⚠ the default is load-bearing —
+   * see the banner above. Exposed ONLY so the suite can watch the detector hallucinate, which is
+   * what proves the refusal earns its place. NEVER turn this on in the app.
    */
   singleStave?: boolean
 }
@@ -548,9 +490,9 @@ export function detectBarlines(
   if (span < 4) return []
   const need = Math.ceil(span * cover)
 
-  // Columns whose ink runs the system's height. Note this counts TOTAL ink in the column, not the
-  // longest unbroken run: a barline crossing a grand stave's inter-stave gap is continuous anyway,
-  // and tolerating breaks is what survives a photographed line that fades.
+  // Columns whose ink runs the system's height. TOTAL ink, not the longest unbroken run: a barline
+  // crossing the inter-stave gap is continuous anyway, and tolerating breaks is what survives a
+  // photographed line that fades.
   const hits: number[] = []
   for (let x = 0; x < w; x++) {
     let n = 0
@@ -576,10 +518,9 @@ export function detectBarlines(
 /**
  * The bars of a system, as [xStart, xEnd] spans between consecutive barlines.
  *
- * Fewer than two barlines ⇒ NO bars, deliberately. A system whose barlines were not found has an
- * unknown bar structure, and the honest answer is to say so — the student then taps them (§A4's MVP
- * is manual anyway) rather than being handed one bogus bar spanning the whole system, which would
- * look exactly like a correct answer and quietly mis-anchor everything pinned to it.
+ * ⚠ Fewer than two barlines ⇒ NO bars, deliberately: an unknown bar structure said honestly, rather
+ * than one bogus bar spanning the whole system that would look correct and mis-anchor everything
+ * pinned to it. The student taps them (§A4's MVP is manual anyway).
  */
 export function barsOf(barlines: number[]): Array<[number, number]> {
   const bars: Array<[number, number]> = []
@@ -606,12 +547,11 @@ export interface AnalyseOptions extends GroupOptions, StaveOptions {
 }
 
 /**
- * The whole §A1 detection pass over one already-binarised page.
+ * The whole §A1 detection pass over one already-binarised page, in the DESKEWED image's space.
  *
- * Returns coordinates in the DESKEWED image's space. Deskew belongs to CAPTURE (`capture.ts` rotates
- * the bitmap once, before storing) so that the stored page image, the anchors, and the reflow all
- * share ONE coordinate space. Two spaces for one page is how the annotations and the music drift
- * apart — the same class of failure as CLAUDE.md's round-11 "two rules, one pane".
+ * ⚠ DESKEW BELONGS TO CAPTURE (`capture.ts` rotates once, before storing) so the stored image, the
+ * anchors and the reflow share ONE coordinate space. Two spaces for one page is how the annotations
+ * and the music drift apart. → docs/archive/music-module-build.md#reflow-one-space
  */
 export function analysePage(bin: BinaryImage, opts: AnalyseOptions = {}): PageAnalysis {
   const skewDeg = opts.assumeDeskewed ? 0 : estimateSkew(bin, opts.skew)
@@ -620,8 +560,8 @@ export function analysePage(bin: BinaryImage, opts: AnalyseOptions = {}): PageAn
   const staves = detectStaves(straight, opts)
   const systems = groupStavesIntoSystems(straight, staves, opts)
 
-  // Slice at the MIDPOINT of each inter-system gap — the whitespace's own centre, so neither
-  // system loses its ledger lines, dynamics or lyrics to the cut.
+  // Slice at the MIDPOINT of each inter-system gap, so neither system loses its ledger lines,
+  // dynamics or lyrics to the cut.
   const cuts: number[] = []
   for (let i = 1; i < systems.length; i++) {
     cuts.push(Math.round((systems[i - 1].bottom + systems[i].top) / 2))
@@ -632,9 +572,10 @@ export function analysePage(bin: BinaryImage, opts: AnalyseOptions = {}): PageAn
 
 // ─── Source ↔ layout mapping (the view transform) ────────────────────────────
 //
-// The reflow NEVER rewrites the image. It is a pure mapping from source-image coordinates to laid-out
-// coordinates, so that adjusting a handle re-lays-out instantly and moves NO annotation off its
-// music (see types.ts, RegionAnchor: anchors are stored in source space precisely so this holds).
+// ⚠ THE REFLOW NEVER REWRITES THE IMAGE — a pure mapping from source coordinates to laid-out ones,
+// so adjusting a handle re-lays-out instantly and moves NO annotation off its music (types.ts
+// RegionAnchor stores anchors in source space precisely so this holds).
+// → docs/archive/music-module-build.md#reflow-one-space
 
 export interface Band {
   kind: 'slice' | 'gap'
