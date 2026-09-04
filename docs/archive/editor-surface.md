@@ -332,3 +332,363 @@ as one more link in this chain, not as a second mechanism.
 EVERY path resolves through migrateSlots — including the first-run one. Returning DEFAULT_SLOTS
 raw was a real bug its own test caught: the array names `media`, whose lane has not landed, so
 the fallback smuggled an unbuilt button into the row that the normal path filters out.
+
+---
+
+## `waveVideo.ts` — the wave video (EXPERIMENTAL, `?waveVideo`, default OFF)
+
+<a id="wave-video"></a>
+### What it is, and why the debug overlay exists
+
+Peter's proposal: play a pregenerated loop video of the water on the hardware media pipeline
+(decode + composite off the main thread — immune to the raster-scheduling residual class: blue
+flash, wave lines lagging their wave). The video is an OPAQUE, baked copy of THIS water
+(gradient + drifting lines + marks + glitters) for the LOAD window only; at rest it hands back
+to the CSS water, which owns scroll-time sway. The CSS/WAAPI unit keeps running HIDDEN
+underneath (`html.iw-wave-video-on`) and is the automatic fallback at EVERY step.
+
+SCOPE (say it plainly): this covers the LOAD animation ONLY — the drift + the S-curve slow-down.
+It cannot affect scroll-time artifacts, because at rest the video is gone and the CSS water is
+back. Load-time targets = blue flash + lines lagging their wave.
+
+⚠️ THE FALLBACK CHAIN IS OTHERWISE SILENT (AV1 → H.264 → CSS) and CSS water looks IDENTICAL to
+the video. `?waveVideo=debug` renders an on-device overlay naming exactly what is on screen and
+WHY — Peter tests on an iPhone 8 with no Mac/Web Inspector, so without it a failed video is
+indistinguishable from a working one and every verdict is uninterpretable.
+
+iOS AUTOPLAY: inline autoplay requires BOTH `muted` and `playsinline` (as attributes AND
+properties — older WebKit reads the attribute) and fails SILENTLY otherwise. Low Power Mode
+blocks autoplay outright; that surfaces as reason 'autoplay-blocked'.
+
+<a id="wave-hydration"></a>
+### ⛔ Nothing may touch the DOM before hydration
+
+2026-07-17 — Peter's *"the video works but it never loads"*, PROBED. `hydrateRoot(document)` makes
+React own EVERY node, so appending our `<video>` (or the overlay) into the PRERENDERED
+`.iw-wave-twinkles` before hydration is a hydration MISMATCH: React throws #418, discards the
+server HTML and client-renders the whole document (#423) — which REPLACES the `<html>` element with
+a new node. The new `<html>` carries no `.iw-water-ready` and no `data-theme`, so
+`:root:not(.iw-water-ready)` puts every wave layer (and the twinkle host our own `<video>` lives
+in) at display:none FOR THE SESSION: the CSS water dies, the video paints nothing, and on phone the
+surface is left a flat aqua gradient with no waves — the 2026-07-10 "gradient without waves"
+catastrophe, re-triggered by this flag. entry.client's MutationObserver stamp-guard cannot save it:
+it watches the ORIGINAL `<html>`, which React detached. Hence `hydrated()` — every DOM write waits
+behind it.
+
+The barrier's own history is the "only wait on a signal that always arrives" rule twice over.
+`inkwave:twinkles-ready` was the first key: waveTwinkle announces it once the pool is mounted from
+a LAYOUT EFFECT, which React can only run after the hydration commit. That was post-hydration, but
+it is NOT guaranteed — the pool announces only if BOTH its sets generate, while the water gate
+opens regardless on its own 1500ms timeout. So a load whose pool never announced hung the video
+FOREVER with the water gate wide open (PROBED 2026-07-17: reason stuck at 'waiting for hydration…',
+clip/fetch never even set). **Correctness of the video must not depend on the twinkles succeeding.**
+
+`.iw-water-ready` was rejected for the mirror-image reason: that gate has a 1500ms timeout path
+(entry.client) that can open it BEFORE hydration on a slow device — an iPhone 8 is exactly that
+device — which puts us right back in the mismatch.
+
+`inkwave:hydrated` (entry.client's beacon) fires from a post-commit effect on every load, and
+`__iwHydrated` makes it askable, so a caller that arrives late can never wait for an event already
+in the past. The check and the subscribe are one synchronous block — nothing can slip between them.
+
+The fetch stays IN FRONT of the barrier deliberately. Picking a codec and fetching bytes touch NO
+DOM, so they are safe pre-hydration — and this is the whole reason the clip used to arrive in time.
+The first cut of the barrier moved the fetch behind hydration too, which on Peter's A11 pushed the
+download ~2s later and cost the video its 2.5s decode budget (his 8:15am overlay: `readyState 0`,
+`fetch requested`). Only the ATTACH has to wait. The overlay was the second offender: with `=debug`
+it broke hydration all by itself.
+
+<a id="wave-ladder"></a>
+### The ladder: CROP, NEVER RESIZE
+
+2026-07-17 — Peter's ruling, and it is a bug fix: *"render the video at one higher resolution and
+then crop it to the screen rather than resizing it… preserve dpi rather than the fixed boundaries
+of the movie"*.
+
+WHY THIS IS NOT A PREFERENCE. The video stands in for the CSS water for the load and HANDS BACK
+at the coast, so its wave tile must be 140 CSS px at EVERY viewport — that congruence IS the
+hand-off. `object-fit: cover` scaled the clip to the viewport, so the tile became
+140 × max(vw/designW, vh/designH): MEASURED 122.5px at 1100×700 and 157.5px at 1440×900 against
+the CSS water's unwavering 140.0 — a 12.5% jump at the swap, exactly Peter's live report (*"the
+video resolution and size of the waves does not match that of the background"*). Crop measured
+140.0 vs 140.0, 0.0% error, at a viewport where cover reads 122.5 (`tilescale.prove.mjs`).
+
+THE MECHANISM: the element is sized to the clip's DESIGN CSS BOX (`cssW`×`cssH`, fixed at the
+top-left) and `object-fit: fill` maps the clip's pixels onto it 1:1. The clip is encoded at
+`cssW × dsf` — so on a device whose DPR === dsf, one clip pixel is one DEVICE pixel ("preserve
+dpi"). The VIEWPORT then crops whatever overflows. A design box must therefore COVER the
+viewport, or there is no pattern to crop from and the surface would show a bare edge.
+
+⚠️ `object-fit: none` is NOT the same fix: it maps 1 video px → 1 CSS px, so a dsf:2 clip would
+render 2× too big. The trio is: clip @ (design CSS × dsf) + element @ design CSS + `fill`.
+
+THE CEILING IS PETER'S (*"Why don't we just do full hd. Or even 720p"*): the desk rung is FULL HD
+at dsf 1, chosen over a retina 3840×2160 because he asked for the smaller file and because the
+water is a gradient + soft 140px lines — and because 1920×1080 (2.07 Mpx) still fits H.264
+**Level 4.0** (~2.1 Mpx), the iPhone-conservative pin `generate.mjs` has always carried. A 4K
+clip would force Level 5.1. `wide` (2560×1440) exists because a 1920-wide design box has nothing
+to crop from on a 2560 desktop; it is DESKTOP-ONLY by construction (`pickRung` partitions on the
+pointer type), so its Level 5.1 never reaches an iPhone.
+
+ABOVE `wide`, pickRung returns null and the CSS water plays — the honest answer, not a stretched
+clip. A `<video>` cannot be background-repeated, two tiled videos are two `currentTime`s, and
+canvas-tiling needs a per-frame JS driver (the one thing this whole unit exists to avoid).
+
+The rungs, and why each exists:
+
+- `phone` 440×956 @dsf 2 — covers every phone CSS viewport in portrait (iPhone 8 375×667 · 12
+  390×844 · 14 Pro Max 430×932). dsf 2 is dpi-exact on an iPhone 8 and 0.67× on a DPR-3 phone —
+  soft by Peter's own budget, not by accident. 880×1912 = 1.68 Mpx, also inside Level 4.0.
+- `desk` 1920×1080 @dsf 1 — FULL HD, Peter's word. Covers a desktop CSS viewport up to 1920×1080
+  at DPR 1.
+- `wide` 2560×1440 @dsf 1 — the crop headroom a 2560-wide desktop needs. Desktop-only ⇒ H.264
+  Level 5.1 is safe here.
+
+<a id="wave-rungs"></a>
+### `pickRung` — "inkwave should detect that"
+
+Peter never tells us his resolution. Exported + PURE so the gate can be tested at every device
+class without a browser. The old rung choice was `coarse || innerWidth < 900` and nothing else:
+under cover-fit either clip stretched to fill anything, so the viewport's SIZE genuinely did not
+matter. Under crop it is the whole question — a design box that does not cover the viewport has no
+pattern to crop from.
+
+THE RULE: the SMALLEST rung of the right device class whose design box covers the viewport in
+BOTH axes. Smallest-that-covers is what keeps a 1280×800 laptop off `wide`'s bytes. Nothing
+covers it ⇒ null ⇒ CSS water. It NEVER returns a rung that must be stretched: that is the bug
+this ladder exists to fix, and silently reintroducing it is worse than not playing at all.
+
+`coarse` IS A PARAMETER, not a `matchMedia` read inside the function — and the first reason is a
+bug these tests caught on their first run: under vitest's node environment there is no `window`,
+so an internal read returns `false` for every case and the ENTIRE touch half of the suite becomes
+a silent second copy of the desktop half — passing, and proving nothing. (waveVideo.test.ts's
+"the stub discriminates" check is what surfaced it.) Second: the device class is an INPUT to this
+decision, so a function that reaches out for it is not the pure rule it claims to be.
+
+THE DEVICE CLASS IS A HARD PARTITION, not a preference. `phone` is captured under the app's PHONE
+CSS (compact 32px page margins, the ×1.25 font rule, in-flow surfaces) and `desk`/`wide` under
+desktop CSS. They are pictures of two different waters. So a coarse device is NEVER offered a
+desk clip — not even a landscape iPad, whose viewport `desk` would happily cover.
+
+⚠️ DPR IS DETECTED AND REPORTED, BUT IT DOES NOT SELECT — and saying so is the honest version.
+Peter's ask is *"detect viewport x DPR at runtime… I shouldn't have to give the res of my
+desktop"*, and both halves ARE read at runtime (`planClip` → `diag.viewport`, `dpiRatio`). But
+selection is a CHOICE, and DPR can only make one where two rungs of the same device class differ
+in `dsf` — this ladder has no such pair, because Peter's ceiling ("full hd. Or even 720p") is
+exactly what rules out the retina desk clip that would create one. A `dpr` parameter here would
+be a number the function reads and cannot act on: an instrument reporting a decision it never
+makes. WHEN a dsf variant is added, this is the function that gains the argument.
+What DPR would otherwise be for — refusing a rung delivering under 1 clip px per device px — is
+deliberately NOT done. A 440-CSS phone at DPR 3 asks 1320 device px of an 880px clip: still a
+CROP (the tile is 140 CSS px, so the hand-off stays exact) and merely SOFT, which is inside
+Peter's stated budget. Refusing it would drop every modern iPhone to CSS water — trading a PROVED
+bug (the 12.5% tile jump) for a guess about crispness nobody has measured on a device.
+
+⚠️ STATED CEILING, found by these tests rather than reasoned about: an iPad in PORTRAIT
+(820×1180) matches no rung. `phone` (440×956) cannot cover it and the desk clips are landscape —
+1080 < 1180, so `desk` fails on HEIGHT even ignoring the partition. It gets CSS water. Deliberate:
+the alternative is an iPad rung nobody asked for, on a device Peter does not test, for a load
+animation whose fallback is already correct.
+
+<a id="wave-loop-gate"></a>
+### The deliberate delay — the reveal waits for one whole loop
+
+Peter: *"make it show at least one loop before the file comes up. purposefully delay it. (And use
+that time to warm up the document)"*.
+
+The reveal gate (TiptapEditor) waits on this alongside fonts.ready + the first pagination
+measure — so "warm up the document" needs no code of its own: the warm-up IS what the load was
+already doing, and this simply stops the reveal from cutting it short.
+
+THE BOUNDARY IS THE VIDEO'S OWN, NOT A TIMER. `releaseAtLoopPoint` watches `currentTime` WRAP —
+a looping media element's clock running backwards is the loop point, OBSERVED. A
+`setTimeout(2000)` would be a guess about a decode we do not control, and a measurement whose
+verdict depends on who else is running is not a guard: on a busy first load the clip starts
+late, so a timer would release mid-loop and Peter would see exactly the half-loop he asked us
+to stop showing him.
+
+ALWAYS ARRIVES, AND IS ASKABLE (the one-shot-async-signal rule — this module has been bitten by
+it twice already). Every exit fires it: bail, decode timeout, autoplay refusal, the wrap, the
+settle, and the cap. A reader that arrives late asks `__iwWaveVideoLoopDone` rather than waiting
+for an event in the past. If this module never loads at all, nothing here fires — which is why
+the reader in TiptapEditor carries its own independent cap.
+
+Watch for the wrap with rVFC where it exists (it ticks with the DECODER, so it sees the wrap on the
+frame it happens), else a 40ms poll of the same fact — the poll is what `wireSettle` already uses
+to find this identical boundary, so this is not a second way of asking one question. The 6s cap is
+NOT the timer sneaking back in as the release mechanism: a media element genuinely can stall on a
+dead network, and a load that never reveals the document is a far worse bug than a short loop. It
+NAMES itself in `diag.loop`, so a capped release can never be read as a real one. The wrap test's
+second arm covers `start` being mid-clip (play() can resolve a frame or two in) — a full duration's
+worth of advance is also one whole loop.
+
+Every exit runs through `bail`, and that is what makes the two gates safe to wait on: a bail must
+ALWAYS hand the water back (drop the white wait → CSS water) and ALWAYS release the reveal (or a
+failed decode would leave Peter on a white screen with no document).
+
+<a id="wave-white-wait"></a>
+### The white wait, and the probe seam
+
+BLANK WHITE UNTIL THE VIDEO COMES UP — Peter: *"we have to just have blank white screen until the
+video comes up and play the video every time"*. `html.iw-wave-video-wait` whites the surface and
+hides every water layer, so a load can never show a frame of CSS water that the video is about to
+replace (the "partial/janky first frame"). It is a CLASS ON `<html>`, set by entry.client BEFORE
+hydration — the same shape as `.iw-water-ready` and `data-theme`, and deliberately NOT a node
+append: appending pre-hydration is precisely the bug (React #418 → the whole document re-rendered →
+the water dead for the session) that the `hydrated()` barrier exists to prevent.
+
+IT MUST NEVER BE PERMANENT. Every exit clears it: the master hand-off swaps it for
+`.iw-wave-video-on`, and every bail drops it so the CSS water — the fallback at every step —
+appears. entry.client carries an independent timeout for the case where this module never loads.
+
+PROBE SEAM (same contract as `window.__iwTwkPool`): probes must read `window.__iwWaveVideo`, never
+scrape the overlay's rendered HTML — the overlay is a formatted STRING for Peter's phone camera,
+and a probe that parses it measures the formatting. `masterEver` is the durable fact a 12s sample
+can otherwise miss entirely: the video can become master and hand back before any single read
+lands, which reads identically to "the video never ran" — the exact ambiguity that makes a green
+meaningless.
+
+<a id="wave-one-clock"></a>
+### One host, one clock — and the direct `src`
+
+DIRECT same-origin src, NOT a blob (2026-07-16 — THE iPhone-8 fix). iOS decodes a `<video>` only
+when it can Range-request the moov atom; a blob URL cannot be ranged → readyState stuck at 0
+(Peter's overlay: fetch 200, readyState 0, decode timeout). The SW serves /wave/ cache-first
+WITH 206 Range, so a direct URL is still one fetch + cached, and iOS can seek the metadata.
+
+The warm fetch is the one the SW's /wave/ handler was written to receive ("non-Range GET (our warm
+fetch…)"): ONE full 200 that populates the cache, so the `<video>`'s later Range probes are served
+from the cached buffer with no network. Fire-and-forget on purpose — nothing may AWAIT it, or a
+stalled network would become a stalled load. If it loses to the `<video>`, the SW just fetches once
+more.
+
+iOS loads a `<video>` only while it is IN THE DOM (a detached element never fetches on WebKit),
+so attach — invisible (opacity 0) — before load(). We are POST-HYDRATION there, so ONE plain
+append is enough: React rendered `.iw-wave-twinkles` as a stable EMPTY container and never
+touches its children again (waveTwinkle owns them imperatively and only ever removes its OWN
+`.iw-twk-set` nodes — it never clears the host). The old 150ms re-attach interval existed
+solely to heal the wipe caused by attaching PRE-hydration; with the barrier there is no wipe,
+so the interval is gone rather than re-tuned. We become MASTER (hide the CSS water) only once
+play() RESOLVES, so a decode/autoplay failure always leaves the CSS water visible.
+
+⚠️ ONE HOST, ONE CLOCK — AND IT MUST STAY THAT WAY (2026-07-17, flagged by fix/wave-desktop-jitter).
+`querySelector` + `:not(.iw-wave-covered)` means exactly ONE `<video>` exists per load: the shell's,
+never the covered editor's. That is load-bearing, not incidental. During the load there are TWO
+drifting surfaces, and the CSS water solves them by making both adopt ONE literal startTime — the
+whole "sibling clock adopt" invariant in Scroll.tsx exists because two copies of this water at
+33-500ms of skew showed doubled lines through the reveal fade. Give the second surface its own
+element and you get the identical two-clock shape WITH DECODERS: two `currentTime`s, no shared
+timeline, no adopt possible (a media element's clock cannot be assigned like an animation's
+startTime). The jitter lane measured what that costs on the CSS side — 43-60px of mark-vs-wave
+skew on 4 of 5 clean loads, from two animations resolving their startTime independently. Do not
+add a second video without an answer to "which clock, and who slaves to it".
+
+`reason` MUST TRACK WHERE THE FUNCTION ACTUALLY IS (2026-07-17). It used to be written once
+before the barrier and then never again until play() resolved, so a video stuck in its decode
+still displayed 'waiting for hydration…' — and that stale line sent the next reader hunting a
+barrier bug that had already released (clip/fetch on the same overlay proved run() was well
+past it). A field nobody updates is a field that lies.
+
+Do not become master before the atomic water has painted, and never veil a load that already
+reached its coast/rest (a slow decode on a fast open) — that would show drift over settled text.
+ASKABLE, not just an event: the class is not a safe thing to test alone (a hydration recovery
+can strip it — that WAS this bug), and the event may have fired while we were decoding. Same
+rule as `hydrated()`: ask first, subscribe only if the answer is no.
+
+The swap order at master is ONE swap, this order: `-on` goes on before `-wait` comes off, so the
+white and the video never both let the CSS water through for a frame. Both are classes on `<html>`
+= a single recalc. And `video.style.opacity = '1'` is not decoration: CSS defaults
+`.iw-wave-video-el` to opacity 0, so THE loop was invisible without it.
+
+<a id="wave-master-derived"></a>
+### `iw-wave-video-on` is DERIVED, never latched
+
+THE MASTER LATCH MUST NOT OUTLIVE THE ELEMENT (2026-07-17 — Peter, live: *"after I signed in just
+now the wave background completely went away"*; flat teal, no waves, document fine).
+
+`html.iw-wave-video-on` SUPPRESSES the CSS water outright (visibility:hidden on the wave pseudos
+AND the twinkle host) with no dependency on this video existing. The class is therefore a PROMISE
+that something else is drawing the water. When a re-render tears our `<video>` out of the DOM —
+mounting Clerk at sign-in does exactly that — the promise is broken and the surface is left a
+bare gradient: the CSS water suppressed, the video gone, nothing drawing. The water dies.
+
+So the class must be DERIVED, not latched: the moment nothing of ours is left to draw, hand the
+water straight back. Event-driven, not polled — the host's children change only when the twinkle
+sets or our own videos mount/unmount, and MutationObserver callbacks are microtasks, so the CSS
+water is restored before the bare-gradient frame can paint. `:not([data-going])` is what makes
+the legitimate loop→brake swap a non-event: the dying loop is already marked, the brake is live.
+
+LIMIT, stated: this sees our element leaving the host, and the host leaving its parent. A
+re-render that replaces a HIGHER ancestor wholesale would go unseen — covering that needs a
+subtree observer over the surface, which contains the ProseMirror subtree and would re-run on
+every keystroke (the --wave-x invalidation lesson). Peter's ruling deletes this whole latch
+anyway; this is the smallest thing that makes the live bug impossible.
+
+Teardown ALWAYS restores the CSS water: dropping the class is what makes the DOM water the
+fallback. (Leaving it set with no video = a blank surface — a real bug, 2026-07-16.)
+
+`mkVideo` writes the element's size in TWO LINES and it must be written there rather than in CSS:
+the design box is a per-rung fact, and the whole point of the ladder is that different devices get
+different design boxes. `object-fit: fill` (index.css) then maps the clip's pixels onto it with no
+scaling of its own.
+
+The settle preloads the brake immediately (direct URL, in-DOM, invisible, guarded) so it is decoded
+before SETTLE — on iOS a brake created at swap-time would stall exactly like the loop did.
+Attaching it as a sibling of the loop in the same host means the guard/host logic covers it too.
+The swap happens at the loop's phase-0 boundary: the brake is baked from that same boundary with
+the SAME pool seed, so its first frame ≡ the loop's frame 0 (pixel-exact join). The abort paths
+(open-begin / resize / an error / the tab hiding) land in `finish` and can outrun the wrap; they
+release the loop gate, or the reveal gate would sit waiting on a loop from a video we just tore
+down — the delay is a courtesy to the animation, never a dependency of the document.
+
+<a id="wave-overlay"></a>
+### The on-device overlay — an alarm that fires on the healthy path is worse than none
+
+"ON SCREEN" MUST MEAN ON SCREEN (2026-07-17). This said VIDEO ON SCREEN whenever play()
+resolved — a claim about the DECODER, not about pixels. It read green on Peter's iPhone while
+the element sat inside a display:none host painting absolutely nothing, which is precisely how
+a broken build talked us out of a real bug. Ask the layout engine instead: a display:none
+ancestor gives a zero box (and null offsetParent for a non-fixed chain), and visibility/opacity
+are resolved values, so this sees every way the video can be silently unpainted.
+
+`painted` means PUTS PIXELS ON SCREEN. It demanded opacity >= 0.9, which invented a false
+alarm out of a legitimate animation: `.iw-wave-video-el` fades in over `transition: opacity
+0.3s`, so for ~270ms of every successful start — the exact moment Peter watches, "right
+before it loads" — a video that WAS painting reported NOT PAINTED. A half-faded video is
+painting. Only a fully transparent one is not.
+
+THE LIVE ELEMENT, not just the first one. During the loop→brake swap the dying loop is still
+in the DOM for 80ms (opacity 0, marked data-going) while the brake plays — picking it made
+the overlay cry "NOT PAINTED" in the middle of a perfectly good hand-off.
+
+NO ANGLE BRACKETS IN ANY OF THESE STRINGS: this box is written with innerHTML, so a literal
+"&lt;video&gt;" is parsed as a TAG — it swallowed the water-gate and reason lines whole the first
+time this ran. The instrument must not be able to blank itself.
+
+THE STATE MACHINE (2026-07-17, round 3). The overlay was RED on a working app, and that is worse
+than green on a broken one: it burns the trust of the one person whose eyes are the ground truth.
+Success ENDS with the element removed and master cleared, so a completed run displayed the same red
+'● CSS WATER (no video)' as a video that never ran at all — and Peter, reading it, reported "the
+first time the video ran, from then on just the css". The finished state and the never-ran state
+MUST NOT look alike. `masterEver` is what tells them apart.
+
+NO "BENIGN" STATE FOR master-WITHOUT-AN-ELEMENT. Round 3 called that a mid-swap transient and
+greyed it out; Peter's sign-in screenshot then showed EXACTLY that state while his water was
+dead — `master` suppresses the CSS water, so master with nothing painting IS the water dying.
+The alarm was telling the truth and I muted it. The legitimate loop→brake swap is excluded
+properly instead, by reading the LIVE element (`:not([data-going])`) rather than by excusing
+the symptom. Red means exactly ONE thing: the video never ran on this load; `reason` says which
+exit.
+
+KEEP IT ATTACHED. hydrateRoot(document) makes React own `<body>`, so a plain appended overlay is
+reconciled AWAY during hydration (why it vanished, 2026-07-16). Re-append whenever it's gone —
+this is Peter's only on-device instrument, it must survive hydration + every re-render.
+
+Any on-device overlay whose screenshots may cross a deploy must print `__BUILD_COMMIT__`.
+
+currentTime advancing = a REAL decode (not a frozen first frame — the iOS silent-failure tell).
+`last` seeded at -1 meant the FIRST tick of any video satisfied `now > last + 0.001` and
+reported "YES (real decode)" for a video holding NO DATA — Peter's 8:15am overlay showed
+`readyState 0 (NOT decoded)` next to `advancing YES (real decode)`, a physically impossible
+pair that cost real time to see through. Require decoded data AND a genuine delta against a
+previous sample; `last = -1` now means "no sample yet", which can never look like motion.
