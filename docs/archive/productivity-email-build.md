@@ -1164,3 +1164,132 @@ whether they complied. `unreflectedRows` is extracted so the drop-up (which SHOW
 the session-close watcher (which OPENS the panel to it) read ONE rule — two copies of "what counts
 as unreflected" is exactly how the two would drift. A row is spoken-for when it ends at/before the
 newest reflection's `to`.
+
+---
+
+## `productivity/report/claims.ts` — enforcing what the prompt can only request
+
+"A prompt is a request, not a guarantee." Every check in this module runs on the reply, on the
+device, after the fact.
+
+<a id="claims-limits"></a>
+### They FLAG, they never rewrite — and the honest limits
+
+Both checks FLAG; they do not rewrite (§A9: never silently drop data — a narrative quietly edited
+by Inkwave would be its own integrity problem, and the writer would never know their model had
+misbehaved).
+
+HONEST LIMITS — these are heuristics over prose, and they are stated in the panel too:
+
+- `findCausalClaims` is a marker-word scan over CLAUSES. Its real limits, in the order you
+  will actually hit them (F18's lesson: a documented limit should be the one people meet,
+  not a curiosity — the old note pinned "the break definitely helped, maybe", a sentence
+  nobody writes, and read as though that were the boundary):
+  1. NO MARKER, NO FLAG. "Your best writing came after the walk" asserts a cause with no
+     causal word in it. Invisible here, and this is the commonest miss by far.
+  2. A HEDGE ANYWHERE IN THE CLAIM'S OWN CLAUSE exempts it, even when it governs some
+     other part of that clause: "Maybe you should protect your peak hours, which are nine
+     to eleven" asserts the hours inside a hedged clause. Clause splitting fixed the
+     cross-clause case; the within-clause case needs a parser, not a regex.
+  3. Punctuation is the clause boundary, so a run-on sentence with no commas is one clause.
+
+  All accepted. The scan is a flag for the reader's judgement, not a proof, and over-flagging
+  the hunches Peter asked for would be the worse error.
+- `findUnverifiedNumbers` only knows the numerals Inkwave actually sent. It cannot check a
+  number written as a word ("forty minutes") — which the fixed prompt encourages for exactly
+  the small counts where a numeral would be noise.
+
+Both are one-directional: a clean result means "nothing detected", never "verified honest".
+
+<a id="claims-hedge"></a>
+### §A6.2 — Peter moved the line, and the rule was re-derived around the hedge
+
+PETER MOVED THIS LINE ON 2026-07-17: "I sort of want them to hazard guesses at causality too.
+They don't have to commit, but something like 'the break maybe helped' or 'you could've taken
+more breaks' I think would be really helpful."
+
+He moved it; he did not delete it. The scan used to fire on causal language as such — which
+would now flag EXACTLY what he asked for. So the rule is re-derived around the hedge:
+
+    "the break helped."        → an assertion from one data point.        FLAGGED.
+    "the break maybe helped."  → a hypothesis, announced as one.          NOT flagged.
+
+A guess that announces itself is honest; a guess dressed as a finding is not. That is the whole
+of it, and it is the same distinction the prompt now draws.
+
+THIS SITS INSIDE §A6.2 RATHER THAN AGAINST IT, which is worth noticing before anyone "fixes" it
+back. The spec line, quoted IN FULL and un-ellipsed because it is load-bearing
+(`docs/specs/Inkwave-Productivity-Email-BuildSpec-v0.2.md`, §A6.2, line 139 — re-verified
+verbatim 2026-07-17):
+
+> "Confident *pattern* claims (breaks help/hurt, best time of day) are permitted only at
+> weekly+ where there's enough data."
+
+HEDGING REMOVES THE CONFIDENCE. The spec drew this line already; we had been reading a ban on
+the SUBJECT where it bans the CERTAINTY — and the trailing clause ("where there's enough data")
+is why: it is a rule about evidence supporting a claim's strength, not about naming causes.
+
+<a id="claims-hedge-clause"></a>
+### F18 — the hedge must govern the claim it exempts, and `may` is case-sensitive
+
+`isHedged` used to be a substring match over the WHOLE SENTENCE, which is a category error: the
+argument is about a claim's MODALITY, and modality belongs to a clause, not to a string. So a
+hedge in a *different clause* exempted a perfectly confident claim next to it. The two misses
+that made the case, both of which an Opus narrative produces constantly:
+
+    "Your peak hours are nine to eleven, which suggests protecting them."
+       → the claim is asserted; "suggests" hedges the SUGGESTION, not the claim. Now flagged.
+    "You always write best in the morning, as you have since May."
+       → "always" is asserted; the exemption came from a MONTH NAME. Now flagged (twice over:
+         the clause split separates it, and `may` is case-sensitive).
+
+`may` is CASE-SENSITIVE, and that is the entire fix for the second miss: `/\bmay\b/i` matched the
+MONTH, so a date silently exempted the sentence. The modal is lower-case in every sentence anyone
+writes ("may have", "may well be"); the month is always capitalised. A sentence-initial modal
+"May the..." is archaic and does not occur in a work report.
+
+The clause split is on PUNCTUATION ONLY, deliberately: the obvious extension is to split on
+connectives too ("which", "and", "but"), and it would BREAK THE MARKERS — "which is why" is itself
+a causal marker, and "because" is the commonest one. Splitting on either destroys the very thing
+being looked for and the scan would go quiet on its own controls. Punctuation cannot collide with
+a marker, so it is the granularity that is safe by construction.
+
+The hedge markers are scoped deliberately: they are only ever consulted for a sentence in which a
+causal or pattern marker ALREADY fired, so an ordinary "could not find the thread" is not at risk
+of being read as a hedge — nothing is looking at it.
+
+<a id="claims-person-verdicts"></a>
+### §A5 — the re-derived guilt list, and why it is a list of three words rather than seven
+
+THE OLD LIST WAS A LIST OF WORDS, AND THAT WAS THE MISTAKE. The kind/non-shaming prompt banned
+"only", "just", "failed to", "should have", "fell short", "wasted", "unproductive". When §A5
+reversed (honest first, funny second, kind third) that list had to be re-derived rather than
+deleted — because most of those words are exactly right when the writer set a goal and missed
+it. "You said Friday. You've opened it twice. You failed to touch it since Tuesday" is the
+FEATURE now. Banning "failed to" would ban the thing Peter asked for.
+
+SO THE RULE IS NOT ABOUT VOCABULARY, IT IS ABOUT THE SUBJECT AND THE STANDARD:
+
+- Measuring the writer against a goal THEY SET → accountability. Any word goes.
+- Measuring them against a standard WE invented → guilt. Banned regardless of politeness.
+- A verdict on the PERSON rather than the work → banned, and no goal licenses it.
+
+The first two are enforced STRUCTURALLY: goals travel only on their own tick, so a model with
+no goal is told it has no standard (prompt.ts) and has nothing to quote. That is not a word
+problem and no matcher could see it.
+
+What a matcher CAN see is the third: words that can only ever be a verdict on a human being.
+That list is short, and it is short on purpose — every entry had to survive the question "is
+there a sentence where a comedian could use this ABOUT THE WEEK rather than about the writer?"
+"Lazy" fails that test (a Tuesday cannot be lazy; only a person can). "Wasted" passes it — "you
+wasted three sessions circling the same paragraph" is about the sessions and is fair game — so
+it is NOT on the list, though it was on the old one.
+
+HONEST LIMITS, and they are wide:
+
+- One-directional. Clean means "nothing detected", never "this reply is honest".
+- It cannot see an imposed STANDARD, which is the commoner and more serious failure ("200
+  words is a thin day" contains no banned word at all). The structural gate is what covers
+  that; this only catches the crude case.
+- Quoted spans are skipped — the narrative may legitimately quote the writer calling THEMSELF
+  lazy, and flagging the writer's own words back at them would be absurd.

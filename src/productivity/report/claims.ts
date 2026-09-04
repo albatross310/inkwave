@@ -1,53 +1,22 @@
 // Client-side enforcement of the two rules the prompt can only REQUEST — spec §A6.2 and §A6.4.
 //
-// "A prompt is a request, not a guarantee." Both checks below run on the reply, on the device,
-// after the fact. They FLAG; they do not rewrite (§A9: never silently drop data — a narrative
-// quietly edited by Inkwave would be its own integrity problem, and the writer would never know
-// their model had misbehaved).
-//
-// HONEST LIMITS — these are heuristics over prose, and they are stated in the panel too:
-//   • findCausalClaims is a marker-word scan over CLAUSES. Its real limits, in the order you
-//     will actually hit them (F18's lesson: a documented limit should be the one people meet,
-//     not a curiosity — the old note pinned "the break definitely helped, maybe", a sentence
-//     nobody writes, and read as though that were the boundary):
-//       1. NO MARKER, NO FLAG. "Your best writing came after the walk" asserts a cause with no
-//          causal word in it. Invisible here, and this is the commonest miss by far.
-//       2. A HEDGE ANYWHERE IN THE CLAIM'S OWN CLAUSE exempts it, even when it governs some
-//          other part of that clause: "Maybe you should protect your peak hours, which are nine
-//          to eleven" asserts the hours inside a hedged clause. Clause splitting fixed the
-//          cross-clause case; the within-clause case needs a parser, not a regex.
-//       3. Punctuation is the clause boundary, so a run-on sentence with no commas is one clause.
-//     All accepted. The scan is a flag for the reader's judgement, not a proof, and over-flagging
-//     the hunches Peter asked for would be the worse error.
-//   • findUnverifiedNumbers only knows the numerals Inkwave actually sent. It cannot check a
-//     number written as a word ("forty minutes") — which the fixed prompt encourages for exactly
-//     the small counts where a numeral would be noise.
-// Both are one-directional: a clean result means "nothing detected", never "verified honest".
+// ⚠ THESE FLAG; THEY NEVER REWRITE (§A9). A narrative quietly edited by Inkwave would be its own
+// integrity problem, and the writer would never know their model had misbehaved.
+// ⚠ ONE-DIRECTIONAL: a clean result means "nothing detected", NEVER "verified honest". Both are
+// heuristics over prose and the panel says so. The misses, in the order you will hit them: no
+// marker ⇒ no flag ("your best writing came after the walk"); a hedge anywhere in the claim's OWN
+// clause exempts it; a run-on with no punctuation is one clause; and a number written as a word is
+// invisible to `findUnverifiedNumbers`. → docs/archive/productivity-email-build.md#claims-limits
 
 // ─── §A6.2 — daily must not ASSERT cause or pattern. A hedged guess is not an assertion. ────
-//
-// PETER MOVED THIS LINE ON 2026-07-17: "I sort of want them to hazard guesses at causality too.
-// They don't have to commit, but something like 'the break maybe helped' or 'you could've taken
-// more breaks' I think would be really helpful."
-//
-// He moved it; he did not delete it. The scan used to fire on causal language as such — which
-// would now flag EXACTLY what he asked for. So the rule is re-derived around the hedge:
-//   "the break helped."        → an assertion from one data point.        FLAGGED.
-//   "the break maybe helped."  → a hypothesis, announced as one.          NOT flagged.
-// A guess that announces itself is honest; a guess dressed as a finding is not. That is the whole
-// of it, and it is the same distinction the prompt now draws.
-//
-// THIS SITS INSIDE §A6.2 RATHER THAN AGAINST IT, which is worth noticing before anyone "fixes" it
-// back. The spec line, quoted IN FULL and un-ellipsed because it is load-bearing and the spec is
-// not in this repo (Inkwave-Productivity-Email-BuildSpec-v0.2.md, §A6.2, line 139 — re-verified
-// verbatim 2026-07-17):
-//
-//   "Confident *pattern* claims (breaks help/hurt, best time of day) are permitted only at
-//    weekly+ where there's enough data."
-//
-// HEDGING REMOVES THE CONFIDENCE. The spec drew this line already; we had been reading a ban on
-// the SUBJECT where it bans the CERTAINTY — and the trailing clause ("where there's enough data")
-// is why: it is a rule about evidence supporting a claim's strength, not about naming causes.
+// ⚠ THE RULE IS THE HEDGE, NOT THE SUBJECT. Peter asked for hazarded guesses, so a scan on causal
+// language as such would flag exactly the feature:
+//     "the break helped."        → an assertion from one data point.  FLAGGED.
+//     "the break maybe helped."  → a hypothesis, announced as one.    NOT flagged.
+// This sits INSIDE §A6.2, not against it. Spec v0.2 §A6.2, verbatim: "Confident *pattern* claims
+// (breaks help/hurt, best time of day) are permitted only at weekly+ where there's enough data."
+// Hedging removes the confidence; the ban is on the CERTAINTY, not the subject.
+// → docs/archive/productivity-email-build.md#claims-hedge
 
 export interface CausalClaim {
   /** The sentence, trimmed. */
@@ -83,12 +52,9 @@ function sentences(markdown: string): string[] {
 }
 
 /**
- * Words that mark a claim as a GUESS. Their presence is what separates a hypothesis the writer
- * can weigh from a finding they are asked to swallow.
- *
- * Scoped deliberately: these are only ever consulted for a sentence in which a causal or pattern
- * marker ALREADY fired, so an ordinary "could not find the thread" is not at risk of being read
- * as a hedge — nothing is looking at it.
+ * Words that mark a claim as a GUESS — what separates a hypothesis the writer can weigh from a
+ * finding they are asked to swallow. Consulted ONLY for a sentence in which a causal or pattern
+ * marker already fired, so an ordinary "could not find the thread" is never at risk.
  */
 const HEDGE_MARKERS: readonly RegExp[] = [
   /\bmaybe\b/i, /\bperhaps\b/i, /\bpossibly\b/i, /\bpossible\b/i, /\bprobably\b/i,
@@ -98,22 +64,18 @@ const HEDGE_MARKERS: readonly RegExp[] = [
   /\bnot sure\b/i, /\bworth (?:testing|trying|watching)\b/i, /\bone reading\b/i,
   /\barguably\b/i, /\bif anything\b/i, /\bmy sense\b/i, /\btempting to think\b/i,
   /\bwould'?ve\b/i, /\bimagine\b/i, /\bsuggests?\b/i,
-  // `may` is CASE-SENSITIVE, and that is the entire fix for a real miss (F18, 2026-07-17):
-  // /\bmay\b/i matched the MONTH, so "You always write best in the morning, as you have since
-  // May." was silently exempted by a date. The modal is lower-case in every sentence anyone
-  // writes ("may have", "may well be"); the month is always capitalised. A sentence-initial modal
-  // "May the..." is archaic and does not occur in a work report.
+  // ⚠ `may` IS CASE-SENSITIVE and that is the whole fix (F18): `/\bmay\b/i` matched the MONTH, so
+  // "…as you have since May." was exempted by a date. The modal is lower-case in every sentence
+  // anyone writes; the month is always capitalised.
   /\bmay\b/,
 ]
 
 /**
  * Split a sentence into clauses on PUNCTUATION ONLY.
  *
- * Punctuation only, deliberately: the obvious extension is to split on connectives too ("which",
- * "and", "but"), and it would BREAK THE MARKERS — "which is why" is itself a causal marker, and
- * "because" is the commonest one. Splitting on either destroys the very thing being looked for
- * and the scan would go quiet on its own controls. Punctuation cannot collide with a marker, so
- * it is the granularity that is safe by construction.
+ * ⚠ NEVER SPLIT ON CONNECTIVES. "which is why" is itself a causal marker and "because" is the
+ * commonest one, so splitting there destroys the very thing being looked for and the scan goes
+ * quiet on its own controls. Punctuation cannot collide with a marker.
  */
 function clauses(sentence: string): string[] {
   return sentence.split(/[,;:—–]|\s+-\s+/).map(c => c.trim()).filter(Boolean)
@@ -122,30 +84,20 @@ function clauses(sentence: string): string[] {
 /**
  * Is this CLAUSE marked as a guess?
  *
- * ─── F18: THE HEDGE MUST GOVERN THE CLAIM IT EXEMPTS (2026-07-17) ────────────────────────────
- * This used to be a substring match over the WHOLE SENTENCE, which is a category error: the
- * argument is about a claim's MODALITY, and modality belongs to a clause, not to a string. So a
- * hedge in a *different clause* exempted a perfectly confident claim next to it. The two misses
- * that made the case, both of which an Opus narrative produces constantly:
- *
- *   "Your peak hours are nine to eleven, which suggests protecting them."
- *      → the claim is asserted; "suggests" hedges the SUGGESTION, not the claim. Now flagged.
- *   "You always write best in the morning, as you have since May."
- *      → "always" is asserted; the exemption came from a MONTH NAME. Now flagged (twice over:
- *        the clause split separates it, and `may` is case-sensitive).
- *
- * Exported for tests; `findCausalClaims` consults it per clause, never per sentence.
+ * ⚠ THE HEDGE MUST GOVERN THE CLAUSE IT EXEMPTS (F18) — modality belongs to a clause, not to a
+ * string. A whole-sentence match exempted confident claims sitting beside a hedge ("your peak
+ * hours are nine to eleven, which suggests protecting them"). Exported for tests;
+ * `findCausalClaims` consults it per clause, never per sentence.
+ * → docs/archive/productivity-email-build.md#claims-hedge-clause
  */
 export function isHedged(clause: string): boolean {
   return HEDGE_MARKERS.some(re => re.test(clause))
 }
 
 /**
- * UNHEDGED cause/pattern claims in a narrative. Meaningful only on the DAILY window — at weekly+
- * these claims are legitimate (§A6.2) and the caller must not run this.
- *
- * A sentence that carries a causal/pattern marker AND a hedge is a hypothesis: Peter asked for
- * those explicitly, and flagging them would be flagging the feature.
+ * UNHEDGED cause/pattern claims in a narrative. ⚠ DAILY ONLY — at weekly+ these claims are
+ * legitimate (§A6.2) and the caller must not run this. A marker plus a hedge is a hypothesis, and
+ * Peter asked for those explicitly: flagging them would be flagging the feature.
  */
 export function findCausalClaims(markdown: string): CausalClaim[] {
   const out: CausalClaim[] = []
@@ -184,12 +136,10 @@ export function numbersIn(text: string): string[] {
 }
 
 /**
- * Numbers in the narrative that do not appear anywhere in the payload Inkwave sent. A model that
- * totals, averages or rounds a measured number produces one of these — which is exactly the
- * corruption §A6.4 exists to prevent, made visible.
- *
- * `payload` should be the compiled payload text (the data section included): anything Inkwave
- * showed the model is fair to quote back.
+ * Numbers in the narrative that appear nowhere in the payload Inkwave sent — a model that totals,
+ * averages or rounds a measured number produces one, which is the §A6.4 corruption made visible.
+ * `payload` is the compiled payload TEXT including its data section: anything Inkwave showed the
+ * model is fair to quote back.
  */
 export function findUnverifiedNumbers(narrative: string, payload: string): string[] {
   const allowed = new Set(numbersIn(payload))
@@ -207,37 +157,19 @@ export function findUnverifiedNumbers(narrative: string, payload: string): strin
 }
 
 
-// ─── §A5 — verdicts on the PERSON (the re-derived guilt list, 2026-07-17) ───────────────────
-//
-// THE OLD LIST WAS A LIST OF WORDS, AND THAT WAS THE MISTAKE. The kind/non-shaming prompt banned
-// "only", "just", "failed to", "should have", "fell short", "wasted", "unproductive". When §A5
-// reversed (honest first, funny second, kind third) that list had to be re-derived rather than
-// deleted — because most of those words are exactly right when the writer set a goal and missed
-// it. "You said Friday. You've opened it twice. You failed to touch it since Tuesday" is the
-// FEATURE now. Banning "failed to" would ban the thing Peter asked for.
-//
-// SO THE RULE IS NOT ABOUT VOCABULARY, IT IS ABOUT THE SUBJECT AND THE STANDARD:
-//   • Measuring the writer against a goal THEY SET  → accountability. Any word goes.
-//   • Measuring them against a standard WE invented → guilt. Banned regardless of politeness.
-//   • A verdict on the PERSON rather than the work  → banned, and no goal licenses it.
-// The first two are enforced STRUCTURALLY: goals travel only on their own tick, so a model with
-// no goal is told it has no standard (prompt.ts) and has nothing to quote. That is not a word
-// problem and no matcher could see it.
-//
-// What a matcher CAN see is the third: words that can only ever be a verdict on a human being.
-// That list is short, and it is short on purpose — every entry had to survive the question "is
-// there a sentence where a comedian could use this ABOUT THE WEEK rather than about the writer?"
-// "Lazy" fails that test (a Tuesday cannot be lazy; only a person can). "Wasted" passes it — "you
-// wasted three sessions circling the same paragraph" is about the sessions and is fair game — so
-// it is NOT on the list, though it was on the old one.
-//
-// HONEST LIMITS, and they are wide:
-//   • One-directional. Clean means "nothing detected", never "this reply is honest".
-//   • It cannot see an imposed STANDARD, which is the commoner and more serious failure ("200
-//     words is a thin day" contains no banned word at all). The structural gate is what covers
-//     that; this only catches the crude case.
-//   • Quoted spans are skipped — the narrative may legitimately quote the writer calling THEMSELF
-//     lazy, and flagging the writer's own words back at them would be absurd.
+// ─── §A5 — verdicts on the PERSON (the re-derived guilt list) ────────────────
+// ⚠ THE BAN IS ON THE SUBJECT AND THE STANDARD, NEVER ON VOCABULARY. The old kind/non-shaming word
+// list would now ban the feature — "you failed to touch it since Tuesday" is exactly what a goal
+// the writer SET licenses.
+//   · measured against a goal THEY SET     → accountability. Any word goes.
+//   · measured against a standard WE chose → guilt. Banned however politely put.
+//   · a verdict on the PERSON, not the work → banned, and no goal licenses it.
+// The first two are STRUCTURAL (goals travel only on their own tick, so a model sent none is told
+// it has no standard) — no matcher could see them. Only the third is matchable, which is why
+// PERSON_MARKERS stays short: every entry must FAIL "could a comedian say this about the WEEK?".
+// ⚠ ONE-DIRECTIONAL, and blind to an imposed standard ("200 words is a thin day" carries no banned
+// word). Quoted spans are skipped — the writer may be quoted calling themself lazy.
+// → docs/archive/productivity-email-build.md#claims-person-verdicts
 
 /** A sentence that appears to pass a verdict on the writer rather than on their week. */
 export interface PersonVerdict {
