@@ -1162,7 +1162,7 @@
     min-height: 0;
     background: var(--iw-application-bg, #ffffff);
     color: var(--iw-application-fg, #292524);
-    border: 1px solid var(--iw-application-edge, #cbb8f2);
+    border: 0;
     border-radius: 16px;
     box-shadow: 0 8px 32px var(--iw-application-shadow, rgba(80, 50, 10, 0.18));
   }
@@ -2304,7 +2304,6 @@
 :root[data-theme="night"] .iw-application-surface {
   background-color: var(--iw-application-bg) !important;
   color: var(--iw-application-fg) !important;
-  border-color: var(--iw-application-edge) !important;
 }
 
 /* ── SNAPSHOT VIEW (/snapshot) — ONE palette for the whole route ─────────────────────────────────

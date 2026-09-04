@@ -46,6 +46,8 @@ describe('ApplicationSurface', () => {
   it('ends after its content instead of manufacturing a blank page-height tail', () => {
     const block = css.match(/\.iw-application-surface\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
     expect(block).toContain('min-height: 0')
+    expect(block).toContain('border: 0')
+    expect(block).not.toContain('border: 1px solid')
     expect(block).not.toContain('--iw-page-height')
     expect(block).not.toContain('100dvh')
   })
