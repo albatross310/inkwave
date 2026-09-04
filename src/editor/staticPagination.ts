@@ -1,31 +1,15 @@
-// CANONICAL GAPPED PAGES FOR STATIC CONTENT — the snapshot view's document pane.
+// CANONICAL GAPPED PAGES FOR STATIC CONTENT — the snapshot view's document pane. It re-implements
+// the editor's PaginationExtension pipeline against plain DOM (FullDiffView / DocView have no
+// ProseMirror): measure in the SAME forced canonical context, compute breaks with the SAME page box
+// (pageModel) and the SAME overflow rules, insert the SAME gap elements (pageGap.ts). Ungapped mode
+// inserts zero-height MARKERS at the same positions; the CSS classes are the editor's throughout.
 //
-// The live editor's PaginationExtension measures line layout inside a forced canonical context
-// and places gap widgets at page-break DOCUMENT POSITIONS. The snapshot doc pane renders STATIC
-// HTML (FullDiffView / DocView — no ProseMirror), so this module re-implements the same pipeline
-// against plain DOM:
-//   1. measure line rects in the SAME forced canonical context (canonicalMeasure: mm paper width,
-//      desktop side margins, zoom 1, base font — plus the pane's own CSS-`zoom` wrapper forced
-//      to 1), inside one synchronous no-paint window;
-//   2. compute breaks with the SAME page box (pageModel) and the SAME overflow rules as
-//      PaginationExtension.compute() — INCLUDING its retirement of the widow/orphan snap. That
-//      sentence used to say "orphan-snap rules" and this file still snapped after the editor
-//      stopped, which is precisely how a claim of sameness outlives the sameness. It is now
-//      MEASURED rather than asserted: halvesbisect.prove.mjs reads the model, the LIVE EDITOR's own
-//      gap widgets and this pane from ONE document and requires all three to agree.
-//   3. insert the SAME gap elements (pageGap.ts) at the break points — recorded as text-node
-//      CHARACTER OFFSETS, the static analog of a ProseMirror document position, so breaks ride
-//      any live reflow (diff zoom, phone width, editor-zoom var) exactly like the editor's
-//      widgets ride theirs.
-// The sheet panels + aqua bands reuse the editor's CSS classes (.inkwave-gapped /
-// .inkwave-sheets / .inkwave-sheet / .inkwave-page-gap-band), so day/night theming and the phone
-// band styling apply unchanged. Ungapped mode inserts the zero-height break MARKERS instead; the
-// pane's PageGuides (Scroll.tsx) pick them up off 'inkwave:pagination-measured' and draw the
-// dashed rules — full parity with the editor's two page modes.
-//
-// Break specs are cached per (snapshot, page settings, font state) as {block, charOffset} — so
-// scrubbing back through visited snapshots re-inserts gaps with NO canonical re-measure (zero
-// forced hypothetical reflows; just the insertion itself).
+// ⚠ IT MIRRORS THE EDITOR, so it must never carry a rule the editor retired — and a claim of
+// sameness outlives the sameness (R2). MEASURED, not asserted: halvesbisect.prove.mjs reads the
+// model, the LIVE editor's gap widgets and this pane from ONE document and requires all three agree.
+// ⚠ Breaks are recorded as text-node CHARACTER OFFSETS — the static analog of a PM document
+// position — so they ride any live reflow exactly as the editor's widgets ride theirs.
+// → docs/archive/pagination-rounds.md#static-pane
 
 import { probePerf } from './perflog'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getColumns, MARGIN_BOTTOM } from './pageSettings'
@@ -96,69 +80,35 @@ function collectBlocks(root: HTMLElement): Block[] {
 // resolution; top (root-relative) drives the page math.
 interface StaticLine { top: number; absTop: number; blockIdx: number }
 
-// ─── A CONTAINER'S ELEMENT CHILDREN ARE NOT LINES (2026-07-17 — the pane's copy of the fix) ─────
-//
-// `range.selectNodeContents(el).getClientRects()` returns, per CSSOM-View, the border box of every
-// element the range SELECTS whose parent it does not — i.e. the range container's own element
-// children — and not only text-line rects. For a `<p>` that is harmless: its element children are
-// inline mark spans whose per-line fragment boxes coincide with the text rects and are eaten by the
-// 3px dedup. For a `<ul>` or a `<blockquote>` it is not.
-//
-// MEASURED in the REAL /snapshot pane (scripts/textrender-probe/panerect.mjs, DocView's own DOM,
-// 8-chapter fixture) against the DOM's own TEXT-NODE rects — a text node has no border box, so its
-// rects are lines by construction and cannot contain a container's box:
-//   529 shipped lines / 529 true lines — the COUNT TELESCOPES, which is why every count- and
-//   height-based check in this file passed — and **24 of them sit exactly 3.000px too high**:
-//   UL 8 · OL 8 · BLOCKQUOTE 8. The first `<ul>`'s raw rects, verbatim:
-//     relTop 0     h 58.219   ← the `<li>`'s BORDER BOX (a 2-line item), admitted as a line
-//     relTop 3     h 23       ← the item's OWN first text rect — DELETED by `top - lastTop <= 3`
-//     relTop 32.109 h 23      ← the item's second line
-//     relTop 62.718 h 87.328  ← a 3-line item's box: over the 80px cut, dropped — right by luck
-// The 3.000px is the half-leading: (lineHeight 29.109 − text 23) / 2 = 3.05. It is not a list
-// constant, which is why `<blockquote>`'s `<p>` box does the identical thing.
-//
-// THE 80px CUT WAS THE ONLY THING STANDING HERE, AND IT IS A COINCIDENCE, NOT A RULE. It admits a
-// container box of ≤80px and drops one over it, so whether this pane paginates correctly depended
-// on how many lines an item happened to wrap to: a 2-line `<li>` (58.219px) broke it, a 3-line one
-// (87.328px) did not. The old comment on that line — "skip tall boxes (nested element border-boxes,
-// not text lines)" — NAMED this exact class while the constant let the short half of it through.
-//
-// THE FIX, and why it is not a copy of the editor's. PaginationExtension asks ProseMirror
-// (`child.isTextblock`) what a textblock is. This pane HAS NO PM TREE — DocView and FullDiffView
-// render plain DOM — so it asks the other authority that is actually present: the LAYOUT ENGINE,
-// via `getComputedStyle().display`. Never a tag name and never a CSS class: either would silently
-// miss the next container the schema grows, which is the whole reason this bug reached three copies.
-// An element with no block-level element child IS a textblock and takes the byte-identical single
-// `selectNodeContents` call it always did — which is what keeps every prose document's breaks
-// bit-for-bit unchanged (breaks.prove.mjs: [2403,4856,7205,9476,…], identical).
+// ─── A CONTAINER'S ELEMENT CHILDREN ARE NOT LINES (the pane's copy of the fix) ─────────────────
+// ⚠ A RECT MAY ONLY BE ADMITTED IF IT *IS* A LINE. `selectNodeContents(el).getClientRects()` also
+// returns the border box of every element the range selects — a `<li>`, a blockquote's `<p>` — and
+// those are CONTAINERS of lines. So rects are collected per TEXTBLOCK.
+// ⚠ THIS PANE HAS NO PM TREE, so it asks the authority that IS present — the LAYOUT ENGINE, via
+// `getComputedStyle().display`. Never a tag name and never a CSS class, either of which silently
+// misses the next container the schema grows (R9). The editor asks ProseMirror; one rule, two
+// authorities. An element with no block-level element child takes the byte-identical old path.
+// → docs/archive/pagination-rounds.md#container-rects
 
 // Inline-level per the layout engine's own answer. `contents` and `none` generate no box of their
 // own, so they are not containers whose box could be mistaken for a line either.
 const INLINE_DISPLAYS = new Set(['inline', 'inline-block', 'inline-flex', 'inline-grid', 'inline-table', 'contents', 'none', 'ruby', 'ruby-text', 'ruby-base'])
-// An EMPTY computed display means the element has no resolved box at all (an unrendered subtree —
-// and jsdom, whose UA stylesheet sets no `display` on `<em>`/`<span>`/`<code>`). Treat it as
-// inline: something with no box cannot be a container whose box is mistaken for a line, and the
-// only alternative — descending into it — would fabricate structure that the engine says is absent.
-// This is also what lets the jsdom gate below exercise the REAL predicate: without it, a test that
-// passed there would be asserting a recursion production never performs.
+// ⚠ An EMPTY computed display (an unrendered subtree; jsdom sets none on `<em>`/`<span>`/`<code>`)
+// counts as INLINE: something with no box cannot be a container mistaken for a line, and descending
+// into it would fabricate structure the engine says is absent (R8). It is also what lets the jsdom
+// gate exercise the REAL predicate rather than a production it never performs.
 const isBlockLevel = (el: Element): boolean => {
   const d = getComputedStyle(el).display
   return !!d && !INLINE_DISPLAYS.has(d)
 }
 
 /** THE LIVE KNOWN-NEGATIVE (the `__iwOpenGuard` / `__iwTabDocRule` / `__iwReadGuard` contract).
- *  `window.__iwStaticLineRule = 'range'` restores the PRE-FIX rule verbatim — ONE
- *  `selectNodeContents` over the whole block, container boxes and all.
+ *  `window.__iwStaticLineRule = 'range'` restores the PRE-FIX rule verbatim.
  *
- *  IT EXISTS BECAUSE THIS BUG IS INVISIBLE TO A RATE. The artifact is a 3.000px error on a ~29px
- *  line grid, so it moves a page break only when a boundary happens to land within 3px of the
- *  overflow cliff. MEASURED: with the bug fully restored, `halvesbisect` on a 6k-word / 25-break
- *  lists fixture still prints "OFFSETS IDENTICAL" — not one break moves. A probe that waited for a
- *  break to move would therefore certify this bug as fixed while it sat there, which is exactly
- *  what the pre-existing `+ lists` row did for as long as it existed.
- *  So `panerect.mjs` measures the ARTIFACT instead — every line's top, against the DOM's own
- *  text-node rects — and this seam is what lets it prove, against the REAL production path and in
- *  ONE build, that it can still SEE the bug. A negative that cannot fire is not a negative. */
+ *  ⚠ IT EXISTS BECAUSE THIS BUG IS INVISIBLE TO A RATE: with the bug fully restored, halvesbisect
+ *  still prints "OFFSETS IDENTICAL" on a 25-break lists fixture, so `panerect.mjs` must measure the
+ *  ARTIFACT (every line's top) rather than wait for a break to move. A negative that cannot fire is
+ *  not a negative (R3, R6). → docs/archive/pagination-rounds.md#container-rects */
 const preFixRangeRule = (): boolean =>
   typeof window !== 'undefined' &&
   (window as unknown as { __iwStaticLineRule?: string }).__iwStaticLineRule === 'range'
@@ -183,19 +133,17 @@ export function staticLineRects(el: HTMLElement, out: DOMRect[] = []): DOMRect[]
     const rects = Array.from(r.getClientRects())
     if (rects.length) out.push(...rects)
     else {
-      // An EMPTY textblock (a blank list item, a blank paragraph inside a blockquote) has no text
-      // rect but still occupies a line. Without this it would vanish from the line list and every
-      // break below it would shift — a missing block is not a smaller block.
+      // ⚠ An EMPTY textblock has no text rect but still occupies a LINE — without this it vanishes
+      // and every break below shifts. A missing block is not a smaller block (R1).
       const b = el.getBoundingClientRect()
       if (b.height >= 1) out.push(b)
     }
     return out
   }
   // A CONTAINER. Descend into its block-level children; take any run of inline/text children
-  // between them as its own range. The run case cannot arise in DocView (which wraps every block
-  // node in an element) — but "it cannot arise today" is exactly the reasoning that let this rule
-  // rot in three copies, and an anonymous block box has no element to ask, so its lines would
-  // simply be LOST rather than mismeasured.
+  // between them as its own range. That run case cannot arise in DocView today — but "it cannot
+  // arise today" is the reasoning that let this rule rot in three copies, and an anonymous block
+  // box has no element to ask, so its lines would be LOST rather than mismeasured (R8).
   let run: Node[] = []
   const flushRun = () => {
     if (!run.length) return
@@ -228,10 +176,8 @@ function collectStaticLines(root: HTMLElement, blocks: Block[]): StaticLine[] {
         continue
       }
       for (const r of rects) {
-        // `isLineRect` — the EDITOR's own predicate (lineRects.ts), not a copy of it. The tall-box
-        // cut stays and still means what it always did; it simply no longer has to stand in for a
-        // container rule it was never able to express (it admitted a 58.219px `<li>` box and
-        // dropped an 87.328px one — the same bug, decided by how many lines an item wrapped to).
+        // ⚠ `isLineRect` is the EDITOR's own predicate (lineRects.ts), never a copy (R2). The
+        // tall-box cut stays, but it no longer stands in for a container rule it could not express.
         if (!isLineRect(r)) continue
         all.push({ absTop: r.top, blockIdx: bi })
       }
@@ -245,23 +191,14 @@ function collectStaticLines(root: HTMLElement, blocks: Block[]): StaticLine[] {
     lastTop = l.absTop
     lines.push({ top: l.absTop - rootTop, absTop: l.absTop, blockIdx: l.blockIdx })
   }
-  // PROBE SEAM (the `window.__iwPerf` contract in perflog.ts, one step up): a harness assigns
-  // `window.__iwStaticLinesHook = (root, lines) => {…}` and this hands it the line list this pane
-  // ACTUALLY measured. A single property check otherwise, zero cost.
-  //
-  // WHY THE LINE LIST AND NOT THE BREAKS. The breaks are already in the DOM as `.inkwave-page-gap`
-  // widgets and any probe can walk them — that is what halvesbisect does. But a 3.000px error in
-  // this list only reaches those widgets when a boundary lands within 3px of the overflow cliff, so
-  // reading the gaps measures a coincidence rather than the rule. MEASURED: with the pre-fix rule
-  // restored, halvesbisect moves NOT ONE of 25 breaks on a lists fixture.
-  //
-  // WHY A CALLBACK AND NOT AN ARRAY. It is invoked HERE, still inside the FORCED CANONICAL WINDOW
-  // (paper width, side margins, zoom 1 — see the caller). These tops mean nothing in the pane's
-  // live layout, which wraps at a different width and may carry a fit-capped CSS zoom: comparing
-  // canonical tops against live rects is trap #8, "the verdict is unreadable off-canonical". A
-  // buffer would hand the probe numbers it could only read after the context was restored. A hook
-  // lets the probe's own comparison run in the coordinate system the numbers belong to — and keeps
-  // the probe's logic in the probe.
+  // PROBE SEAM (the `window.__iwPerf` contract in perflog.ts): a harness assigns
+  // `window.__iwStaticLinesHook` and this hands it the line list the pane ACTUALLY measured. A
+  // single property check otherwise, zero cost.
+  // ⚠ IT HANDS OVER THE LINE LIST, NOT THE BREAKS — a 3px error reaches a gap widget only when a
+  // boundary lands within 3px of the overflow cliff, so reading the gaps measures a coincidence (R6).
+  // ⚠ AND IT IS A CALLBACK, invoked HERE, INSIDE the forced canonical window: these tops mean
+  // nothing in the pane's live layout, so a buffer would hand the probe unreadable numbers (R5).
+  // → docs/archive/pagination-rounds.md#static-pane
   if (typeof window !== 'undefined') {
     const hook = (window as unknown as { __iwStaticLinesHook?: (r: HTMLElement, l: StaticLine[]) => void }).__iwStaticLinesHook
     // A probe must never be able to break the pane it measures.
@@ -273,11 +210,9 @@ function collectStaticLines(root: HTMLElement, blocks: Block[]): StaticLine[] {
 // ── Break computation (mirrors PaginationExtension.compute's overflow rules; NO orphan snap) ───
 interface Pick { lineIdx: number; snap: boolean; brokeUsed: number }
 
-// EXPORTED AS A TEST SEAM (2026-07-17). This function is PURE — lines in, picks out, no DOM — so
-// the rule it carries can be pinned in the GATE in milliseconds instead of only by a hand-run
-// browser probe. That distinction is not academic: the orphan snap below survived here for a week
-// after the editor retired it, with every suite green, because its only possible witness was a
-// browser comparison nobody ran. A proof that ran once is not a guard.
+// EXPORTED AS A TEST SEAM. This function is PURE — lines in, picks out, no DOM — so the rule it
+// carries is pinned in the GATE in milliseconds rather than only by a hand-run browser probe. A
+// proof that ran once is not a guard (R3). → docs/archive/pagination-rounds.md#three-copies
 export function _computeBreakPicksForTest(lines: Array<{ top: number; absTop: number; blockIdx: number }>, textArea: number): Pick[] {
   return computeBreakPicks(lines as StaticLine[], textArea)
 }
@@ -285,33 +220,19 @@ export function _computeBreakPicksForTest(lines: Array<{ top: number; absTop: nu
 function computeBreakPicks(lines: StaticLine[], textArea: number): Pick[] {
   const picks: Pick[] = []
   let used = 0
-  // `blockIdx` is all the block tracking this rule needs now: `blockStartUsed`/`blockFirstLine`
-  // existed ONLY to feed the orphan snap, and typecheck flagged them the moment it went — which is
-  // its own small confirmation that the snap was the only thing reading them.
+  // `blockIdx` is all the block tracking this rule needs now — the rest existed only to feed the
+  // retired orphan snap.
   let blockIdx = -2 // -2 forces the first line to (re)resolve its block (mirrors blockStart=-1)
   for (let i = 0; i < lines.length; i++) {
     const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
     if (lines[i].blockIdx !== blockIdx || blockIdx === -2) blockIdx = lines[i].blockIdx
     if (i > 0 && used + lh > textArea) {
-      // THE ORPHAN SNAP IS GONE — because it is gone in the editor (2026-07-17).
-      //
-      // This is the THIRD copy of the break rule (PaginationExtension.computeBreaks,
-      // arithmeticLayout.paginate, and here). When production retired the widow/orphan snap
-      // (`const snap = false`, PaginationExtension ~457: "a straddling paragraph is broken at the
-      // overflow line wherever it falls"), `paginate()`'s default was corrected and THIS COPY WAS
-      // MISSED — while the comment above it claimed "identical policy (and 0.22 constant) to the
-      // editor" and this file's header claimed "the SAME overflow / orphan-snap rules as
-      // PaginationExtension.compute()". Both were false, and the claim is exactly why nobody looked.
-      //
-      // MEASURED (halvesbisect.prove.mjs, three corners from ONE document — the canvas model, the
-      // LIVE EDITOR's own gap widgets, and this pane): the pane was +2 pages on a 25-page document,
-      // on PLAIN PROSE — no lists, no citations, no refList. canvas === EDITOR on every shape, so
-      // the pane was the outlier. Snapping pushes a small orphan onto the next page, which the
-      // editor stopped doing, so /snapshot has shown page numbers the editor disagrees with since
-      // staticPagination was written (2026-07-10) — the minimap's and the diff panel's included.
-      //
-      // Canonical pagination's whole claim is "the same text on page N at every zoom, on phone, and
-      // in print". A pane that mirrors the editor may not carry a rule the editor retired.
+      // ⚠ THE ORPHAN SNAP IS GONE, BECAUSE IT IS GONE IN THE EDITOR. This is the THIRD copy of the
+      // break rule (PaginationExtension.computeBreaks · arithmeticLayout.paginate · here);
+      // production retired the snap and THIS COPY WAS MISSED, under a comment claiming the rules
+      // were identical — which is exactly why nobody looked (R2). Change one, check all three, and
+      // compare break POSITIONS: equal page counts hide divergent offsets.
+      // → docs/archive/pagination-rounds.md#three-copies
       const snap = false
       picks.push({ lineIdx: i, snap, brokeUsed: used })
       used = 0
@@ -568,14 +489,11 @@ export function paginateStaticDoc(opts: {
       tops.push((r.top - sr.top) / z)
       heights.push(r.height / z)
     })
-    // CONTENT height (panels + full-final-page minHeight excluded) from the SAME clean layout as
-    // the band rects: content bottom = the editor root's rect bottom + the sheet's own bottom
-    // padding. The old display:none + minHeight-clear scrollHeight read forced a SECOND full
-    // re-layout of the pane per paint (and a third when restored + re-read by computePages) —
-    // roughly half of every band repaint's cost on a thesis-sized doc (probed 2026-07-11). The
-    // panels are absolutely positioned and minHeight never moves the ROOT, so this equals the
-    // old hidden-layer scrollHeight by construction — the "never retracts" fixpoint and the
-    // minHeight ratchet both only ever inflated scrollHeight, never the root's bottom.
+    // ⚠ DERIVE THE CONTENT EXTENT FROM THE IN-FLOW CHILDREN'S RECTS, IN THE SAME LAYOUT PASS as the
+    // band reads (content bottom = the editor root's rect bottom + the sheet's bottom padding). The
+    // old `display:none` + minHeight-clear `scrollHeight` read forced a SECOND full re-layout per
+    // paint — roughly half of every band repaint on a thesis-sized doc.
+    // → docs/archive/pagination-rounds.md#band-geometry
     const rr = root.getBoundingClientRect()
     const pb = parseFloat(getComputedStyle(sheet).paddingBottom) || 0
     const total = (rr.bottom - sr.top) / z + pb
