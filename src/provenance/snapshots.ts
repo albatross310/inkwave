@@ -22,18 +22,11 @@ async function getRoot(): Promise<FileSystemDirectoryHandle> {
 }
 
 // ── Gzip (CompressionStream, available in all target browsers) ────────────────
-// Snapshots JSON is highly repetitive (same contentJson structure, receipt fields)
-// and compresses ~75%, keeping storage manageable as the snapshot list grows.
-// Capability floor: CompressionStream is iOS/Safari 16.4+. Older WebKit can't write the gzip
-// archive, so createSnapshotIfChanged degrades to a no-op (warn once) instead of throwing on the
-// first resolved kick — writing keeps working, provenance is disabled. entry.client shows a banner.
-//
-// THE COMPRESS RUNS OFF-THREAD (gzipJsonOffThread, workers/parseClient.ts). Every snapshot embeds
-// the whole document body, so the archive is N × the whole thesis and JSON.stringify + gzip of it
-// is O(N×doc) — it used to run on the main thread inside queueSnapshotsWrite, stalling keystrokes
-// ~1s per checkpoint on a large doc (Peter's report). The READ was already off-thread
-// (gunzipJsonOffThread); this is the missing sibling. Falls back inline where there is no Worker
-// (node/vitest/prerender). "We should be able to make snapshots while continuing to type."
+// ⚠ NO CompressionStream (iOS/Safari < 16.4) ⇒ createSnapshotIfChanged DEGRADES to a no-op and warns
+// once, never throws: writing keeps working, provenance is disabled, entry.client shows a banner.
+// ⚠ THE COMPRESS RUNS OFF-THREAD — the archive is N × the whole thesis, so an on-thread
+// stringify+gzip stalled keystrokes ~1s per checkpoint. "We should be able to make snapshots while
+// continuing to type." → docs/archive/storage-and-sync.md#snap-gzip
 const hasCompressionStream = typeof CompressionStream !== 'undefined'
 let warnedNoCompression = false
 
@@ -43,45 +36,24 @@ function isGzip(buf: ArrayBuffer): boolean {
   return v[0] === 0x1f && v[1] === 0x8b
 }
 
-// THE ARCHIVE READ. `[]` MEANS "THIS DOCUMENT HAS NO HISTORY" AND MAY MEAN NOTHING ELSE.
+// ⚠ THE ARCHIVE READ. `[]` MEANS "THIS DOCUMENT HAS NO HISTORY" AND MAY MEAN NOTHING ELSE.
 //
-// This function used to end `catch { return [] }`, which is the 2026-07-15 shape (`catch { return
-// null }` erasing the difference between "there is nothing there" and "I could not find out")
-// pointed at the provenance spine itself. Every consumer below reads-then-writes the WHOLE array,
-// so a transient OPFS fault, a corrupt gzip or a worker failure made this happen:
-//
-//     const snaps = await readSnapshotsFile(doc.id)          // ← [] on ANY failure
-//     await writeSnapshotsFile(doc.id, [...snaps, snapshot]) // ← ONE snapshot over the archive
-//
-// Every OTS proof and signed receipt for the document — Peter's evidence that he wrote his thesis
-// himself — replaced by a single snapshot. No race: one failed read did it. `clearAllSnapshotSummaries`
-// was a second vector on the same lie ([] → writes [] over the archive).
-//
-// So the boundary is `storage/notFound.ts`, the same predicate the document body already hangs off:
-// a NotFoundError is the ONE honest `[]` (a new document has no snapshots.json and must still get a
-// blank archive, not an error screen); everything else THROWS and the write paths refuse.
-//
-// A NON-ARRAY parse is a failure, NOT an emptiness, for exactly the reason a corrupt JSON body is:
-// the bytes are still on disk and may be recoverable, and answering `[]` would invite the next
-// snapshot to write over them. Same for a gzip that won't inflate.
+// A NotFoundError is the ONE honest `[]` (a new document has no snapshots.json and must still get a
+// blank archive, not an error screen); every other fault — a transient OPFS error, a gzip that will
+// not inflate, a non-array parse — THROWS, and the write paths refuse. Both catch arms below are
+// load-bearing: every consumer reads-then-writes the WHOLE array, so one `[]` from a failed read
+// puts a single snapshot over every OTS proof and signed receipt the document has.
+// → docs/archive/storage-and-sync.md#snap-archive-read
 //
 async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
   const path = `documents/${documentId}/snapshots.json`
   // THE LIVE KNOWN-NEGATIVE — `window.__iwArchiveGuard = 'off'` restores the `catch { return [] }`
-  // collapse above, so a browser probe can destroy the archive in the SAME BUILD it then proves
-  // fixed. The precedents are `__iwReadGuard` (opfs.ts) and `__iwOpenGuard` (openDoc.ts) and the
-  // reason is theirs: "a probe that only ever runs against the fixed build cannot tell 'the guard
-  // works' from 'the probe cannot see the bug'".
-  //
-  // THE PREVIOUS LANE DELIBERATELY LEFT THIS OUT, and was right to: it had no probe, and a live
-  // off-switch for the provenance archive with no consumer is only a way to turn provenance off.
-  // It arrives now WITH its consumer — `scripts/archguard-probe/repro.mjs`, which REQUIRES this
-  // cell to truncate a real 4-snapshot archive in real OPFS before it will read the fixed verdict
-  // (it exits 2 if the control fails to reproduce). Do not keep this seam if that probe goes: the
-  // rule the previous lane wrote still binds, in both directions.
-  //
-  // It is checked FIRST, before `isNotFound`, exactly like opfs.ts's — the legacy shape had no
-  // NotFoundError branch at all, so honouring one here would make the control a partial fiction.
+  // collapse, so a probe can destroy the archive in the SAME BUILD it then proves fixed. ⚠ It is
+  // checked FIRST, before `isNotFound`: the legacy shape had no NotFoundError branch, so honouring
+  // one here would make the control a partial fiction. ⚠ DO NOT KEEP THIS SEAM if its consumer
+  // (`scripts/archguard-probe/repro.mjs`) goes — a live off-switch for the provenance archive with
+  // no probe is only a way to turn provenance off.
+  // → docs/archive/storage-and-sync.md#snap-known-negative
   const legacy = typeof window !== 'undefined'
     && (window as unknown as { __iwArchiveGuard?: string }).__iwArchiveGuard === 'off'
   let buf: ArrayBuffer
@@ -100,8 +72,7 @@ async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
   }
   try {
     // Gzip archives (the normal case) gunzip + JSON.parse OFF-THREAD — a big archive is ~1s of
-    // unbreakable main-thread work otherwise, felt as typing/scroll freezes whenever it loads.
-    // Legacy uncompressed files fall through to a plain UTF-8 decode inline.
+    // unbreakable main-thread work otherwise. Legacy uncompressed files decode inline.
     const parsed = isGzip(buf)
       ? await gunzipJsonOffThread(buf)
       : JSON.parse(new TextDecoder().decode(buf))
@@ -117,16 +88,11 @@ async function readSnapshotsFromDisk(documentId: string): Promise<Snapshot[]> {
 }
 
 /**
- * The archive read, as an outcome a caller must branch on rather than a value it can mistake for
- * emptiness — the same shape as `DocRead` in storage/opfs.ts, and deliberately with NO `[]` member
- * on the failure arm. The whole bug was that `[]` answered two different questions.
- *
- * WHY THERE IS NO 'absent' ARM, when DocRead has one. For a DOCUMENT, absent is a real third answer:
- * it is what makes `newDocument()` legal, so it must stay distinct from `found`. For an ARCHIVE the
- * two collapse — "no snapshots.json" and "a snapshots.json holding []" mean the identical thing to
- * every caller ("this document has no history"), and both are safe to append to. Splitting them
- * would buy nothing and cost a dead branch at every call site, which is its own kind of rot. The
- * distinction that DOES matter is the one this union keeps: established emptiness vs failed read.
+ * The archive read as an OUTCOME to branch on — same shape as `DocRead`, and with NO `[]` member on
+ * the failure arm, because `[]` answering two different questions was the whole bug. The one
+ * distinction it keeps is established emptiness vs failed read; there is no 'absent' arm because for
+ * an ARCHIVE (unlike a document) "no file" and "a file holding []" mean the same thing to every
+ * caller. → docs/archive/storage-and-sync.md#snap-read-union
  */
 export type SnapshotRead =
   /** The archive, possibly empty — an ESTABLISHED emptiness (new document). Safe to write. */
@@ -146,24 +112,19 @@ export async function readSnapshotArchive(documentId: string): Promise<SnapshotR
 }
 
 // ── In-memory cache ─────────────────────────────────────────────────────────────
-// One parsed copy per document per session. A single doc open used to gunzip + JSON.parse the whole
-// archive up to 5 times (eager list, receipt recovery ×2, folder link, cloud resume) — 100ms–1s each
-// on a big archive. Every mutation in this app funnels through writeSnapshotsFile (and the editor
-// serialises snapshot work through one queue), so a write-through cache is safe. Reads hand out a
-// shallow COPY so a caller's in-place edits can't alias the cached array. (A second tab writing the
-// same doc's OPFS bypasses this cache — but concurrent same-doc tabs already race on the file itself;
-// the grow-only merge protects sync targets either way.)
+// One parsed copy per document per session — a single open used to gunzip + parse the whole archive
+// up to 5 times. Safe because every mutation funnels through writeSnapshotsFile; reads hand out a
+// shallow COPY so a caller's in-place edits cannot alias it.
+// → docs/archive/storage-and-sync.md#snap-cache
 const _snapCache = new Map<string, Promise<Snapshot[]>>()
 
 async function readSnapshotsFile(documentId: string): Promise<Snapshot[]> {
   let p = _snapCache.get(documentId)
   if (!p) {
     p = readSnapshotsFromDisk(documentId)
-    // A FAILED READ MUST NOT BE CACHED. When this cache held `[]` from a failed read, the lie
-    // persisted for the whole session — every later reader was told "no history" long after the
-    // transient fault had passed. Caching the REJECTION instead would be the same mistake wearing
-    // the other hat: one blip and provenance is off until reload. So evict on failure and let the
-    // next reader retry the disk; only a resolved read is worth keeping.
+    // ⚠ A FAILED READ MUST NOT BE CACHED — a cached `[]` told every later reader "no history" long
+    // after the fault passed. Caching the REJECTION is the same mistake wearing the other hat: one
+    // blip and provenance is off until reload. Evict, and let the next reader retry the disk.
     p.catch(() => { if (_snapCache.get(documentId) === p) _snapCache.delete(documentId) })
     _snapCache.set(documentId, p)
   }
@@ -178,15 +139,11 @@ export function _resetSnapCache(): void {
 }
 
 /**
- * Await every queued snapshot write to LAND. Tests only.
- *
- * The open path restores with `deferDiskWrite: true` — a fire-and-forget write on `_writeChain`
- * that outlives the call that queued it (`restoreSnapshotsFromBundle` → `void write.catch(...)`).
- * A test that swaps its in-memory OPFS root between cases (installOpfsShim) must first let those
- * writes DRAIN, or the previous case's deferred write resolves `getDirectory()` against the NEXT
- * case's fresh root and materialises a stray document in a disk that should have been clean. A
- * fixed `setTimeout` cannot bound an off-thread gzip under CPU load; this awaits the actual chain.
- * Loops because a chain can enqueue a successor while we await the first.
+ * Await every queued snapshot write to LAND. Tests only — a case that swaps its in-memory OPFS root
+ * must DRAIN the open path's deferred writes first, or the previous case's write resolves against
+ * the next case's fresh root. A fixed `setTimeout` cannot bound an off-thread gzip under load; this
+ * awaits the actual chain, and loops because a chain can enqueue a successor.
+ * → docs/archive/storage-and-sync.md#snap-drain-writes
  */
 export async function _drainSnapshotWrites(): Promise<void> {
   for (let pass = 0; pass < 5; pass++) {
@@ -198,25 +155,16 @@ export async function _drainSnapshotWrites(): Promise<void> {
 }
 
 // ── Cache-first, serialised disk writes ────────────────────────────────────────
-// The write-through cache updates SYNCHRONOUSLY (before the disk write lands) and is the in-session
-// authority; the gzip+stringify+write is chained per-document so writes can never land out of order.
-// Grow-only safety: the cache is a SUPERSET of disk *for every read that succeeded* (only intentional
-// deletes shrink it), and every write-back (cloud sync, folder mirror) reads through the cache — so if
-// a deferred disk write fails, disk merely didn't grow (never truncated) and every sync target still
-// gets the full union.
-//   THE CAVEAT IS LOAD-BEARING, and this comment used to assert the invariant flatly. It was FALSE: a
-// failed read cached `[]`, so the "superset" was a lie for the rest of the session and every sync
-// target got that lie unioned into nothing. The read now throws instead of returning `[]` and a
-// failure is never cached (see readSnapshotsFile) — which is what makes the sentence above true.
-// A comment asserting parity is a reason nobody checks parity; this one earns it or it goes.
-// The per-doc chain also means a deferred open-time restore write and a subsequent snapshot append
-// serialise: disk always converges to the latest cache state.
+// The write-through cache updates SYNCHRONOUSLY and is the in-session authority; the write is chained
+// per-document so writes can never land out of order. Grow-only holds because the cache is a SUPERSET
+// of disk FOR EVERY READ THAT SUCCEEDED — a caveat that is load-bearing, not decoration: while a
+// failed read cached `[]` the sentence was FALSE and every sync target got that lie unioned into
+// nothing. → docs/archive/storage-and-sync.md#snap-write-chain
 const _writeChain = new Map<string, Promise<void>>()
 /**
- * Byte length this tab last WROTE for a document's archive. The archive being a different size than
- * we left it is proof another tab (or window, or the open-time restore in another context) has
- * written since — the cheap trigger for the re-read below. A file's `size` comes from its metadata,
- * so this costs no gunzip and no parse in the overwhelmingly common single-tab case.
+ * Byte length this tab last WROTE for a document's archive. A different size is proof someone else
+ * has written since — the cheap trigger for the re-read below, off metadata alone, so the single-tab
+ * case pays no gunzip and no parse.
  */
 const _lastWrittenSize = new Map<string, number>()
 
@@ -243,28 +191,20 @@ function queueSnapshotsWrite(documentId: string, snaps: Snapshot[], opts: { allo
   const prev = _writeChain.get(documentId) ?? Promise.resolve()
   const next = prev.catch(() => { /* keep the chain alive after a failed predecessor */ }).then(async () => {
     let out = copy
-    // ── THE STALE-CACHE GUARD (2026-08-20) ────────────────────────────────────────────────────
-    // `_snapCache` is MODULE state, so it is per TAB, and everything above treats it as the
-    // in-session authority. Across two tabs that is false: a tab that loaded when the archive held
-    // 4 snapshots keeps `cache = 4` for its whole life, and if another tab then grows the archive to
-    // 79 this one still unions against its own stale 4 and writes that over the top. Peter lost 79
-    // snapshots to exactly this, twice, in one session — his count fell back to 4 while he worked
-    // and /snapshot then said the history "isn't on this device".
-    // `mergeSnapshots` did not catch it because it guards against a SHORT read; this read is not
-    // short, it is STALE — it succeeds and returns a confidently outdated answer. Same family as the
-    // 2026-07-15 and archiveReadFail bugs, one question further along: not "could I read it" but
-    // "is what I read still current".
-    // The check is a SIZE comparison, not a re-read: if the file is exactly the length we last wrote,
-    // no one else has touched it and the outgoing set is already a superset. Only a surprise triggers
-    // the gunzip, so the single-tab path pays one metadata read.
+    // ── ⚠ THE STALE-CACHE GUARD ───────────────────────────────────────────────────────────────
+    // `_snapCache` is MODULE state, so it is PER TAB. A tab that loaded at 4 snapshots keeps that
+    // for its whole life and will union against it even after another tab has grown the archive to
+    // 79 — which Peter lost, twice in one session. `mergeSnapshots` cannot catch it: it guards a
+    // SHORT read, and this read is not short, it is STALE. So: compare the byte SIZE against what
+    // we last wrote, and only a surprise pays the gunzip.
+    // → docs/archive/storage-and-sync.md#snap-stale-cache
     if (!opts.allowShrink) {
       const size = await archiveSizeOnDisk(documentId)
       const untouched = size !== null && size === _lastWrittenSize.get(documentId)
       if (!untouched) {
         // Someone else wrote (or we have never written this file). Union against DISK, not cache.
-        // A genuine read failure THROWS here and the write is abandoned — deliberately: losing one
-        // new snapshot is recoverable, overwriting an archive we could not read is not. That is the
-        // same rule readSnapshotsFromDisk already enforces for its own callers.
+        // ⚠ A read failure THROWS here and the write is ABANDONED, deliberately: losing one new
+        // snapshot is recoverable, overwriting an archive we could not read is not.
         const onDisk = await readSnapshotsFromDisk(documentId)
         if (onDisk.length) {
           out = mergeSnapshots(onDisk, copy) // outgoing wins id clashes ⇒ OTS/summary updates survive
@@ -272,10 +212,8 @@ function queueSnapshotsWrite(documentId: string, snaps: Snapshot[], opts: { allo
         }
       }
     }
-    // The compress (stringify + gzip of the WHOLE archive) runs OFF-THREAD — see the gzip note above.
-    // It stays INSIDE the per-doc chain, after `prev`, so the write-through cache set above remains
-    // the synchronous in-session authority and disk writes still land in order (the grow-only
-    // invariant depends on that ordering). writeOpfsFile works on iOS too (worker sync-access).
+    // The compress runs OFF-THREAD but stays INSIDE the per-doc chain, after `prev`: the grow-only
+    // invariant depends on disk writes landing in order. writeOpfsFile works on iOS (worker sync).
     const bytes = await gzipJsonOffThread(out)
     await writeOpfsFile(['documents', documentId, 'snapshots.json'], bytes)
     _lastWrittenSize.set(documentId, bytes.byteLength)
@@ -307,11 +245,10 @@ function receiptCount(s: Snapshot): number {
   return Array.isArray(r) ? r.length : 0
 }
 
-// The grow-only "read the existing file and union its snapshots" pass on write-back only needs to run
-// ONCE per target per session — enough to fold in another device's snapshots. After that the local
-// OPFS set is the superset (snapshots are append-only), so a save just grows it; re-reading and parsing
-// the (possibly 20 MB) file on EVERY save is pure lag. Callers gate on needsWritebackMerge() and call
-// markWritebackMerged() only on a successful read, so a failed read retries next time.
+// The write-back union pass runs ONCE per target per session — after it the local set is the superset,
+// and re-parsing a 20MB file on every save is pure lag. ⚠ `markWritebackMerged()` only on a SUCCESSFUL
+// read, so a failed one retries. (The ledger deliberately does NOT copy this gate.)
+// → docs/archive/storage-and-sync.md#snap-merge
 const _mergedTargets = new Set<string>()
 export const needsWritebackMerge = (targetKey: string): boolean => !_mergedTargets.has(targetKey)
 export const markWritebackMerged = (targetKey: string): void => { _mergedTargets.add(targetKey) }
@@ -319,25 +256,20 @@ export const markWritebackMerged = (targetKey: string): void => { _mergedTargets
 /**
  * All snapshots for a document, in creation order.
  *
- * ⚠ THROWS `StorageReadError` if the archive cannot be read — it will not answer `[]` for a failure,
- * because that answer is what truncated the archive (see readSnapshotsFromDisk). It returns `[]`
- * only for a document that genuinely has no history.
- *
- * PREFER `readSnapshotArchive`, and note that every production caller now uses it: the failure here
- * is invisible to the compiler, so an unguarded `await listSnapshots(id)` in a click handler is a
- * button that silently does nothing, and `.catch(() => [])` around it walks the original bug right
- * back in. The union makes the failure a value you have to look at. This stays exported because it
- * is the honest primitive and the tests drive it directly.
+ * ⚠ THROWS `StorageReadError` on an unreadable archive; `[]` means only that this document has no
+ * history. PREFER `readSnapshotArchive` — the failure here is invisible to the compiler, so an
+ * unguarded call in a click handler is a button that silently does nothing and `.catch(() => [])`
+ * around it walks the original bug right back in. Exported because it is the honest primitive and
+ * the tests drive it directly. → docs/archive/storage-and-sync.md#snap-read-union
  */
 export async function listSnapshots(documentId: string): Promise<Snapshot[]> {
   return readSnapshotsFile(documentId)
 }
 
 // ─── Metadata projection (the snapshot memory diet) ──────────────────────────
-// React state must never hold the full snapshot array — every Snapshot embeds its whole
-// contentJson (+ receipts + frozen bibliography), so hundreds of snapshots would keep hundreds
-// of MB resident just to render a 210px list. The cache above keeps the full array ONCE
-// (unavoidable — rapid scrubbing needs it hot); UI state holds only this cheap projection.
+// ⚠ React state must never hold the full snapshot array — every Snapshot embeds its whole
+// contentJson, so hundreds would keep hundreds of MB resident to render a 210px list.
+// → docs/archive/storage-and-sync.md#snap-meta-diet
 
 /** Project a Snapshot to its UI metadata — drop contentJson / receipts / bibliography,
  *  keep a receipt COUNT (all the panel ever shows). */
@@ -346,10 +278,10 @@ export function toSnapshotMeta(s: Snapshot): SnapshotMeta {
   return { ...rest, receiptCount: Array.isArray(receipts) ? receipts.length : 0 }
 }
 
-/** Metadata-only listing for React state. Same cached read as listSnapshots (so the eager
- *  load still warms the scrub cache), but hands back only the lightweight projection.
- *  ⚠ THROWS on an unreadable archive, exactly like listSnapshots — never `[]`. A caller that
- *  answers the failure by rendering an empty list has moved the lie from storage into the UI. */
+/** Metadata-only listing for React state. Same cached read as listSnapshots (so the eager load still
+ *  warms the scrub cache), but hands back only the lightweight projection.
+ *  ⚠ THROWS on an unreadable archive, never `[]` — a caller that answers the failure by rendering an
+ *  empty list has moved the lie from storage into the UI. */
 export async function listSnapshotMeta(documentId: string): Promise<SnapshotMeta[]> {
   return (await readSnapshotsFile(documentId)).map(toSnapshotMeta)
 }
@@ -364,16 +296,13 @@ export async function deleteSnapshot(documentId: string, snapId: string): Promis
 }
 
 /**
- * Restore snapshots from an export bundle into OPFS — only when OPFS has FEWER snapshots than the
- * bundle. Local OPFS always wins: if the machine already has the full history, leave it untouched.
- * Call this when opening a .studio file so provenance survives device transfers.
+ * Restore snapshots from an export bundle into OPFS — only when OPFS has FEWER than the bundle, and
+ * as a UNION, so local-only snapshots are never dropped. Call this when opening a .studio so
+ * provenance survives device transfers.
  *
- * `deferDiskWrite` (the OPEN path): the union lands in the write-through cache synchronously —
- * the editor's eager snapshot list right after open sees the FULL union — while the heavy
- * stringify+gzip+write runs behind the reveal (the wave-decay dead time) on the per-doc write
- * chain. GROW-ONLY holds either way: a failed deferred write leaves disk un-grown (never
- * truncated), the cache stays the superset every write-back unions from, and the bundle's copy
- * still exists at its source.
+ * `deferDiskWrite` (the OPEN path) lands the union in the write-through cache synchronously and runs
+ * the heavy write behind the reveal. GROW-ONLY holds either way: a failed deferred write leaves disk
+ * un-grown, never truncated. → docs/archive/storage-and-sync.md#snap-restore-bundle
  */
 export async function restoreSnapshotsFromBundle(
   documentId: string,
@@ -428,9 +357,8 @@ export function groupByVersion<T extends Pick<Snapshot, 'trigger'>>(snapshots: T
   return groups
 }
 
-// The word notion now lives in `./countWords` (a leaf that imports nothing — see its header for why
-// `bundle.ts` could not simply import it from here). Imported for local use AND re-exported, so the
-// four existing callers keep importing `countWords` from this module exactly as before.
+// The word notion lives in `./countWords` (a leaf that imports nothing). Re-exported so the existing
+// callers keep importing it from here. → docs/archive/storage-and-sync.md#snap-countwords
 export { countWords }
 
 /**
@@ -458,9 +386,9 @@ export async function createSnapshotIfChanged(
   const last = snaps[snaps.length - 1]
   if (!force && last && last.contentHash === cHash) return null
 
-  // Freeze the DISPLAYED bibliography (the mode-resolved cited subset resolve.ts embedded) and hash
-  // it deterministically. Only when there's ≥1 displayed entry — otherwise bibHash stays undefined
-  // and bundleHash keeps its v:1 form (pre-citation docs hash exactly as before). See citations §12.
+  // Freeze the DISPLAYED bibliography and hash it deterministically. ⚠ Only when there is ≥1 entry:
+  // otherwise bibHash stays undefined and the bundle keeps its v:1 form, so every pre-citation
+  // anchor still verifies. → docs/archive/storage-and-sync.md#snap-bundlehash-versions
   const bib = doc.bibliography
   const hasBib = !!bib && bib.entries.length > 0
   const bHash = hasBib ? await bibliographyHash(bib!.entries, doc.citationStyle) : undefined
@@ -468,29 +396,23 @@ export async function createSnapshotIfChanged(
     ? { ...bib!, style: doc.citationStyle, bibHash: bHash }
     : undefined
 
-  // Freeze the EMAIL HEADERS (§B2.2) the same way, and only on an email document — so the bundle
-  // keeps its v:1/v:2 form for every other document and all existing anchors verify unchanged.
-  // The body needs no special handling: it IS contentJson, already committed via contentHash. The
-  // headers are canonicalised before hashing so one header set has exactly one anchored hash.
+  // Freeze the EMAIL HEADERS (§B2.2) the same way, ⚠ only on an email document. The body needs no
+  // handling — it IS contentJson. Headers are canonicalised first, so one header set has exactly one
+  // anchored hash. → docs/archive/storage-and-sync.md#snap-bundlehash-versions
   const isEmail = doc.docType === 'email' && !!doc.email
   const frozenEmail = isEmail ? normaliseHeaders(doc.email!) : undefined
   const eHash = frozenEmail ? await emailHeadersHash(frozenEmail) : undefined
 
-  // Freeze the ATTACHED MUSIC (music spec §B5) the same way, and only on a document that carries a
-  // score — so the bundle keeps its v:1/v:2/v:3 form for every other document and every existing
-  // anchor verifies unchanged. The MusicXML BYTES are not frozen here (a master lives in OPFS, like
-  // a PDF sidecar); its sha256 is, which is what actually pins the notation: correct the score under
-  // an anchored analysis and this stops matching. For a music essay the claim is exactly §B5's —
-  // this analysis, of these bars of this notation, existed by time T.
+  // Freeze the ATTACHED MUSIC (music spec §B5) the same way, ⚠ only on a document carrying a score.
+  // The MusicXML BYTES are not frozen (a master lives in OPFS, like a PDF sidecar); its sha256 is,
+  // which is what pins the notation. → docs/archive/storage-and-sync.md#snap-bundlehash-versions
   const music = doc.music
   const hasMusic = !!music && (music.masters.length > 0 || music.excerpts.length > 0)
   const frozenMusic = hasMusic ? music : undefined
   const mHash = frozenMusic ? await musicAttachmentsHash(frozenMusic) : undefined
 
-  // bundleHash commits to content, the DISPLAYED bibliography (v:2), the EMAIL HEADERS (v:3), the
-  // ATTACHED MUSIC (v:4), AND the live-composition receipt chain, so the OTS proof (M2) anchors the
-  // whole signed record to Bitcoin. For an email that is exactly the §B2.2 claim: headers + body
-  // existed by time T.
+  // bundleHash commits to content, the bibliography (v:2), the email headers (v:3), the attached
+  // music (v:4) AND the receipt chain, so the OTS proof anchors the whole signed record to Bitcoin.
   const snapshot: Snapshot = {
     id: uuidv4(),
     documentId: doc.id,
@@ -565,8 +487,9 @@ export async function patchSnapshotDiffSummary(
 }
 
 // ─── OTS stamping / upgrading (M2) ──────────────────────────────────────────────
-// Each mutation re-reads the file before writing, so callers that serialise them (the editor's
+// Each mutation RE-READS the file before writing, so callers that serialise them (the editor's
 // snapshot queue) never lose a concurrent append.
+// → docs/archive/storage-and-sync.md#snap-ots-reread
 
 async function patchSnapshot(
   documentId: string,

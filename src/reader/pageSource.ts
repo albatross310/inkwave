@@ -1,38 +1,20 @@
 // WHERE THE SOURCE READER'S FETCH ACTUALLY HAPPENS — the writer's own browser first, our server
-// second.
+// second. A search engine serves a person and refuses a data centre (measured against the deployed
+// endpoint), and the extension IS a person's browser.
 //
-// Peter, 2026-08-28: "is it possible for us to run the window from the user's IP?" The reason the
-// question came up is MEASURED and is not going to be argued away by tuning a user-agent string:
-// against the DEPLOYED endpoint, duckduckgo, lite-ddg and mojeek answer "fetch failed", searx.be
-// answers "Verifying your browser…", priv.au serves a captcha and marginalia returns 5 blocks and
-// ZERO links, while wikipedia and plato.stanford.edu are served normally. A search engine will
-// serve a person and refuse a data centre. The extension IS a person's browser.
+// ⚠ ONE EXTRACTOR, TWO FETCHERS. `extract.mjs` is the same module api/_reader-core.mjs imports, so
+// the same function turns HTML into blocks whichever machine fetched it; a client-side second copy
+// would drift the first time either side was tuned. `pageSource.test.ts` pins byte-identity.
 //
-// ⚠ ONE EXTRACTOR, TWO FETCHERS. `extract.mjs` was split out of api/_reader-core.mjs for exactly
-// this and is imported here — the same function turns HTML into blocks whichever machine fetched
-// it. A client-side second copy would drift the first time either side was tuned, and both feed one
-// renderer (the pmToText/textMap lesson, one directory along). `pageSource.test.ts` pins that the
-// extension path's output is byte-identical to calling the extractor directly.
+// ⚠ AND STILL NO HTML REACHES THE RENDERER. The extension's HTML STRING is consumed HERE by the
+// extractor, which returns {kind, text, href} — so injection stays UNREPRESENTABLE rather than
+// filtered. Never assign it to innerHTML, and never "improve" the extractor into a DOMParser, which
+// builds real elements.
 //
-// ⚠ AND STILL NO HTML REACHES THE RENDERER. The extension hands back an HTML STRING — the one thing
-// api/_reader-core.mjs's header says must never cross — and it is consumed HERE, in this module, by
-// the extractor, which returns {kind, text, href}. Nothing downstream of `loadSource` has ever seen
-// markup, so injection stays unrepresentable rather than filtered. The string does exist in this
-// origin's memory for the length of one call; it is never assigned to innerHTML, never parsed by
-// DOMParser, never inserted. (DOMParser would be the tempting "better" extractor and it is the one
-// thing this must not become: `new DOMParser().parseFromString(html, 'text/html')` builds real
-// elements — img src fires no request in a detached document today, but that is a browser
-// behaviour, not a guarantee we control, and the tolerant scanner needs no such promise.)
-//
-// ⚠ WHAT THE EXTENSION PATH ACTUALLY BUYS, STATED PRECISELY, because the UI quotes this module:
-//   • the request leaves the WRITER'S OWN ADDRESS, not a Vercel IP. That is Peter's question and it
-//     is unambiguously true.
-//   • our server never learns the URL, because it is not in the path at all. Strictly stronger than
-//     the "sees the address for an instant, logs nothing" posture the server endpoint documents.
-//   • cookies: an extension-worker fetch is cross-site by initiator, so a site's SameSite=Lax/Strict
-//     cookies are NOT sent. Some session state travels, some does not, and which is the site's
-//     choice. UNVERIFIED per-site, so the UI claims the ADDRESS and says nothing about being
-//     signed in.
+// ⚠ WHAT THE EXTENSION PATH BUYS, PRECISELY, because the UI quotes this module: the request leaves
+// the WRITER'S OWN ADDRESS · our server never learns the URL, being absent from the path entirely ·
+// cookies are a site-by-site matter and UNVERIFIED, so the UI claims the ADDRESS and says nothing
+// about being signed in. → docs/archive/reader-panels.md#pagesource
 
 import type { ReaderBlock, ReaderDoc } from './types'
 import {
@@ -56,11 +38,10 @@ export type Via = 'extension' | 'server'
 
 /**
  * What the extension can do for us right now.
- *   absent  — not installed, or installed and not answering (indistinguishable from here, and the
- *             UI says the same thing for both because the writer's remedy is the same).
- *   blocked — installed and answering, but it has not been granted permission to fetch pages. This
- *             is the state that must never be silently treated as `absent`: it is one click away
- *             from `ready` and the UI can say so.
+ *   absent  — not installed, or installed and not answering (indistinguishable from here, and one
+ *             remedy for both).
+ *   blocked — ⚠ answering, but not granted permission to fetch. NEVER treat this as `absent`: it is
+ *             one click from `ready` and the UI can say so.
  *   ready   — it will fetch.
  */
 export type ExtensionState = 'absent' | 'blocked' | 'ready'
@@ -96,15 +77,12 @@ function newId(): string {
 }
 
 /**
- * One request, one reply, correlated and deadlined — the shape all three exchanges below share.
+ * One request, one reply, correlated and deadlined — the shape all the exchanges below share.
  *
- * ⚠ ASK, DO NOT WAIT TO BE TOLD. An "the extension is here" announcement is a ONE-SHOT ASYNC SIGNAL
- * and this repo has the scar tissue: a listener attached after it fired waits for ever, silently,
- * and a feature that is merely disabled is indistinguishable from a feature nobody built. So the
- * page asks; `null` back means the deadline passed, which is an ANSWER and not a hang.
- *
- * The uuid is not decoration either: without it, a late reply to an EARLIER question satisfies a
- * later one, and the reader believes an extension that has since gone away.
+ * ⚠ ASK, DO NOT WAIT TO BE TOLD. An announcement is a ONE-SHOT ASYNC SIGNAL, and a listener attached
+ * after it fired waits for ever, silently. So the page asks; `null` back is an ANSWER, not a hang.
+ * The uuid is not decoration: without it a late reply to an EARLIER question satisfies a later one.
+ * → docs/archive/reader-panels.md#ps-ask
  */
 function ask<T>(
   port: Port,
@@ -145,10 +123,10 @@ export async function fetchViaExtension(port: Port, url: string, timeoutMs = 25_
 /**
  * Ask the extension to open its own popup, where the permission button lives.
  *
- * Returns false when it could not — including when it did not answer at all — and the caller MUST
- * still show the writer how to do it by hand. `action.openPopup()` is a recent API and may simply
- * refuse; a button whose only fallback is silence is the dead button this reader has already been
- * bitten by twice.
+ * ⚠ Returns false when it could not — including when it did not answer at all — and the caller MUST
+ * still show the writer how to do it by hand: `action.openPopup()` may simply refuse, and a button
+ * whose only fallback is silence is the dead button this reader has been bitten by twice.
+ * → docs/archive/reader-panels.md#ps-fallback
  */
 export async function openExtensionPopup(port: Port, timeoutMs = 3000): Promise<boolean> {
   const r = await ask<{ ok: boolean }>(port, { type: READER_GRANT },
@@ -159,12 +137,11 @@ export async function openExtensionPopup(port: Port, timeoutMs = 3000): Promise<
 /**
  * Ask the extension to let ONE page be framed, so live view can show a site that refuses framing.
  *
- * ⚠ TRUE MEANS A RULE WAS INSTALLED — IT DOES NOT MEAN THE PAGE WILL RENDER, and the caller must
- * not tell the writer otherwise. Measured in a real browser (docs/SEARCH-AND-THE-EXTENSION.md):
- * abc.net.au and youtube's own watch page render properly, facebook still refuses in its BODY where
- * there is no header to strip, google served a CAPTCHA, and ANY logged-in site renders SIGNED OUT
- * because `SameSite=Lax` — the default a cookie gets when it says nothing — is dropped in a
- * third-party frame. That last one is the browser's own rule and no header we remove touches it.
+ * ⚠ TRUE MEANS A RULE WAS INSTALLED — IT DOES NOT MEAN THE PAGE WILL RENDER, and the caller must not
+ * tell the writer otherwise. Measured: facebook still refuses in its BODY, google served a CAPTCHA,
+ * and ANY logged-in site renders SIGNED OUT because `SameSite=Lax` is dropped in a third-party frame
+ * — the browser's own rule, which no header we remove touches.
+ * → docs/archive/reader-panels.md#ps-fallback
  */
 export async function allowFramingVia(port: Port, url: string, timeoutMs = 3000): Promise<boolean> {
   const r = await ask<{ ok: boolean }>(port, { type: READER_FRAME, url },
@@ -173,25 +150,22 @@ export async function allowFramingVia(port: Port, url: string, timeoutMs = 3000)
 }
 
 /**
- * Release it. Fire-and-forget BY DESIGN: this runs from the panel's teardown, and on a tab close
- * there is no later turn in which an ack could arrive — waiting would make the common path the one
- * that never completes. The rule is session-scoped in the worker precisely so that a lost release
- * cannot leave framing open past the browser session.
+ * Release it. Fire-and-forget BY DESIGN: this runs from the panel's teardown, and on a tab close no
+ * ack can arrive — waiting would make the common path the one that never completes. The worker's
+ * rule is session-scoped so a lost release cannot outlive the browser session.
  */
 export function releaseFraming(port: Port | null): void {
   try { port?.post({ source: APP_SOURCE, type: READER_UNFRAME, uuid: newId() }) } catch { /* gone */ }
 }
 
 // ── THE SESSION'S ANSWER, ASKED ONCE ────────────────────────────────────────────────────────────
-// The probe costs a round trip, and re-running it per navigation would put its deadline in front of
-// every link the reader follows. So it is memoised for the page's lifetime — with two rules that
-// are easy to get wrong and expensive to get wrong:
-//   • NEVER CACHE THE SSR ANSWER. There is no window during prerender, so an eager module-scope
-//     probe would bake 'absent' into the build's first paint and the extension would be invisible
-//     until a reload. `typeof window === 'undefined'` returns without writing the memo.
-//   • `refresh` EXISTS BECAUSE THE ANSWER CHANGES. Granting the permission happens in the
-//     extension's popup, which cannot tell the page anything; the reader re-asks when the window
-//     regains focus, which is exactly when the writer has come back from doing it.
+// Memoised for the page's lifetime, because re-probing per navigation would put a deadline in front
+// of every link. Two rules, both easy and expensive to get wrong:
+//   • ⚠ NEVER CACHE THE SSR ANSWER — there is no window during prerender, so an eager probe bakes
+//     'absent' into the first paint and the extension stays invisible until a reload.
+//   • ⚠ `refresh` EXISTS BECAUSE THE ANSWER CHANGES: the grant happens in the extension's popup,
+//     which cannot tell the page anything, so the reader re-asks on window focus.
+// → docs/archive/reader-panels.md#ps-memo
 let memo: Promise<ExtensionState> | null = null
 
 export function extensionState(refresh = false): Promise<ExtensionState> {
@@ -224,11 +198,10 @@ export interface LoadOptions {
  * Read a source page. Extension first, server second — and the caller is TOLD which happened,
  * because a privacy posture nobody can see is a privacy posture nobody has.
  *
- * ⚠ THE FALLBACK IS FOR A FAILED FETCH, NOT FOR A DISAPPOINTING PAGE. If the extension fetched the
- * page and the extractor found no prose in it, that IS the answer: falling back would send the
- * address to our server for a second opinion the writer did not ask for, on the one path whose
- * whole point is that our server is not in it. A JS-rendered app has no article in its HTML from
- * anyone's IP. The reader offers Live mode for that, as it already did.
+ * ⚠ THE FALLBACK IS FOR A FAILED FETCH, NOT FOR A DISAPPOINTING PAGE. A fetch that succeeded and
+ * found no prose IS the answer; falling back would send the address to our server for a second
+ * opinion nobody asked for, on the one path whose whole point is that our server is not in it.
+ * → docs/archive/reader-panels.md#ps-fallback
  */
 export async function loadSource(url: string, o: LoadOptions = {}): Promise<{ doc: ReaderDoc; via: Via }> {
   const fetchFn = o.fetchFn ?? fetch
@@ -248,26 +221,16 @@ export async function loadSource(url: string, o: LoadOptions = {}): Promise<{ do
   return { doc: await fetchViaServer(url, fetchFn), via: 'server' }
 }
 
-// ── THE PDF THE PANEL IS LOOKING AT (2026-08-30) ────────────────────────────────────────────────
-// Peter: "also can we have a downloads." Bringing a browsed PDF into the citation library needs its
-// BYTES, and where they can come from is not a preference — it is decided by two rules, one of
-// which is OURS:
+// ── THE PDF THE PANEL IS LOOKING AT ─────────────────────────────────────────────────────────────
+// Two routes only, because the extension can fetch anything and ⚠ THE PAGE IS WALLED BY OUR OWN CSP
+// (`connect-src 'self' <named hosts>`), not by CORS. So `pdfRouteFor` decides FIRST and the panel
+// draws accordingly — no doomed attempt whose only product is a console error. And it must never
+// FAIL SILENTLY: `savePdfSource.ts` turns each code below into a sentence.
 //
-//   • THE EXTENSION CAN FETCH ANYTHING. It holds `<all_urls>`, neither CORS nor our CSP applies to
-//     it, and the request leaves the writer's own address like every other reader fetch.
-//   • THE PAGE CAN FETCH ALMOST NOTHING, AND THE REASON IS OUR OWN CSP, NOT CORS. Measured in a
-//     real browser: `middleware.ts` sets `connect-src 'self' <named hosts>`, so a cross-origin
-//     request from here is refused BY US before CORS is consulted. See `pdfRouteFor` in
-//     pdfAddress.ts for why that header stands and the feature bends instead.
-//
-// So `pdfRouteFor` decides FIRST and the panel draws accordingly — there is no doomed attempt whose
-// only product is a console error and a wasted press. What this must never do is FAIL SILENTLY:
-// `savePdfSource.ts` turns each code below into a sentence, and the panel offers the extension at
-// exactly the wall it would remove.
-//
-// ⚠ THE SERVER IS DELIBERATELY NOT A THIRD ROUTE. `api/pdf.mjs?proxy=` was removed on 2026-07-08
-// for being slow, often blocked, and the one PDF path that passed a writer's reading through our
-// machine. Re-adding it here would undo that decision quietly, inside a feature about convenience.
+// ⚠ THE SERVER IS DELIBERATELY NOT A THIRD ROUTE. `api/pdf.mjs?proxy=` was removed for being slow,
+// often blocked, and the one PDF path that passed a writer's reading through our machine; re-adding
+// it here would undo that quietly, inside a feature about convenience.
+// → docs/archive/reader-panels.md#ps-pdf-routes
 
 /** One PDF, fetched by the extension. Rejects with the extension's own short code. */
 export async function fetchFileViaExtension(
@@ -288,10 +251,10 @@ export interface PdfFetch { bytes: Uint8Array; finalUrl: string; via: FileVia }
 /**
  * The PDF's bytes, by whichever route can get them.
  *
- * ⚠ `no route` IS AN ANSWER, NOT A BUG. When the extension is absent AND the host refuses
- * cross-origin reads there is genuinely nothing this origin can do, and saying so — with the
- * extension offered beside it — is the honest end of the path. Guessing, retrying, or quietly
- * storing an error page is not.
+ * ⚠ `no route` IS AN ANSWER, NOT A BUG. With no extension and a host that refuses cross-origin
+ * reads there is genuinely nothing this origin can do, and saying so — with the extension offered
+ * beside it — is the honest end of the path. Guessing, retrying, or quietly storing an error page is
+ * not. → docs/archive/reader-panels.md#ps-pdf-routes
  */
 export async function fetchPdfBytes(url: string, o: {
   port?: Port | null; fetchFn?: typeof fetch; timeoutMs?: number; pageOrigin?: string
@@ -308,9 +271,9 @@ export async function fetchPdfBytes(url: string, o: {
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
       return { bytes, finalUrl: r.finalUrl, via: 'extension' }
     } catch (e) {
-      // A refusal the WRITER can act on must survive the fallback. `needs-permission`, `too large`
-      // and `not a pdf` are all verdicts about this file, and reporting the direct fetch's generic
-      // CORS failure over the top of one of them would send the writer looking in the wrong place.
+      // ⚠ A refusal the WRITER can act on must SURVIVE the fallback: these three are verdicts about
+      // this file, and reporting the direct fetch's generic CORS failure over one of them sends the
+      // writer looking in the wrong place.
       firstError = (e as Error)?.message ?? null
       if (firstError === NEEDS_PERMISSION || firstError === 'too large' || firstError === 'not a pdf') throw e
     }

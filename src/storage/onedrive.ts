@@ -1,13 +1,11 @@
-// OneDrive sync via Microsoft Graph (cross-browser cloud storage). File System Access is
-// Chromium-only, so this gives Firefox/Safari writers (and anyone) a way to sync their record to
-// OneDrive: sign in with a Microsoft account (OAuth 2.0 PKCE via MSAL), then PUT the files into the
-// app's OneDrive folder (OneDrive/Apps/Inkwave) with the least-privilege Files.ReadWrite.AppFolder
-// scope. Only an access token + the file bytes leave the browser, straight to Microsoft Graph — no
+// OneDrive sync via Microsoft Graph — the cross-browser cloud destination (File System Access is
+// Chromium-only). Sign in with a Microsoft account (OAuth 2.0 PKCE via MSAL), then PUT into the
+// chosen folder. ONLY an access token + the file bytes leave the browser, straight to Graph — no
 // Inkwave server is involved.
 //
-// Requires an Azure app registration (a public SPA client id) in VITE_MS_CLIENT_ID; the feature is
-// hidden until that's configured. MSAL is lazily imported so it's a separate client chunk and never
-// enters the prerender/SSR graph.
+// ⚠ It MIRRORS gdrive.ts, and the two have drifted apart twice with a data-loss bug on one side only.
+// The safety rule is `planWriteback`, shared; this file owns only the mapping of GRAPH's failure
+// surface into `ArchiveRead`. → docs/archive/storage-and-sync.md#cloud
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { buildExportBundle, bundleFilename, composeTraceFile, TRACE_EXTENSION } from '../provenance/bundle'
@@ -54,9 +52,9 @@ export function setOneDriveFilename(docId: string, name: string): void {
   try { localStorage.setItem(nameKey(docId), clean) } catch { /* private mode */ }
 }
 
-// The OneDrive filename is PINNED per-document the first time we sync. The slug is derived from the
-// title, which is re-derived from the text on every edit — so without pinning, each sync would PUT a
-// different name and create a new file every few seconds instead of overwriting the same one.
+// ⚠ THE FILENAME IS PINNED per-document at the first sync. The slug comes from the title, which is
+// re-derived from the text on every edit — so without pinning, each sync PUTs a different name and
+// creates a new file every few seconds. → docs/archive/storage-and-sync.md#od-scopes
 function stableFilename(doc: InkwaveDocument): string {
   try {
     const existing = localStorage.getItem(nameKey(doc.id))
@@ -76,12 +74,11 @@ export function oneDrivePath(doc: InkwaveDocument): string {
   return `${prefix}${stableFilename(doc)}`
 }
 
-// The Azure app (SPA) client id — PUBLIC (it appears in OAuth redirects), so it's committed as the
-// default and overridable via VITE_MS_CLIENT_ID. Redirect URIs registered: https://iwsolo.me
-// + https://www.iwsolo.me + http://localhost:5173 (dev). Authority /common + delegated Files.ReadWrite.
+// The Azure app (SPA) client id — PUBLIC (it appears in OAuth redirects), so committed as the default
+// and overridable. Registered redirect URIs + the scope rationale are in the archive.
 const CLIENT_ID = (import.meta.env?.VITE_MS_CLIENT_ID as string | undefined) || 'be76cc89-ab01-4681-99c0-f37b9f9d2308'
-// Personal + work/school accounts. Files.ReadWrite (full drive) so the writer can pick ANY folder
-// to sync into; existing AppFolder-only sessions are re-prompted to consent on the next sync.
+// /common covers personal + work/school. Files.ReadWrite (full drive) so the writer can pick ANY
+// folder; AppFolder-only sessions re-consent on the next sync.
 const AUTHORITY = 'https://login.microsoftonline.com/common'
 const SCOPES = ['Files.ReadWrite', 'User.Read']
 const GRAPH = 'https://graph.microsoft.com/v1.0'
@@ -172,14 +169,9 @@ function contentUrl(name: string): string {
 }
 
 /**
- * Translate a write precondition into Graph's wire form (Finding E).
- *
- * PURE and exported so it can be tested without a Microsoft account — the DECISION is testable even
- * where the SERVER's honouring of it is not. See the STATED-NOT-PROBED note on `putFile`.
- *
- * `conflictBehavior=fail` is a query parameter on a content PUT; `If-Match` is a header. The repo
- * already uses conflictBehavior (the folder-create at the driveItem endpoint passes it in the BODY
- * — a different Graph shape, so this is the same idea, not the same call).
+ * Translate a write precondition into Graph's wire form (Finding E). PURE and exported so it can be
+ * tested without a Microsoft account — the DECISION is testable even where the SERVER's honouring of
+ * it is not. → docs/archive/storage-and-sync.md#cloud-metadata-only
  */
 export function graphWriteOptions(pre: WritePrecondition): { query: string; headers: Record<string, string> } {
   if (pre.expect === 'absent') return { query: '?@microsoft.graph.conflictBehavior=fail', headers: {} }
@@ -190,12 +182,10 @@ export function graphWriteOptions(pre: WritePrecondition): { query: string; head
 // PUT the file into the chosen folder (or the OneDrive root). Returns the file's webUrl so the UI
 // can offer "open in OneDrive".
 //
-// ⚠ STATED, NOT PROBED — and it FAILS SAFE, which is why it ships this way. Neither the query
-// parameter nor the If-Match header has been exercised against real Graph (that needs Peter's
-// account). If either is wrong the write is REFUSED, never mis-applied: a rejected upload is a
-// failed sync that retries, not a lost row. The failure direction is what makes an unprobed API
-// guess acceptable here — the same reasoning CLAUDE.md records for `Graph 404 ⇒ absent`. A wrong
-// guess costs a sync cycle; the bug it prevents costs the rows.
+// ⚠ THE PRECONDITIONS ARE STATED, NOT PROBED — and they FAIL SAFE, which is why they ship. Neither
+// the query parameter nor the If-Match header has been exercised against real Graph; if either is
+// wrong the write is REFUSED, never mis-applied. A wrong guess costs a sync cycle; the bug it
+// prevents costs the rows. → docs/archive/storage-and-sync.md#cloud-metadata-only
 async function putFile(token: string, name: string, content: string, pre: WritePrecondition): Promise<string | null> {
   const { query, headers } = graphWriteOptions(pre)
   const res = await fetch(contentUrl(name) + query, {
@@ -203,8 +193,8 @@ async function putFile(token: string, name: string, content: string, pre: WriteP
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain', ...headers },
     body: content,
   })
-  // 409 (conflictBehavior=fail hit an existing file) and 412 (If-Match failed) are the precondition
-  // doing its job — a real remote we had not reconciled with. Loud, not silent, and never a write.
+  // 409 and 412 are the precondition doing its job — a real remote we had not reconciled with. Loud,
+  // not silent, and never a write.
   if (res.status === 409 || res.status === 412) {
     throw new Error(`Graph precondition failed (${res.status}) — the remote moved; retrying next sync`)
   }
@@ -214,10 +204,9 @@ async function putFile(token: string, name: string, content: string, pre: WriteP
 }
 
 // ─── Generic small-file access (the productivity ledger; NOT the .studio) ─────
-// The ledger is its own small JSON file beside the .studio. These two exports are deliberately
-// dumb: they move bytes and REPORT WHAT HAPPENED. In particular a 404 (the file does not exist yet)
-// is a DIFFERENT answer from a failure, and the caller must be able to tell them apart — treating
-// "I couldn't read it" as "there's nothing there" is precisely the 2026-07-15 blind overwrite.
+// Deliberately dumb: they move bytes and REPORT WHAT HAPPENED. ⚠ A 404 is a DIFFERENT answer from a
+// failure and the caller must be able to tell them apart — treating "I couldn't read it" as "there's
+// nothing there" is precisely the 2026-07-15 blind overwrite.
 
 export type OneDriveReadResult =
   /** `etag` is the version read, for the write's precondition (Finding E). null when Graph sent
@@ -227,14 +216,14 @@ export type OneDriveReadResult =
   | { status: 'error'; reason: string }
 
 /**
- * Map a Graph GET's HTTP status to the union. PURE, exported, and tested — because this one line is
- * the entire absent-vs-error decision, and F16's lesson is that a perfectly-typed union guards the
- * CONSUMER while the PRODUCER quietly decides the answer. `404 ⇒ absent` licenses a first write; a
- * mistake in the other direction (a failure read as "not there") is the 2026-07-15 blind overwrite.
+ * Map a Graph GET's HTTP status to the union. PURE, exported and tested, because ⚠ THIS ONE LINE IS
+ * THE ENTIRE ABSENT-VS-ERROR DECISION and a typed union guards the CONSUMER while the PRODUCER
+ * quietly decides the answer.
  *
- * FAIL-SAFE BY DESIGN: everything that is not exactly 404 is an ERROR. A Graph status we have never
- * seen makes sync refuse to write, never destroy. That is also why 401/403 are errors and not
- * "absent" — an expired token means we cannot SEE the file, not that it is gone.
+ * ⚠ FAIL-SAFE BY DESIGN: everything that is not exactly 404 is an ERROR, so a Graph status we have
+ * never seen makes sync refuse to write rather than destroy. 401/403 are errors and NOT "absent" —
+ * an expired token means we cannot SEE the file, not that it is gone.
+ * → docs/archive/storage-and-sync.md#cloud-status-map
  */
 export function mapGraphReadStatus(status: number): 'ok' | 'absent' | 'error' {
   if (status === 404) return 'absent'
@@ -245,11 +234,10 @@ export function mapGraphReadStatus(status: number): 'ok' | 'absent' | 'error' {
 /**
  * Read a small file by name from the chosen folder.
  *
- * NEVER THROWS — and that used to be a lie (auditor F13, 2026-07-17): `getSilentToken()` sat OUTSIDE
- * the try, so an MSAL failure threw straight through a function whose contract says it returns an
- * error union. The whole point of the union is that a caller cannot forget the failure case; a
- * producer that throws instead of returning `error` hands the caller an exception it never wrote a
- * branch for. Everything fallible is now inside the try.
+ * ⚠ NEVER THROWS — keep everything fallible INSIDE the try. It used to be a lie: `getSilentToken()`
+ * sat outside it, so an MSAL failure threw straight through a function whose contract says it returns
+ * an error union, handing the caller an exception it never wrote a branch for.
+ * → docs/archive/storage-and-sync.md#cloud-status-map
  */
 export async function readOneDriveText(name: string): Promise<OneDriveReadResult> {
   try {
@@ -267,10 +255,9 @@ export async function readOneDriveText(name: string): Promise<OneDriveReadResult
 }
 
 /**
- * Write a small file by name into the chosen folder, ONLY if `pre` still holds. False on any
- * failure — including a violated precondition, which is a remote we had not reconciled with
- * (Finding E). The caller keeps local and the next sync re-reads; nothing is lost either way.
- * `pre` is REQUIRED: an optional precondition is one a caller forgets, silently.
+ * Write a small file by name into the chosen folder, ONLY if `pre` still holds. False on any failure,
+ * a violated precondition included — the caller keeps local and the next sync re-reads.
+ * ⚠ `pre` is REQUIRED: an optional precondition is one a caller forgets, silently.
  */
 export async function writeOneDriveText(name: string, text: string, pre: WritePrecondition): Promise<boolean> {
   try {
@@ -299,9 +286,9 @@ function recordOneDriveWrite(docId: string): void {
   try { localStorage.setItem(writeAtKey(docId), String(Date.now())) } catch { /* private mode */ }
 }
 
-/** Cheap remote-file check: validates the silent token and returns the file's link + modified time
- *  from Graph METADATA — never downloads the (possibly 20 MB) body. Used by resume-on-load and the
- *  heartbeat, both of which previously fetched + parsed the whole file. */
+/** Cheap remote-file check: the file's link + modified time from Graph METADATA. ⚠ Never downloads
+ *  the (possibly 20 MB) body — resume-on-load and the heartbeat both used to fetch and parse the
+ *  whole file. → docs/archive/storage-and-sync.md#cloud-metadata-only */
 export async function getRemoteFileInfo(doc: InkwaveDocument): Promise<{ webUrl: string | null; modifiedAt: number } | null> {
   if (!CLIENT_ID) return null
   const token = await getSilentToken()
@@ -316,20 +303,15 @@ export async function getRemoteFileInfo(doc: InkwaveDocument): Promise<{ webUrl:
   }
 }
 
-/** Warm the once-per-session grow-only merge at IDLE, without uploading (see folder.preMergeSaveFile
- *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now).
+/** Warm the once-per-session grow-only merge at IDLE, without uploading — the first sync otherwise
+ *  fires on a checkpoint mid-typing.
  *
- * THIS PASS CLOSES THE MERGE GATE, so it is a WRITE-BACK DECISION wearing a cache-warmer's clothes,
- * and it gets the same read as the sync path. It used to run its own private `fetch` + parse — which
- * is exactly how Drive's copy of this function drifted into a live data-loss bug (`preMergeGDrive`,
- * fixed the same day; and it is the `daySummary` story again). The gate sits UPSTREAM of
- * `syncToOneDrive`'s guard, so closing it on a read we did not establish means `planWriteback` is
- * never even called and the next checkpoint PUTs the short local set unopposed.
- *
- * This copy's `if (!res.ok) return` was already correct for the HTTP arm — but it shared Drive's
- * second hole: `parseTraceOffThread` returns whatever `JSON.parse` gives, so a 200 carrying valid
- * non-record JSON left `remote.snapshots` undefined, skipped the restore, and closed the gate
- * anyway. `readRemoteArchive` + `archiveSnapshotsOf` now decide both arms, in one place, once. */
+ * ⚠ THIS PASS CLOSES THE MERGE GATE, so it is a WRITE-BACK DECISION wearing a cache-warmer's clothes
+ * and it MUST use the same read as the sync path. The gate sits UPSTREAM of `syncToOneDrive`'s guard,
+ * so closing it on a read we did not establish means `planWriteback` is never even called and the
+ * next checkpoint PUTs the short local set unopposed. A private `fetch` + parse here is exactly how
+ * Drive's copy drifted into a live data-loss bug.
+ * → docs/archive/storage-and-sync.md#cloud-warm-pass */
 export async function preMergeRemote(doc: InkwaveDocument): Promise<void> {
   const key = `onedrive:${doc.id}`
   if (!CLIENT_ID || !needsWritebackMerge(key)) return
@@ -353,9 +335,9 @@ export async function preMergeRemote(doc: InkwaveDocument): Promise<void> {
   markWritebackMerged(key) // 'absent' or a merged 'ok' — both are facts we established.
 }
 
-/** Multi-device guard WITHOUT downloading the file — metadata only, mirroring readLocalHeartbeat's
- *  design: the remote file having been modified well after OUR last upload means another device wrote
- *  it. The generous margin absorbs Graph-server vs local clock skew; the guard is purely advisory. */
+/** Multi-device guard WITHOUT downloading the file — metadata only: modified well after OUR last
+ *  upload means another device wrote it. The generous margin absorbs server-vs-local clock skew, and
+ *  the guard is purely advisory. */
 export async function readRemoteHeartbeat(doc: InkwaveDocument): Promise<{ session?: string; exportedAt?: string } | null> {
   const info = await getRemoteFileInfo(doc)
   if (!info?.modifiedAt) return null
@@ -412,19 +394,18 @@ export async function createOneDriveFolder(parentId: string | null, name: string
 }
 
 // ─── Open a file FROM OneDrive (Upload — esp. phone, where OneDrive isn't a mounted folder) ───────
-// Broad on purpose: real Inkwave files show up as .studio.gz (zipped exports), .trace.json/.json
-// (pre-.studio era), or .txt (iOS "rename on share" mangling). The opener validates by CONTENT
-// (parseTraceFile anchors on the record marker), so listing broadly is safe — a wrong pick errors.
+// BROAD ON PURPOSE — real Inkwave files arrive as .studio.gz, .trace.json/.json (pre-.studio era) or
+// .txt (iOS "rename on share"). The opener validates by CONTENT, so a wrong pick errors.
 const OPENABLE_FILE_RE = /\.(studio|studio\.gz|inkwave|trace\.json|insig\.json|json|txt)$/i
 
-/** An openable OneDrive file, with the metadata the open cache keys on: cTag is Graph's CONTENT
- *  tag (changes only when the file's bytes change — a rename doesn't invalidate the cache); eTag
- *  is the fallback for the rare items without one (over-invalidates, which is always safe). */
+/** An openable OneDrive file, with the metadata the open cache keys on: cTag is Graph's CONTENT tag
+ *  (a rename doesn't invalidate the cache), eTag the fallback — which over-invalidates, always the
+ *  safe direction. → docs/archive/storage-and-sync.md#cloud-listing */
 export interface OneDriveFileEntry { id: string; name: string; cTag?: string; size?: number; modifiedAt?: number }
 
-// Graph pages children at $top and every doc's PDF sidecars live in the SAME folder — past one
-// page, .studio files sorting after the cut silently vanish from the picker (2026-07-11 "open
-// file is not showing the studio files"). Follow @odata.nextLink to exhaustion (capped).
+// ⚠ FOLLOW @odata.nextLink TO EXHAUSTION. Graph pages children at $top and every doc's PDF sidecars
+// live in the SAME folder, so past one page the .studio files sorting after the cut vanish from the
+// picker silently. → docs/archive/storage-and-sync.md#cloud-listing
 async function listAllPages<T>(firstUrl: string, token: string): Promise<T[]> {
   const out: T[] = []
   let url: string | null = firstUrl
@@ -443,11 +424,10 @@ export async function listOneDriveFiles(parentId: string | null): Promise<OneDri
   const token = await getSilentToken()
   if (!token) throw new Error('not signed in')
   const base = parentId ? `${GRAPH}/me/drive/items/${parentId}/children` : `${GRAPH}/me/drive/root/children`
-  // The enriched $select feeds the open cache (change-tags) + recency prefetch. Graph's consumer
-  // (personal) drives are pickier about $select/$orderby combinations than the docs admit, and a
-  // rejected field would 400 the WHOLE listing — the picker regression ("not seeing the files",
-  // 2026-07-10). So: any failure of the enriched request retries the proven pre-cache minimal
-  // listing before erroring. Files then still list + open; the byte cache just misses (safe).
+  // ⚠ THE ENRICHED $select MUST DEGRADE. It feeds the open cache, but consumer drives are pickier
+  // about $select/$orderby than the docs admit and a rejected field 400s the WHOLE listing — the
+  // 2026-07-10 "not seeing the files" regression. Retry the minimal listing before erroring: files
+  // still list and open, and only the byte cache misses.
   type Item = { id: string; name: string; file?: unknown; cTag?: string; eTag?: string; size?: number; lastModifiedDateTime?: string }
   let items: Item[]
   try {
@@ -505,19 +485,11 @@ export interface SyncResult { ok: boolean; webUrl: string | null }
  * (no UI). ok:false if not signed in / the scope isn't consented — call startOneDriveSignIn() first.
  */
 /**
- * Read the remote .studio's snapshot archive, reporting WHAT HAPPENED.
- *
- * This is OneDrive's half of the write-back decision and the only half it owns: mapping Graph's
- * failure surface into `ArchiveRead`. The safety rule itself lives in `planWriteback`, shared with
- * every other provider — one rule, one place.
- *
- * `mapGraphReadStatus` is reused rather than re-derived: it is this file's own pure, tested
- * absent-vs-error predicate (404 ⇒ absent; EVERYTHING else ⇒ error, fail-safe by design, so a Graph
- * status we have never seen refuses the write instead of destroying the archive). The ledger path
- * below has had that discipline since it was written; the .studio — the thesis — did not.
- *
- * A parse failure is an ERROR, not an absence: a truncated or garbled download tells us nothing
- * about what the file holds, and "I could not decode it" must never license replacing it.
+ * Read the remote .studio's snapshot archive, reporting WHAT HAPPENED — OneDrive's half of the
+ * write-back decision, and the only half it owns. ⚠ REUSE `mapGraphReadStatus` rather than
+ * re-deriving the absent-vs-error rule, and note that a PARSE failure is an ERROR: a truncated or
+ * garbled download tells us nothing about what the file holds, and "I could not decode it" must
+ * never license replacing it. → docs/archive/storage-and-sync.md#cloud-status-map
  */
 async function readRemoteArchive(token: string, name: string): Promise<ArchiveRead> {
   try {
@@ -526,13 +498,12 @@ async function readRemoteArchive(token: string, name: string): Promise<ArchiveRe
     if (kind === 'absent') return { status: 'absent' } // no remote yet → a first upload is safe
     if (kind === 'error') return { status: 'error', reason: `Graph GET ${res.status}` }
     const text = await res.text()
-    // An empty body is an established emptiness (a placeholder the OneDrive desktop client created,
-    // or a previous upload that never landed) — nothing there to lose. Treating it as a parse ERROR
-    // would refuse every sync forever, since the merge gate only closes on a write. See folder.ts.
+    // An EMPTY BODY is an established emptiness (a desktop-client placeholder, or an upload that
+    // never landed) — nothing to lose. As a parse ERROR it would refuse every sync forever, since
+    // the merge gate only closes on a write.
     if (!text.trim()) return { status: 'absent' }
-    // A body that PARSED is not a body we UNDERSTOOD. `parseTraceFile` is JSON.parse + a marker
-    // slice, so a 200 carrying any valid JSON that is not a record used to arrive here as
-    // `snapshots: []` — an established emptiness we never established. See archiveSnapshotsOf.
+    // ⚠ A body that PARSED is not a body we UNDERSTOOD — `parseTraceFile` is JSON.parse plus a marker
+    // slice, so any valid JSON used to arrive here as an emptiness we never established.
     const snapshots = archiveSnapshotsOf(await parseTraceOffThread(text))
     if (!snapshots) return { status: 'error', reason: 'the remote file is not an Inkwave record' }
     return { status: 'ok', snapshots }
@@ -545,18 +516,17 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   if (!CLIENT_ID) return { ok: false, webUrl: null }
   const token = await getSilentToken()
   if (!token) return { ok: false, webUrl: null }
-  // The .studio stays LEAN (no PDF bytes) so text edits don't re-upload megabytes. The cited PDFs go
-  // as sidecar files next to it, uploaded once (re-uploaded only if the PDF itself changes).
+  // The .studio stays LEAN (no PDF bytes) so text edits don't re-upload megabytes; cited PDFs go as
+  // sidecars beside it, uploaded once.
   const studioName = oneDriveFilename(doc.id) ?? bundleFilename(doc)
-  // GROW-ONLY: union the remote file's snapshots in before overwriting so a short local set can't
-  // truncate history — but only ONCE per session (the per-sync GET+parse of a big file adds lag).
+  // GROW-ONLY: union the remote's snapshots in before overwriting, so a short local set cannot
+  // truncate history — but only ONCE per session (a per-sync GET+parse of a big file adds lag).
   //
-  // THE READ MUST BE ABLE TO FAIL. This block used to be `if (res.ok) { merge }` wrapped in a
-  // `catch { /* no remote yet → write local as-is */ }` — so a 500, a 429 throttle, an expired
-  // token or a corrupt body all read as "there is nothing there" and the PUT below replaced the
-  // remote archive with the local set. That is the 2026-07-15 collapse (a failure wearing an
-  // absence's clothes) driving the 2026-07-05 truncation (a short local set over a long archive),
-  // in the live sync of Peter's thesis. `planWriteback` is the guard; only 404 means absent.
+  // ⚠ THE READ MUST BE ABLE TO FAIL. As `if (res.ok) { merge }` inside a `catch { /* no remote */ }`,
+  // a 500, a throttle, an expired token or a corrupt body all read as "there is nothing there" and
+  // the PUT replaced the remote archive with the local set — in the live sync of Peter's thesis.
+  // `planWriteback` is the guard; only 404 means absent.
+  // → docs/archive/storage-and-sync.md#cloud-sync-guard
   let merged = snapshots
   const key = `onedrive:${doc.id}`
   if (needsWritebackMerge(key)) {
@@ -572,20 +542,17 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
   }
   const bundle = buildExportBundle(doc, merged)
   try {
-    // { expect: 'any' } — the .studio keeps its PRE-EXISTING posture, stated rather than defaulted.
-    // Its cross-device race is mitigated differently (the metadata heartbeat + the once-per-session
-    // grow-only merge above), and pinning it is a separate change with its own proof. Finding E is
-    // scoped to the LEDGER, whose file is cheap enough to reconcile on every write.
+    // { expect: 'any' } — the .studio keeps its PRE-EXISTING posture, STATED rather than defaulted.
+    // Its cross-device race is mitigated by the heartbeat + the once-per-session merge above, and
+    // pinning it is a separate change with its own proof. Finding E is scoped to the LEDGER.
     const webUrl = await putFile(token, studioName, composeTraceFile(bundle), { expect: 'any' })
     recordOneDriveWrite(doc.id) // heartbeat baseline: metadata newer than this = another device
     setDocSource(doc.id, 'onedrive')
     void uploadPdfSidecars(token, doc.id, studioName, bundle.bibliography ?? []) // fire-and-forget
-    // NOT `void`ed, and that is load-bearing (2026-07-17). `restoreSnapshotsFromBundle` READS the
-    // local archive, and that read now THROWS on a fault instead of lying `[]` — so `void` on it is
-    // an unhandled rejection escaping a fire-and-forget shortcut, surfacing as an uncaught browser
-    // error at the exact moment storage is already misbehaving. The heal is genuinely best-effort
-    // (the remote already has the union; OPFS catching up is a bonus), so the failure is LOGGED, not
-    // thrown — the same shape `restoreSnapshotsFromBundle`'s own deferDiskWrite arm uses.
+    // ⚠ CATCH THIS, never bare-`void` it: `restoreSnapshotsFromBundle` READS the local archive and
+    // that read THROWS on a fault, so an unhandled rejection would surface as an uncaught browser
+    // error at the exact moment storage is already misbehaving. The heal is best-effort — the remote
+    // already has the union — so the failure is LOGGED.
     if (merged.length > snapshots.length) {
       void restoreSnapshotsFromBundle(doc.id, merged)
         .catch((err) => console.warn('[inkwave] snapshot heal after sync failed (the remote has the union):', err))
@@ -597,9 +564,9 @@ export async function syncToOneDrive(doc: InkwaveDocument, snapshots: Snapshot[]
 }
 
 // ── PDF sidecars ──────────────────────────────────────────────────────────────
-// A cited source's PDF is stored beside the .studio as "<base>.<citekey>.pdf". Uploaded once and
-// tracked per-doc (by pdfName), so annotations — which live as JSON in the .studio, not in the PDF —
-// never trigger a re-upload; only replacing the PDF does.
+// Stored beside the .studio as "<base>.<citekey>.pdf", uploaded once and tracked per-doc by pdfName —
+// annotations live as JSON in the .studio, not in the PDF, so marking one up triggers no re-upload.
+// → docs/archive/storage-and-sync.md#cloud-sidecars
 const sidecarBase = (studioName: string) => studioName.replace(/\.(studio|inkwave)$/i, '')
 const sidecarName = (studioName: string, citekey: string) => `${sidecarBase(studioName)}.${citekey.replace(/[^\w.-]/g, '_')}.pdf`
 
@@ -646,9 +613,9 @@ export async function fetchPdfSidecars(folder: OneDriveFolder | null, studioName
   }
 }
 
-/** Fetch ONE missing sidecar on demand (e.g. the reader tapped a PDF whose bytes aren't local).
- *  Historical iOS trap: savePdf threw on WebKit until the OPFS write shim (2026-07-08), so a doc's
- *  sidecar pass could "complete" with nothing stored. This + the quiet-pass refetch heal that. */
+/** Fetch ONE missing sidecar on demand. It exists because `savePdf` threw on WebKit until the OPFS
+ *  write shim, so a doc's sidecar pass could "complete" with nothing stored — this and the quiet-pass
+ *  refetch heal that. → docs/archive/storage-and-sync.md#cloud-sidecars */
 export type SidecarFetchResult = { ok: true } | { ok: false; reason: 'unavailable' | 'no-auth' | 'not-found' }
 export async function fetchSidecarFor(docId: string, item: CSLItem): Promise<SidecarFetchResult> {
   if (!oneDriveConfigured() || !pdfNameOf(item)) return { ok: false, reason: 'unavailable' }

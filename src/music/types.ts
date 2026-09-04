@@ -1,26 +1,13 @@
 // ─── The Piece — the music module's shared data model (build-spec §1) ─────────
 //
-// THIS FILE IS A CONTRACT. Three lanes build against it: the photo path (§A1/§A2, this lane),
-// the MusicXML path (§B), and lesson capture (§A3). A silent change here breaks the other two.
-// If a lane needs a shape that isn't here, ADD to it — never redefine a field's meaning in place.
+// ⚠️ THIS FILE IS A CONTRACT — the photo path (§A1/§A2), the MusicXML path (§B) and lesson capture
+// (§A3) all build against it. ADD to it; never redefine a field's meaning in place.
+// snake_case is deliberate: this is a DOCUMENT/WIRE shape the spec writes that way (as
+// `productivity/types.ts` is). Don't "tidy" it to camelCase.
 //
-// NAMING: snake_case, deliberately, and it is NOT repo style drift. The Piece is a DOCUMENT/WIRE
-// contract (it is persisted into a `.studio` file and read by independent lanes), and the spec
-// writes it in snake_case. `productivity/types.ts` made the same call for the same reason. Three
-// lanes reading one spec and typing what they see is worth more than internal-style consistency;
-// don't "tidy" it to camelCase.
-//
-// ⚠️ STORAGE POSTURE — READ BEFORE WRITING ANY UI COPY OR COMMENT.
-// Spec §0 lists "encryption at rest" among what is reused from the Inkwave engine, and §1 says the
-// Piece is "stored in the user's own storage and encrypted at rest". **THAT IS NOT TRUE TODAY** —
-// verified in the code (2026-07-17): `storage/opfs.ts` writes `JSON.stringify(data)` in PLAINTEXT,
-// there is no `crypto.subtle.encrypt`/AES-GCM anywhere in src, and package.json carries no crypto
-// library (`@noble/ed25519` is for SIGNING). A Piece is gzip'd/plain JSON in OPFS — protected by the
-// browser's origin sandbox and the device's own disk encryption, not by Inkwave. The spec is a PLAN;
-// a plan is not a property. ZERO-RETENTION *is* real (there is no server holding any of it), so the
-// true and shippable sentence is the one the email lane landed on after hitting this same wall:
-//   "Stored on your device — we never hold it."
-// Do NOT write music-only encryption to paper over an app-wide gap. See CLAUDE.md (email layer §B2.2).
+// ⚠️ THERE IS NO AT-REST ENCRYPTION IN THIS BUILD, whatever §0/§1 promise. Any UI copy must track
+// the CODE: the true and shippable sentence is "Stored on your device — we never hold it".
+// → docs/archive/music-module-build.md#piece-storage-posture
 
 // ─── Geometry ────────────────────────────────────────────────────────────────
 
@@ -38,30 +25,17 @@ export interface Region {
 
 // ─── Anchors — how EVERYTHING links to the music (§A2 last bullet) ───────────
 //
-// "Every annotation carries an `anchor` (page + x,y region, and — once barlines are marked, §A5 —
-// the bar number) so it can be linked to lesson feedback, the heatmap, and recordings."
-//
-// A discriminated union, NOT one loose bag of optional fields: §1 says an anchor is "page + region
-// for photo; note/measure id for MusicXML", and those are genuinely different addressing schemes.
-// The union makes a consumer handle both explicitly instead of silently reading `page` as 0 on a
-// MusicXML piece. `bar` is the JOIN KEY and is optional on BOTH variants — it is what lets a lesson
-// note ("bar 24 — watch the dynamics"), a heatmap range, and a recording refer to the same music
-// regardless of which path the Piece came in through.
+// A DISCRIMINATED UNION, never one bag of optional fields: photo and MusicXML are different
+// addressing schemes, and the union makes a consumer handle both rather than read `page` as 0 on a
+// MusicXML piece. `bar` is the JOIN KEY, optional on every variant.
+// → docs/archive/music-module-build.md#anchor-union
 
 /**
- * THE COORDINATE SPACE IS THE SOURCE IMAGE — the photograph as captured, before reflow.
- *
- * This is load-bearing and was a real design decision, not an accident of implementation.
- * Annotation-space reflow (§A1) INSERTS blank bands between systems, which changes the rendered
- * page's geometry every time the student drags a manual adjust handle. If an anchor were stored in
- * rendered/reflowed coordinates, nudging one handle would silently slide every annotation below it
- * off its music. So: the reflow is a pure VIEW TRANSFORM over immutable source coordinates
- * (`reflow.ts` → `sourceToLayout` / `layoutToSource`), and an anchor never moves when the layout does.
- *
- * The one case source coordinates cannot express is an annotation written INTO inserted space — it
- * has no source pixel, which is the entire point of the gap. Those carry `gap_after_system` + a
- * normalised offset WITHIN that gap, so they stay pinned to the stave they belong to and travel with
- * it when the gap is resized. See `GapOffset`.
+ * ⚠️ THE COORDINATE SPACE IS THE SOURCE IMAGE — the photograph as captured, before reflow. The
+ * reflow is a pure VIEW TRANSFORM (`reflow.ts` → `sourceToLayout` / `layoutToSource`), so an anchor
+ * never moves when the layout does; store one in reflowed coordinates and one dragged handle slides
+ * every annotation below it off its music. A mark written INTO inserted space has no source pixel
+ * and carries a `GapOffset` instead. → docs/archive/music-module-build.md#anchor-source-space
  */
 export interface RegionAnchor {
   kind: 'region'
@@ -85,9 +59,8 @@ export interface GapOffset {
 }
 
 /**
- * MusicXML addressing (§B4): "anchor comments to specific notes/measures (addressable in MusicXML —
- * even cleaner than the photo path's region anchors)". Owned by the MusicXML lane; declared here so
- * one Annotation type serves both paths and a bar means the same thing on both.
+ * MusicXML addressing (§B4). Owned by the MusicXML lane; declared here so one Annotation type
+ * serves both paths and a bar means the same thing on both.
  */
 export interface MusicXmlAnchor {
   kind: 'musicxml'
@@ -98,27 +71,12 @@ export interface MusicXmlAnchor {
 }
 
 /**
- * "Bar 24" — AND NOTHING ELSE. The third variant, and the one a real lesson actually produces.
+ * "Bar 24" — AND NOTHING ELSE: the join key when the join key is all that is known, which is what
+ * a real lesson produces (a teacher SAYS a bar; the photo may have no bar model at all).
  *
- * ADDED 2026-07-17, answering the lesson lane's `BarOnlyAnchor` ask. That lane found the gap and
- * REFUSED all three dishonest ways round it — fabricating a `region` rect the student never drew,
- * misusing `MusicXmlAnchor` on a photo Piece, or re-forking its own anchor type — and reported it
- * instead. It was right on every count, and the gap was real: `RegionAnchor` demands a page and a
- * rect, `MusicXmlAnchor` demands notation, and **mid-lesson the student has neither**. They are
- * typing while their teacher talks, on a photograph whose barlines may never be marked.
- *
- * This is not a special case bolted on — it is what BarRef's "both optional" MEANS, made reachable.
- * A bar-only anchor is the join key when the join key is all that is known:
- *
- *     { kind: 'bar', bar_label: '24' }              ← mid-lesson: a teacher SAID "bar 24"
- *     { kind: 'bar', bar_label: '24', bar_index: 23 } ← later, once barlines exist to resolve against
- *
- * `page` is optional and is a HINT, not an address: on a multi-page photo Piece a student may know
- * which page they are looking at, and that narrows a later resolution. It never makes this a region.
- *
- * ⚠️ It carries NO region and MUST NOT GROW ONE. The moment this variant can hold coordinates, the
- * temptation returns to fill them in with a guess — which is the exact lie the lesson lane refused.
- * If coordinates are genuinely known, that is a `RegionAnchor` and the caller should build one.
+ * ⚠️ It carries NO region and MUST NOT GROW ONE — the moment it can hold coordinates, the
+ * temptation returns to fill them with a guess. If coordinates are genuinely known, build a
+ * `RegionAnchor`. → docs/archive/music-module-build.md#bar-anchor
  */
 export interface BarAnchor {
   kind: 'bar'
@@ -131,35 +89,11 @@ export type Anchor = RegionAnchor | MusicXmlAnchor | BarAnchor
 
 // ─── BarRef: how a bar is named, and why it takes TWO fields ─────────────────
 //
-// ⚠️ THIS REPLACED `bar: number` / `measure: number` (2026-07-17), and the reason is not tidiness —
-// the single name `bar` was being read three different ways by three lanes at once:
-//   · the MusicXML lane's `Measure.index`  — a 0-based ORDINAL
-//   · the lesson lane's `{ bar: 24 }`      — a number a TEACHER TYPED, i.e. a printed label
-//   · this lane's heatmap `bars: [a, b]`   — an ordinal RANGE to sweep a Pencil across
-// Those are not the same quantity, and a join key that means three things joins nothing.
-//
-// THE FACTS THAT DECIDE IT, and they come from the MusicXML lane's own parser (`parse.ts`), not
-// from taste:
-//  1. **A printed bar number is a STRING by MusicXML spec** — `'0'` pickups, `'8a'`/`'8b'` repeat
-//     endings. `parse.ts` keeps it verbatim and is right to.
-//  2. **A printed bar number is NOT UNIQUE.** `indicesOfPrintedBar` returns an ARRAY because repeat
-//     endings reuse numbers and multi-movement files restart at 1; `onlyIndexOf` REFUSES an
-//     ambiguous reference rather than resolve it to the first hit. So a printed number is
-//     structurally incapable of being a key — it can match two different bars in one score.
-//  3. Only the ordinal can be sorted, ranged, or joined. A heatmap sweep, a recording's span and an
-//     excerpt's extent are all ordinal facts.
-//
-// SO: two fields, and the NAMES carry the semantics because the old name is exactly what failed.
-//  · `bar_index`  — 0-based ORDINAL, identical to `parse.ts` `Measure.index` (no conversion for that
-//                   lane, and nobody can misread `bar_index: 23` as "bar 23"). THE JOIN KEY.
-//  · `bar_label`  — the bar number as PRINTED or as SPOKEN ('0', '8a', '24'). Display + citation.
-//                   Ambiguous by spec. NEVER a key, never sorted, never ranged.
-//
-// BOTH ARE OPTIONAL, and that is deliberate rather than lax: they are populated at different times.
-// A teacher saying "bar 24" during a lesson on a PHOTO piece gives a LABEL and nothing else — that
-// Piece has no bar model until the student taps barlines (§A4) or the CV pre-detects them, so there
-// is no ordinal to record and inventing one would be a guess. `bar_index` fills in when the piece
-// gains a bar model. Carry what you actually know; resolve later; never fabricate the key.
+// ⚠️ `bar_index` (0-based ORDINAL) IS THE JOIN KEY. `bar_label` (as printed or as spoken — '0',
+// '8a', '24') is NEVER a key: a printed bar number is a STRING by MusicXML spec and is NOT UNIQUE,
+// so it can match two bars in one score. Only an ordinal can be sorted, ranged or joined.
+// BOTH ARE OPTIONAL because they are known at different times: carry what you actually know,
+// resolve later, never fabricate the key. → docs/archive/music-module-build.md#barref
 export interface BarRef {
   bar_index?: number
   bar_label?: string
@@ -168,31 +102,28 @@ export interface BarRef {
 // ─── Assets — image/audio bytes live OUTSIDE the JSON ────────────────────────
 
 /**
- * An opaque handle to bytes held in the Piece's asset store, NOT the bytes themselves.
- *
- * WHY (CLAUDE.md, "Load performance is sacred"): a Piece is a few photographed pages — megabytes.
- * Inlining base64 into the JSON would put a whole-file parse of every page image on the load path,
- * which is precisely the class of bug that cost this app ~10s per open (the `blobToBase64` /
- * heartbeat findings). Refs resolve lazily, on demand, exactly like the PDF sidecars do.
+ * An opaque handle to bytes in the Piece's asset store, NEVER the bytes themselves — inlining
+ * base64 puts a whole-file parse of every page image on the load path, the class of bug that cost
+ * this app ~10s per open. Refs resolve lazily, like the PDF sidecars.
+ * → docs/archive/music-module-build.md#asset-ref
  */
 export type AssetRef = string
 
 // ─── Pages, systems, bars (§1 `pages`) ───────────────────────────────────────
 
 /**
- * One stave — five lines. Detected by GEOMETRY only (row-darkness peaks), never by reading notes.
- * OMR is an explicit, repeated non-goal (§0): nothing in this module may recognise a note.
+ * One stave — five lines. ⚠ Detected by GEOMETRY only (row-darkness peaks), never by reading notes:
+ * OMR is an explicit, repeated non-goal (§0). → docs/archive/music-module-build.md#system-atomic
  */
 export interface Stave {
   region: Region            // normalised to the source page image
 }
 
 /**
- * One SYSTEM — the unit the reflow slices between and must NEVER cut through (§A1).
- *
- * A grand stave (piano treble+bass, or any braced group) is ONE system with several `staves`.
- * `is_grand_stave` is a rendering/UX convenience; the invariant that matters is structural — a
- * system is atomic to the slicer, whatever it contains.
+ * One SYSTEM — the unit the reflow slices between and must NEVER cut through (§A1). A grand stave
+ * is ONE system with several `staves`; a system is atomic to the slicer whatever it contains, and
+ * `is_grand_stave` is only a rendering convenience.
+ * → docs/archive/music-module-build.md#system-atomic
  */
 export interface System {
   index: number             // ordinal down the page
@@ -200,9 +131,8 @@ export interface System {
   staves: Stave[]           // ≥1; >1 ⇒ braced group kept together
   is_grand_stave: boolean   // staves.length > 1
   /**
-   * How confident the detector is that the boundary BELOW this system is a real system break
-   * ([0,1]). Surfaced to the manual adjust handles (§A1 "manual adjust handles for messy/skewed
-   * photos") so a low-confidence cut is offered for review rather than applied silently.
+   * Confidence [0,1] that the boundary BELOW this system is a real break. A low-confidence cut is
+   * offered to the §A1 adjust handles for review, never applied silently.
    */
   confidence: number
 }
@@ -232,11 +162,10 @@ export interface PiecePage {
 // ─── Annotation-space reflow (§A1 — the distinctive feature) ─────────────────
 
 /**
- * The reflow PLAN for one page: how much blank space to insert after each system.
- *
- * This is a VIEW TRANSFORM, never a mutation of the image. It is stored (so it survives a reload
- * and travels in the .studio), it is fully reversible, and the source image is never re-encoded.
- * `gaps` is sparse — a system with no entry gets `default_gap`.
+ * The reflow PLAN for one page: how much blank space to insert after each system. ⚠ A VIEW
+ * TRANSFORM, never a mutation — fully reversible, and the source image is never re-encoded.
+ * `gaps` is sparse; a system with no entry gets `default_gap`.
+ * → docs/archive/music-module-build.md#page-reflow
  */
 export interface PageReflow {
   enabled: boolean
@@ -251,10 +180,9 @@ export interface PageReflow {
 export type AnnotationKind = 'freehand' | 'text' | 'highlight' | 'leader' | 'sticky' | 'symbol'
 
 /**
- * §1 declares `kind: freehand|text|highlight|leader|sticky`. `symbol` is ADDITIVE and is §A2's own
- * requirement — "musical symbols from a small palette" — which §1's list omits. It is a distinct
- * kind rather than a `text` with a glyph in it because a symbol has no prose to search, spell-check,
- * or distil, and the palette must be able to enumerate its own marks.
+ * `symbol` is ADDITIVE to §1's list — §A2's own requirement. A distinct kind, not a `text` with a
+ * glyph in it: a symbol has no prose to search or distil, and the palette must be able to enumerate
+ * its own marks. → docs/archive/music-module-build.md#symbol-kind
  */
 
 /** One stroke: a flat [x0,y0,x1,y1,…] run of source-normalised points, plus per-point pressure. */
@@ -291,13 +219,9 @@ export interface StickyContent {
 }
 
 /**
- * Smart leader-line routing (§A2 — distinctive). "When the space above/below a stave is cramped,
- * the student draws a curved connector so a dynamics/feedback note can sit where there's room and
- * still point to the right place."
- *
- * The ROUTE IS DERIVED, not stored: `from`/`to` are the two endpoints and `leader.ts` computes the
- * curve. Storing a baked path would freeze the routing against a reflow the student later adjusts —
- * the same failure mode the source-coordinate rule above exists to prevent.
+ * Smart leader-line routing (§A2). ⚠ THE ROUTE IS DERIVED, NOT STORED — `from`/`to` are the two
+ * endpoints and `leader.ts` computes the curve; a baked path freezes the routing against a reflow
+ * the student later adjusts. → docs/archive/music-module-build.md#leader-route
  */
 export interface LeaderContent {
   kind: 'leader'
@@ -362,21 +286,12 @@ export interface HeatmapEntry {
 // ─── Lesson capture (§1, §A3 — ANOTHER LANE; contract declared now) ──────────
 
 /**
- * §1/§A3: "the *raw* transcript is **never** stored here — only the student's own distilled
- * snippets." There is deliberately NO `transcript` field on Piece and there must never be one:
- * the session-scoped, non-storable transcript is the entire reassurance that makes a teacher
- * comfortable being recorded. If a lane needs the live transcript it lives in session memory and
- * dies with the session — it does not reach this type.
+ * ⚠️ THERE IS NO `transcript` FIELD ON `Piece` AND THERE MUST NEVER BE ONE (§1/§A3: only the
+ * student's own distilled snippets are stored). A live transcript lives in session memory and dies
+ * with the session — that non-storability is the whole reassurance that lets a teacher be recorded.
  *
- * DECLARED ONCE — HERE, IN THE CONTRACT — AND IMPORTED BY `lesson/types.ts`.
- *
- * The direction matters and I had it BACKWARDS on this branch: I imported these FROM the lesson
- * lane, which (a) was circular the moment that lane unforked and imported the contract, and (b) had
- * the ownership wrong. §1 itself declares `lesson_notes: [LessonNote]` and spells out
- * `LessonNote { id, snippet, anchor(optional → bar), created_at }` — so it is a CONTRACT type that
- * the lesson lane fills, not a lesson type the Piece borrows. That lane reached the same conclusion
- * independently on its rebase and deleted its copies; this is the other half. Two identical shapes
- * are not harmless — they drift the first time one side gains a member (CLAUDE.md: `DocType`).
+ * DECLARED ONCE — HERE, IN THE CONTRACT — AND IMPORTED BY `lesson/types.ts`, never the reverse.
+ * → docs/archive/music-module-build.md#lesson-note-ownership
  */
 export interface LessonNote {
   id: string
@@ -400,31 +315,22 @@ export interface Assignment {
 // ─── Reference tracks + sync (§1, §A4 — LATER, step 3) ───────────────────────
 
 /**
- * ONE TAPPED BARLINE — the SPATIAL half of §A4's sync, and the thing that gives a photographed
- * Piece a bar model at all.
+ * ONE TAPPED BARLINE — the SPATIAL half of §A4's sync. ⚠ Not a fallback: `reflow.ts` REFUSES to
+ * pre-detect barlines on a single stave, so on a violin or vocal part these taps are the ONLY
+ * source of bars and without them the heatmap has nothing to colour.
  *
- * §A4: "MVP: the student marks barlines by tapping their positions on the photo (robust on any
- * image)." That is not a fallback — it is load-bearing. `reflow.ts` REFUSES to pre-detect barlines
- * on a single stave (a note stem is not distinguishable from a barline by geometry alone), so for a
- * violin or vocal part these taps are the ONLY source of bars, and without them the heatmap has
- * nothing to colour.
- *
- * An anchor marks a barLINE (a boundary), not a bar. Consecutive anchors on the SAME system are what
- * define a bar — see `sync.ts` `barSpansFromAnchors`, which is also what makes the cursor incapable
- * of sweeping across a line end.
+ * An anchor marks a barLINE (a boundary), never a bar — consecutive anchors on the SAME system
+ * define a bar (`sync.ts` `barSpansFromAnchors`), which is what makes the cursor incapable of
+ * sweeping across a line end. → docs/archive/music-module-build.md#barline-anchor
  */
 export interface BarlineAnchor {
   page: number
   system: number
   x: number                 // normalised across the page width
   /**
-   * The 0-based ORDINAL of the bar this barline OPENS. See BarRef.
-   *
-   * ⚠️ Was `bar: number` — renamed 2026-07-17 to match the ruling this same file makes 300 lines
-   * above. §A4's types were written before it and kept the retired name, which is precisely how a
-   * vocabulary drifts back in: the rule was documented, and the file that documented it still had
-   * two counter-examples in its own tail. A closing barline (the last on a piece) opens no bar and
-   * carries the ordinal one past the final bar.
+   * The 0-based ORDINAL of the bar this barline OPENS. See BarRef — never a printed label. A
+   * closing barline opens no bar and carries the ordinal one past the final bar.
+   * → docs/archive/music-module-build.md#barline-anchor
    */
   bar_index: number
 }
@@ -473,13 +379,10 @@ export interface PracticeTask {
 }
 
 /**
- * A practice session is a REFERENCE into the productivity ledger, not a copy of one.
- *
- * §A5: "practice sessions write to the productivity ledger, so practice counts toward the student's
- * overall work stats." The ledger owns the measurement (`productivity/types.ts` SessionRow). Copying
- * minutes here would put a SECOND copy of every measured number beside the ledger's own — which is
- * exactly the trap CLAUDE.md records (§A6.4, "one representation of measurement, always": two copies
- * is how a narrative ends up contradicting the bars).
+ * ⚠️ A practice session is a REFERENCE into the productivity ledger, never a copy of one — the
+ * ledger owns the measurement (`productivity/types.ts` SessionRow), and a second copy of a measured
+ * number is how a narrative ends up contradicting the bars.
+ * → docs/archive/music-module-build.md#practice-session-ref
  */
 export interface PracticeSessionRef {
   session_id: string        // → productivity SessionRow.session_id
@@ -517,30 +420,12 @@ export interface PhotoSource {
 }
 
 /**
- * A MASTER SCORE ID — `MasterMeta.id` from `music/master.ts`. NOT an `AssetRef`.
- *
- * ─── The question the photo lane left open, answered by the lane that owns the field ─────────
- * `PieceSource.xml_ref` and `music.masters[]` can name the same bytes, and §B6 is explicit that the
- * MusicXML is "stored ONCE ... deduplicated". So there is only one right answer: **xml_ref names a
- * master**, and the master store IS the deduplicated store. It is not a copy in the Piece's assets.
- *
- * The two stores are genuinely different and neither is wrong:
- *   AssetRef  → `library/pieces/<pieceId>/assets/<ref>` — PER-PIECE bytes (page photos, recordings).
- *               Resolved with `getAsset(pieceId, ref)`. Deleting the Piece deletes them.
- *   MasterRef → `library/scores/<masterId>.musicxml`    — CROSS-DOCUMENT, content-deduplicated.
- *               Resolved with `loadMasterXml(id)`. Two Pieces of the same public-domain score share
- *               ONE master (dedup is by contentHash at import), and a master outlives any one Piece —
- *               which is exactly what makes §B6's "fix the master, every excerpt updates" possible.
- *
- * WHY A SEPARATE TYPE AND NOT `AssetRef`: `getAsset(pieceId, ref)` resolves a PER-PIECE path. Hand
- * it a master id and it returns `null` — which surfaces as "this score has no notation", with no
- * error, on exactly the Pieces that came in through the MusicXML path. Typing this as `AssetRef`
- * invites that call. The distinct name is the warning; see `pieceSource.test.ts`, which asserts no
- * call site ever routes an `xml_ref` through the asset store.
- *
- * RESIDUAL, for the contract's owner: both are `string` aliases, so the wrong call still COMPILES.
- * Branding them (`string & {__brand}`) would make it a type error rather than a test — worth doing,
- * but `AssetRef` is the photo lane's field and that is their call, not mine.
+ * A MASTER SCORE ID — `MasterMeta.id` from `music/master.ts`. ⚠ NOT an `AssetRef`: resolve it with
+ * `loadMasterXml(id)`, NEVER `getAsset`, which resolves a per-piece path and returns `null` for a
+ * master id — surfacing as "this score has no notation", silently, on exactly the MusicXML-path
+ * Pieces. Both are `string` aliases, so the wrong call still compiles; the distinct name is the
+ * warning and `pieceSource.test.ts` is the guard.
+ * → docs/archive/music-module-build.md#master-ref
  */
 export type MasterRef = string
 
@@ -563,12 +448,9 @@ export type PieceSource = PhotoSource | MusicXmlSource
 export type PieceSchemaVersion = '0.1.0'
 
 /**
- * §1's Piece, implemented field-for-field. Everything about one piece of music lives here and this
- * whole object is what goes in the `.studio`.
- *
- * The score is MARKUP-ONLY, NEVER EDITABLE (§0, repeatedly): there is no field here that changes a
- * note, and none may be added. Inkwave consumes Sibelius/MuseScore/Dorico output and adds a study
- * layer; it does not compete with them.
+ * §1's Piece, implemented field-for-field; this whole object is what goes in the `.studio`.
+ * ⚠️ THE SCORE IS MARKUP-ONLY, NEVER EDITABLE (§0) — no field here changes a note, and none may be
+ * added. → docs/archive/music-module-build.md#piece-markup-only
  */
 export interface Piece {
   id: string

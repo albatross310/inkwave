@@ -1,8 +1,10 @@
-// Google Drive sync — the cross-platform cloud destination for Firefox/Safari writers (mirrors the
-// OneDrive module's shape). Auth is Google Identity Services (GIS) token flow with the per-file
-// `drive.file` scope: Inkwave can only ever see files IT creates — never the rest of your Drive.
-// One self-contained .inkwave file per document; its Drive file id is remembered so we update (not
-// duplicate) on every sync. Gated on VITE_GOOGLE_CLIENT_ID — inert until that's set.
+// Google Drive sync — the cross-platform cloud destination for Firefox/Safari writers. GIS token flow
+// with the per-file `drive.file` scope: ⚠ INKWAVE CAN ONLY EVER SEE FILES IT CREATES, which is why
+// the picker enumerates app-created folders rather than the Drive, and why files others shared with
+// you are unreachable here. One .inkwave per document; its file id is remembered so we UPDATE.
+//
+// ⚠ It MIRRORS onedrive.ts, and the two have drifted apart twice with a data-loss bug on one side
+// only. → docs/archive/storage-and-sync.md#cloud
 
 import type { InkwaveDocument, Snapshot } from '../types/document'
 import { composeTraceFile, buildExportBundle, bundleFilename, TRACE_EXTENSION } from '../provenance/bundle'
@@ -54,11 +56,10 @@ async function ensureClient(): Promise<TokenClient> {
   return tokenClient
 }
 
-/** Warm the GIS script + token client OFF the click path. iOS Safari revokes a tap's transient
- *  activation while ensureClient() awaits the network script load, so requestAccessToken then runs
- *  WITHOUT a gesture and the consent popup is silently blocked (getDriveToken resolves null with no
- *  hint why). Fire this when the sync UI opens; by the time the writer taps "Google Drive",
- *  ensureClient() resolves from cache and the popup opens inside the tap's activation window. */
+/** ⚠ WARM THE GIS CLIENT OFF THE CLICK PATH. iOS Safari revokes a tap's transient activation while
+ *  `ensureClient()` awaits the script load, so `requestAccessToken` then runs WITHOUT a gesture and
+ *  the consent popup is SILENTLY blocked — `getDriveToken` resolves null with no hint why. Fire this
+ *  when the sync UI opens. → docs/archive/storage-and-sync.md#gd-scope */
 export function preloadGis(): void {
   if (!CLIENT_ID) return
   void ensureClient().catch(() => { /* offline / blocked — the click path retries the load */ })
@@ -69,8 +70,9 @@ export function preloadGis(): void {
  * user gesture); interactive=false attempts a silent grant (only works once consented). null = no token.
  */
 /** The already-granted in-memory token if fresh, else null — NEVER hits the network or GIS.
- *  For background warm paths: GIS's requestAccessToken opens a POPUP WINDOW even for
- *  prompt:'none' (Chrome tolerates quiet ones; Firefox blocks + warns "prevented a popup"). */
+ *  ⚠ EVERY BACKGROUND WARM PATH MUST USE THIS, never `getDriveToken`: GIS's `requestAccessToken`
+ *  opens a POPUP WINDOW even for `prompt:'none'` (Firefox blocks it and warns).
+ *  → docs/archive/storage-and-sync.md#gd-scope */
 export function peekDriveToken(): string | null {
   return cached && cached.expiry > Date.now() + 60_000 ? cached.token : null
 }
@@ -249,38 +251,19 @@ export async function listGoogleDriveFolders(parentId?: string): Promise<Array<{
 // ─── Open a file FROM Drive (Upload) ────────────────────────────────────────────
 export function googleDriveFileId(docId: string): string | null { return driveFileId(docId) }
 
-/** Warm the once-per-session grow-only merge at IDLE, without uploading (see folder.preMergeSaveFile
- *  — same rationale: the first sync fires on a checkpoint mid-typing; do the download+parse now).
+/** Warm the once-per-session grow-only merge at IDLE, without uploading — the first sync otherwise
+ *  fires on a checkpoint mid-typing.
  *
- * ⚠ THIS FUNCTION WAS THE LAST LIVE INSTANCE OF THE 2026-07-15 SHAPE, AND IT WAS THE WORST PLACED
- * (found + reproduced 2026-07-17, `cloudWriteback.test.ts`). Auditor B named it in the wrong
- * function — `syncToGoogleDrive` does NOT do this (probed) — but the finding itself was real, and
- * it lived here, in the IDLE WARM PASS. It read:
+ * ⚠ THIS WAS THE LAST LIVE INSTANCE OF THE 2026-07-15 SHAPE, and the worst placed. Reading through
+ * `downloadGoogleDriveFile` — `string | null`, null on 404 AND on 500/429/401/offline — and marking
+ * the gate merged ANYWAY closed it on an outage; and because the gate sits UPSTREAM of
+ * `syncToGoogleDrive`'s guard, the next checkpoint skipped `planWriteback` ENTIRELY. Proved: a
+ * 4-snapshot remote lost to a 1-snapshot local, with no failure the writer could see.
  *
- *     const text = await downloadGoogleDriveFile(fileId)   // ← `string | null`: null on 404,
- *     if (text) { …restore… }                              //   AND on 500 / 429 / 401 / offline
- *     markWritebackMerged(key)                             // ← RAN ANYWAY
- *
- * `downloadGoogleDriveFile` is the exact `catch { return null }` shape archiveWriteback.ts exists to
- * abolish: it collapses "the file is not there" and "Drive is down" into one word. A 500 in the warm
- * pass therefore CLOSED the once-per-session merge gate — and because that gate sits UPSTREAM of
- * `syncToGoogleDrive`'s guard, the next checkpoint skipped `planWriteback` ENTIRELY and PUT the
- * short local set over the remote archive. **A guarded union that is never reached guards nothing**
- * (archiveWriteback.ts's own words). Not "it never retries" — it never even asks.
- *
- * PROVED: a 4-snapshot remote + a 1-snapshot local + a 500 in the warm pass ⇒ the upload carried
- * `['s5']`. Four Bitcoin-anchored snapshots, gone, with no failure anywhere the writer could see.
- * OneDrive's `preMergeRemote` never had it (`if (!res.ok) return` sits BEFORE its mark) — the two
- * providers had silently drifted, which is this repo's standing wound.
- *
- * THE FIX IS TO REUSE THE READ THAT ALREADY REPORTS WHAT HAPPENED. `readDriveArchive` is this
- * module's own `ArchiveRead` adapter — the same one the sync path trusts. One rule, one read, one
- * place; a second private read of the same file is how these two drifted apart to begin with.
- *
- * AND THE GATE STILL CLOSES ON A GENUINE ABSENCE — this is not "delete the mark". A 404 means there
- * is nothing to merge, so closing is correct and saves the first sync a pointless second download of
- * a file that isn't there. Only `error` leaves it open. Guarding loss alone is how a lane ships an
- * outage. */
+ * SO: REUSE `readDriveArchive`, the same read the sync path trusts. A second private read of one
+ * file is how these two providers drifted apart. ⚠ And the gate still CLOSES on a genuine absence —
+ * only `error` leaves it open, because guarding loss alone is how a lane ships an outage.
+ * → docs/archive/storage-and-sync.md#cloud-warm-pass */
 export async function preMergeGDrive(docId: string): Promise<void> {
   const key = `gdrive:${docId}`
   const fileId = driveFileId(docId)
@@ -303,9 +286,9 @@ export async function preMergeGDrive(docId: string): Promise<void> {
   markWritebackMerged(key) // 'absent' or a merged 'ok' — both are facts we established.
 }
 
-/** Cheap remote-file check: validates the silent token and returns the file's link + modified time
- *  from Drive METADATA — no upload, no download. Used by resume-on-load, which previously rebuilt
- *  and re-uploaded the whole bundle just to re-activate sync. */
+/** Cheap remote-file check: the file's link + modified time from Drive METADATA — no upload, no
+ *  download. Resume-on-load used to rebuild and re-upload the whole bundle just to re-activate sync.
+ *  → docs/archive/storage-and-sync.md#cloud-metadata-only */
 export async function getGDriveFileInfo(docId: string): Promise<{ webUrl: string | null; modifiedAt: number } | null> {
   const id = driveFileId(docId)
   if (!id) return null
@@ -321,25 +304,24 @@ export async function getGDriveFileInfo(docId: string): Promise<{ webUrl: string
   }
 }
 
-// List the .studio/.inkwave files this app can SEE on drive.file (the ones Inkwave created/synced —
-// your own files, across devices). drive.file can't enumerate files OTHERS shared with you; for those,
-// open via "This device" (the mounted Drive folder) on desktop.
+// The files this app can SEE on drive.file — the ones Inkwave created, across devices. Files OTHERS
+// shared with you are unreachable by this scope; those open via the mounted Drive folder on desktop.
 
-/** An openable Drive file, with the change-tag the open cache keys on: md5Checksum changes only
- *  with the CONTENT; `version` (which also bumps on metadata changes — over-invalidates, always
- *  safe) is the fallback for files without an md5. */
+/** An openable Drive file, with the change-tag the open cache keys on: md5Checksum changes only with
+ *  the CONTENT, `version` is the fallback and over-invalidates — always the safe direction.
+ *  → docs/archive/storage-and-sync.md#cloud-listing */
 export interface GDriveFileEntry { id: string; name: string; tag?: string; size?: number; modifiedAt?: number }
 
 export async function listGoogleDriveFiles(parentId?: string): Promise<GDriveFileEntry[]> {
   if (!CLIENT_ID) return []
   const token = await getDriveToken(false) // silent only — interactive sign-in happens in the click, not here
   if (!token) return []
-  // Broad on purpose (matches the OneDrive opener): .studio.gz matches "contains '.studio'";
-  // .json/.txt catch pre-.studio-era saves and iOS renames. The opener validates by content.
+  // BROAD ON PURPOSE, matching the OneDrive opener — .json/.txt catch pre-.studio saves and iOS
+  // renames, and the opener validates by CONTENT.
   let q = "(name contains '.studio' or name contains '.inkwave' or name contains '.json' or name contains '.txt') and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
   if (parentId) q += ` and '${parentId}' in parents`
-  // Enriched fields feed the open cache; if Drive ever rejects the combination (400), retry the
-  // proven minimal listing before giving up — files must always LIST even if the cache can't tag.
+  // ⚠ THE ENRICHED FIELDS MUST DEGRADE: if Drive rejects the combination, retry the minimal listing
+  // before giving up — files must always LIST even when the cache cannot tag them.
   let res = await fetch(`${FILES_API}?q=${encodeURIComponent(q)}&fields=files(id,name,md5Checksum,version,size,modifiedTime)&pageSize=200&orderBy=modifiedTime desc`, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) {
     console.warn(`[inkwave] enriched Drive listing failed (${res.status}) — retrying the minimal listing`)
@@ -362,15 +344,11 @@ export async function listGoogleDriveFiles(parentId?: string): Promise<GDriveFil
  * Read the remote .inkwave's snapshot archive, reporting WHAT HAPPENED — Drive's half of the
  * write-back decision (the rule itself is `planWriteback`, shared with every provider).
  *
- * Deliberately NOT built on `downloadGoogleDriveFile`: that returns `string | null`, and a `null`
- * that means "no token" / "500" / "throttled" / "gone" indifferently is exactly the type-level
- * ambiguity the 2026-07-15 loss turned on. This is the same call with its answers kept apart.
- *
- * `404 ⇒ absent` and everything else ⇒ error, mirroring `mapGraphReadStatus`'s fail-safe rule: a
- * status we have never seen must refuse the write, never destroy the archive. CLAUDE.md's standing
- * warning about this adapter — "an absent-vs-error mapping never exercised against the real API is
- * the guess that becomes a blind overwrite" — is why this maps only the two statuses Drive's REST
- * contract actually documents, and treats the entire remainder as unknown.
+ * ⚠ Deliberately NOT built on a `string | null` reader: a null meaning "no token" / "500" /
+ * "throttled" / "gone" indifferently is exactly the type-level ambiguity the 2026-07-15 loss turned
+ * on. `404 ⇒ absent` and EVERYTHING else ⇒ error, mirroring `mapGraphReadStatus` — only the two
+ * statuses Drive's REST contract documents are mapped, and the whole remainder is unknown.
+ * → docs/archive/storage-and-sync.md#cloud-status-map
  */
 async function readDriveArchive(fileId: string): Promise<ArchiveRead> {
   try {
@@ -389,24 +367,14 @@ async function readDriveArchive(fileId: string): Promise<ArchiveRead> {
   }
 }
 
-// ─── `downloadGoogleDriveFile` IS GONE (2026-07-17), and its absence is the point ────────────────
-// It was:
-//     export async function downloadGoogleDriveFile(id: string): Promise<string | null> {
-//       const token = await getDriveToken(false); if (!token) return null
-//       const res = await fetch(`${FILES_API}/${id}?alt=media`, …)
-//       if (!res.ok) return null                    // ← 404, 500, 429 and 401: all one word
-//       return res.text()
-//     }
-// `preMergeGDrive` was its only caller, and that call was a live data-loss bug (see above): `null`
-// could not tell "the file is not there" from "Drive is down", so a 500 closed the merge gate and
-// the next sync PUT the short local set over the archive. The fix moved that caller onto
-// `readDriveArchive`, which left this with NO production callers — a `string | null` reader of the
-// archive, still exported, one autocomplete away from the next caller who needs a Drive file. That
-// is not dead code, it is a loaded footgun: the whole of archiveWriteback.ts exists to abolish this
-// exact signature, and leaving it would let the bug back in through the door it came through.
-// `readDriveArchive` (the `ArchiveRead` union) is how you read the archive; `downloadGoogleDriveFileBlob`
-// (below, still live) is how you read RAW BYTES for the opener — where a null honestly means "there
-// is nothing to open" and no archive can be overwritten by the answer.
+// ─── ⚠ DO NOT REINTRODUCE A `string | null` READER OF THE ARCHIVE ────────────────────────────────
+// `downloadGoogleDriveFile` was deleted rather than left unused, and its absence is the point: it
+// answered `null` to 404, 500, 429 and 401 alike, which was the live data-loss bug above. Once its
+// only caller moved to `readDriveArchive` it was not dead code but a loaded footgun — one autocomplete
+// away from the next caller, with the exact signature archiveWriteback.ts exists to abolish.
+// Read the ARCHIVE through `readDriveArchive` (the union); read RAW BYTES for the opener through
+// `downloadGoogleDriveFileBlob`, where a null honestly means "there is nothing to open" and no
+// archive can be overwritten by the answer. → docs/archive/storage-and-sync.md#cloud-warm-pass
 
 /** The LIVE change-tag for one file (metadata GET, no body) — the open cache verifies a cached
  *  copy against this when the picker's listing itself came from cache (a stale listing tag must
