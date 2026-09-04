@@ -1,0 +1,334 @@
+# The editor surface — the stories behind the rules
+
+The **why** for `src/editor/TiptapEditor.tsx`, `Scroll.tsx`, `waveTwinkle.ts`, `waveVideo.ts` and
+`toolbarContract.ts`. Each source file carries the rule as a short imperative comment ending in a
+pointer to an anchor here; this file carries the incident, the measurement, and the hypothesis that
+was refuted.
+
+Read the section that owns your area before proposing an alternative. Most of what is here has
+already been measured, and several plausible alternatives have already lost.
+
+Convention: `docs/archive/README.md`. Rule form: `docs/RULES.md`.
+
+---
+
+## `toolbarContract.ts` — the footer toolbar contract
+
+<a id="toolbar-contract"></a>
+### Why this file exists at all
+
+OWNER: the toolbar lane. Three lanes (feat/prod-ledger, feat/music-piece-photo,
+feat/music-musicxml) take toolbar real estate at once; this module is the ONE way they get it.
+
+WHY THIS FILE EXISTS AT ALL: this codebase's recurring wound is two implementations of one
+rule (staticPagination's orphan-snap vs the editor's; textRender's duplicate runOf; the
+email lane's competing docTypeOf). Three lanes inventing a slot/layer mechanism independently
+is that wound, pre-authorised. So the rules below are STRUCTURAL where they can be — a
+second mechanism must be unrepresentable, not merely discouraged — and pinned by tests that
+are mutation-proved to FIRE (toolbarContract.test.ts).
+
+HOW A LANE PLUGS IN (read this; then read the section your change touches). Four things exist here
+and nowhere else. If your lane is about to invent a fifth, it is about to fork one of these:
+
+1. **A BUTTON** → add a member to `SlotId` + `ALL_SLOTS`, and a predicate to `SLOT_LIVE`.
+   That is the whole registration: the row, the ▲ drawer, drag-to-reorder, migration and the
+   positional hotkey all follow. Do not touch ROW_SLOTS, the storage key, or `migrateSlots`.
+   Registered ≠ live — a slot whose lane has not shipped (`music`) or whose flag is off (`clock`)
+   says so in SLOT_LIVE and is invisible everywhere, rather than painting a dead circle.
+2. **A SECOND BAR** → add a member to `BarLayerId` and render on `active === 'x'`. The exclusion
+   Peter asked for is the TYPE (one variable, one id), not a convention.
+3. **TWO WAYS IN** → a slot is a TRIGGER, never an OWNER. Lift ONE piece of open state and give
+   every door the setter (the ◈ ReceiptPanel is the precedent Peter named).
+4. **A PER-DOC LAYOUT** → `ToolbarConfig` on the .studio. Read with `readToolbarConfig`
+   (found/absent/error — never null), render with `resolveToolbarRow`, store/travel with
+   `carryToolbarConfig`. It is OUTSIDE the provenance hash and must stay there:
+   `toolbarHash.test.ts` PROVES it against the real snapshot + verify chain, so the day someone
+   folds it in, the gate says so.
+
+THE 2026-07-17 ARRIVALS, and their state: `media` LIVE (photo/audio/video import) · `clock` behind
+?prodLedger (the Pomodoro/ledger drop-up; the top-right countdown is its second door) · `music`
+registered, awaiting its lane, and it owns the music BAR LAYER when it lands.
+
+ONE population (CLAUDE.md 2026-07-12): the ROW_SLOTS main-row circles + the ▲ drop-up
+overflow. S (style) and ⚙ (settings) are slots too; only ▲ and ⋮ are fixed.
+
+A LANE ADDS A BUTTON BY ADDING ONE MEMBER TO SlotId + ALL_SLOTS. Nothing else. It does not
+touch the row size, the storage key, or the migration — and it MUST NOT add itself to
+DEFAULT_SLOTS.
+
+<a id="toolbar-row-six"></a>
+### `ROW_SLOTS = 6` — the toolbar is a homepage
+
+THE TOOLBAR IS A HOMEPAGE, NOT A PLATONIC FIXED THING. Peter, 2026-07-17, and it is the design
+brief rather than a flourish: *"we're disrupting the whole ethos of a toolbar is a fixed
+platonified thing to making it more like a toolbar is like your app homepage. You define what
+apps sit on your homepage."* So SIX is a phone homescreen row, ▲ is the app drawer, and the
+hold-drag-to-reorder machinery is the PRIMARY interaction — not a power-user setting. Design for
+someone rearranging this often, per task.
+
+SIX, AND THE REASON IS CONTINUITY. Peter: *"there's only 6 slots not 7 which I think is a good
+number because it fits well on phone… we want to keep the phone and desktop experience
+continuous."* The phone row is sized `(100vw − 45px)/N` (index.css .iw-phone-toolbar) across
+▲ + the row + ⋮; six keeps every circle above the 44px tap target on a 320px iPhone SE, and
+desktop shows the SAME six so the two devices teach one layout. This number is not a budget to
+fight — it is what keeps one experience. Changing it is Peter's call, not a lane's.
+
+<a id="toolbar-first-run"></a>
+### `DEFAULT_SLOTS` — the first-run six, and why its scope is narrow
+
+THE FIRST-RUN SIX — Peter's own list, verbatim: *"we can set up a default standard for the first
+time you open a window or in incognito etc. which will be like page, style, info, settings,
+media import, review"*. ('info' is the guide menu — the `i` circle.)
+
+ITS SCOPE IS NARROW AND THAT MATTERS. This is NOT "the toolbar". It is the fallback for a writer
+who has NOTHING — a first-ever window, or incognito. Three states, and only the first uses this:
+
+- first run / incognito  → this array
+- a NEW document         → whatever config is in OPFS (the writer's own last layout)
+- a RECEIVED document    → its author's layout (signed-in writers can apply a saved preset)
+
+So nobody is "evicted" by what is absent here: an existing writer's stored order is migrated, not
+replaced (migrateSlots), and `bib`/`math` stay one click away in ▲ for the writers who want them.
+
+<a id="toolbar-slot-live"></a>
+### Registered ≠ LIVE — and the second implementation it absorbed
+
+A registered slot may not be renderable YET, and there are exactly two reasons — which are the
+same reason, and so they get ONE mechanism:
+
+- its lane has not shipped a button (`media`: Peter's first-run six names it before it exists)
+- it is behind a default-OFF flag (`clock`: `?prodLedger`)
+
+Either way the id must not reach the row, the ▲ drawer or the drag machinery, or the writer gets
+a circle that does nothing.
+
+RECONCILED 2026-07-17 with feat/prod-ledger, which landed the clock before this contract existed
+and had reached the same instinct from the other side: flag-conditional `allSlots()`/
+`defaultSlots()`/`slotCount()` triples, dropping a stored `clock` *"so a stored 7-row can't strand
+an unrenderable id"*. That is exactly this rule, written a second time — which is the wound this
+file exists to close. So their gate is GONE and their guarantee is kept here, generalised: a lane
+declares WHEN its slot is live and everything else follows. `clock` keeps its flag; nothing about
+the ledger's behaviour changes for anyone.
+
+Per-slot notes, at the time of writing:
+
+- `clock` — feat/prod-ledger, the Pomodoro/ledger drop-up. Default OFF; the countdown is the
+  other door.
+- `media` — LIVE 2026-07-17: the media-import lane landed, and the `media: () => true` line is the
+  one line that made it appear (row, ▲ drawer, drag-to-swap and migration all followed). It is now
+  in Peter's first-run six for real, so no first-run writer falls through to `bib` any more.
+- `music` — feat/music-piece-photo, the music BAR trigger (opens the
+  [turn this photo into a piece] / [add youtube/mp3] second-bar layer). Behind the SAME
+  default-OFF flag the music module already ships behind (`?music`, src/music/flag.ts), so the
+  LIVE toolbar is BYTE-UNCHANGED for every real writer: the slot appears only when the music
+  module is on, exactly as `clock` appears only with `?prodLedger`. The toolbar owns the SHELL and
+  this trigger; the music lane fills the bar's body (components/MusicBar.tsx is the labelled seam
+  it replaces). When the music panel is real, this flag is what turns both on together.
+
+<a id="toolbar-migrate"></a>
+### `migrateSlots` — the 4→6 precedent, generalised
+
+The buttons that were FIXED before they became slots (`FORMERLY_FIXED = ['style', 'settings']`): a
+legacy 4-slot config predates them, so they are appended first — this is CLAUDE.md's "legacy 4
+migrates by appending style,settings", kept verbatim in behaviour and generalised in mechanism.
+
+THE 4→6 PRECEDENT, GENERALISED — and the generalisation is the point. The shipped rule keyed on
+`parsed.length === 4` and demanded an exact length, so it answered exactly one historical
+question and RESET the writer's toolbar for every other shape (a stored 5, a retired id, and —
+the live trap — any future row-size change). This rule is generational instead: KEEP what is
+still live, in the writer's own order; FILL what is missing from canonical order; never reset
+unless there is nothing usable to keep.
+
+Resolve against what RENDERS, not merely what is registered: a row is a set of real buttons.
+This is what keeps Peter's first-run six honest while `media` waits for its lane, and what
+keeps feat/prod-ledger's promise that a stored `clock` cannot strand an unrenderable id.
+
+Drop unknowns (a retired id, or a flagged-off one) and duplicates rather than failing the
+whole config: a writer who once had a button we removed keeps the rest of their order.
+
+Nothing usable — a first-ever window, incognito, or a config we cannot read at all. Peter's
+first-run six leads the fill; anything in it that has no button yet falls through to the next
+canonical member, so the row is always six REAL buttons.
+
+`readStoredRow` returns `null` when the writer has none, and the null is the point — it is the same
+distinction `readToolbarConfig` draws: "this writer has never curated a toolbar" (⇒ Peter's
+first-run six) is not "this writer's layout is the default six" (⇒ their choice, which happens to
+match). Collapsing them would make the first-run fallback unable to tell a fresh install from a
+deliberate default — and would silently overwrite the meaning of an empty OPFS on every read.
+
+<a id="toolbar-hotkeys"></a>
+### Positional hotkeys — Alt+1…Alt+6
+
+Peter: *"apps are like a learning tool for learning how to do things on hotkeys (and doing them
+on phone where there are no hotkeys)"* — so the BINDING is the feature and the tooltip is only
+how it is taught.
+
+POSITIONAL, not per-slot letters, and the metaphor argues it: *"a toolbar is like your app
+homepage. You define what apps sit on your homepage."* Alt+3 means THE THIRD CIRCLE — the same
+thing your eye means. Position is identity on a homescreen, so the binding moving when you
+reorder is the design, not a defect: the number you press is the number you see.
+
+WHY NOT Alt+&lt;letter&gt;, which is the obvious first idea: Firefox on Windows/Linux — PETER'S OWN
+BROWSER — binds Alt+F/E/V/S/B/T/H to the menu bar. Alt+digit is unbound in both Chrome and
+Firefox, so the whole population fits with zero collisions and no chord.
+
+THE PHONE LOSES NOTHING: it has no Alt, so it renders no hints and keeps the buttons as the
+entire interface. This is additive on desktop and invisible everywhere else.
+
+`slotIndexForDigit` returns null for '0' deliberately — the drawer is not a row slot, and folding
+it in here would make "Alt+0 is index -1" a number some caller eventually indexes an array with.
+
+<a id="toolbar-bar-layers"></a>
+### Bar layers — the exclusion is the TYPE
+
+Peter's word is "mutually exclusive": R and music cannot both own the bar.
+
+THE SHIPPED MUTUAL EXCLUSION IS A CONVENTION, NOT A STRUCTURE — and that is the bug waiting to
+happen. Today the state is TWO booleans (styleBarOpen, reviewOpen) = FOUR states, one of which
+("both open") is illegal and is prevented ONLY by the discipline of a single function that
+hard-codes the pair. A third member turns 4 states into 8 and 1 illegal state into 4, and the
+function that must remember all of them is hand-written. That is how "identical policy" comments
+come to sit above rules that have quietly diverged.
+
+So the state is ONE VARIABLE holding ONE id. Two layers open at once is not "prevented" — it is
+UNREPRESENTABLE. A lane owns the bar by adding a member here and rendering on `active === 'x'`.
+
+`BAR_HANDOFF_MS = 240`: how long the outgoing layer takes to collapse before the incoming one
+opens (max-height 220ms + slack). One constant: a per-lane copy is how two layers come to overlap
+mid-handoff. `BarTogglePlan.handoff` is true when a DIFFERENT layer is currently open and must
+collapse first: the caller opens `open` after BAR_HANDOFF_MS, guarded by a sequence number so a
+fast double-tap cannot land a stale open on top of a newer one.
+
+THE GUARANTEE `planBarToggle` CARRIES: the return type cannot express "two layers open". Any
+caller, however careless, ends with at most one. That is the property CLAUDE.md's toolbar section
+asks for and the current booleans only promise.
+
+<a id="toolbar-trigger"></a>
+### A slot is a TRIGGER, never an OWNER
+
+Peter, 2026-07-17, on the Pomodoro: *"the pomedoro can be accessed two ways. Like the provedence
+snapshots."* That names the precedent exactly, and it is already in this file's neighbour —
+READ IT BEFORE BUILDING A SECOND WAY IN. `ReceiptPanel` (◈) is reachable twice today:
+
+- it renders its OWN ◈ button (ReceiptPanel.tsx ~L158), and
+- TiptapEditor LIFTS the state (`receiptOpen`) and passes `open`/`onOpenChange`, so the ▲
+  drop-up's phone entry (~L2946) writes that SAME state.
+
+One panel. One piece of open state, owned by the toolbar. N dumb triggers that only call the
+setter. THAT is how a feature gets two front doors without getting two implementations — and it
+is why the clock's toolbar slot and the top-right countdown are not a fork: both are triggers
+writing one `ledgerOpen`. If a lane finds itself with two booleans for one panel, it has already
+left the contract.
+
+<a id="toolbar-config"></a>
+### The `.studio` toolbar config — and why it is outside the hash
+
+Peter, 2026-07-17: *"we should encode the toolbar configuration into a .studio document."* The
+layout becomes per-DOCUMENT and task-based — a score gets music tools, an essay gets writing
+tools — rather than one global preference.
+
+⚠ At the time this was written the schema change (`toolbar?: ToolbarConfig` on InkwaveDocument,
+types/document.ts) WAS NOT APPLIED — it was coordinated with Peter first, and the shape and rules
+were settled so the three lanes could build against them. It has since landed: the field is on
+`InkwaveDocument`, `bundle.ts` emits it and `openDoc.ts` restores it.
+
+PROBED, not assumed, because the question was "is this inside the Bitcoin-anchored hash?":
+**NO, AND IT CANNOT BE.** `contentHash(contentJson)` (provenance/hash.ts L66) hashes ONLY the
+contentJson — never the InkwaveDocument — and `bundleHash` folds four EXPLICIT arguments
+(contentHash · bibHash · emailHash · musicHash). So a new document field cannot ride in; it
+would take someone deliberately adding it. That is the right answer and the precedent agrees:
+the music lane excluded per-master titles/`addedAt` from v:4 because "a corpus renaming a piece
+must not read as a tamper". Rearranging your buttons must not read as tampering with your thesis.
+PRECEDENT for travelling at all: `citationStyle`, `scasLimitN` and `docType` are already
+document-level preferences that travel in the .studio and already sit outside the anchored hash.
+This is that same class of field — not a new kind of thing.
+
+`ToolbarConfig.v` is versioned from birth: the shape is a wire contract the moment a .studio
+carries it. `row` is the speed dial, in order, read through migrateSlots — never trusted raw.
+
+**`ToolbarConfigRead` has NO `null` MEMBER, DELIBERATELY** — this is the `RemoteRead` pattern from
+`productivity/ledgerRemotes.ts`, and it exists because of the 2026-07-15 incident: `readJson`'s
+`catch { return null }` made a FAILED read indistinguishable from an ABSENT one, Edit.tsx answered
+null by minting a blank document, and it destroyed a day of Peter's real honours-proposal
+annotations. 'absent' and 'error' are different words and the type system enforces that they stay
+different.
+
+On the `found` member: `row` is the config MIGRATED for rendering here, now — exactly ROW_SLOTS ids
+this build can actually draw, with anything flagged-off dropped. `config` is the SAME config
+VERBATIM — the author's order, unmigrated — and the two are different on purpose. The migration is
+a RENDER-time rule, and baking it into a document is a lossy write. `absent` means no config (a
+pre-2026-07-17 document, or an uncurated one); `error` means present but unreadable — NEVER
+silently a default.
+
+WHY THE DISTINCTION IS LOAD-BEARING HERE, since a toolbar cannot lose a thesis: it is about what
+we WRITE, not what we render. Both 'absent' and 'error' RENDER the same fallback row (the writer
+always gets a working toolbar — see resolveToolbarRow). But only 'found'/'absent' may be written
+back: persisting a resolved default over a config we merely FAILED TO PARSE is the blind
+overwrite of 2026-07-15 in miniature — a read failure causing a write that destroys the thing it
+failed to read. On 'error' we render the fallback and leave the document's bytes alone.
+
+A config that survives `readToolbarConfig` is still passed through migrateSlots by the caller: a
+hostile or truncated `row` cannot produce an unreachable toolbar, because migrateSlots returns
+exactly ROW_SLOTS valid unique members from ANY input. ▲ and ⋮ are fixed chrome and are not slots
+at all, so no config can hide the way back. "A received document locks me out" is unrepresentable.
+
+<a id="toolbar-carry"></a>
+### `carryToolbarConfig` / `mergeRowIntoConfig` — migration is a render rule
+
+The config as it TRAVELS — written into a .studio, and read back out of one. Verbatim order;
+registered ids only; **never migrated**. `undefined` when the raw value is absent or unreadable:
+an unreadable config is DROPPED, not repaired, because a toolbar is one drag to fix and a
+repaired-from-junk row is a guess we would then persist as if the author had arranged it.
+
+WHY VERBATIM, AND IT IS THE LOAD-BEARING HALF. `migrateSlots` resolves against `livePopulation()`,
+which is FLAG-SENSITIVE. Migrate on the way in or out and a writer who opens their own document
+with `?prodLedger` off has `clock` silently deleted from the FILE — permanently, at the next save.
+Migration answers "what can THIS build draw right now?"; a document answers "what did the author
+arrange?". Those are different questions and only the second belongs in the bytes. Rendering still
+goes through migrateSlots on every read (resolveToolbarRow), so a carried id this build cannot
+draw is invisible rather than broken — the same partition, one rule, applied at the right end.
+
+`registeredOnly` is the one filter it does apply: an id no version of Inkwave ever had is not a
+lost feature, it is junk, and junk in a document is how a later reader learns to distrust a field.
+Liveness is a runtime state; registration is a fact about the build.
+
+`mergeRowIntoConfig` is the config to WRITE after the writer rearranges their row — the third
+site, and the one where the flag-sensitivity closed back in.
+
+The row the UI hands back is a MIGRATED row: it can only contain what this build draws. Persist it
+raw and every drag quietly deletes the author's flagged-off slots from their own document —
+`carryToolbarConfig` refuses to lose them on the way in and out, and this would lose them in the
+middle. So: the writer's new row, PLUS any registered-but-not-live id their config already had.
+
+THE RULE THAT MAKES THAT SOUND, and it needs the distinction the config's shape already draws: the
+stored config is the ROW; drawer membership is DERIVED (overflowSlots). So a LIVE slot missing from
+the new row was moved to the drawer BY THE WRITER — deliberate, and it must not come back. A slot
+that was never renderable cannot have been dragged anywhere; its absence is the flag's doing, not a
+decision. Keep what they could not have chosen to drop.
+
+<a id="toolbar-resolve"></a>
+### `resolveToolbarRow` — the resolution chain
+
+THE RESOLUTION CHAIN, and the answer to "does a received document impose its author's seven?"
+
+> document config → the writer's own global order → DEFAULT_SLOTS.
+
+YES, A RECEIVED DOCUMENT'S LAYOUT APPLIES — that IS the feature Peter asked for: open a score,
+get music tools. It is safe to let it, and the reasons are structural rather than hopeful:
+a config can only ever name buttons that exist (migrateSlots), can never hide ▲/⋮, is
+non-destructive, and is one drag to change. The precedent is already shipped and uncontroversial:
+`citationStyle` travels in a .studio and silently reconfigures your citation rendering on open.
+A document with NO config uses YOUR order, never a stranger's — so nothing changes for the
+thousands of existing documents, which is the case that must not regress.
+
+AND THE GLOBAL ORDER STAYS THE WRITER'S DEFAULT (localStorage, exactly as today — curation keeps
+writing it). That is what stops per-document layouts becoming a chore: a new document inherits
+the writer's latest curated order instead of snapping back to a factory seven. It is also why
+there is no hardcoded per-docType default table — inheritance gives task-based sevens for free
+the moment a writer curates one, without anybody guessing what a score's seven should be before
+the music bar exists. If Peter wants factory-seeded per-type defaults later, they slot in HERE,
+as one more link in this chain, not as a second mechanism.
+
+EVERY path resolves through migrateSlots — including the first-run one. Returning DEFAULT_SLOTS
+raw was a real bug its own test caught: the array names `media`, whose lane has not landed, so
+the fallback smuggled an unbuilt button into the row that the normal path filters out.
