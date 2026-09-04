@@ -45,22 +45,15 @@ import type { IwCitationMeta } from '../types/document'
 
 const INK = '#5c2d8a'
 
-// ─── THE BOTTOM TOOLBAR IS A READER BAR, NOT THE PAGE (2026-08-30) ───────────────────────────────
-// This file's chrome did not theme AT ALL, in either direction: at night the toolbar stayed #faf8fc
-// with #fff control faces and a #5c2d8a glyph on each — a strip of daylight welded under a dark app,
-// directly below a reader header that HAD been migrated. One panel, two themes.
-//
-// It joins the reader family rather than growing a palette, and the reason is that its day values
-// already ARE that family's: bar #faf8fc, face #fff, outline #d6cfe0, glyph #5c2d8a, byte for byte.
-// PdfReaderView's header is the same bar in the same panel — the ¶ toggle only swaps what is
-// between them. So the day rendering is unchanged BY CONSTRUCTION, not by measurement.
-//
-// ⚠ THE PAGE IS NOT THE BAR, and the split is the whole care of this change. Anything drawn ON a
-// page — a note's sheet and its ink, the eraser ✕, the delete badge, the page canvas — keeps its
-// literal: pdf.js renders a picture of a white page in both themes, and a mark's colour is STORED
-// IN THE DOCUMENT and shared with the source reader. Re-toning either would make one highlight two
-// colours on two devices, which is the fill/stroke rule CLAUDE.md's reader section states. The
-// popovers anchored at a click on the page are page surfaces for the same reason and stay light.
+// ─── THE BOTTOM TOOLBAR IS A READER BAR, NOT THE PAGE ────────────────────────────────────────────
+// ⚠ ASK WHICH SURFACE A CONTROL SITS ON, then take that surface's token. The bar is reader CHROME
+// and shares PdfReaderView's tokens (its day values already ARE that family's, byte for byte, so
+// the day rendering is unchanged by construction).
+// ⚠ ANYTHING DRAWN ON A PAGE KEEPS ITS LITERAL — a note's sheet and ink, the eraser ✕, the delete
+// badge, the page canvas, and every popover anchored at a click on the page. pdf.js paints a white
+// page in both themes, and a mark's colour is STORED IN THE DOCUMENT and shared with the source
+// reader: re-toning either makes one highlight two colours on two devices.
+// → docs/archive/reader-panels.md#pv-toolbar-theme
 const BAR = 'var(--iw-reader-bar, #faf8fc)'
 const CTL = 'var(--iw-reader-ctl, #fff)'
 const EDGE = 'var(--iw-reader-edge, #d6cfe0)'
@@ -106,12 +99,10 @@ const HIGHLIGHT_COLORS = COLORS.slice(0, 4)
 // read (Peter, 2026-08-28: "get rid of these last two colours for text boxes").
 const NOTE_COLORS = COLORS.slice(0, 4)
 type ToolKind = HighlightKind | 'erase'
-// ⚠ UNDERLINE AND STRIKETHROUGH ARE GONE FROM THE TOOL ROW (Peter, 2026-08-28: "let's get rid of
-// underline and strikethrough"). The KINDS stay in the model and in the renderer on purpose: a PDF
-// annotated before today may already carry them, and dropping the render would make an existing
-// mark silently vanish from someone's source — the deletion-by-omission this codebase keeps
-// refusing. You can no longer CREATE one; every one already made still shows, and the eraser still
-// removes it.
+// ⚠ UNDERLINE AND STRIKETHROUGH ARE GONE FROM THE TOOL ROW, BUT NOT FROM THE MODEL OR THE RENDERER.
+// A PDF annotated earlier may carry them, and dropping the render would make an existing mark
+// silently vanish from someone's source — deletion by omission. You cannot CREATE one; every one
+// already made still shows, and the eraser still removes it.
 const TOOLS: Array<{ kind: ToolKind; label: string; title: string }> = [
   { kind: 'highlight', label: '▮', title: 'Highlight' },
   { kind: 'text', label: 'T', title: 'Text note — click on the page to place' },
@@ -251,22 +242,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const printedKnownRef = useRef(false) // true when Haiku verified the offset
   const [pending, setPending] = useState<Pending | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  // ATOMIC CONTENTS REVEAL (Peter, 2026-07-09): the panel window pops instantly (PdfSidePanel) as
-  // pure WHITE + the ✕ close button — nothing else. The WHOLE viewer (toolbar, context strip, find
-  // bar, zoom + dock controls, pages) stays at opacity 0 (still laid out + rendering underneath —
-  // same trick as the editor's settle gate) behind a white cover, and flips in ONE toggle when the
-  // initial viewport is actually ready: placeholders built + the visible pages' canvas AND text-layer
-  // spans attached (renderVisibleNow → renderOnePage's text-ready contract) + highlight overlays
-  // re-drawn + the initial scroll applied. Capped at 1.5s like the editor's reveal gate, so a
-  // slow/huge PDF can never hold the panel hostage.
+  // ATOMIC CONTENTS REVEAL: the panel pops instantly as white + ✕; the whole viewer sits at
+  // opacity 0 (laid out and rendering underneath) and flips in ONE toggle once the initial viewport
+  // is really ready — placeholders, the visible pages' canvas AND text-layer spans, overlays, the
+  // initial scroll. ⚠ Capped at 1.5s, so a huge PDF can never hold the panel hostage.
+  // → docs/archive/reader-panels.md#pv-reveal
   const [revealed, setRevealed] = useState(false)
-  // Latch mirror + the ONE reveal decision point. The old one-shot barrier raced the newer render
-  // paths (fit-to-text / live-fit re-renders supersede the load token, and a superseded
-  // renderVisibleNow resolves EARLY) — the toolbar then revealed before the text layer (Peter's
-  // regression). maybeReveal() is instead called after EVERY completed page render (and by the
-  // load barrier): it flips only when every page actually intersecting the viewport has its
-  // canvas AND text-layer spans attached (pg.rendered — the text-ready contract). Whatever render
-  // path completes last is the one that opens the gate, so no path can slip past it.
+  // ⚠ ONE reveal decision point, re-asked after EVERY completed page render — never a one-shot
+  // barrier (R7). A superseded `renderVisibleNow` resolves EARLY, so a barrier tied to the load
+  // token revealed the toolbar before the text layer. Whatever render finishes last opens the gate.
+  // → docs/archive/reader-panels.md#pv-reveal
   const revealedRef = useRef(false)
   function maybeReveal(): void {
     if (revealedRef.current) return
@@ -295,12 +280,9 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   const dragMovedRef = useRef<string | null>(null)
   // How far past the page you can scroll. Enough for a text note at the margin, and 0 at fit.
   const PDF_OVERSCROLL_PX = 180
-  // ⚠ THE MARGIN HAS TO RESIZE THE PAGE (Peter, 2026-08-28: "this button doesn't appear to be
-  // working"). It DID pad the scroller — but every fit calculation measures `clientWidth`, which
-  // padding does not change, so the page kept its old size, overflowed into the new strip and the
-  // margin was only reachable by scrolling. Reserving space that the page then covers is the same
-  // as reserving nothing. Now the reserve is a NUMBER shared by the padding and the fit, so the
-  // page shrinks and the margin is beside it, which is the whole point of asking for one.
+  // ⚠ THE MARGIN RESERVE IS ONE NUMBER, SHARED BY THE PADDING AND THE FIT (R2). Padding alone does
+  // not change `clientWidth`, which is what every fit measures — so the page kept its size and
+  // covered the strip, i.e. reserving space that reserves nothing.
   const commentMarginRef = useRef(0)
   const [commentMargin, setCommentMargin] = useState(() => {
     try { return localStorage.getItem('inkwave:pdfCommentMargin') === '1' } catch { return false }
@@ -423,16 +405,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           const noteBorder = emptyNote ? `1.5px dashed ${INK}` : '1px solid rgba(0,0,0,0.2)'
           const minH = (r0.h || 0) > 0.001 ? `min-height:${Math.max(20, (r0.h || 0) * ph)}px;` : ''
           const noteW = Math.max(60, (r0.w || 0.3) * pw)
-          // ⚠ `touch-action:none` — WITHOUT IT DRAG-TO-MOVE DOES NOT EXIST ON TOUCH. The app-wide
-          // phone rule is `* { touch-action: pan-x pan-y }` and touch-action does NOT inherit, so a
-          // finger pressed on a note is a candidate PAN: the browser takes the gesture, scrolls the
-          // PDF and sends `pointercancel`, and `setPointerCapture` cannot override that (capture
-          // routes events, it does not claim the gesture). The note simply never moves, silently.
-          // Same rule CLAUDE.md records for the SCAS reel: an element that owns a drag declares it.
-          // COST, stated: you can no longer start a page scroll with your finger on a note. Notes
-          // are small boxes; if a tall one ever makes a page hard to scroll, the narrower fix is to
-          // set this only while the note is SELECTED (tap, then drag) — at the price of dragging
-          // meaning something different on touch than it does with a mouse.
+          // ⚠ `touch-action:none` — WITHOUT IT DRAG-TO-MOVE DOES NOT EXIST ON TOUCH. Under the
+          // app-wide `pan-x pan-y` (which does NOT inherit) a finger on a note is a candidate PAN:
+          // the browser takes the gesture and sends `pointercancel`, and `setPointerCapture` cannot
+          // override that. An element that owns a drag declares it.
+          // COST, stated: a page scroll can no longer start on a note.
+          // → docs/archive/reader-panels.md#pv-note-touch
           note.style.cssText = `position:absolute;left:${r0.x * pw}px;top:${r0.y * ph}px;width:${noteW}px;${minH}background:${hl.color};border:${noteBorder};border-radius:4px;padding:3px 6px;font-size:${hl.size ?? 12}px;line-height:1.35;color:var(--iw-reader-on-mark, #2c2a28);pointer-events:auto;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.22);z-index:2;font-family:system-ui,sans-serif;white-space:pre-wrap;overflow-wrap:break-word;outline:none;touch-action:none;`
           note.textContent = hl.note || hl.text
           note.title = 'Click/tap to select (✕ or Delete removes) · double-click or tap again to edit'
@@ -447,14 +425,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
           const delBtn = document.createElement('button')
           delBtn.textContent = '×'
           delBtn.title = 'Remove note'
-          // TOP-LEFT (Peter, 2026-08-28: "the x needs to be at top left not top right"). A note grows
-          // rightward and downward from its origin, so the right edge MOVES as the box is resized or
-          // its text wraps — the handle wandered. The origin does not.
-          // 16px is a mouse target. On touch the badge grows to 28 and stays CENTRED on the note's
-          // corner, so it gains its size outward rather than reaching further into the note — a
-          // delete that is easy to hit by accident is worse than one that is hard to hit on purpose.
-          // (It cannot use the `.iw-tap` hit region for that reason: a 44px zone here would cover
-          // the note's top-left corner, and a tap meant to EDIT would delete.)
+          // ⚠ TOP-LEFT: a note grows right and down from its origin, so only the origin holds still
+          // as the box resizes. On touch the badge grows OUTWARD from that corner and takes no
+          // `.iw-tap` region — a 44px zone here would turn a tap meant to EDIT into a delete.
+          // → docs/archive/reader-panels.md#pv-note-touch
           const dBtn = isTouch ? 28 : 16
           delBtn.style.cssText = `position:absolute;left:${r0.x * pw - dBtn / 2}px;top:${r0.y * ph - dBtn / 2 - 1}px;width:${dBtn}px;height:${dBtn}px;padding:0;line-height:${dBtn - 2}px;text-align:center;border-radius:50%;border:1px solid #7f1d1d;background:#fff;color:#7f1d1d;font-weight:bold;cursor:pointer;font-size:${isTouch ? 18 : 12}px;pointer-events:auto;z-index:3;display:none;touch-action:none;`
           delBtn.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); removeNote() })
@@ -475,12 +449,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
             const rng = document.createRange(); rng.selectNodeContents(note); rng.collapse(false)
             const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(rng)
           }
-          // ── DRAG TO MOVE (Peter, 2026-08-28: "and need to move on click and drag") ──────────
-          // Threshold-based, so a plain click still selects: nothing moves until the pointer has
-          // travelled more than a few px, and only then is the click suppressed. Positions are
-          // FRACTIONS of the page (like every other annotation rect), so a moved note stays put
-          // through zoom, rotation and a re-render — dragging in px and storing px would pin it to
-          // one scale.
+          // ── DRAG TO MOVE ────────────────────────────────────────────────────────────────────
+          // Threshold-based, so a plain click still selects and only a real drag suppresses it.
+          // ⚠ Store the position as a FRACTION of the page, like every other annotation rect — px
+          // would pin the note to one scale and lose it on zoom, rotation or a re-render.
           let drag: { px: number; py: number; x0: number; y0: number; moved: boolean } | null = null
           note.addEventListener('pointerdown', (ev) => {
             if (note.contentEditable === 'true') return   // editing: the pointer is placing a caret
@@ -605,16 +577,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   // background base progress.
   const sharpActiveRef = useRef(0)
 
-  // Paint one page's canvas + text layer on demand (called by the IntersectionObserver). Placeholder
-  // sizes are already correct, so this never reflows — which is also what stops the open-scroll snap.
-  //
-  // TEXT-READY CONTRACT (Peter, 2026-07-09 "the text takes a moment longer"): the returned promise
-  // resolves only when the canvas AND the text-layer spans are actually attached to the DOM (the
-  // TextLayer render task below is awaited before `rendered` flips). Crucially, a caller that asks
-  // for a page whose render is already IN FLIGHT — the IntersectionObserver usually starts the
-  // visible pages before renderVisibleNow asks for them — gets THAT render's promise, not an instant
-  // resolve. The old `if (rendering) return` early-out is exactly what let the atomic reveal fire
-  // with the canvas painted but the text layer still streaming in.
+  // Paint one page's canvas + text layer on demand. Placeholder sizes are already correct, so this
+  // never reflows — which is also what stops the open-scroll snap.
+  // ⚠ TEXT-READY CONTRACT: resolve only once the canvas AND the text-layer spans are attached, and
+  // hand a caller asking for an IN-FLIGHT page THAT render's promise — never an instant resolve.
+  // An `if (rendering) return` early-out is what let the reveal fire mid-text-layer.
+  // → docs/archive/reader-panels.md#pv-render
   function renderOnePage(idx: number, token: number): Promise<void> {
     const pg = pagesRef.current[idx]
     if (!pg || pg.rendered) return Promise.resolve()
@@ -628,24 +596,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     try {
     const pdfjs = await getPdfjs()
     if (token !== renderTokenRef.current) { pg.rendering = false; return }
-    // Supersample: render the canvas at ≥2× the CSS size and let the browser downscale, so PDF text
-    // stays crisp even on 1× displays (or setups that under-report devicePixelRatio). But the viewport
-    // already grows with zoom, so cap the canvas at 4096px/side to bound memory — supersampling then
-    // only adds resolution where the page is still small (the default fit view, where the blur shows).
-    // Supersample to ≥2× (capped 3×): exactly-dpr looked soft on low-dpr displays, and 3–4× shimmered
-    // on non-integer downscales. 2–3× is the sweet spot — crisp without the aliasing. Capped for memory.
-    // Touch (iOS) caps at 2×: iPhones report dpr 3, and 3× canvases are 2.25× the bytes for no visible
-    // gain on those screens — iOS's TOTAL canvas memory budget is the scarce resource (see eviction).
-    // ⚠ THE CODE CONTRADICTED ITS OWN COMMENT (2026-08-28, Peter: "is there a way for us to simply
-    // fix the PWA to 100% — the PDFs seem to be blurry otherwise"). It said "render at ≥2× … so PDF
-    // text stays crisp even on 1× displays", and then took `min(…, devicePixelRatio)`, which CAPS
-    // the canvas AT the display scale — so a 1× display supersampled by exactly 1×, i.e. not at all.
-    // And a browser at less than 100% zoom REPORTS A LOWER DPR (Chrome folds zoom into it): at 67%
-    // on a Retina Mac, dpr ≈ 1.33, so the page rendered at 1.33× and was downscaled into a soft
-    // mush. That is the blur, and it is why it appeared at "not 100%".
-    // No page can set the browser's zoom, so the fix is not to demand 100% — it is to stop caring:
-    // the floor is now 2× whatever the display says, keeping every existing ceiling (3× desktop /
-    // 2× touch for iOS's canvas-memory budget, and 4096px per side).
+    // ⚠ SUPERSAMPLE IS A FLOOR OF 2×, NEVER CAPPED AT `devicePixelRatio`. A browser below 100% zoom
+    // REPORTS a lower dpr (Chrome folds zoom in), so a dpr cap rendered at 1.33× on a Retina Mac at
+    // 67% and downscaled into mush — the blur that "appeared at not 100%". Ceilings stay: 3× desktop,
+    // 2× touch (iOS's TOTAL canvas budget is the scarce resource — see eviction), 4096px per side.
+    // 2–3× is the measured sweet spot; exactly-dpr looks soft, 3–4× shimmers on non-integer scales.
+    // → docs/archive/reader-panels.md#pv-render
     const MAX_CANVAS = 4096
     const outputScale = pdfOutputScale(window.devicePixelRatio || 1, isTouch, pg.viewport.width, pg.viewport.height, MAX_CANVAS)
     const canvas = document.createElement('canvas')
@@ -675,12 +631,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   }
 
   // ── BASE TIER (never blank) ──────────────────────────────────────────────────
-  // Fast scroll used to outrun the on-demand sharp renderer and land on white placeholders. So after
-  // the initially visible pages have painted, a background sweep renders EVERY page once at a cheap
-  // low resolution into a CSS-stretched canvas UNDER the sharp one. A fast flick then always lands on
-  // a soft-but-readable page (the sharp render covers it moments later), and the touch-only eviction
-  // can drop far sharp canvases and fall back to base instead of blank. Sequential, yielding between
-  // pages, and stalled whenever a sharp render is in flight — it never competes with the visible view.
+  // Every page gets one cheap low-res canvas UNDER the sharp one, so a fast flick lands on a
+  // soft-but-readable page and eviction can fall back to it instead of white.
+  // ⚠ Sequential, yielding, and STALLED whenever a sharp render is in flight — it must never compete
+  // with the visible view. → docs/archive/reader-panels.md#pv-render
   const BASE_SCALE_MAX = 0.45                 // soft but readable; ~0.4 MB RGBA per US-Letter page
   const BASE_SCALE_MIN = 0.2                  // resolution floor for very long docs
   const BASE_BUDGET_BYTES = 48 * 1024 * 1024  // total base-tier cap (iOS canvas memory is the scarce resource)
@@ -745,13 +699,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     })()
   }
 
-  // Evict far-away rendered pages (TOUCH ONLY). iOS caps the tab's TOTAL canvas memory; a long PDF of
-  // permanent supersampled canvases blows the budget and Safari blanks pages / jetsams the tab. Keep
-  // ~6 pages either side of the viewport; beyond that, free the SHARP canvas bitmap NOW (width=0
-  // releases iOS's canvas accounting immediately — GC alone is too late), clear the text layer, and
-  // mark the page unrendered so the IntersectionObserver repaints it when it scrolls back near.
-  // The BASE canvas is deliberately left alive — evicted pages fall back to the soft base render, not
-  // white. Placeholder sizes are untouched, so eviction never reflows. hlLayer (annotations) is left alone.
+  // Evict far-away rendered pages (TOUCH ONLY) — iOS caps the tab's TOTAL canvas memory and Safari
+  // jetsams the tab when a long PDF blows it. ⚠ Free the SHARP bitmap with `width = 0`, which
+  // releases iOS's accounting immediately; GC alone is too late. Keep the BASE canvas alive so an
+  // evicted page is soft, not white; placeholder sizes are untouched, so eviction never reflows.
+  // → docs/archive/reader-panels.md#pv-render
   const KEEP_PAGES = 6
   function evictFarPages(visible: Set<number>) {
     let lo = Infinity, hi = -Infinity
@@ -1097,22 +1049,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
       const ax = a ? a.x - box.left : el.clientWidth / 2
       const ay = a ? a.y - box.top  : el.clientHeight / 2
       const cxNow = box.left + ax, cyNow = box.top + ay // the anchor point, in viewport coords
-      // ⚠ ANCHOR ON THE PAGE, NOT ON A PROPORTION (2026-08-30 — MEASURED, see
-      // scripts/pdfzoom-probe/zoomanchor.prove.mjs). The old rule was
-      //     scrollLeft = (scrollLeft + ax) * ratio - ax
-      // i.e. "every horizontal offset scales with the zoom". It does not. The scroller's own 12px
-      // padding, the pages' 12px inter-page margins and — decisively — the 180px overscroll GUTTER
-      // are CONSTANTS in the layout, and multiplying them by `ratio` is what moved the words.
-      // MEASURED at 1.77× on a 1400px pane: the content under the cursor settled 170.2px away from
-      // it, and `192 - 12 * ratio` predicts that to the pixel (192 = 12px scroller pad + 180px
-      // gutter). It is INDEPENDENT of where the cursor is, which is why it reads as "flashes back
-      // centrally" rather than as a cursor-tracking error.
-      // So: record where the cursor sits INSIDE ITS OWN PAGE as a fraction of that page's box, and
-      // after the re-render put that same fraction back under the cursor as a scroll DELTA. A
-      // fraction of a real element is immune to every constant in the layout — no padding, margin,
-      // gutter or scroll-origin convention enters the arithmetic, so none of them can be
-      // mis-scaled. Applying it as a delta also means an intermediate clamp self-corrects on the
-      // next application rather than being baked in.
+      // ⚠ ANCHOR ON THE PAGE, NOT ON A PROPORTION. A LAYOUT CONSTANT MUST NEVER BE SCALED AS THOUGH
+      // IT WERE CONTENT: paddings, inter-page margins and the 180px gutter do not grow with zoom, so
+      // `(scrollLeft + ax) * ratio - ax` moved the words by an amount INDEPENDENT of the cursor.
+      // Record the cursor as a fraction of ITS OWN PAGE'S box and re-apply it as a scroll DELTA —
+      // every constant is already inside `page.left`, so none of them can be mis-scaled, and an
+      // intermediate clamp self-corrects instead of being baked in.
+      // → docs/archive/reader-panels.md#pv-zoom-anchor
       const pgIdx = (() => {
         const pages = pagesRef.current
         if (!pages.length) return -1
@@ -1231,13 +1174,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     return () => root.removeEventListener('keydown', onKey)
   }, [])
 
-  // ── ONE AXIS AT A TIME (Peter, 2026-08-28) ───────────────────────────────────────────────────
-  // "restrict the scroll in pdf mode so that you can only go down and up or left to right at a
-  // time. So the downwards scroll isn't subject to arbitrary drift left and right." A trackpad
-  // reports both axes on every event and no hand is perfectly vertical, so reading down a zoomed
-  // page slides it sideways until the column is off-centre. The axis is chosen ONCE per gesture
-  // (components/axisLock.ts) — per event, a wobble flips it, which is the drift wearing a hat.
-  // Ctrl/⌘ is left alone above: that gesture is the zoom, and it owns both axes.
+  // ── ONE AXIS AT A TIME ───────────────────────────────────────────────────────────────────────
+  // ⚠ Choose the axis ONCE PER GESTURE (components/axisLock.ts), never per event — a trackpad
+  // reports both axes on every event, so a per-event choice flips on a wobble, which is the
+  // sideways drift wearing a hat. Ctrl/⌘ is the zoom and owns both axes.
+  // → docs/archive/reader-panels.md#pv-axis-lock
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -1258,22 +1199,14 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  // ── LIVE FIT ON PANEL RESIZE (Peter, 2026-07-10) ─────────────────────────────────────────────
-  // While the panel is drag-resized (or the window changes width) the fit-to-text baseline tracks
-  // the live width so the text margins stay snapped to the panel edges through the whole drag. Per
-  // resize frame: recompute the fit from the stored inputs and CSS-scale the current render (cheap
-  // — no page repaint); on settle, ONE sharp re-render at the new fit (the same instant-transform +
-  // settle pattern as the wheel zoom).
-  //
-  // ⚠ A MANUAL ZOOM NO LONGER SKIPS THIS — 2026-08-30, and it is the whole of Peter's "PDFs no
-  // longer change size". The rule was "manual zoom wins: no tracking until they're back at 100%",
-  // which sounds right and is not, because `zoom` is PERSISTED and the gesture can never land back
-  // on exactly 1: one ctrl+wheel froze the page size for every PDF, for ever, and the only way out
-  // was a ⤢ button labelled "fit the text to the window". MEASURED at 1440px, a persisted 0.6:
-  // dragging the dock 250px wider left the page at 503px — byte-identical — while the dead strip
-  // beside it grew 108px → 233px. `zoom` is a MULTIPLIER on the fit, so re-basing the fit and
-  // re-rendering at fit×zoom respects their magnification exactly AND follows the window. Only
-  // ROTATION still skips (it swaps the page dims out from under the stored inputs).
+  // ── LIVE FIT ON PANEL RESIZE ─────────────────────────────────────────────────────────────────
+  // The fit-to-text baseline tracks the live width: CSS-scale per resize frame, one sharp re-render
+  // on settle (the wheel zoom's instant-transform + settle pattern).
+  // ⚠ `zoom === 1` NEVER means "the reader has not chosen a zoom" — it is a persisted MULTIPLIER on
+  // the fit and a trackpad pinch can land back on exactly 1. Skipping the refit on `zoom !== 1`
+  // froze the page size for every PDF for ever. Re-base the fit and render at fit×zoom, which keeps
+  // their magnification AND follows the window. Only ROTATION skips (it swaps the page dims out
+  // from under the stored inputs). → docs/archive/reader-panels.md#pv-live-fit
   useEffect(() => {
     if (status !== 'ready') return
     const sc = scrollRef.current, viewer = viewerRef.current
@@ -1327,18 +1260,13 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status])
 
-  // ── FULLSCREEN ENTER/EXIT REFIT (Peter, 2026-07-10: "exit leaves the text ridden off to the
-  // right") ── the dock↔fullscreen jump is the one width change the live-fit RO could leave
-  // half-done: with a persisted manual zoom (zoomStateRef ≠ 1) the RO deliberately skips, so the
-  // old fullscreen scrollLeft survived into the much narrower dock — text jammed off-screen. Drive
-  // the transition deterministically: at the fit baseline, recompute fit for the NEW width, sharp
-  // re-render, and snap the text's left margin flush; under a manual zoom the magnification is
-  // carried through the re-fit (2026-08-30 — the same change as the resize observer above: `zoom`
-  // multiplies the fit, so re-basing the fit keeps the reader's zoom AND follows the width) and the
-  // pan is SCALED rather than snapped, because a reader who zoomed in chose where they were looking.
-  // ⚠ THE FIT IS `computeTextFit` NOW, not a fourth hand-rolled copy of it — the old inline copy had
-  // already drifted: it never subtracted the comment margin, so entering fullscreen with the margin
-  // open re-fitted the page as though the margin were not there.
+  // ── FULLSCREEN ENTER/EXIT REFIT ──────────────────────────────────────────────────────────────
+  // Drive the dock↔fullscreen width change deterministically: recompute the fit for the NEW width,
+  // sharp re-render, snap the left margin flush. Under a manual zoom the magnification carries
+  // through the re-fit and the pan is SCALED, not snapped — a reader who zoomed in chose where they
+  // were looking. ⚠ THE FIT IS `computeTextFit` (R2). The fourth hand-rolled copy had already
+  // drifted: it never subtracted the comment margin.
+  // → docs/archive/reader-panels.md#pv-live-fit
   const prevFsRef = useRef(!!fullscreen)
   useEffect(() => {
     const was = prevFsRef.current
@@ -1424,30 +1352,16 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     setTimeout(() => el.remove(), 1800)
   }
 
-  // ── EXPORT / PRINT THE MARKED-UP PDF (Peter, 2026-08-28) ─────────────────────────────────────
-  // "we need a three dots button with an export and print button that export/print the marked up
-  // pdf as a pdf … or to printer."
-  //
-  // ONE mechanism, two exits: pdfAnnotatedPages re-renders every page from the pdf.js document and
-  // burns the marks into the canvas; Print and Export then hand the SAME pixels to the browser or
-  // to a file. See that module's header for why the on-screen canvases could not be reused (most of
-  // them are a 0.2–0.45× base render, or evicted, or sized for the reader's zoom).
-  //
-  // ⚠ IT EXPORTS THE PAGE VIEW, AND ONLY THE PAGE VIEW. There are two views of a PDF now, and
-  // "the marked-up PDF" means something different in each: this one is the publisher's pages with
-  // rectangles on them, and the reader view (PdfReaderView) is the text RE-SET in the reader's own
-  // font — a different document, whose export would be a different feature. Peter asked to
-  // "export/print the marked up pdf as a pdf", so the pages are what comes out, whichever view
-  // happens to be on screen when the menu is used.
-  //   That is not the same as dropping reader-made marks. A mark made in the reader view also
-  // stores page rects (PdfReaderView → pdfReflow.rectsForRange, "so the two views agree by
-  // construction"), so it prints here like any other. What cannot be painted is a mark whose rects
-  // came back EMPTY — `marksWithoutGeometry` finds those, and the menu SAYS how many rather than
-  // handing over a document quietly missing them.
-  //
-  // Every other failure mode is shown in the same place: a source too large to render at readable
-  // resolution is REFUSED with the reason, a long one asks first, and a cancel throws the partial
-  // render away instead of exporting the pages that happened to finish.
+  // ── EXPORT / PRINT THE MARKED-UP PDF ─────────────────────────────────────────────────────────
+  // ONE mechanism, two exits: `pdfAnnotatedPages` re-renders every page and burns the marks in;
+  // Print and Export hand the SAME pixels to the browser or a file (R2). The on-screen canvases
+  // cannot be reused — see that module's header.
+  // ⚠ IT EXPORTS THE PAGE VIEW ONLY, whichever view is on screen: the reader view is a different
+  // document. Reader-made marks still print (they store page rects too); a mark whose rects came
+  // back EMPTY cannot be painted, and the menu SAYS how many rather than quietly omitting them (R8).
+  // Every other failure is stated in the same place — too large is REFUSED with the reason, a long
+  // one asks first, a cancel discards the partial render.
+  // → docs/archive/reader-panels.md#pv-export
   type OutputKind = 'export' | 'print'
   type OutputState =
     | { phase: 'idle' }
@@ -1731,13 +1645,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     }
   }
 
-  // iOS text selection (long-press + drag handles) never fires mouseup on the container, so the
-  // pending-annotation toolbar would never appear on touch. Mirror onMouseUp off document.selectionchange
-  // instead, debounced 300ms so it settles after the handles stop moving. Touch-only: on desktop the
-  // mouse path already covers it, and a >300ms pause MID-drag would misfire an armed tool.
-  // Loop guards: a programmatic removeAllRanges refires selectionchange, so (a) skip one event after our
-  // own clear and (b) never act on a collapsed/outside selection — in particular we never CLEAR pending
-  // here, because tapping a pending-toolbar button collapses the selection an instant before its click.
+  // ⚠ iOS SELECTION NEVER FIRES `mouseup` on the container, so mirror the handler off
+  // `selectionchange` (touch only, debounced 300ms). Loop guards are load-bearing: skip one event
+  // after our own `removeAllRanges`, and never act on a collapsed/outside selection — tapping a
+  // pending-toolbar button collapses the selection an instant before its click.
+  // → docs/archive/reader-panels.md#pv-ios-selection
   const skipSelChangeRef = useRef(false)
   useEffect(() => {
     if (!isTouchDevice()) return
@@ -1948,12 +1860,10 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
   }
 
   // ── TRANSLATION, PAGE VIEW → READER VIEW ─────────────────────────────────────────────────────
-  // A mark made on the printed page gets a TEXT anchor as well as its rects, so the reader view can
-  // place it. Deliberately AFTER the mark exists and is persisted: the anchor is an addition, never
-  // a precondition — a page whose text cannot be read (a scan) must still get its highlight, and it
-  // then simply shows in the reader view's "not placed here" list rather than being refused.
-  // Returns nothing and swallows nothing silently: a page with no text answers null and the mark
-  // keeps no anchor, which is the honest state.
+  // ⚠ THE TEXT ANCHOR IS AN ADDITION, NEVER A PRECONDITION — run it AFTER the mark is persisted, so
+  // a scanned page still gets its highlight and merely lands in the reader view's "not placed here"
+  // list. A page with no text answers null and the mark keeps no anchor, which is the honest state.
+  // → docs/archive/reader-panels.md#pv-translation
   async function attachTextAnchors(made: PdfHighlight[], text: string): Promise<void> {
     const doc = docRef.current
     if (!doc || !made.length) return
@@ -2009,14 +1919,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
     await createHighlight(info, 'highlight', color, link)
   }
 
-  // ⚠ THE GUTTER FOLLOWS THE *RENDERED* ZOOM, NOT THE LIVE ONE (2026-08-30, and it was half of the
-  // snap-back — see scripts/pdfzoom-probe/zoomanchor.prove.mjs). Keyed to `zoom`, this 180px
-  // paddingLeft appeared the instant the writer's first notch crossed 1.02, i.e. IN THE MIDDLE of
-  // the CSS-transform preview, whose entire premise is "scale the CURRENT render — no reflow". The
-  // pages jumped 180px right under a transform anchored to where they used to be, so the content
-  // under the cursor slid away by exactly 180 × the live scale (MEASURED: 198.0 at 1.1×, 289.9 at
-  // 1.61×, 318.9 at 1.77× — 180×ratio to the pixel). The gutter belongs to the laid-out render, so
-  // it changes when the render does; `legacy` restores the old keying as the probe's control.
+  // ⚠ THE GUTTER FOLLOWS THE *RENDERED* ZOOM, NOT THE LIVE ONE. Keyed to `zoom` it appeared
+  // mid-gesture, inside the CSS-transform preview whose whole premise is "no reflow", sliding the
+  // content under the cursor by exactly 180 × the live scale. The gutter belongs to the laid-out
+  // render, so it changes when the render does; `legacyZoomAnchor()` is the probe's control (R3).
+  // → docs/archive/reader-panels.md#pv-zoom-anchor
   const overscrollPx = (legacyZoomAnchor() ? zoom : renderedZoom) > 1.02 ? PDF_OVERSCROLL_PX : 0
   const commentMarginPx = commentMargin
     ? Math.round(Math.min(320, Math.max(120, (scrollRef.current?.clientWidth ?? 800) * 0.26)))
@@ -2116,18 +2023,11 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                 width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontSize: '0.95rem', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 border: `1px solid ${active ? BAR_INK : EDGE}`,
-                // THE BUTTON WEARS ITS OWN COLOUR (Peter, 2026-08-28: "the colour of these buttons
-                // needs to reflect the colour chosen"). Now that each palette lives under its tool,
-                // the tool is the only place the choice is visible — a fixed yellow ▮ over a pink
-                // highlighter is a control lying about what it will do. Read from the ref, which is
-                // fresh on every render because setColor re-renders.
-                // ⚠ A NOTE IS A COLOURED PIECE OF PAPER, SO THE BUTTON IS TOO (Peter, 2026-08-28:
-                // "with the text colour, it should be the background not the T that gets coloured",
-                // "the background should be yellow by default"). The highlighter's colour lives in
-                // its ▮ mark, which IS the ink; a sticky note's colour is the SHEET, and a coloured
-                // letter T on white said the wrong thing about what the tool would produce.
-                // The `text` tool's SHEET colour wins over the armed tint: which colour the note
-                // will be is the more useful fact, and the ring already shows it is armed.
+                // ⚠ A TOOL BUTTON WEARS THE COLOUR IT WILL PRODUCE (R4) — the palette lives under
+                // the tool, so this is the only place the choice is visible. And it wears it the way
+                // the tool does: the highlighter's colour is its ▮ INK, a note's colour is its
+                // SHEET. The `text` tool's sheet colour wins over the armed tint; the ring already
+                // says it is armed. → docs/archive/reader-panels.md#pv-swatch
                 ...(t.kind === 'text'
                   ? { background: toolColorsRef.current.text ?? COLORS[0], color: ON_MARK }
                   : { background: active ? `${LIT_SOFT}` : CTL,
@@ -2135,23 +2035,17 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                       // fill/stroke note at the top of this file); every other tool wears the bar's
                       // own glyph colour, which is what follows the theme.
                       color: t.kind === 'highlight' ? (toolColorsRef.current.highlight ?? COLORS[0]) : BAR_INK,
-                      // ⚠ THE SWATCH MUST STILL BE VISIBLE. Peter's rule above is that the button
-                      // wears the armed colour — but the default is #ffe066 on a white face, which
-                      // MEASURED 1.3:1 (a control needs 3:1), i.e. the one thing the ▮ exists to
-                      // say was the thing you could not see. An outline carries the contrast while
-                      // the fill keeps carrying the colour: the mark still reads as that colour,
-                      // and it reads at all. Not applied to the `text` tool — it colours its whole
-                      // SHEET and puts a dark glyph on top, which already has its own contrast.
+                      // ⚠ THE SWATCH MUST STILL BE VISIBLE: #ffe066 on a white face measures 1.3:1
+                      // and a control needs 3:1. The OUTLINE carries the contrast, the fill keeps
+                      // carrying the colour. Not on the `text` tool — its dark glyph on a coloured
+                      // sheet already has its own. → docs/archive/reader-panels.md#pv-swatch
                       ...(t.kind === 'highlight' ? { WebkitTextStrokeWidth: '0.6px', WebkitTextStrokeColor: 'rgba(60,40,10,0.72)' } : {}) }),
                 textDecoration: t.kind === 'strike' ? 'line-through' : t.kind === 'underline' ? 'underline' : 'none',
               }}>{t.kind === 'erase' ? <EraserIcon /> : t.label}</button>
           )
-          // ⚠ THE PALETTE LIVES UNDER THE TOOL IT BELONGS TO (Peter, 2026-08-28: "move highlight
-          // colour into click and hold on the highlight button. Add a text colour click and hold on
-          // text that changes the sticky note colour"). Six permanently-visible swatches were six
-          // tap targets for a choice made once in a while, and they were the reason the row wrapped.
-          // CLICK still arms the tool — unchanged; only a HOLD opens the colours, the same gesture
-          // the style bar uses (components/useLongPress.ts, one implementation).
+          // ⚠ THE PALETTE LIVES UNDER THE TOOL IT BELONGS TO — six permanent swatches were six tap
+          // targets for a rare choice, and the reason the row wrapped. CLICK arms the tool; only a
+          // HOLD opens the colours, through the style bar's own `useLongPress` (R2).
           const palette = t.kind === 'highlight' ? HIGHLIGHT_COLORS : t.kind === 'text' ? NOTE_COLORS : null
           if (!palette) return btn
           return (
@@ -2197,14 +2091,12 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
         {/* Text-note font size */}
         <select value={noteSize} title="Text note size" onMouseEnter={() => setHint('text-note font size')}
           onChange={e => { const n = Number(e.target.value); setNoteSize(n); try { localStorage.setItem('inkwave:pdfNoteSize', String(n)) } catch { /* private */ } }}
-          // Narrower (Peter, 2026-08-28: "make the font size button smaller"). The iOS 16px floor
-          // is untouched on touch — shrinking a control below it makes the page auto-zoom on focus
-          // and STAY zoomed, which is a far worse bug than a wide select.
-          // No "px", no dropdown arrow, no reserved arrow gutter (Peter, 2026-08-28) — the row has
-          // to fit on ONE line and a two-digit number needs none of that to be read as a size.
-          // A <select> gets no pseudo-element in Chrome/Safari, so it cannot borrow the `.iw-tap`
-          // hit region — its box has to be the target. 34px is also what the forced 16px iOS floor
-          // (index.css) needs to hold its own line without clipping.
+          // Narrow, with no "px", arrow or arrow gutter — the row must fit on ONE line.
+          // ⚠ NEVER SHRINK THE TYPE BELOW THE iOS 16px FLOOR: the page then auto-zooms on focus and
+          // STAYS zoomed. ⚠ A `<select>` is a REPLACED element and renders no pseudo-element in
+          // Chrome or Safari, so it can never borrow `.iw-tap` — its own box is the only target it
+          // has, and 34px is what the floored type needs to hold its line.
+          // → docs/archive/reader-panels.md#pv-fontselect
           style={{ height: isTouch ? 40 : 28, width: isTouch ? 44 : 34, borderRadius: 6, border: `1px solid ${EDGE}`, background: CTL, color: BAR_INK, fontSize: isTouch ? '16px' : '0.78rem', padding: '0 2px', cursor: 'pointer', flexShrink: 0, textAlign: 'center', appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none' as never }}>
           {[8, 10, 12, 14, 16, 18, 20, 24, 28, 36].map(s => <option key={s} value={s}>{s}</option>)}
         </select>
