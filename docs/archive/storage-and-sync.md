@@ -581,3 +581,192 @@ queue) never lose a concurrent append.
 The word notion lives in `./countWords`, a leaf that imports nothing — see its header for why
 `bundle.ts` could not simply import it from here. It is imported for local use AND re-exported, so the
 four existing callers keep importing `countWords` from this module exactly as before.
+
+---
+
+# <a id="writeback"></a>`storage/archiveWriteback.ts` — "may I overwrite the remote archive, and with what?"
+
+## <a id="wb-guarded-union"></a>⚠ A GUARDED UNION THAT IS NEVER REACHED GUARDS NOTHING
+
+**This is the 2026-07-15 bug one directory over.** `mergeSnapshots` is the grow-only union, and it is
+correct and tested (`mergeSnapshots.test.ts` pins "a short local set can never truncate a long
+remote"). It was never the hole. The hole was the code that decides WHETHER TO CALL IT — all three
+cloud providers wrote:
+
+    let merged = snapshots                       // ← local only
+    try {
+      const res = await fetch(remote)
+      if (res.ok) merged = mergeSnapshots(remote.snapshots, snapshots)
+    } catch { /* no remote yet → write local as-is */ }
+    await put(buildExportBundle(doc, merged))    // ← WRITES ANYWAY
+
+So a 500, a 429 throttle, an expired token, a network blip or a corrupt download all fell into the
+same branch as "the file does not exist yet" — and the next act was an UNCONDITIONAL PUT of the local
+set over the remote. That is the 2026-07-15 loss exactly (`catch { return null }` made "I could not
+read it" and "there is nothing there" the same answer), and the 2026-07-05 truncation exactly (a
+short local set replacing a long archive) — recombined, in the live cloud sync, on Peter's thesis.
+
+The distinction is not a nicety: **"absent" and "error" license OPPOSITE actions.** Absent ⇒ writing
+creates the file, and nothing can be lost. Error ⇒ we know NOTHING about what is there, and the only
+safe act is to not act. So, following `ledgerSync.ts`'s `RemoteRead` (which got this right) and
+`notFound.ts`'s boundary predicate:
+
+1. **THE UNION HAS NO `null` MEMBER.** A provider cannot accidentally answer "nothing" for "the
+   network was down"; 'absent' and 'error' are different words and the compiler enforces it.
+2. **ONE RULE, ONE PLACE.** OneDrive, Google Drive and the local folder all reconcile the same
+   question, so they share this function. Three copies of a rule is how one silently stops matching
+   the others (this repo's standing wound — see CLAUDE.md on `daySummary`).
+3. **EACH PROVIDER MAPS ONLY ITS OWN FAILURE SURFACE** into the union — the thing only it knows
+   (Graph: 404 ⇒ absent via `mapGraphReadStatus`; FSA: NotFoundError ⇒ absent via `isNotFound`).
+   Nothing here decides anything about a provider; nothing there decides anything about safety.
+
+F16's lesson applies and is why `planWriteback` is pure and exported: **a union guards the CONSUMER,
+not the PRODUCER.** The type stops a caller forgetting the error branch; it cannot stop this function
+mapping the branches wrongly. So the mapping itself is the thing under test.
+
+`planWriteback` is PURE — no network, no OPFS, no clock — and ~10 lines so that the gate can KEEP it
+true in milliseconds without a browser (CLAUDE.md: "a green gate is not a guard"; a browser probe that
+ran once is archaeology). **THE ASYMMETRY IS THE POINT:** refusing to write costs one sync cycle (the
+rows/text are safe locally and the next sync retries). Writing over an archive we could not read costs
+the archive. When in doubt, do nothing — a sync that did not happen is a boring, recoverable Tuesday.
+
+On the 'ok' branch the union runs **even when the remote's array is EMPTY: an empty read is a fact we
+established, unlike an empty guess.**
+
+## <a id="wb-no-merged-flag"></a>The `mergedRemote` flag that was deleted
+
+`WritebackPlan` deliberately has no `mergedRemote` field. It was written, and it was always `true`
+wherever `write` was `true` — **a field no test could ever kill, i.e. a comment that costs a branch**
+(the `library.ready` mutation lesson). The equivalence is the useful fact and it is stated once:
+`write: true` ⟺ we established what the remote holds, so it is exactly the condition under which a
+caller may close its once-per-session merge gate. An 'error' never writes and never closes the gate,
+so the next sync retries the read.
+
+Also worth saying plainly: `write: false` is a NORMAL outcome, not a crash. Local is safe.
+
+## <a id="wb-is-a-record"></a>`archiveSnapshotsOf` — the third half of the read, and it was a live hole
+
+⚠ PROBED, AND IT WAS A LIVE HOLE IN ALL THREE PROVIDERS (2026-07-17). Each one ended its read with:
+
+    const remote = await parseTraceOffThread(text)
+    return { status: 'ok', snapshots: remote.snapshots ?? [] }
+
+`parseTraceFile` is `JSON.parse` with a marker-anchored slice and NO shape check, so it happily
+returns a string, a number, `true`, or an array for a body that is valid JSON and not a record.
+`.snapshots` on those is `undefined` ⇒ `?? []` ⇒ **`{ status: 'ok', snapshots: [] }`** — a remote we
+never established, reported as an ESTABLISHED EMPTINESS, which is the one answer that licenses
+`planWriteback` to overwrite. The whole module exists to keep a failure out of an absence's clothes
+and the last line of every adapter handed it a fresh set. (`cloudWriteback.test.ts` reproduced it: a
+200 carrying `"just a string"` PUT the local set over a 4-snapshot archive.)
+
+`snapshots` being a NON-array is the same hole one field down: `?? []` passes a string straight
+through (it is not nullish), `mergeSnapshots` iterates its characters, every one lacks an `id`, and the
+union silently comes out as local-only. **A truthiness check cannot see that; a type check can.**
+
+THE OUTAGE DIRECTION SETS THE PREDICATE'S FLOOR, and is why this is not "reject anything odd":
+
+* `snapshots` ABSENT is a real, healthy record — a document that has never been snapshotted, and every
+  pre-snapshot-era file. It MUST read as an established emptiness or those files can never be synced
+  to again.
+* `snapshots: []` likewise.
+
+So the rule is narrow and structural: an Inkwave record is a non-null, non-array OBJECT, and its
+`snapshots` is an array or is not there. Nothing about a legitimate bundle can fail that, and nothing
+that fails it can tell us what the remote holds.
+
+It returns `null` for "this is not a record" — which every caller must map to `error`, never to
+`absent`. **A `null` there is the ONE thing a caller could mistake for emptiness, which is why it is
+not an `ArchiveRead`: the caller has to write the word.**
+
+## <a id="wb-precondition"></a>The write PRECONDITION (auditor Finding E)
+
+READ-MERGE-WRITE still has a gap between the read and the write. `planWriteback` decides WHETHER to
+write; this decides WHAT THE WRITE ASSUMED, so the server can refuse it if that assumption went stale
+in flight. Two devices interleaving:
+
+    A reads {R} · B reads {R} · A writes {R ∪ localA} · B writes {R ∪ localB}   ← A's rows GONE
+
+Both merges are honest and rows are still lost, because each merged against a version that moved. A
+violated precondition is a FAILED WRITE — which every caller here already handles correctly: nothing
+is lost, and the next sync re-reads, re-merges and writes the true union. Self-healing, which is why
+no 'conflict' outcome is needed for correctness.
+
+It lives in STORAGE, not in the ledger: "what must still be true for my write to land" is a property
+of writing to a remote, and the ledger is merely its first caller.
+
+The three members: `absent` (we read a 404 — the file must NOT exist; Graph:
+`@microsoft.graph.conflictBehavior=fail`) · `unchanged` (we read this exact version; Graph:
+`If-Match: <etag>`) · `any` (**the provider gave no version to pin — honest, narrow, and the
+PRE-EXISTING posture, never a default**; only a read that genuinely returned no etag may produce it,
+and the 'absent' case never degrades to it, which is precisely Finding E).
+
+---
+
+# <a id="singleopen"></a>`storage/singleOpen.ts` — the same-device take-over handshake
+
+## <a id="so-ack-ordering"></a>THE ONE INVARIANT: the loser stops writing BEFORE the winner starts
+
+WHAT IT IS FOR (Peter, verbatim): *"make it so that a device can't open the same document anywhere on
+the same device at all if it's already opened somewhere else."* Two tabs editing one document diverge
+and then one blind-overwrites the other's OPFS copy (`saveDocument` is a whole-file replace with no
+union — the 2026-07-15 loss vector). `tabDoc.ts` already keeps ONE live tab per document via a Web
+Lock; this module is the layer ABOVE it: when a second tab finds the lock held, it does not silently
+open something else — it offers the writer a choice, and makes the "Take over here" choice SAFE.
+
+Get the ordering wrong and the take-over reproduces the exact blind overwrite the whole mechanism
+prevents. It is enforced by an ACK, not asserted in prose:
+
+    holder receives take-over → flush pending body → FREEZE writes → post 'surrendered'
+    taker posts take-over → AWAIT 'surrendered' → steal the lock → only now open + write
+
+The freeze is set before the ack is sent, and the taker does not write until the ack arrives, so the
+two writers can never overlap. See `storage/opfs.ts` `freezeDocWrites` for the byte-level stop.
+
+**DEGRADE, NEVER DEAD-END.** BroadcastChannel is universal on shipping engines, but if it is absent
+the take-over still works by STEALING the Web Lock — the loser's request promise rejects (`tabDoc.ts`
+`onDocLockLost`) and it freezes. That path has no ack to order it, so it is best-effort: it is the
+rescue of a possibly-dead holder, not the common case. Two live tabs on an engine with neither Web
+Locks nor BroadcastChannel fall back to tabDoc's existing behaviour — never a hard block.
+
+TESTABILITY: every side effect that touches OPFS, the lock, or the DOM is injected (see `Wiring`), so
+the handshake ordering is provable at the unit level with a synchronous in-memory bus and spies — no
+browser, no real Web Locks. Production binds the real primitives in `defaultWiring()`.
+
+## <a id="so-two-surrenders"></a>Two flavours of surrender, and only one of them flushes
+
+* **GRACEFUL** (a `take-over` message): flush the last body FIRST, while writes are still allowed,
+  THEN freeze, THEN ack. The taker waits for the ack, so this preserves the holder's final keystrokes
+  with zero overwrite risk. The flush routes through `saveDocument`, which the freeze refuses — hence
+  the order. A failed flush is logged but never blocks the handoff: the taker then opens the
+  previously saved state, which is safe (no overwrite), just missing the last unsaved edit.
+* **FORCED** (the lock was stolen with no handshake — a rescue of a dead/hung tab): freeze ONLY, do
+  NOT flush. The taker already owns the document and may already be writing; a late flush from us
+  would be the overwrite we forbid. **Losing the last unsaved keystrokes is the correct trade when
+  the alternative is corrupting the taker's copy.**
+
+"Switch to it" is fire-and-forget: the holder may not be able to focus itself (browser policy), which
+is why the blocked screen keeps its other two actions available.
+
+## <a id="so-ack-timeout-grace"></a>THE ACK-TIMEOUT RACE, and why the post-steal GRACE closes it
+
+Reproduced by the auditor. The ack timer can fire while a LIVE holder is still inside `await flush()`
+— before it reaches its freeze. Steal-and-return-immediately then lets the caller READ the body while
+the holder is still UNFROZEN with an in-flight `saveDocument` that can land AFTER the read; the
+caller's later save would overwrite the holder's flushed final keystrokes — the exact overwrite this
+mechanism exists to prevent.
+
+**The steal itself cannot force an early freeze**: the holder's `onLockLost` fires `surrender(false)`,
+but its `if (surrendered) return` guard is already tripped by the in-progress `surrender(true)`, so the
+freeze only happens when that in-flight flush completes.
+
+So after a timeout we STEAL, then wait a brief grace for the LATE `surrendered` a live slow-flusher
+posts once it finishes flushing and freezes — guaranteeing the caller reads AFTER the freeze. A
+genuinely dead holder never posts; the grace expires and the rescue proceeds exactly as before.
+Degraded (no bus): steal only, as before.
+
+ONE persistent listener covers the whole handoff: `acked` records a `surrendered` whenever it lands
+and `onAck` wakes whichever phase is waiting. **Recording it even when no phase waits closes the gap
+where the late ack arrives DURING the steal**, between the two waits.
+
+`releaseFraming`-style fire-and-forget applies to `requestSwitch` too: the message is given time to
+deliver before the channel is dropped.
