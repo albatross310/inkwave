@@ -1589,3 +1589,71 @@ The sync + provider adapters must not ride the editor's load path just because c
 Chunking is not laziness (a lane shipped 16KB gzip onto every writer's load while claiming zero
 cost) — an `import()` behind a runtime boundary is. Fire-and-forget: a sync failure must never
 surface as a broken close.
+
+---
+
+## `productivity/ledgerStore.ts` — the ledger's own file (§A3.1)
+
+<a id="ledgerstore-zero-retention"></a>
+### Zero-retention and grow-only
+
+ZERO-RETENTION: the ledger is stored exactly like any other Inkwave document — in the writer's
+own storage (OPFS, via the same app-level JSON helpers the rest of the app uses). Inkwave's
+servers never hold it. The ONLY thing that ever leaves the device from this module is a
+BLOCK HASH sent to the OTS relay for Bitcoin anchoring (a hash of metadata hashes — it carries no
+prose, and the relay logs nothing; see provenance/ots.ts).
+
+GROW-ONLY (§A9, and the real 2026-07-05 truncation incident in CLAUDE.md): every write reads the
+target's current rows and UNIONS first. A write can only ever grow the ledger.
+
+<a id="ledgerstore-read-throws"></a>
+### `loadLedger` THROWS on a failed read — and that is the whole point
+
+(auditor, 2026-07-17.) This used to read through `readAppJson`, which answers `null` to BOTH "no
+ledger yet" and "the disk just failed". Every caller is a read-modify-WRITE, so the lie was
+destructive: `flushMonth` unions against `stored.rows` and would write the buffered rows ALONE
+over a real month; `saveReflection` would write a 0-row ledger, so saving a reflection erased the
+sessions it was about. One transient failure, no race. The 2026-07-15 shape, in the ledger's local
+store.
+
+THE FIX IS MOSTLY DELETION, because the recovery was already written and simply unreachable:
+every writer here runs inside `.then(...).catch(...)`, and those catches already do the right
+thing — `flushMonth` puts the rows back for the next flush ("A failed write must not lose the
+rows"), the others decline to write and warn. They were built for a failure the read swallowed
+before they could ever see it. Making the read honest is what turns them on.
+
+An ABSENT file still returns an empty ledger: that is a real answer (a first-ever month), and it
+is the one case where writing cannot lose anything.
+
+Do not "fix" a noisy console by wrapping this in `.catch(() => emptyLedger(month))` — that is the
+bug again in eleven characters, it typechecks, and `ledgerStore.readfail.test.ts` will go red.
+
+<a id="ledgerstore-one-write-path"></a>
+### One write path for every kind of row
+
+`addPostHocRow` goes through `queueRow`, so it takes the SAME grow-only, read-then-union,
+re-attested path as a measured row: it is a real row in the writer's real ledger, inside the day's
+tamper-evident block. What makes it different is `entered: 'post-hoc'` on the row itself, not a
+softer write path — the flag is the honesty, and a second storage route would be a second rule for
+one question. It flushes immediately rather than waiting on the 2s debounce: he typed this on
+purpose and expects to see it.
+
+`annotateRow` attaches the writer's diary note / place label to an already-written session (§A5 —
+the note is written at session END, by which time the row is on disk). It flushes first so a row
+still sitting in the debounce buffer can be annotated, then does one read-modify-write on the
+ledger's own chain, and re-attests so the note is inside the day's tamper-evident block like
+everything else.
+
+`mergeIntoLocalLedger` unions an incoming ledger (another device's, via cloud sync) into the LOCAL
+file, grow-only, on the SAME per-month write chain as every other write — which is the point: a
+row queued by the capture engine between sync's load and its write-back cannot be interleaved
+away. It reads local FRESH inside the chain rather than trusting a copy the caller loaded earlier,
+because the gap between a read and a write is exactly where a blind overwrite lives.
+
+<a id="ledgerstore-ots"></a>
+### `stampClosedDays` — never on load, and only for days that are DONE
+
+CLAUDE.md's load-performance rule is explicit — the OTS sweep used to cost ~10s on every open — so
+this runs only on demand/idle, and only for days that are DONE: today's block still gains rows, so
+its hash still changes and stamping it would burn a proof on a block that no longer exists by
+evening.

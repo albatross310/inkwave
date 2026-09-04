@@ -1,13 +1,10 @@
 // Ledger persistence (spec §A3.1) — the writer's own storage, debounced background writes.
 //
-// ZERO-RETENTION: the ledger is stored exactly like any other Inkwave document — in the writer's
-// own storage (OPFS, via the same app-level JSON helpers the rest of the app uses). Inkwave's
-// servers never hold it. The ONLY thing that ever leaves the device from this module is a
-// BLOCK HASH sent to the OTS relay for Bitcoin anchoring (a hash of metadata hashes — it carries no
-// prose, and the relay logs nothing; see provenance/ots.ts).
-//
-// GROW-ONLY (§A9, and the real 2026-07-05 truncation incident in CLAUDE.md): every write reads the
-// target's current rows and UNIONS first. A write can only ever grow the ledger.
+// ⚠ ZERO-RETENTION: stored like any other Inkwave document, in the writer's own OPFS. The ONLY
+// thing that ever leaves the device from here is a BLOCK HASH for OTS anchoring — no prose, and
+// the relay logs nothing.
+// ⚠ GROW-ONLY (§A9, and the 2026-07-05 truncation incident): every write reads the target's rows
+// and UNIONS first. → docs/archive/productivity-email-build.md#ledgerstore-zero-retention
 
 import { v4 as uuidv4 } from 'uuid'
 import { readAppJsonStrict, writeAppJson } from '../storage/opfs'
@@ -27,25 +24,17 @@ function isLedger(v: unknown): v is MonthLedger {
 }
 
 /**
- * ⚠ THROWS on a failed read — and that is the whole point (auditor, 2026-07-17).
+ * ⚠ THROWS on a failed read, and that is the whole point (R1). It used to read through
+ * `readAppJson`, which answers `null` to BOTH "no ledger yet" and "the disk just failed" — and
+ * every caller here is a read-modify-WRITE, so `flushMonth` would write the buffered rows ALONE
+ * over a real month and `saveReflection` would erase the sessions it was about. One transient
+ * failure, no race. Each writer's `.catch` already recovers; the read swallowed the failure before
+ * they could see it. An ABSENT file still returns an empty ledger — the one case where writing
+ * cannot lose anything.
  *
- * This used to read through `readAppJson`, which answers `null` to BOTH "no ledger yet" and "the
- * disk just failed". Every caller below is a read-modify-WRITE, so the lie was destructive:
- * `flushMonth` unions against `stored.rows` and would write the buffered rows ALONE over a real
- * month; `saveReflection` would write a 0-row ledger, so saving a reflection erased the sessions it
- * was about. One transient failure, no race. The 2026-07-15 shape, in the ledger's local store.
- *
- * THE FIX IS MOSTLY DELETION, because the recovery was already written and simply unreachable:
- * every writer here runs inside `.then(...).catch(...)`, and those catches already do the right
- * thing — `flushMonth` puts the rows back for the next flush ("A failed write must not lose the
- * rows"), the others decline to write and warn. They were built for a failure the read swallowed
- * before they could ever see it. Making the read honest is what turns them on.
- *
- * An ABSENT file still returns an empty ledger: that is a real answer (a first-ever month), and it
- * is the one case where writing cannot lose anything.
- *
- * Do not "fix" a noisy console by wrapping this in `.catch(() => emptyLedger(month))` — that is the
- * bug again in eleven characters, it typechecks, and `ledgerStore.readfail.test.ts` will go red.
+ * ⚠ Do NOT quieten a noisy console with `.catch(() => emptyLedger(month))`: that is the bug again
+ * in eleven characters and it typechecks. `ledgerStore.readfail.test.ts` goes red.
+ * → docs/archive/productivity-email-build.md#ledgerstore-read-throws
  */
 export async function loadLedger(month: string): Promise<MonthLedger> {
   const raw = await readAppJsonStrict<MonthLedger>(fileFor(month))
@@ -121,15 +110,12 @@ export function queueRow(month: string, row: SessionRow): void {
 }
 
 /**
- * Add a block the writer TOLD us about (§A5's repair tool — "for if you forget to use the timer").
+ * Add a block the writer TOLD us about (§A5's repair tool).
  *
- * Goes through `queueRow`, so it takes the SAME grow-only, read-then-union, re-attested path as a
- * measured row: it is a real row in the writer's real ledger, inside the day's tamper-evident block.
- * What makes it different is `entered: 'post-hoc'` on the row itself, not a softer write path — the
- * flag is the honesty, and a second storage route would be a second rule for one question.
- *
- * Flushed immediately rather than left on the 2s debounce: he typed this on purpose and expects to
- * see it. Returns the row so the caller can show what landed.
+ * ⚠ THROUGH `queueRow` — the SAME grow-only, read-then-union, re-attested path as a measured row.
+ * The honesty is `entered: 'post-hoc'` on the row, never a softer write path; a second storage
+ * route would be a second rule for one question. Flushed immediately (he typed it on purpose and
+ * expects to see it) and returns the row so the caller can show what landed.
  */
 export async function addPostHocRow(entry: PostHocEntry, opts: { at?: number; offsetMin?: number; sessionId?: string } = {}): Promise<SessionRow> {
   const at = opts.at ?? Date.now()
@@ -153,11 +139,9 @@ export async function flushLedgerNow(): Promise<void> {
 
 /**
  * Attach the writer's diary note / place label to an already-written session (§A5 — the note is
- * written at session END, by which time the row is on disk).
- *
- * Flushes first so a row still sitting in the debounce buffer can be annotated, then does one
- * read-modify-write on the ledger's own chain. Re-attests, so the note is inside the day's
- * tamper-evident block like everything else. Returns false when the session isn't in this month.
+ * written at session END, by which time the row is on disk). Flushes first so a row still in the
+ * debounce buffer can be annotated, then ONE read-modify-write on the ledger's own chain, and
+ * re-attests. Returns false when the session isn't in this month.
  */
 export async function annotateRow(
   month: string,
@@ -194,10 +178,8 @@ export async function annotateRow(
 /**
  * Union an incoming ledger (another device's, via cloud sync) into the LOCAL file. Grow-only.
  *
- * Runs on the SAME per-month write chain as every other write, which is the point: a row queued by
- * the capture engine between sync's load and its write-back cannot be interleaved away. Reads local
- * FRESH inside the chain rather than trusting a copy the caller loaded earlier — the gap between a
- * read and a write is exactly where a blind overwrite lives.
+ * ⚠ ON THE SAME PER-MONTH WRITE CHAIN as every other write, and it re-reads local FRESH inside the
+ * chain: the gap between a read and a write is exactly where a blind overwrite lives.
  */
 export async function mergeIntoLocalLedger(month: string, incoming: MonthLedger): Promise<MonthLedger> {
   let result: MonthLedger = incoming
@@ -270,12 +252,10 @@ export function _resetLedgerStore(): void {
 /**
  * Anchor the ledger's CLOSED daily blocks to Bitcoin via the existing OTS relay.
  *
- * NEVER call this on load. CLAUDE.md's load-performance rule is explicit — the OTS sweep used to
- * cost ~10s on every open — so this runs only on demand/idle, and only for days that are DONE:
- * today's block still gains rows, so its hash still changes and stamping it would burn a proof on a
- * block that no longer exists by evening.
- *
+ * ⚠ NEVER ON LOAD (the sweep once cost ~10s per open) and ONLY for days that are DONE: today's
+ * block still gains rows, so stamping it burns a proof on a block that will not exist by evening.
  * `todayLocal` is the writer's current local day ('YYYY-MM-DD').
+ * → docs/archive/productivity-email-build.md#ledgerstore-ots
  */
 export async function stampClosedDays(month: string, todayLocal: string): Promise<number> {
   const l = await loadLedger(month)
