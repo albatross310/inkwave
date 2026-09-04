@@ -174,3 +174,103 @@ The key is FNV-1a x2 over the block's serialized JSON: native `stringify` is far
 `fromJSON`'s Node/Fragment/Mark allocation, which is the whole point of the trade. Anything not a
 plain top-level doc falls back to the ONE full-parse path rather than growing a second set of
 structural rules. Eviction is bounded FIFO and COUNTED, never silent.
+
+---
+
+## `arithMeasure.ts` — the arithmetic canonical measure
+
+<a id="arith-measure"></a>
+### The third acquisition path, and the scope of its first version
+
+ARITHMETIC CANONICAL MEASURE (Decision 6, 2026-07-15 — flag `inkwave:arithLayout`, default OFF).
+The THIRD acquisition path for the pagination measure: instead of forcing a full-document browser
+reflow (canonicalMeasure) and reading each block's line geometry with range.getClientRects,
+COMPUTE the canonical lines + block boundaries from the arithmeticLayout engine (canvas advances +
+greedy wrap — proven byte-identical for the certified font palette). Output is the SAME
+{lines, blocks} shape collectLines produces, feeding the SAME computeBreaks — so break positions +
+page-break signature are byte-identical, and the caller can SKIP forceCanonicalContext entirely
+(no visible-tree reflow) on the paths where the live layout isn't already canonical (phone).
+
+SCOPE OF THIS FIRST VERSION (conservative — correctness over coverage): the whole document must be
+arithmetic-eligible TEXT PARAGRAPHS (certified uniform-size fonts, no citations / inline-math /
+lists / rules / refList / headings). ANY ineligible block ⇒ return null ⇒ caller falls back to the
+DOM measure. Uniform-size + leading-free means firstLineLeadingPx=0 is byte-identical (the leading
+only shifts the cosmetic botMargin at a SIZE boundary, which an all-body-text doc never has). The
+idle DOM verifier + pagCheck remain the safety net. Extending eligibility (headings via the
+per-font leading table, block-math via a cached KaTeX box, per-region scoped use) is the follow-up.
+
+### Inline atoms: a citation is a proven opaque box, everything else defers
+
+INLINE ATOMS: a CITATION is a proven opaque box (CitationNodeView pins `white-space: nowrap`, so
+its label has no internal break opportunity and its `normal`-mode subtree cannot reach the
+parent's line breaking) — it supplies the cached canonical box harvested by the DOM measure
+(citations/citeBox.ts). Anything else (inline MATH) supplies NO box, so blockEligibility's
+`!r.box` gate defers the whole block — exactly the gate we want until its own rect-fix lands.
+Marked citations cache under their own FONT KEY: real ones nearly always carry a
+textStyle{fontFamily} mark, so skipping them would defer ~every citation-bearing block.
+
+`basePx` joins the box lookup: the label sets in `font: inherit`, so its advance is base-dependent
+(117px at canonical 18, 143px at the phone's 22.5 render base). A box harvested at a different base
+MISSES ⇒ the block defers to the DOM measure rather than wrap on a width that is ~26px wrong per
+citation. See citations/citeBox.ts `keyOf`.
+
+`runsOfParagraph` is SHARED by the whole-doc path and the scoped per-block path so the two can
+never drift apart.
+
+### `arithBlockLayout` — the scoped seam, and why `relPos` is the payoff
+
+computeScoped's whole cost is measuring the CHANGED blocks live — which is what forces the
+canonical context and pays its two full-document reflows (the 400–1100ms phone pause). When every
+changed block is arithmetic-eligible we can produce the SAME per-block geometry with no DOM at
+all, so the scoped measure needs no forced context and no reflow. Unchanged blocks already reuse
+their cached entries, so a typing pause in ordinary prose becomes pure arithmetic.
+
+`relPos` is the payoff: the DOM path leaves each line's doc position LAZY and pays a posAtCoords
+hit-test for the one line a break lands on. Arithmetically the position is exact and free —
+relPos = 1 + charIndex (the block's content starts at offset+1) — so nothing is ever hit-tested.
+
+<a id="marks-allowlist"></a>
+### The mark allow-list — and the `code` mark that measured 47 pages against the editor's 79
+
+MARKS THIS ENGINE MODELS — and marks it has PROVED it may ignore. Anything else DEFERS.
+
+WHY AN ALLOWLIST (2026-07-18, `typematrix.prove.mjs`). `runOf` used to walk `node.marks` and act
+on bold/italic/textStyle, SILENTLY IGNORING every other mark. For a metric-neutral mark that is
+right by luck; for `code` it was right by nothing at all. The `code` mark renders the run in a
+MONOSPACE face, and the engine measured it in the body font: MEASURED against the live editor on
+a 13k-word fixture with 434 code runs — **the model said 47 pages, the editor 79, and NOT ONE of
+its 79 break positions matched (first divergence at break 0, Δ955)**. It reported
+`estimatedBlocks 0` and full reliability the whole time. Wrong words on every page, declared
+trustworthy — the worst failure this renderer can produce.
+
+The gate is modelled on `isCertifiedStack`, which already does exactly this for FONTS: an
+allowlist, and anything outside it defers to the DOM measure rather than being guessed. The
+property that matters is what happens to the NEXT mark someone adds to the schema — today it
+would silently corrupt every break below it; with this it defers and says so.
+
+METRIC_NEUTRAL is not an assumption: every family listed is PROVED byte-identical to the live
+editor by typematrix.prove.mjs at ~46 breaks/fixture (underline, strike, highlight, scasSlot,
+comment, insertion, deletion — decorations and colour, no advance change). If a future change
+gives one of them a metric (padding, a font swap), its row goes red and this list is the first
+place to look.
+
+An unmodelled mark rides the run so `blockEligibility` can refuse the block. It is carried as a
+REASON rather than acted on in `runOf`: that function's job is metrics, and inventing a metric for
+a mark we have not certified is precisely the bug.
+
+<a id="forced-breaks"></a>
+### `forcedBreaks` — the RENDER pass needs them; the CANONICAL pass must not have them
+
+`fontLoaded(stack, sizePx)` gates a text run whose face isn't loaded (measureText would fall back
+to a system face). `ratio` = the render context's line-height (1.618 desktop / 1.55 phone / the
+live `--inkwave-lh`). `contentWidthPx` = the CANONICAL content width (pageWidthPx − 2·sideMargin).
+
+`forcedBreaks` — doc positions at which a line MUST start (the mid-block canonical break `at`
+positions from computeBreaks). The RENDER pass needs these: a page-gap widget is display:block
+inside the `<p>`, so it ends the pre-gap line partial and text resumes AFTER the gap; without it
+the continuous wrap fills that slack and loses a render line, drifting every band below. The
+CANONICAL pass passes none (it PRODUCES the breaks; feeding them back would be circular and its
+own gaps are cleared before it measures). Absent ⇒ byte-identical to the gap-free layout.
+
+Mid-block forced line-starts are mapped per block: doc pos → block-relative char (`pos − offset −
+1`). A gap AT the block start (charOffset 0) is a no-op; a break past the content never matches.
