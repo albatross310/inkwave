@@ -857,3 +857,1038 @@ be true for that cell to fail.
   (it used to share it, which would have installed the harness for every writer on default-ON) — it
   now arms only on the fresh `?textRender` URL param, which is what `.prove.mjs` scripts navigate to
   and nobody else. Mutation-proved default both ways.
+
+---
+
+# <a id="snapshotview"></a>`routes/SnapshotView.tsx` — the narrative, moved out of the route (2026-09-04)
+
+The comment-compression pass left each rule below beside its code, in the standard form, and moved
+the reasoning here **verbatim, with its numbers**. Nothing was deleted on either side. If a rule in
+the source looks arbitrary, its evidence is under the matching anchor.
+
+## <a id="sv-palette"></a>The /snapshot palette
+
+> EVERY colour on this route resolves through a `--iw-snap-*` token defined at :root in BOTH themes
+> (the SNAPSHOT VIEW block in src/styles/index.css, which carries the reasoning). Deliberately NOT
+> `.iw-nightable`: that class exists for a floating panel and forces a dolphin-grey fill on whatever
+> it sits on — here it would paint the three full-height panes light grey over the near-black
+> document pane, which is the half-lit screen this palette was written to fix. Each name below is a
+> `var(…, <day literal>)`, so a missing stylesheet still yields the day design rather than nothing.
+> KEEP THE INDIRECTION: an inline literal here is a night bug by construction, because these panes
+> sit outside every scope that remaps one.
+
+Pattern **R2** (one definition, not two) applied to colour: the token block in `index.css` is the
+definition; a literal in this file is a second one that cannot be remapped.
+
+## <a id="sv-pane-wrap"></a>The pane's white-space must match the editor
+
+> WHITE-SPACE MUST MATCH THE EDITOR (2026-07-18 — a measured /snapshot bug, not a style choice).
+> ProseMirror injects `.ProseMirror { white-space: break-spaces }` from prosemirror-view's own
+> stylesheet, and it injects it ONLY WHEN AN EditorView MOUNTS. /snapshot has no view, so the class
+> is on the element and the RULE IS NOT: measured, the editor's flow computes `break-spaces` and
+> this pane computed `normal`. Those wrap by DIFFERENT RULES — `break-spaces` HANGS a trailing
+> space, `normal` COLLAPSES it — so every page break landed one character apart from the editor's
+> (halvesbisect: editor 2426 vs pane 2425 at the FIRST break, on plain prose, on every shape).
+> Canonical pagination's whole claim is "the same text on page N at every zoom, on phone, and in
+> print"; a pane that mirrors the editor cannot wrap by another rule. blockEligibility already
+> refuses to model anything but `break-spaces` for exactly this reason ("whitespace-unproven").
+> NB the flat branch below has always pinned `pre-wrap` — a THIRD mode. Three surfaces meant to
+> mirror each other, three wrapping rules, none of them checked against another until now.
+
+Also the FullDiffView contract that surrounded it:
+
+> Left pane: entire document with inline green/red diff marks (no collapsing).
+> When ops is null (first snapshot), falls back to the rich DocView with formatting.
+> When ops exists, renders plain-text diff — inline marks (bold etc.) are not
+> preserved because the diff runs at the text level. A ProseMirror-aware diff
+> would be needed for mark-level fidelity (future work).
+> onOpClick: called with opIdx when a change span is clicked (reverse hyperlink to right pane).
+
+## <a id="sv-rich-pane"></a>Rich pages for every version, on ONE flag
+
+> RICH PAGES FOR EVERY VERSION (flag `inkwave:textRender`, DEFAULT ON since 2026-07-18). Below this
+> line is the legacy FLAT transcript: one pre-wrap span of `pmToText`, which is what 115 of 116
+> versions rendered before this graduated. It survives ONLY behind the sticky `?textRender=off`
+> opt-out. RichDiffView projects the same ops back onto the PM tree (provenance/textMap.ts) so the
+> pane shows real headings/lists/citations with the diff marks intact.
+>
+> GATED ON textRenderEnabled(), DELIBERATELY — not on a flag of its own. The canvas renderer and
+> this DOM landing must move TOGETHER: a rich canvas frame settling onto a flat pane (or the
+> reverse) is round 11's two-rules-one-pane disease, which cost 186px of drift. One flag makes
+> that combination unrepresentable rather than merely unlikely.
+
+## <a id="sv-doclayer"></a>DocLayer — one snapshot's pane, kept alive
+
+> The flip-to-card architecture (2026-07-11): each recently-visited snapshot keeps its whole
+> rendered pane (static HTML + inserted gaps + sheet panels + its own scroll position) mounted in
+> an absolutely-positioned layer; only the active one is visible. `visibility:hidden` (NEVER
+> display:none) keeps the hidden layers' layout alive, so flipping to a warm layer is paint-only —
+> no React remount, no re-layout of a 40-page document, no gap re-insertion. Pagination runs ONCE
+> per layer: immediately when it mounts active, ~150ms deferred when it mounts as a hidden warm
+> neighbour (splits the warm into two shorter tasks: subtree layout, then canonical measure).
+> On activation the layer points the shared refs (leftScrollRef/pagRef/pageGeo) at itself in a
+> LAYOUT effect, so every parent effect keyed on snapshot.id still reads the right scroller.
+
+⚠ **That paragraph was STALE where it named the hiding mechanism, and the compression pass corrected
+the rule rather than preserving the error.** The shipped code has used `opacity: 0.001` since the
+round-11 keep-alive work (`DocLayer`'s own inline style, and the same value on the sweep replicas);
+`visibility:hidden` is not what runs, and the archive's round-11 entry, CLAUDE.md and three other
+comments in this same file all say `opacity: 0.001 — never 0 / visibility / display`. A truly-hidden
+layer loses its compositor backing store and the next flip stalls ~500ms. The header now states the
+mechanism the code uses; the paragraph above is kept only as the record of what it used to claim.
+
+The layer's own anchor and warm-capture contracts, moved from the `DocLayerHooks` fields:
+
+> Where THIS layer's version must sit so the reader's content stays under the reading line.
+> CONTENT identity, not scroll offset: versions differ in LENGTH, so a shared scrollTop lands
+> different words in every version (measured: anchor drift 0px, centre content held 33%). The
+> scroller is passed in because the answer is a property of the TARGET version's own layout.
+
+> Warm (NON-ACTIVE) layer painted → scrub-bitmap capture. `pages` is THIS layer's canonical page
+> geometry (round 10): the sweep's offscreen minimap replica needs a non-active version's real
+> page regions, and this hidden layer is the only place they exist. ADDITIVE — it rides the
+> warm-only branch that already ran; the ACTIVE path (onActivate / onGeo / the shared
+> leftScrollRef+pagRef+pageGeo binding) is untouched.
+
+And the LRU window it sits in:
+
+> Pagination + rendering moved INTO DocLayer (one per snapshot, kept alive). Here we manage the
+> LRU window: the active id joins at render time (a flip to an unwarmed snapshot must mount this
+> commit); the ±1 neighbours warm AFTER the flip has painted, staggered so each warm (a hidden
+> full render + canonical measure) is its own task; old layers beyond MAX_LAYERS evict LRU,
+> never evicting current/prev/next.
+
+## <a id="sv-sweep-panes"></a>Sweep panes and the offscreen replicas (round 10)
+
+> BACKGROUND SWEEP (2026-07-16 — Peter "yes add the sweep"): bake a thumbnail for EVERY version
+> while /snapshot sits open, Photos-style library pre-generation. A thumbnail can only be
+> rasterised from a MOUNTED pane, so the sweep drives one extra hidden warm DocLayer at a time
+> (opacity 0.001 — same keep-alive machinery): mount → onWarmReady → queueCapture → bake → next.
+> Idle-only, pauses on ANY input or active scrub, resumable, bakes OUTWARD from the current
+> position. Without this the flipbook has nothing to flip on a first-pass cold scroll.
+
+> Sweep PANES (round 10, 2026-07-16) — the diff panel + minimap for an UNVISITED version.
+> The sweep bakes from a hidden warm DocLayer, which only ever gave us the DOC pane; the diff
+> panel and the minimap render off the ACTIVE snapshot's state, so two of the three panes had no
+> thumbnail for an unvisited version and a cold fling fell back to a stale nearest for both
+> (the asymmetry Peter saw: one pane flickering, two lagging).
+>
+> Neither needs the version ACTIVATED, and neither touches the visible panes:
+>  · DIFF — `opsBetween(prev, target)` is a PURE, diffCache-backed function of two snapshots and
+>    InlineDiffView is a pure render of those ops. So we render a second InlineDiffView into an
+>    OFFSCREEN host sized to the real diff pane's box and capture THAT.
+>  · MAP  — MinimapPanel is already parameterised by (leftRef, ops, pageGeo); it never reads the
+>    active snapshot. Point it at the SWEEP LAYER's own scroller + that layer's page geometry.
+> The contract change is exactly one line in DocLayer: the warm-only branch now hands its pages
+> to onWarmReady. The ACTIVE layer's activation path is byte-unchanged.
+
+> Sweep replica panes (round 10) — the offscreen diff panel + minimap for the sweep version.
+> opacity 0.001 (the DocLayer keep-alive rule, NOT display:none/visibility): a truly-hidden
+> subtree has no boxes to measure and nothing to rasterise. Fixed at the viewport origin behind
+> the panes (z 0, pointer-events none); everything on top of it is opaque.
+
+> LAY THE REPLICAS OUT IN FLOW (flex row), NEVER with position:absolute + a left/top offset.
+> A captured element's OWN inline position rides into the clone, and captureRegion drops the
+> clone at the foreignObject's origin — so an offset host rasters OUTSIDE the crop, comes back
+> blank, gets silently dropped by blank-detect, and stalls the sweep on that version forever
+> (probed: scrub.capture.fail.map, map baked 1/36). Each host also mirrors its real
+> counterpart's `position` exactly (mapHost is relative).
+
+## <a id="sv-fit"></a>Fit cap, pane zoom and the phone pinch
+
+> Fit cap + effective pane zoom (Peter, 2026-07-10 — the main editor's fit-to-width floor).
+> The doc pane's zoom lives as CSS `zoom` on the PAPER (applied imperatively below), so scaling
+> shrinks the whole page — sheet, panels, gaps, text — and a narrow pane always shows the FULL
+> page, never a horizontally-cut one. fit = (paneWidth − water margins) / canonical page width,
+> recomputed on every pane resize (split drag, window resize, side panel). Manual zoom below the
+> cap works; zooming past fit is capped, exactly like magnify.ts's fitScale. PHONE: the pane
+> defaults to the phone view — fluid full-width paper + PHONE_PAGE_MARGIN (staticPagination), so
+> effective zoom is pinned to 1 and the page spans edge-to-edge with no side water.
+
+> Phone PINCH → pane zoom (Peter, 2026-07-10: "two-finger zoom doesn't work at all").
+> Two fingers on the doc pane drive the SAME CSS-zoom effZoom pipeline, live: the zoom writes
+> are imperative + rAF-coalesced during the gesture (CSS zoom on the static pane is one cheap
+> uniform rescale — the sheet panels/gaps live INSIDE the zoomed paper, so nothing needs
+> repositioning mid-gesture), and the gesture end commits to phoneZoom state → one repaint
+> refreshes pageGeo. The pinch midpoint's content point is held stationary via scroll
+> correction. CAPTURE-phase listeners + stopPropagation own the two-finger gesture on this
+> pane: Scroll.tsx's surface pinch (the font-reflow pipeline) must never double-zoom, and the
+> swipe scrub's multi-touch bail hands off here. Per the phone input invariant, touchstart is
+> passive and the non-passive touchmove is armed only while two fingers are down.
+
+## <a id="sv-page-sync"></a>Midline page sync
+
+> Midline PAGE SYNC (Peter, 2026-07-10).
+> When the DRIVER pane's midline crosses a page boundary, the FOLLOWER flies to that page — the
+> editor's boundaries are the real canonical page regions (pageGeo); the diff panel's are its
+> page rules ([data-page], wired to the same breaks). Fires ONLY where the continuous bijection
+> isn't already driving that direction (it would fight the spring / the per-frame inverse map):
+> editor→diff jumps unless bijMode 'both'; diff→editor jumps only in 'off'. Hysteresis: pages
+> are latched per pane — one jump per boundary CROSSING (a further crossing mid-flight simply
+> RETARGETS the follower); snapshot navigation re-latches without jumping (nav-settle window).
+
+## <a id="sv-hover"></a>Cross-pane hover rings paint PER FRAGMENT
+
+> hover: NO gold. Just the same green/red ring, THICKENED — from 1× (unlit) up to 2× when the diff
+> is fully lit (--iw-align=1), proportionally in between. Full-alpha so the hover reads on any diff.
+> PER-FRAGMENT (Peter, 2026-07-10): `outline` paints ONE rect around the union of an inline's
+> fragments, and a diff span straddling a page break hosts a BLOCK gap/marker child (block-in-
+> inline split) — the union rect became a giant empty box spanning the water / the whole page
+> (gapped AND marker mode). An inset ring shadow + box-decoration-break:clone paints per LINE
+> FRAGMENT instead — each wrapped line gets its own ring, gaps get nothing, and the browser
+> recomputes fragments on any reflow (zoom included) for free. Ring listed before the fill so
+> it stays on top.
+> COLOURS COME FROM THE --iw-snap-* TOKENS, never literals: these rules paint over BOTH panes
+> and both themes, and a literal here reproduces the exact half-lit screen the palette fixes.
+> The channel triples are substituted into rgba() so one token drives ring, fill and alpha.
+
+## <a id="sv-anchor"></a>The registration anchor
+
+> THE REGISTRATION ANCHOR (the doc pane's "same words at the centre" contract).
+> Same shape as the zoom focal anchor (99bf8a0): hold a CONTENT identity, re-find it after the
+> thing changed, land on it. Here the "change" is the version itself, so the counterpart is
+> found through the provenance word-diff rather than re-read from the same DOM.
+>
+> THE RULE, in order — every branch lands SOMEWHERE sensible, never the top:
+>   1. EXACT      — the anchor text exists in this version → put it under the reading line.
+>   2. NEIGHBOUR  — the anchor text was inserted/deleted between the versions, so it HAS no
+>                   counterpart. Fall back to the nearest text that provenance says survives
+>                   into this version (`same` ops) and land THAT under the line. The reader
+>                   drifts by the length of the edit, which is the smallest honest error
+>                   available: there is nothing else to be at the centre.
+>   3. RATIO      — no anchor at all (never scrolled / no surviving text). Proportional
+>                   position, the pre-existing behaviour.
+> Runs on the WARM layer's deferred pagination task (idle, beside a 130-270ms paginate and a
+> 300ms+ raster), never on the input path. Observable: probes below tally each branch, so a
+> fallback storm is visible instead of silently reading as "registered".
+
+> KNOWN-NEGATIVE A/B (harness-only): the OLD rule — prime every version to the active pane's
+> raw scrollTop. A probe must prove it can SEE this misregistration before its verdict on the
+> fix means anything (this codebase has trusted instruments that measured a fiction).
+
+> NB the scrub is ALWAYS content-registered — including under lineMode 'longest' (the
+> default), which deliberately abandons the anchor to snap each version to ITS OWN biggest
+> change. That rule is right for a deliberate single step ("show me what changed") and ruin
+> for a burst: measured, it flings the reading position a median 50,455px per version, which
+> is the mush Peter is describing. So 'longest' stays exactly as it is on the LIVE landing
+> render (this changes no navigation semantics), while the flipbook frames the sweep bakes
+> hold the reader's place. Landing in 'longest' then snaps to the change — as it already did
+> before this commit, since the live render always re-anchored itself on landing regardless.
+
+The harness-only registration trace beside it:
+
+> Registration trace (harness-only; zero cost unless a probe defines the array).
+> The burst RECORDER can only carry a centre signature for frames it CAPTURED this session — a
+> hydrated thumbnail has none — so its `registered` rate is computed over a handful of steps
+> (measured: 0-7 of a 12-step burst). Far too small to accept or reject an anchoring rule.
+> This traces the real thing at FULL sample instead: for every version the sweep primes, the text
+> actually sitting under that version's centre line AT THE SCROLLTOP ITS BITMAP IS CAPTURED AT.
+> Read across the sweep, consecutive versions agreeing = the flip is registered. Same locator the
+> recorder uses (paneCentreSig — text granularity; the pane is ~4 giant [data-opidx] spans, so
+> block granularity would call every frame registered).
+
+## <a id="sv-flipbook"></a>The shift-wheel flipbook and its four constants
+
+> Shift-wheel FLIPBOOK (2026-07-16 — Peter: "if Apple Photos can flicker frame-by-frame on
+> scroll, so should we"). Root cause of the old "stays put until you stop": the handler computed
+> target off the COMMITTED idxRef and called goTo per event, so it advanced at most ±1 per React
+> commit — a fast shift-wheel commanded only 1-3 distinct versions of 30 (probed). Photos swaps
+> among ALREADY-RESIDENT textures decoupled from app state; so does this: a COMMANDED index runs
+> ahead of React per event, an rAF driver presents EVERY intermediate from the resident bitmap
+> cache (compositor swap, no React commit), the counter updates imperatively, and ONE React
+> commit lands the live full render on settle. DPR1 cap keeps the resident pool affordable.
+> Live diagnostics for ?snapThumbs=debug — separates "driver never ran" from "driver ran but had
+> nothing to show" from "showed into an invisible node" (the wave-video bug class).
+
+> LAND_QUIET_MS must be LONGER than a real mouse-wheel notch gap. At 120ms it landed BETWEEN
+> notches (a hand-rolled wheel fires every ~150-250ms): the driver caught up, saw "quiet", and
+> committed a full live render per notch — which is exactly Peter's "the minimap goes a few
+> times a second but no flashing". Land only once the stream is no longer RAPID (same 250ms
+> window goTo uses), and hold the freeze past that so the panes don't re-render mid-scrub.
+> MAX_PER_FRAME=1 — EVERY commanded version gets its own frame (the Photos bar). At 2 the
+> driver jumped two versions when behind and only show()ed the landing one, silently DROPPING
+> the intermediate: a 12-notch fling commanded 11 but presented 7. One-per-frame at 60fps =
+> 60 versions/s, far above any wheel cadence, so it keeps up AND flickers every version; an
+> extreme fling just trails by a few frames and catches up (Photos does exactly this).
+> SW_STEP trimmed 40 → 67 (Peter, 2026-08-28: "take 40% off the net scroll speed for
+> trackpad/phone"). This costs a MOUSE nothing — a notch delivers 120, so one notch is still
+> exactly one version, which is this path's whole contract — and halves what a trackpad's
+> fine-delta stream flies through, which is the surface the complaint is about.
+
+## <a id="sv-wheel-debt"></a>Debt on reversal
+
+> DEBT ON REVERSAL (Peter's oldest complaint: "lags behind which version you're actually
+> up to. When you stop it catches up.")
+> A step consumes only SW_STEP(40) of the event's delta, but a mouse notch delivers 120 — so
+> 80 of undischarged intent survives EVERY notch and compounds. After 12 backward notches the
+> accumulator sits at ~-960, and a forward notch then reads -840: still negative, so it steps
+> BACKWARD. Probed: 12 back then 12 forward = 5 fwd / 5 back, starts at 8, ends at 8 — the
+> reversal nets nothing until the debt is paid off. Everyone (me included) read that as
+> presentation latency for weeks; presenting was measured at 49-51/s the whole time.
+> So: a direction change cancels the debt. NOT a full discharge — one notch stays one version
+> (Peter's call: it removes the bug and changes nothing he likes).
+> The `>= SW_STEP` test is what makes this safe for a TRACKPAD: a fine-delta stream never
+> leaves debt (its accumulator always lands back inside [0, SW_STEP) after a step), so its
+> jittery sign flips can never wipe legitimate in-progress accumulation. Only a coarse-delta
+> device — the one that actually leaks — can hold a debt worth cancelling.
+
+## <a id="sv-touch"></a>Touch swipe — flick vs scrub
+
+> Touch swipe → snapshot scrub (phone).
+> TWO modes, split by a PRESS-AND-HOLD (Peter, round 2: "a single flick goes over lots of
+> snapshots — we need a short click-and-hold before the many-snaps-at-once kicks in"):
+>  • FLICK (default): a plain horizontal swipe steps EXACTLY ONE version — slide LEFT = next,
+>    slide RIGHT = previous — no matter how far or fast the finger travels.
+>  • SCRUB (armed): hold the finger ~280ms mostly still FIRST, then drag — the position-based
+>    scrubber (FIRST detent + REST px per step, like Apple Photos) with the fling coalescing.
+> Vertical stays native scroll. Works starting on either pane. The swipe OWNS horizontal on
+> this view: `touch-action: pan-y` on the root + panes keeps the browser's native x-pan from
+> racing it, and the horizontal branch preventDefaults. EXCEPTION: a pinch-zoomed doc pane
+> (zoom > 1) pans the page horizontally instead of scrubbing.
+
+The trackpad position scrubber, and the **duplicate** that sat under it:
+
+> Trackpad TWO-FINGER HORIZONTAL swipe over the editor or diff pane → snapshot scrub — a pure position
+> scrubber (Apple-Photos style): NO flick/momentum. A small detent (FIRST) commits the first snap, then
+> every REST px is another, applied as a NET hop per event so a light swipe flies through 10-30. A pause
+> resets the gesture so the next swipe re-arms the detent. Vertical wheels are untouched.
+> GESTURE STATE LIVES IN REFS (round 3): this effect re-subscribes on every step (per-render `nav`
+> identity + the per-landing scroller swap), and effect-local accum/started reset the detent
+> mid-gesture — every step cost ~5 more events (probed: a 22-step scrub degenerated to ~3 hops).
+
+> Detent state in a REF, not effect-local: this effect re-subscribes on every step (per-render
+> `nav` identity + the per-landing scroller swap), and effect-local state reset the gesture
+> mid-scrub (round 3 — a 22-step scrub degenerated to ~3 hops).
+
+Those two paragraphs state the SAME rule (R7 — decided once while the world kept moving) about the
+SAME mechanism, back to back, in slightly different words. One survives in the source.
+
+## <a id="sv-fling"></a>Fling coalescing
+
+> Fling coalescing (2026-07-11).
+> Rapid navigation streams (fling / held key / shift-wheel storm) FREEZE the heavy split view on
+> the snapshot it's already showing and render only the LANDING version once inputs go quiet.
+> Detection lives in goTo (the chokepoint for every navigation) and keys off INPUT spacing —
+> detecting off render spacing failed: when each step renders slowly the steps land >160ms
+> apart and nothing froze, which was the whole case that needed freezing. An isolated step
+> (a normal swipe) never freezes, so single flips stay immediate. The header counter/word-diff
+> stay live off the real idx, so the user still sees the position fly during a fling.
+
+## <a id="sv-swipe-nav"></a>The browser must not steal the sideways swipe
+
+> The browser must not steal the sideways swipe (Peter, 2026-08-30).
+> On a Mac trackpad a two-finger horizontal swipe fired the browser's own back/forward and threw
+> him out of the review mid-read — while THIS VIEW already owns that gesture (the deltaX position
+> scrubber below). `overscroll-behavior-x` on the ROOT is what suppresses it, and it must be the
+> root because the rule propagates to the viewport only from `<html>`; a swipe landing on the
+> minimap or the header has no scroller under it at all and chains straight there. Scoped to this
+> route by adding the class on mount, so nothing about the editor's own gestures changes.
+> See the `.iw-no-swipe-nav` block in index.css for why preventDefault is not the mechanism.
+
+## <a id="sv-break-tables"></a>Break tables for every version
+
+> BREAK TABLES FOR EVERY VERSION (flag `inkwave:snapBreaks`, default OFF).
+> The whole-document index the plaintext page renderer opens from: per version, the doc position
+> each page starts at (~656B on disk vs the 62.9MB bitmap pool). Built here — on the route that
+> OWNS the versions — because /snapshot has no editor, which is exactly why the tables could not
+> be built at all until `editorSchema.ts` made a version's contentJson parseable outside one.
+>
+> Keyed on [docId, allSnapshots.length] — NOT on snapId. A scrub step must never restart the
+> sweep (the perf note above this block is the same lesson: a pure snapId change must not re-read
+> the archive). Hydration makes a re-run nearly free anyway, but "nearly free × every scrub step"
+> is how a background task becomes the thing you are debugging at 2am.
+>
+> This does NOT paint. It fills the index and stops; wiring the renderer's show() path is the
+> paint lane's, and a table is useless-but-harmless until then. Nothing here can touch typing:
+> there is no editor on this route (see snapshotBreaks.ts's header).
+
+## <a id="sv-badges"></a>Header +N/−N badges
+
+> Header words-diff badges (+N / −N) — live per step, like the counter.
+> These used to be pinned to the HEAVY (frozen) pair, on the stated reasoning that an LCS per
+> intermediate would jank the gesture "for a number nobody reads mid-fling". Peter reads it
+> mid-fling: the premise was wrong, not the implementation. The counter already shows the shape
+> — precomputed per index, written imperatively by the driver, no React commit per step — which
+> is exactly why the version number keeps up while these crawled.
+>
+> NEVER an LCS on the input path (that concern was legitimate): peekOpsBetween is cache-only.
+> `preloadDiffWindow` keeps ±20 resident, so a scrub is reading numbers already paid for.
+> Memoised per PAIR (not per index — indices shift when a snapshot arrives; ids don't).
+
+## <a id="sv-grid"></a>One stable DOM structure for wide↔narrow
+
+> ONE stable DOM structure — the same 5 items in a constant order — placed by CSS-grid areas that differ
+> for wide vs narrow. Because the panes keep their position/identity, the wide↔narrow flip re-lays-out via
+> CSS instead of tearing down and rebuilding every pane (the remount storm that caused the switch jank).
+>   wide:  [ diff | d1 | editor | d2 | side ]           (one row)
+>   narrow: editor on top; d1 splits it from a bottom row of [ side | d2 | diff ]
+
+## <a id="sv-drift"></a>Judge registration by DRIFT IN PX
+
+> DRIFT, in px — the measure the zoom focal anchor was proved with (99bf8a0: 0.0-0.3px), and
+> the only one that is honest here. A signature of the centre LINE cannot answer this: it is
+> the line's OPENING 60 chars, so an anchor sitting mid-line (which wrapping alone decides,
+> and wrapping differs between versions of different length) reads as a miss even though it is
+> exactly under the reading line. So ask geometry instead: where IS the anchor text now,
+> relative to the centre? `null` = the anchor has no counterpart in this version at all.
+
+> Warm layers pre-scroll to the anchor's position IN THEIR OWN VERSION — the same CONTENT
+> under the reading line, not the same scrollTop (see getAnchorTop). This is the whole
+> registration contract: this scrollTop is the one the layer's scrub bitmap is CAPTURED at,
+> and a warm layer never gets the active path's midline reposition, so if it is primed to a
+> raw offset its bitmap is misregistered FOREVER — every frame individually correct, the
+> sequence sliding. Once painted here the layer is ready for its capture (idle — scrubRaster).
+
+## <a id="sv-pane-water"></a>No `--wave-x` sway on a pane-scoped water pseudo
+
+> NO --wave-x scroll sway here (2026-07-12 "snapshots lagging massively"): the pane-scoped
+> water pseudo is CONTENT-tall (>60,000px on a thesis), so every sway write invalidated its
+> whole paint and re-rastered the visible water tiles per scroll event — the same class of
+> bug as the editor's --wave-x subtree invalidation (see the typing-invariants block). The
+> absolute pseudo already scrolls WITH the content; the waves in the page gaps move naturally.
+
+## <a id="sv-warp"></a>The warp physics, the magnetic snap and the alignment glow
+
+> Editor snap mode A — WHEEL-TAKEOVER PHYSICS: we take the wheel and integrate a particle (the scroll
+> position) moving with LINEAR RESISTANCE through a landscape of POTENTIAL WELLS at the diffs. A wheel
+> delta is an impulse to velocity; each frame: v += wellForce − resist·v (exponential-decay fling that
+> the wells bend), then x += v · speedWarp (the Mexican-hat slow-through/fast-before layered on). Result:
+> a fast flick coasts and decays Apple-style; a slow one is captured and settles onto the nearest diff.
+> Ctrl/⌘+wheel is left alone (that's the diff zoom). Centres come from the cache → zero layout per frame.
+
+> Local magnetic snap: within ±W of a diff LOCK POINT, blend the linear map toward a slope-1 line
+> through the lock, so both midlines move in lockstep AT the lock (dry/dlMid = 1, d²ry/dlMid² = 0 —
+> Taylor-matched to 2nd order), easing back to linear by the window edge. smootherstep gives zero
+> 1st AND 2nd derivative at both ends → no kink where it hands back to the linear segments. The
+> window is capped to half the gap to the nearest neighbouring lock so adjacent windows never
+> overlap (they meet at u=0, staying continuous). This is what makes passing a change feel like it
+> "clicks in" without the whole follow being snappy.
+
+> Synchronised alignment glow: a CONTINUOUS Gaussian per diff — intensity 1 when its centre is on
+> the midline, tapering to ~0 about 40px past its top/bottom edges (reach = half-height + 40). No
+> cap: every diff glows in turn as it passes. Both panes get the same --iw-align, so they light up
+> together. Clear diffs that scrolled out of reach.
+> PLATEAU glow: fully lit (1) the whole time the midline is inside the diff body (|d| ≤ half) — so
+> every diff is reliably, fully lit once as it passes — with a smootherstep dropoff over the next
+> GLOW_DROP px (curved shoulders, zero slope at both ends → no visible edge).
+
+> Hover glow lights whenever the cursor is over a diff — EXCEPT while panning or scrolling (scrolling the
+> content under a still cursor was the case that spuriously lit it; see the scroll-suppress effect).
+> A multi-line diff is ONE wrapped span, so the leading between its lines isn't over the span and fires a
+> mouseleave. Treat the diff as a BLOCK: on leave, keep it lit if the cursor is still inside its bounding
+> box (a span's getBoundingClientRect spans all its line-boxes, gaps included). Applies to both panes.
+
+## <a id="sv-unreadable"></a>'unreadable' is its own status
+
+> 'unreadable' is its OWN status, and both other answers were wrong. A throw would leave this
+> on 'loading' forever ("Loading…" with nothing coming — the spinner-forever shape). And
+> 'missing' renders "That snapshot isn't on this device", which on a failed read is a LIE
+> about the one thing this page exists to show: it would tell Peter his history is gone while
+> it sits intact on disk. Neither. Say the truth: we couldn't read it, try again.
+
+This is **R1** (an unknown is not a known-empty), the family that caused six data-loss incidents.
+
+## <a id="sv-rapid-input"></a>Rapid detection reads the INPUT EVENT's own timestamp
+
+> INPUT-TIME rapid detection (round 3): goTo runs AFTER the previous step's synchronous React
+> render, so goTo-to-goTo spacing ≈ render time — a heavy cold flip (300-500ms) kept every
+> pair >250ms and rapid mode never engaged EXACTLY when it was needed (probed). Events carry
+> hardware timestamps (e.timeStamp, performance.now() clock): each input source stamps ONCE
+> per user input; goTo checks the last INPUT pair. The old goTo-spacing check stays as an OR.
+
+> PERF (2026-07-11): a pure snapId change (every scrub step) must NOT re-read the archive —
+> the list is already in state and a fresh `.slice()` per step invalidated every downstream
+> memo. Only a doc change (or an unknown snap) goes back to the store.
+
+> ARMED-SCRUB inputs (the hold-armed touch drag, the trackpad position scrubber) are bitmap
+> mode from their FIRST step (Peter's spec: "armed multi-scrub AND rapid single flips") — the
+> first step of a burst otherwise takes the live path, and its 300-1100ms cold render bunches
+> the queued inputs into fling jumps (probed: 21 steps collapsed into ~3 goTos). Flicks stay
+> 'flick' → the isolated single-step live flip is untouched.
+
+> This path FLIPS THE BITMAP TOO, so it owes the badges the same update the rAF driver gives
+> them — otherwise the header keeps the old version's number while a new version is on
+> screen. That is the exact lie this whole change removes, and it was measurable: a burst's
+> first notch is not yet `rapid` (lastNavInputAt is 0 on a fresh page), so it lands HERE, and
+> the probe saw 14 versions presented against 13 badge paints — one stale frame at the start
+> of every gesture. Same cache-only read; an uncached pair still blanks rather than lying.
+
+## <a id="sv-aria"></a>`aria-disabled`, not `disabled`, on the header lozenges
+
+> `aria-disabled` rather than `disabled`: the click is already withheld, and this states the fact
+> that the lozenge is INACTIVE — which is what licenses its deliberately faint colours in both
+> themes (WCAG 1.4.3 exempts inactive components, and a contrast sweep must be able to tell an
+> unavailable control from an illegible one rather than being handed an exemption list).
+
+---
+
+# <a id="raster"></a>`editor/scrubRaster.ts` — the narrative, moved out of the raster layer (2026-09-04)
+
+## <a id="raster-architecture"></a>Capture and cache, as the header used to tell it
+
+> Scrub raster layer (round 3, 2026-07-12 — Peter: "preload their views as PNGs or something
+>    so that the user can scroll through real fast … same with the minimap … raster them as PNGs
+>    at current resolution of screen")
+>
+> During RAPID snapshot stepping (armed multi-scrub, or single flips <~250ms apart) the doc pane,
+> the diff panel and the minimap flip through PRE-RASTERISED bitmaps: one `<canvas>` per pane,
+> swapped into an absolutely-positioned overlay per step — zero layout work on the input path.
+> At rest (~150ms after the last step, once the live DOM for the landing snapshot has painted)
+> the overlay hides and the real view shows — bitmap and DOM are pixel-aligned because each
+> bitmap is captured from the live pane at its own scroll offset + the current zoom.
+>
+> CAPTURE — SVG foreignObject rasterisation, no dependencies: clone the pane subtree, inline the
+> app stylesheet (same-origin CSSOM text; `:root`/`html` selectors re-pointed at the clone
+> wrapper so theme vars + wave-tile URIs still resolve) and the LOADED webfont faces as data:
+> URIs (fonts are self-hosted → same-origin fetch; an SVG-image document may not fetch ANYTHING,
+> so every subresource must be a data: URI — that also satisfies the strict CSP: img-src has
+> data:, not blob:). The crop is the pane's viewport region (thesis panes are >60,000px tall —
+> a full strip would blow any budget), selected by negative margins inside a pane-sized
+> foreignObject (NOT viewBox/transform cropping — WebKit's foreignObject handling of those is
+> historically buggy). Raster = draw the SVG `<img>` into a canvas at DEVICE resolution: pane box
+> × DPR × (CSS zoom where the zoom wraps the pane — the diff panel). Peter said "current
+> resolution of screen": desktop captures at full DPR; phone caps at 2 (memory).
+>
+> CACHE — LRU keyed `${kind}|${snapshot.id}|${paneW}x${paneH}|z${zoom}|d${dpr}` under a hard
+> byte budget (60MB desktop / 24MB touch). Snapshot content is immutable, so entries only go
+> stale on scroll (the owning pane recaptures on scroll settle) or on a key change (zoom /
+> pane size / DPR → different bucket, old bucket ages out). Misses during a scrub show the
+> NEAREST cached snapshot's bitmap (by snapshot order) — never a blank flash; the live counter
+> stays truthful (it renders outside the overlays) and the real render catches up at rest.
+> Capture runs strictly OFF the input path: idle-pumped, paused while scrubbing or within
+> 350ms of any nav input.
+
+## <a id="raster-budgets"></a>The byte budget and `RASTER_DPR_CAP`
+
+> Byte budgets. Round 5 (2026-07-14 — Peter "keep + salvage"): the raster DPR is now CAPPED (see
+> RASTER_DPR_CAP / dprOf), so each doc-pane bitmap is ~¼ its DPR2 size and 60MB again holds ~38
+> entries (~12 snapshots × doc/diff/map — the round-3 measured depth). Deep enough that a fast
+> scrub finds the intermediate versions CACHED instead of falling back to a stale nearest — the
+> regression-#3 fix ("only some versions seen; lags; catches up on stop"). Bitmaps are GPU-backed
+> (ImageBitmap) → bounded native memory, not JS heap.
+
+> Cap the RASTER DPR (NOT the display). The felt scrub jank was the per-step compositor texture
+> upload of a full-DPR bitmap (measured DPR2 ≈ 20MB/swap → 28% of burst frames >32ms); capping to
+> 1 quarters that upload AND ~4×s the cache depth (more intermediate versions stay cached → fewer
+> stale-nearest skips). Text at reading size stays crisp at 1. A harness may override via
+> window.__iwRasterDprCap to A/B the cap.
+
+## <a id="raster-band-trim"></a>Band trimming — the capture-cost fix
+
+> Serialising + laying out the WHOLE pane in the SVG document cost seconds on a thesis-scale doc
+> (measured 4.5-13s per capture). Only the crop band matters, so the clone is trimmed to it:
+> far content is Range-deleted at SAFE block boundaries and a pixel-exact spacer preserves the
+> kept band's offsets. Safe boundaries: the canonical `.inkwave-page-gap` widgets (block-in-
+> inline — text after one always starts a fresh line, so removing content before an earlier gap
+> or after a later one can't re-wrap the kept band; the absolute `.inkwave-sheets` panel layer
+> lives OUTSIDE the text flow and is untouched); fallback for the diff panel: its own block
+> children. The minimap (short content) skips trimming entirely.
+
+> Pin the live client box EXACTLY: width w (clientWidth excludes the scrollbar; with overflow
+> visible the clone grows none, so line wrapping is identical) AND height h — percent-height
+> children (the diff panel's lead/trail spacers, the minimap's 1fr grid rows) resolve against
+> the box height and would collapse under height:auto. Taller content simply overflows
+> (visible) and the crop picks the scrolled band.
+
+## <a id="raster-registration"></a>Registration — a frame carries a CONTENT identity
+
+> REGISTRATION (Peter, 2026-07-16: "nothing happens except the version number").
+> Versions differ in LENGTH, so preserving the SCROLL OFFSET does not preserve the CONTENT: every
+> frame can be individually correct while the text slides under the viewport and the sequence
+> reads as mush rather than animation. Apple Photos flickers legibly precisely BECAUSE consecutive
+> frames are registered to each other. So the recorder carries a CONTENT identity per present: the
+> text under the pane's centre line, hashed at CAPTURE time (idle — never in the hot path) and
+> INTERNED to an integer, so recording it is one array write of a number already on the entry.
+> Consecutive presents with the same `centre` = registered; a changing `centre` = the frames are
+> sliding, and no amount of presenting speed can fix that.
+
+## <a id="raster-recorder"></a>The burst is RECORDED, not watched
+
+> The `?snapThumbs=debug` overlay is a DOM node re-rendering on the SAME main thread a scrub
+> saturates — so a mid-burst screenshot of it is a stale render of the INSTRUMENT, and every
+> number read off it was really an at-rest sample (Peter's mid-scrub capture came back
+> byte-identical to his idle one). This codebase has been burned repeatedly by instruments that
+> can't see the thing they measure (canvasShapingMatchesEditor returning false forever, silently
+> disabling arithLayout for months) — so the burst is RECORDED, not watched: a preallocated ring
+> buffer written per present with no allocation, no string building, no DOM and no console in the
+> hot path, serialised only once the burst has settled. `resetRecord()`/`record()` on the
+> presenter; window.__iwScrub.record() for a harness or for Peter's clipboard.
+
+Pattern **R5** — measure in the real context. An instrument that repaints on the thread it is
+measuring reports the idle state under any load.
+
+## <a id="raster-key"></a>One source of truth for the cache key
+
+> ONE SOURCE OF TRUTH for the key: the SURFACE this bitmap will be PRESENTED into and looked
+> up against. The box used to come from `el` — the CAPTURED element, which for a sweep job is
+> a warm DocLayer or an offscreen replica, not the surface — while `hydrate()`/`show()` key
+> off the surface. Two elements that merely HAPPEN to agree (both DocLayers share CSS, and
+> `scrollbar-gutter:stable` keeps the gutter reserved so clientWidth can't drift with content
+> height). Traced verbatim they match byte-for-byte today — but a latent second source keys
+> every bake to a box no lookup ever asks for the day it diverges, which reads as "all baked,
+> never hit" and is unfalsifiable from the outside. The MAP keeps its bake permanently even
+> if doc/diff move to on-demand text rendering, so this contract has to be sound, not lucky.
+
+Pattern **R2**, and the interesting half is that the two sources agree *today*: the bug it
+prevents is invisible until the day they stop.
+
+## <a id="raster-eviction"></a>Name the bound
+
+> NAME THE BOUND. `planEviction` walks both passes and then falls through with `freed < over`
+> and says NOTHING, and this loop additionally REFUSES to evict anything still attached — so
+> the plan's own `freed` can promise bytes that never come back. A budget that is silently
+> exceeded reads exactly like a budget that holds. Measured on ACTUAL bytes after the sweep,
+> never on the plan's promise: if we could not get under, that is the eviction rule failing
+> and it must say so by name (the doc/diff bitmaps may retire to the plaintext renderer, but
+> the MAP keeps its bake permanently — this rule is the long-lived one).
+
+---
+
+# <a id="textrender"></a>`editor/textRender.ts` — the narrative, moved out of the plaintext renderer (2026-09-04)
+
+## <a id="tr-overview"></a>What it is, its two paint modes, and its honest limits
+
+> PLAINTEXT PAGE RENDERER (2026-07-16 — flag `inkwave:textRender`, default OFF).
+>
+> Peter's idea: a page PREVIEW is just text + highlight rectangles. It does not need ProseMirror,
+> the DOM, or a reflow. We already own the hard half — arithmeticLayout computes canonical line
+> breaks from canvas measureText advances, and that wrap is CERTIFIED to match the editor
+> (CERTIFIED_FAMILIES + the fonttools ligature strip + luFloor quantisation). So: run the arith
+> engine to get line breaks, then fillText each line onto a canvas. No DOM, no editor, no reflow.
+>
+> This module is a MEASUREMENT PROTOTYPE. It exists to answer "is this fast enough, and faithful
+> enough, to replace the snapshot thumbnail bake?" — not to ship. Read the honest limits below.
+>
+> TWO PAINT MODES (the map-pane hypothesis, 2026-07-16):
+>   • 'text'  — fillText each line's runs. The real preview.
+>   • 'rects' — one filled rect per line (x, baseline-ish band, run length). At MINIMAP scale no
+>               glyph is resolvable, so the only information that survives is WHERE lines are and
+>               HOW LONG they run — which the layout already knows.
+>     NB THE HONEST FRAMING: 'rects' does NOT "skip shaping". The line BREAKS come from
+>     measureText, which IS shaping — that cost is identical in both modes. 'rects' skips only
+>     RASTERISATION (fillText). So the mode difference measures exactly one thing: is a page's cost
+>     dominated by glyph raster, or by layout? Do not claim more than that from it.
+>
+> HONEST LIMITS (each is a DEFER, never a guess — the same discipline as the engine's eligibility):
+>   • Text blocks = `paragraph` only, in certified+loaded fonts, uniform size (blockEligibility).
+>   • EVERYTHING ELSE (figure, math, embedded PDF, list, rule, refList, heading) draws a LABELLED
+>     PLACEHOLDER BOX at a declared/estimated height. It does NOT pretend to render. A placeholder
+>     whose height is estimated is a real fidelity gap and the coverage map reports it.
+>   • `justify` alignment is NOT modelled (the browser distributes slack across spaces) — a
+>     justified paragraph renders left-aligned and is reported as a gap, not silently drawn wrong.
+
+⚠ **The flag line above names the wrong flag, and the compression pass corrected it rather than
+carrying it forward.** `inkwave:textRender` gates `RichDiffView` (the /snapshot doc pane's rich
+pages) and has been **DEFAULT ON** since round 15 (`ef96306`) — `textRenderFlag.ts` says so in its
+own header. Nothing reaches THIS module through it: the only production caller is
+`editor/snapshotBreaks.ts`, behind `inkwave:snapBreaks`, which is default OFF
+(`localStorage.getItem(FLAG) === '1'`). Everything else importing it is a probe, a store or a test.
+So the header read as though the renderer had been dark since 2026-07-16 under a flag that has in
+fact been live for a different feature for six weeks — the exact archaeology CLAUDE.md warns about
+when a stale entry describes a lane's state. The rewritten header names `inkwave:snapBreaks`.
+
+## <a id="tr-positional"></a>Reliability is POSITIONAL
+
+> RELIABILITY IS POSITIONAL, NOT A DOCUMENT-WIDE BOOLEAN (2026-07-17).
+> A placeholder with a guessed height does not merely look wrong — it MOVES EVERY PAGE BREAK
+> AFTER IT, silently, and the pages then carry the wrong words while the renderer reports
+> success. But it only moves the breaks BELOW it: everything above is unaffected.
+> A whole-model boolean therefore reported EVERY thesis unreliable (they all have a
+> bibliography, which is force-broken onto its own page at the very END) and said nothing about
+> WHERE — throwing away ~57 of 58 perfectly exact pages. So:
+>   pages [0, reliablePages) are trustworthy; from reliablePages on, they are not.
+> This is the general contract for "we estimated something here" — any future estimated block
+> inherits it, not just the refList.
+
+Pattern **R9** — scope by what the mechanism actually needs. A document-wide boolean is the wrong
+axis for a defect that only propagates downward.
+
+## <a id="tr-tone"></a>Line-rect tone calibration
+
+> Line-rect tone calibration (MEASURED 2026-07-16, not chosen).
+> A line drawn as a solid bar is far darker than the text it stands for, and at map scale tone IS
+> the signal — the eye reads a page thumbnail as grey texture, so getting the density wrong makes
+> the strip read as a barcode even when every line is in exactly the right place.
+> Measured on the real editor's own pixels, downscaled to map scale (scripts/textrender-probe/
+> mapcompare.mjs), mean ink density over the content box:
+>     real thumbnail 6.71%   ·   text render 6.73%   ·   line-rects @0.42/0.72 = 22.27%
+> So the bar was 3.3× too dark. Effective coverage = bandRatio × alpha; matching 6.71/22.27 of the
+> old 0.42 × 0.72 = 0.3024 gives ≈0.091. Keeping the band at 0.42 (thinner bands alias away at map
+> scale, where a band is only ~3 device px) puts alpha at 0.217.
+> CAVEAT, stated rather than buried: this is calibrated to EB Garamond at the canonical 18px. A
+> different face/size has a different ink density, so this is a per-font constant that happens to be
+> hard-coded to the identity serif — re-measure before trusting it for another face.
+
+## <a id="tr-runof"></a>The second copy of `runOf`, and the comments that asserted parity
+
+> One text node → an engine run. Mirrors arithMeasure.runOf (same mark resolution) so the two
+> paths can never disagree about what a run IS.
+> ⚠ THIS IS A SECOND COPY of arithMeasure.runOf — see runsOfParagraph below, whose comment claims
+> the two "Mirror … EXACTLY". THEY DID NOT. Fixing the unmodelled-mark hole in arithMeasure alone
+> changed nothing, because buildRenderModel calls THIS one: `code`-marked prose stayed eligible and
+> kept reporting full reliability. The rule that decides which mark is measurable now lives ONCE, in
+> arithMeasure (MODELLED_MARKS / METRIC_NEUTRAL_MARKS), and both copies call it — so a new mark can
+> no longer be handled in one and silently guessed in the other.
+>
+> The same shape has now bitten this project three times: staticPagination claimed "identical policy
+> (and 0.22 constant) to the editor" while carrying a rule the editor had retired; breaks.prove.mjs
+> claimed "byte-identical to the live editor" on a fixture with no citations; this claimed "can never
+> disagree". A COMMENT ASSERTING PARITY IS A REASON NOBODY CHECKS PARITY.
+
+That last sentence is the file's own best line and it survives in the source, because it is a rule
+about how to read every other comment here.
+
+## <a id="tr-citations"></a>Citations are a proven opaque box; an unknown one DEFERS
+
+> One paragraph's inline content → engine runs. Mirrors arithMeasure.runsOfParagraph EXACTLY (same
+> mark resolution, same citeBox lookup) so the renderer and the canonical measure can never disagree
+> about what a paragraph contains.
+>
+> CITATIONS (wired 2026-07-16 — Peter: "can't you do a math version that includes citations? just
+> calculates how long they are and includes it in the math?"). A citation IS a proven opaque box:
+> CitationNodeView pins `white-space: nowrap`, so its label has no internal break opportunity and
+> the parent line can only break BEFORE or AFTER it — one unbreakable advance, measurable once and
+> cached by an immutable key (citations/citeBox.ts). Supplying it is what lets a citation-bearing
+> paragraph render arithmetically instead of placeholdering out; without it Peter's thesis (174
+> citations) would placeholder ~every paragraph.
+>
+> SELF-HEALING, NOT GUESSING: a key that isn't cached (new citekey, bibliography not yet hydrated,
+> CSL style switch, wrong measurement base) returns null ⇒ no box ⇒ blockEligibility's `!r.box` gate
+> DEFERS that block to a labelled placeholder. We never invent an advance that is about to change.
+> Anything else atomic (inline math) still supplies no box and still defers, by the same rule.
+
+## <a id="tr-window"></a>Window mode
+
+> WINDOW MODE (2026-07-17).
+> PROVED first, then built: a page laid out from its own break position reproduces the full
+> model's line starts EXACTLY, with zero prefix (30/30, 31/31, 31/31 at 2k/10k/40k; mid-line
+> negatives collapse to 0/31). Because a break `at` IS a line start and greedy wrap restarts
+> deterministically there. So the prefix is needed ONLY to FIND the break — never to lay out
+> the page.
+
+## <a id="tr-blockcache"></a>The incremental block cache
+
+> Incremental block cache.
+> PETER'S TARGET: "if we can get it under 1s we can just load it when the snapshots screen loads
+> up" — <1s for 116 versions ⇒ <8.6ms/version, from a naive 62-82ms.
+>
+> THE THEOREM IT RESTS ON (confirmed, not assumed): `layoutParagraph(block, contentWidthPx, ratio,
+> measure, whiteSpace)` takes ONLY the block. No prefix, no preceding state, no document. Line
+> wrapping never crosses a block boundary, so a block's layout is a pure function of its own runs
+> and its width/font context. Everything a block's position depends on — `top`, `posBase`,
+> `blockIdx` — is applied by emitTextBlock as a pure OFFSET after the layout exists. So reuse is
+> the SAME ARITHMETIC, not an approximation: cache the block-relative geometry, re-emit at the new
+> offsets. This is the same rule the editor's `computeScoped` already runs on (unchanged blocks
+> reuse cached block-relative lines at the previous measure's tops).
+>
+> KEYED ON A CONTENT HASH, NEVER ON A DIFF. A diff (`opsBetween`) would be cheaper, but a wrong
+> diff SILENTLY REUSES WRONG LAYOUT — it paints the right words on the wrong page and reports
+> success. A content hash cannot: if the bytes differ, the key differs. The key is
+> self-validating, which is the whole difference between a fast renderer and a fast renderer that
+> is subtly wrong. Two independent 32-bit FNV-1a streams ⇒ an effective 64-bit key: collisions are
+> the ONLY way this can under-invalidate, and under-invalidation is the direction that paints wrong
+> words, so the extra stream is cheap insurance (the same asymmetry as bibSignature's whole-entry
+> hash).
+>
+> INVALIDATION IS THE CALLER'S JOB, and it is the same contract the canonical measure's block-line
+> WeakMap already carries: the key covers the block's CONTENT and its LAYOUT PARAMS, but NOT the
+> font-loading state that `measure` closes over. Fonts change advances. So the caller MUST drop the
+> cache whenever the canonical context moves (fonts ready/'loadingdone', page settings,
+> bibliography hydration) — exactly where clearLineCache already sits. A table's `contextSig`
+> covers the same ground for the persisted layer.
+
+## <a id="tr-heading-font"></a>The heading font-family gap, stated
+
+> styledRuns re-families EVERY run to the harvested style, so the strut IS that family and
+> the mixed-family check is a tautology here. That is a real gap, stated: a
+> textStyle:fontFamily mark INSIDE a heading is overwritten rather than modelled, so a
+> heading in a picked font is laid out in the h2's own face. Headings are single-line in
+> practice and the matrix's heading rows are byte-identical, so it is not moving a break
+> today — but it is a guess, and it should become a defer when a fixture can catch it.
+
+## <a id="tr-lists"></a>A list's margins COLLAPSE
+
+> LIST: ONE block (as the live DOM's `<ul>`/`<ol>` is one top-level block), many item lines.
+>
+> ⚠ A LIST'S MARGINS COLLAPSE, AND THAT IS THE WHOLE OF THIS BRANCH'S DIFFICULTY (2026-07-17).
+> The model used to add one `li > p` margin-bottom after EVERY item, including the last, then the
+> list's own margin-bottom on top. CSS does not: the last item's paragraph has nothing below it
+> inside the list — no padding-bottom, no border on the `li` or the `ul` — so its bottom margin
+> COLLAPSES THROUGH both and merges with the list's own. The gap after a list is
+> `max(itemMargin, listMargin)`, not their sum.
+> MEASURED against the live DOM (scripts/textrender-probe/listdiag.mjs, 3-item lists, canonical
+> 18px): the `ul`'s own rect is `Σ item paragraphs + (n−1) × 4.5`, and the real gap to its next
+> sibling is 9 — while the model produced `Σ + n × 4.5` and then added 9, i.e. **+4.5px per
+> list, every list**. Silent: `estimatedBlocks 0`, `reliablePages 55/55` — full reliability
+> claimed while every break below the first list carried the wrong words. Six lists into a
+> document that is one 29px line of drift.
+> So: the item margin is added BETWEEN items (never after the last), and the list's trailing
+> advance is the COLLAPSE of the last item's margin with the list's own.
+
+## <a id="tr-emit"></a>Routed through `emitTextBlock`
+
+> ROUTED THROUGH emitTextBlock (2026-07-17). This branch used to carry its OWN COPY of the
+> layout+emit loop — a second implementation of the same rule, which is the pmToText/textMap
+> drift trap wearing another hat: headings and list items went through emitTextBlock while
+> PARAGRAPHS, the bulk of every real document, took a duplicate path. It was found by
+> measurement, not by reading: the block cache reported 99% reuse and a 1.03x speedup at once,
+> because it only ever saw 127 of ~380 emits (43 headings + the list items) — the 254
+> paragraphs bypassed it entirely. Byte-identical by construction: posBase collapses to the
+> old `offset + 1 + fromChar + sc`, margins are the same (0 / marginBottom), and the caller
+> still pushes the block and advances `top` exactly as before.
+
+## <a id="tr-breaks"></a>The splitter's default, and the two kinds of break `at`
+
+> paginate()'s default now MATCHES production (no orphan snap — see its ⚠ note). It used to snap,
+> which put the WRONG WORDS on every page after the first (first break 2141 vs the editor's 2403;
+> 17 pages vs 16). A preview showing different text than the editor is worse than no preview, so
+> this deliberately rides the default: if the default ever drifts from computeBreaks again,
+> breaks.prove.mjs fails against the live editor's own gap widgets rather than this file silently
+> compensating for it.
+
+> Assign each line to a page by walking the breaks the splitter produced (never re-deriving them
+> — a second copy of the break rule is a second chance to disagree with production).
+>
+> A break's `at` is one of TWO position kinds, and conflating them silently blanks the renderer:
+>   • a mid-block break → `at` = the line's own pos (= blockOffset + 1 + startChar), or
+>   • an ORPHAN-SNAP / refList break → `at` = the BLOCK START (= blockOffset), which is ONE LESS
+>     than that block's first line's pos and therefore never equals any line's pos.
+> Matching only on line.pos meant snapped breaks never fired: every line stayed on page 0,
+> pageTop[1..] was undefined, and paintPage early-returned — so pages 1+ rendered BLANK while the
+> timings still looked wonderful. Caught by the pixel diff (differing == ink exactly = "we drew
+> nothing"), which is precisely why the fidelity check is not optional.
+
+## <a id="tr-anchoring"></a>Content anchoring
+
+> CONTENT ANCHORING (2026-07-16 — the frame-registration requirement).
+> Versions differ in LENGTH, so "page 7 of v3" and "page 7 of v4" are not the same content: a scrub
+> that preserves page number (or scroll offset) does not preserve what you're LOOKING AT, and the
+> sequence reads as noise even when every frame is correct and fast. So the renderer must be able to
+> answer "the page containing content X", not only "page N". Both directions are a lookup over the
+> model the build already produced — no extra layout.
+
+## <a id="tr-geometry"></a>The canonical geometry, from settings alone
+
+> THE CANONICAL GEOMETRY, FROM SETTINGS ALONE (2026-07-17 — the /snapshot seam).
+>
+> Note what this does NOT touch: the DOM. The canonical geometry is a pure function of the page
+> SETTINGS — paper, orientation, margins, paragraph spacing — with a pinned 18px base and 1.618
+> ratio. That is precisely why /snapshot, which has no editor and no .ProseMirror, can compute the
+> SAME geometry the editor paginates under rather than a lookalike.
+>
+> It lived privately inside textRenderProbe.ts as `liveGeom`. /snapshot needs the identical rule,
+> and a second copy of "what is the canonical geometry" is how one route silently starts paginating
+> to a different page size. One implementation; the probe now calls this too.
+
+---
+
+# <a id="textrenderprobe"></a>`editor/textRenderProbe.ts` — the narrative, moved out of the harness (2026-09-04)
+
+Almost every block here is an instance of **R3** (a guard must be proved to fire), **R5** (measure in
+the real context) or **R6** (a control that cannot fail proves nothing). The rules stayed; the
+account of which instrument lied, and how it was caught, is here.
+
+## <a id="trp-surface"></a>Why the probe is armed by the URL param, not by the flag
+
+> TEXT-RENDER PROBE SURFACE — MEASUREMENT ONLY, armed by the FRESH `?textRender` URL param.
+>
+> NOT gated on textRenderEnabled(): that flag graduated to DEFAULT ON (2026-07-18 — the rich
+> /snapshot pane ships live), so gating this 1477-line harness on it would install it for every
+> writer. TiptapEditor arms it instead on `?textRender` being present in the URL at mount — which
+> only the .prove.mjs scripts navigate to — so a normal load of `/` never fetches this chunk.
+>
+> The whole point of this round is an HONEST measurement, and this codebase has been burned five
+> times by results proven in a context production never uses (a plain-div wrap harness; a ligatures-
+> on font grid; a font we don't ship; a Chromium hinting artifact; and canvasShapingMatchesEditor,
+> a gate that always returned false and silently disabled arithLayout for months). So the renderer
+> is measured HERE — inside the running app, against the LIVE editor's document, with the REAL
+> shipped fonts at the REAL device DPR — not in a harness that reimplements the context.
+>
+> Loaded by a dynamic import from TiptapEditor, so it costs nothing when unarmed.
+
+## <a id="trp-harvest"></a>Harvest styles only where the live layout IS canonical
+
+> Harvest heading/list styles from the LIVE .ProseMirror. This is only legitimate in the CANONICAL
+> context — a rendered value is the canonical value only when the live layout IS canonical, which on
+> desktop at defaults it is (PaginationExtension's `canonicalIsLive`: no phone rules, zoom 1,
+> magnify 1). Asserted, not assumed: harvesting under a zoom would bake the zoomed font size into a
+> "canonical" table and every break would be wrong in a way that looks like an engine bug.
+> PRODUCTION HOME (not this file): beside harvestCiteBoxes inside the DOM canonical measure, which
+> forces that context explicitly. Here the probe drives it because the prototype has no wire-in.
+
+## <a id="trp-canvas"></a>The persistent canvas, and `flushedMs` vs `recordedMs`
+
+> PERSISTENT CANVAS. Allocating a fresh 3.5-megapixel canvas per page is a HARNESS artifact, not
+> the renderer's cost — production reuses one canvas per pane (scrubRaster's round-4 lesson: the
+> per-step attach re-layerized + re-uploaded a full texture every step). Measuring the alloc as
+> if it were render cost would overstate the renderer by ~4×. `fresh: true` measures the alloc
+> path deliberately, so the difference is visible rather than assumed.
+> RETURNS BOTH NUMBERS, ALWAYS. Canvas 2D `fillText` RECORDS a command; it does not rasterise.
+> Timing only the record loop yields ~0ms and is a LIE of exactly the shape that already bit this
+> codebase (round-4: "the show() 0.4ms was JS-only and hid the real cost" — the felt lag the JS
+> timer never saw). `flushedMs` forces the raster to complete (a 1px readback drains the command
+> queue) and is THE number to quote. `recordedMs` is kept only to show the gap.
+
+## <a id="trp-midline"></a>The mid-line break audit, and the two ways it was vacuous
+
+> THE MID-LINE BREAK AUDIT.
+> A page break must land at a LINE START. If it lands mid-line, the page gap opens in the middle
+> of a rendered line — the "space left on the last line" of a split paragraph.
+>
+> ⚠ MEASURE THE NATURAL LAYOUT, NOT THE GAPPED ONE. The page-gap widget is a display:block span,
+> so it FORCES a line break at its own position ("the break it forces coincides with the line
+> start it sits at" — pageGap.ts). Asking the GAPPED DOM whether a break sits at a line start is
+> therefore VACUOUS: every break trivially does, and the audit reports a confident 0 for a
+> document full of real mid-line breaks. That is exactly the house failure mode, and the first
+> version of this audit fell into it. So the gaps are removed from flow first, and the question
+> is asked of the NATURAL wrapping — the gap-free canonical layout collectLines claims to
+> measure (compute() clears the widgets before measuring; on desktop at defaults the live layout
+> IS canonical, so hiding the gaps reproduces that context).
+>
+> Line starts are derived INDEPENDENTLY of collectLines: a document-order walk of the real text
+> characters, plus each inline ATOM as ONE unit via its own outer box. An atom's INTERIOR boxes
+> never vote — they are the fiction under test (the citation NodeView's inline-flex ⤵ button sits
+> ~6px off the line, past the 3px dedup, and became a phantom line). An atom that begins a line
+> IS a line start, so it must be counted, or a legitimate break before a line-leading citation
+> false-positives.
+>
+> POLARITY — both must hold before any number here is believed:
+>   • known-NEGATIVE: plain prose (no NodeViews) must audit 0 mid-line breaks;
+>   • known-POSITIVE: pre-fix, citation-dense prose must reproduce real mid-line breaks.
+> An audit that reports 0 everywhere is blind, not passing.
+
+> ⚠ THE VERDICT IS ONLY MEANINGFUL WHERE THE RENDERING IS CANONICAL. Breaks are measured in a
+> FORCED canonical context (18px base, desktop margins, zoom 1, magnify 1). The phone RENDERS
+> the same doc at 22.5px in a ~350px column — a different reflow entirely — so a canonical
+> break lands wherever it falls in the phone's own wrapping. That is canonical pagination
+> working as designed (same words on the same page everywhere), not a mid-line bug; auditing
+> canonical positions against a non-canonical reflow measures the question, not the code.
+> Desktop at defaults IS canonical (canonicalIsLive), which is where the verdict counts.
+
+## <a id="trp-linecount"></a>The line over-count audit — measure the artifact, not the coincidence
+
+> THE LINE OVER-COUNT AUDIT.
+> The mid-line rate only fires when a page break HAPPENS to land on a phantom line, so it is a
+> poor instrument for a NodeView that is rare in the doc: inline math measured 0 mid-line breaks
+> even UNFIXED, which says "no break landed there", not "no bug". The ARTIFACT itself is the
+> phantom line, so measure THAT directly and per block: how many lines does the rect path report
+> versus how many the block really has?
+>   • truth  — line starts from the validated char/atom walk (the same rule midlineAudit uses);
+>   • old    — keepLineRects(whole-block range rects): descends into NodeViews ⇒ over-counts;
+>   • fixed  — keepLineRects(blockLineRects(...)): atoms collapsed to one box each.
+> Both paths call the REAL production functions, not copies. Gaps are removed from flow first
+> (a gap widget splits a block's rects and would corrupt every count).
+
+## <a id="trp-memory"></a>The memory reading is an order of magnitude, and says so
+
+> MEMORY: what a cached MODEL costs vs a cached BITMAP.
+> The bitmap pool holds ~62.7MB for 57 bitmaps because a bitmap is W×H×4 bytes no matter how
+> little ink is on it. A render model holds geometry + the segment strings instead. This builds
+> N independent models and reports the heap delta.
+> performance.memory is COARSE (quantised, GC-dependent), so this is an order-of-magnitude
+> reading, not a precise one — it is reported as such. A structural count is included alongside
+> so the estimate can be sanity-checked against something that isn't the GC's opinion.
+
+## <a id="trp-incremental"></a>The incremental proof — four things that must hold at once
+
+> THE INCREMENTAL PROOF.
+> Peter: "if we can get it under 1s we can just load it when the snapshots screen loads up."
+>
+> WHAT MUST BE TRUE AT ONCE, or the number is worthless:
+>  (1) incremental == full, BYTE-IDENTICAL. An incremental build that is subtly wrong paints the
+>      right words on the WRONG PAGE and looks completely fine. Compared at LINE level (top/pos/
+>      startChar/endChar/height per line), not just the table's page starts — a drift inside a
+>      page that happens not to move a break would pass a starts-only check.
+>  (2) THE REUSE RATE BESIDE THE TIMING. 82ms → 8ms at 0% reuse means something else happened.
+>  (3) THE POISONED-CACHE NEGATIVE. If a corrupted entry does NOT change the output, the hit path
+>      never ran and every "identical" above is VACUOUS — the build silently fell back to full.
+>      This is the trace-the-pass instrument: it proves the thing being measured is the thing.
+>  (4) BOTH FIXTURE NEGATIVES. `nothing` (100% reuse) cannot test the DELTA path; `everything`
+>      (0% reuse) cannot test REUSE. Only `realistic` exercises both, so only it can be believed
+>      — and the other two prove the metric moves in the right directions rather than being a
+>      constant.
+
+## <a id="trp-lru"></a>Ask a version the LRU still holds
+
+> THE REFERENCE MODEL MUST BE ONE THAT SURVIVED (fixed 2026-07-17). This read `coverageOf('v0')`
+> — and the LRU evicts the OLDEST first, so v0 is the FIRST casualty at any n that overflows the
+> budget. At n=116 it reported `pagesPerVersion: 0` and `lastPageReachableByContent: false`:
+> both read exactly like the whole-document claim COLLAPSING, when the truth was that the probe
+> asked an evicted key. A probe that reports a scary zero because it queried something it threw
+> away is this project's signature failure — fourteen times over. Ask the MOST-RECENTLY-USED
+> version, which the LRU guarantees is resident, and VOID loudly if somehow nothing survived.
+
+## <a id="trp-lastpage"></a>The last block's own position, and the model bug it was masking
+
+> The content-anchored seam: the LAST page must be reachable by CONTENT, not page number —
+> if the model only covered a window, a far position would clamp to the window's edge.
+>
+> ASK THE LAST BLOCK'S OWN POSITION, derived from the DOC (2026-07-17). `doc.content.size - 2`
+> was wrong whenever the document ends in a LEAF ATOM (`nodeSize === 1` — a refList, a
+> mathBlock): the atom occupies [size-1, size), so size-2 is inside the SECOND-TO-LAST block
+> and resolves, correctly, to the second-to-last page. The assertion then read as "the last
+> page is unreachable" when the probe had simply asked about a different page. It ALSO masked
+> a real model bug underneath (a leaf atom's line claimed `offset + 1` — the position AFTER
+> itself; see blockFirstLinePos in textRender.ts), which is why this was worth chasing rather
+> than silencing: two independent faults, the probe's one hiding the model's.
+
+## <a id="trp-window"></a>Prefix-independent window layout
+
+> THE CRUX: PREFIX-INDEPENDENT WINDOW LAYOUT.
+> Peter: "we only need the plaintext of the precise part of the doc that will be visible at the
+> current zoom." That only works if page N can be laid out WITHOUT laying out pages 0..N-1.
+> Line breaks cascade, so the prefix decides where page N BEGINS — but a break position IS a
+> line start, and greedy wrap restarts deterministically at a line start. So the claim under
+> test is: given the break position, the page's own layout is prefix-independent.
+> TEST: build the full model; then for several pages, cut the doc at that page's break position
+> and lay the REMAINDER out from scratch (no prefix at all). If the first lines of the cut
+> layout match the full model's lines for that page, the claim holds.
+> KNOWN-POSITIVE: a deliberately WRONG cut (2 chars off a line start) must FAIL the same check —
+> otherwise the comparison proves nothing.
+
+> WINDOW MODE, AS BUILT.
+> Two claims, both measured, neither assumed:
+>  (1) EXACT — the window's line starts equal the full model's for that page (known-positive),
+>      and mid-line cuts score STRICTLY worse (a negative that cannot fail is not a negative).
+>  (2) O(WINDOW) — the cost must NOT scale with document size. The crux test laid out the whole
+>      TAIL (57-60ms at 40k); if this shows the same curve, the early stop does not work and the
+>      "1-2ms" claim is fiction.
+
+## <a id="trp-table"></a>Break-table portability, verified rather than asserted
+
+> BREAK TABLE: size, cost, and PORTABILITY VERIFIED (not assumed).
+> Canonical pagination claims breaks are device- and zoom-independent. That claim is what makes
+> a table PORTABLE (bake once, valid at any zoom, across reloads) and it is why zoom is absent
+> from contextSig. The codebase asserting it is not evidence, so: build the table, then rebuild
+> it under DIFFERENT zoom/DPR conditions and require the starts to be byte-identical.
+> KNOWN-NEGATIVE: a genuinely different context (a changed side margin, which really does move
+> the breaks) MUST produce a different table — otherwise this comparison cannot fail and proves
+> nothing.
+
+## <a id="trp-gate"></a>The known-positive gate
+
+> THE KNOWN-POSITIVE GATE.
+> "Measure X, compare to Y, report" is exactly the shape that failed silently before. So before
+> any null result is believed, assert the instrument can SEE a known-positive:
+>   • fonts really loaded (not the system fallback measuring against itself),
+>   • the measure actually discriminates (two different strings ⇒ different widths),
+>   • an INJECTED wrap error really moves the output (a 5% advance inflation must change the
+>     line count — if it doesn't, the comparison is blind and nothing it reports means anything).
+
+## <a id="trp-schema"></a>`Node.eq` across two schemas can never return true
+
+> THE DOCUMENT-LEVEL CHECK — and the trap it walked into first (2026-07-17).
+>
+> The obvious instrument is `Node.fromJSON(mine, liveDoc.toJSON()).eq(liveDoc)`. IT CAN NEVER
+> RETURN TRUE. PM's `hasMarkup` is `this.type == type` — REFERENCE equality on NodeType — so
+> two Schema instances (which is the entire premise here) always compare unequal, whatever the
+> content. It reported `false` for the UNTOUCHED live document: a check structurally incapable
+> of passing, i.e. one that would have condemned a perfectly correct schema. It was caught
+> ONLY because the known-negative reads its positive arm too (clean must still say yes).
+> Same family as canvasShapingMatchesEditor, the gate that always returned false and silently
+> disabled arithLayout for months.
+>
+> The correct cross-schema comparison is STRUCTURAL: type NAMES, attrs, marks and text — i.e.
+> the serialised form, which is schema-independent by construction and is also exactly what a
+> snapshot's contentJson IS. Compared with a key-stable serialiser so attr enumeration order
+> can never masquerade as a difference.

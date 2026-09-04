@@ -1,18 +1,10 @@
-// TEXT-RENDER PROBE SURFACE — MEASUREMENT ONLY, armed by the FRESH `?textRender` URL param.
-//
-// NOT gated on textRenderEnabled(): that flag graduated to DEFAULT ON (2026-07-18 — the rich
-// /snapshot pane ships live), so gating this 1477-line harness on it would install it for every
-// writer. TiptapEditor arms it instead on `?textRender` being present in the URL at mount — which
-// only the .prove.mjs scripts navigate to — so a normal load of `/` never fetches this chunk.
-//
-// The whole point of this round is an HONEST measurement, and this codebase has been burned five
-// times by results proven in a context production never uses (a plain-div wrap harness; a ligatures-
-// on font grid; a font we don't ship; a Chromium hinting artifact; and canvasShapingMatchesEditor,
-// a gate that always returned false and silently disabled arithLayout for months). So the renderer
-// is measured HERE — inside the running app, against the LIVE editor's document, with the REAL
-// shipped fonts at the REAL device DPR — not in a harness that reimplements the context.
-//
-// Loaded by a dynamic import from TiptapEditor, so it costs nothing when unarmed.
+// TEXT-RENDER PROBE SURFACE — MEASUREMENT ONLY.
+// ⚠ ARM IT ON THE FRESH `?textRender` URL PARAM, never on `textRenderEnabled()`: that flag is
+// DEFAULT ON, so gating this harness on it would install ~1500 lines for every writer. Dynamically
+// imported, so an unarmed load never fetches the chunk.
+// ⚠ MEASURE IN THE RUNNING APP (R5) — the live editor's document, the shipped fonts, the real DPR.
+// Five results here were proved in a context production never uses.
+// → docs/archive/snapshot-scrub-rounds.md#textrenderprobe
 
 import type { Editor } from '@tiptap/react'
 // The /snapshot seam under test — the standalone schema, imported here so the probe compares it
@@ -62,13 +54,11 @@ function buildOpts(): { citationStyle: string; bibEpoch: number } {
   return { citationStyle: getCitationStyle(), bibEpoch: bibProvider.getVersion() }
 }
 
-// Harvest heading/list styles from the LIVE .ProseMirror. This is only legitimate in the CANONICAL
-// context — a rendered value is the canonical value only when the live layout IS canonical, which on
-// desktop at defaults it is (PaginationExtension's `canonicalIsLive`: no phone rules, zoom 1,
-// magnify 1). Asserted, not assumed: harvesting under a zoom would bake the zoomed font size into a
-// "canonical" table and every break would be wrong in a way that looks like an engine bug.
-// PRODUCTION HOME (not this file): beside harvestCiteBoxes inside the DOM canonical measure, which
-// forces that context explicitly. Here the probe drives it because the prototype has no wire-in.
+// ⚠ HARVEST LIVE STYLES ONLY WHERE THE LAYOUT IS CANONICAL, and ASSERT it (`canonicalIsLive`).
+// Harvesting under a zoom bakes the zoomed font size into a "canonical" table and every break is
+// then wrong in a way that looks like an engine bug. Production's home for this is beside
+// harvestCiteBoxes in the DOM canonical measure, which forces the context explicitly.
+// → docs/archive/snapshot-scrub-rounds.md#trp-harvest
 function harvestNow(): { ok: boolean; reason: string } {
   const pm = document.querySelector('.ProseMirror') as HTMLElement | null
   if (!pm) return { ok: false, reason: 'no .ProseMirror' }
@@ -233,16 +223,11 @@ export function installTextRenderProbe(editor: Editor): void {
       return { model, ms: performance.now() - t0 }
     },
 
-    // PERSISTENT CANVAS. Allocating a fresh 3.5-megapixel canvas per page is a HARNESS artifact, not
-    // the renderer's cost — production reuses one canvas per pane (scrubRaster's round-4 lesson: the
-    // per-step attach re-layerized + re-uploaded a full texture every step). Measuring the alloc as
-    // if it were render cost would overstate the renderer by ~4×. `fresh: true` measures the alloc
-    // path deliberately, so the difference is visible rather than assumed.
-    // RETURNS BOTH NUMBERS, ALWAYS. Canvas 2D `fillText` RECORDS a command; it does not rasterise.
-    // Timing only the record loop yields ~0ms and is a LIE of exactly the shape that already bit this
-    // codebase (round-4: "the show() 0.4ms was JS-only and hid the real cost" — the felt lag the JS
-    // timer never saw). `flushedMs` forces the raster to complete (a 1px readback drains the command
-    // queue) and is THE number to quote. `recordedMs` is kept only to show the gap.
+    // ⚠ REUSE ONE CANVAS, as production does — a fresh 3.5-megapixel canvas per page is a harness
+    // artifact worth ~4× the renderer's real cost (`fresh: true` measures that path deliberately).
+    // ⚠ QUOTE `flushedMs`, NEVER `recordedMs`. Canvas 2D `fillText` records a command; it does not
+    // rasterise, so timing the record loop yields ~0ms — the felt lag a JS timer never sees.
+    // → docs/archive/snapshot-scrub-rounds.md#trp-canvas
     paint(model, pageIdx, opts = {}) {
       const g = liveGeom()
       const fresh = (opts as { fresh?: boolean }).fresh
@@ -301,30 +286,15 @@ export function installTextRenderProbe(editor: Editor): void {
     },
 
     // ── THE MID-LINE BREAK AUDIT ─────────────────────────────────────────────────────────────
-    // A page break must land at a LINE START. If it lands mid-line, the page gap opens in the middle
-    // of a rendered line — the "space left on the last line" of a split paragraph.
-    //
-    // ⚠ MEASURE THE NATURAL LAYOUT, NOT THE GAPPED ONE. The page-gap widget is a display:block span,
-    // so it FORCES a line break at its own position ("the break it forces coincides with the line
-    // start it sits at" — pageGap.ts). Asking the GAPPED DOM whether a break sits at a line start is
-    // therefore VACUOUS: every break trivially does, and the audit reports a confident 0 for a
-    // document full of real mid-line breaks. That is exactly the house failure mode, and the first
-    // version of this audit fell into it. So the gaps are removed from flow first, and the question
-    // is asked of the NATURAL wrapping — the gap-free canonical layout collectLines claims to
-    // measure (compute() clears the widgets before measuring; on desktop at defaults the live layout
-    // IS canonical, so hiding the gaps reproduces that context).
-    //
-    // Line starts are derived INDEPENDENTLY of collectLines: a document-order walk of the real text
-    // characters, plus each inline ATOM as ONE unit via its own outer box. An atom's INTERIOR boxes
-    // never vote — they are the fiction under test (the citation NodeView's inline-flex ⤵ button sits
-    // ~6px off the line, past the 3px dedup, and became a phantom line). An atom that begins a line
-    // IS a line start, so it must be counted, or a legitimate break before a line-leading citation
-    // false-positives.
-    //
-    // POLARITY — both must hold before any number here is believed:
-    //   • known-NEGATIVE: plain prose (no NodeViews) must audit 0 mid-line breaks;
-    //   • known-POSITIVE: pre-fix, citation-dense prose must reproduce real mid-line breaks.
-    // An audit that reports 0 everywhere is blind, not passing.
+    // A page break must land at a LINE START; mid-line, the gap opens inside a rendered line.
+    // ⚠ ASK THE NATURAL WRAPPING, NOT THE GAPPED DOM (R6). A gap widget is a display:block span that
+    //   FORCES a break at its own position, so the gapped question is vacuous — it reported a
+    //   confident 0 on a document full of real mid-line breaks. Remove the gaps from flow first.
+    // ⚠ DERIVE LINE STARTS INDEPENDENTLY of collectLines — a char/atom walk, with each inline atom
+    //   as ONE outer box. Its interior boxes are the fiction under test.
+    // ⚠ BOTH POLARITIES BEFORE ANY NUMBER IS BELIEVED (R3): plain prose must audit 0, and pre-fix
+    //   citation-dense prose must reproduce real mid-line breaks. A 0 everywhere is blind.
+    // → docs/archive/snapshot-scrub-rounds.md#trp-midline
     midlineAudit(debugNear?: number) {
       const view = editor.view
       const doc = view.state.doc
@@ -332,13 +302,10 @@ export function installTextRenderProbe(editor: Editor): void {
       // Captured BEFORE the gaps are hidden — these are production's real, applied break positions.
       const breaks = api.liveBreaks()
 
-      // ⚠ THE VERDICT IS ONLY MEANINGFUL WHERE THE RENDERING IS CANONICAL. Breaks are measured in a
-      // FORCED canonical context (18px base, desktop margins, zoom 1, magnify 1). The phone RENDERS
-      // the same doc at 22.5px in a ~350px column — a different reflow entirely — so a canonical
-      // break lands wherever it falls in the phone's own wrapping. That is canonical pagination
-      // working as designed (same words on the same page everywhere), not a mid-line bug; auditing
-      // canonical positions against a non-canonical reflow measures the question, not the code.
-      // Desktop at defaults IS canonical (canonicalIsLive), which is where the verdict counts.
+      // ⚠ THE VERDICT IS ONLY MEANINGFUL WHERE THE RENDERING IS CANONICAL. The phone renders the
+      // same doc at 22.5px in a ~350px column, so canonical breaks land mid-line in its own reflow
+      // BY DESIGN — auditing there measures the question, not the code.
+      // → docs/archive/snapshot-scrub-rounds.md#trp-midline
       const pm = document.querySelector('.ProseMirror') as HTMLElement | null
       const baseFont = pm ? parseFloat(getComputedStyle(pm).fontSize) : NaN
       const rootCS = getComputedStyle(document.documentElement)
@@ -462,16 +429,11 @@ export function installTextRenderProbe(editor: Editor): void {
     },
 
     // ── THE LINE OVER-COUNT AUDIT ────────────────────────────────────────────────────────────
-    // The mid-line rate only fires when a page break HAPPENS to land on a phantom line, so it is a
-    // poor instrument for a NodeView that is rare in the doc: inline math measured 0 mid-line breaks
-    // even UNFIXED, which says "no break landed there", not "no bug". The ARTIFACT itself is the
-    // phantom line, so measure THAT directly and per block: how many lines does the rect path report
-    // versus how many the block really has?
-    //   • truth  — line starts from the validated char/atom walk (the same rule midlineAudit uses);
-    //   • old    — keepLineRects(whole-block range rects): descends into NodeViews ⇒ over-counts;
-    //   • fixed  — keepLineRects(blockLineRects(...)): atoms collapsed to one box each.
-    // Both paths call the REAL production functions, not copies. Gaps are removed from flow first
-    // (a gap widget splits a block's rects and would corrupt every count).
+    // ⚠ MEASURE THE ARTIFACT PER BLOCK, NOT THE COINCIDENCE (R6): a mid-line RATE only fires when a
+    // break happens to land on a phantom line, so a rare NodeView scores 0 unfixed. Compare truth
+    // (the char/atom walk) against old and fixed rect paths, calling the REAL production functions.
+    // Gaps come out of flow first, or a gap widget splits a block's rects and corrupts every count.
+    // → docs/archive/snapshot-scrub-rounds.md#trp-linecount
     lineCountAudit() {
       const view = editor.view
       const doc = view.state.doc
@@ -661,12 +623,9 @@ export function installTextRenderProbe(editor: Editor): void {
     },
 
     // ── MEMORY: what a cached MODEL costs vs a cached BITMAP ─────────────────────────────────
-    // The bitmap pool holds ~62.7MB for 57 bitmaps because a bitmap is W×H×4 bytes no matter how
-    // little ink is on it. A render model holds geometry + the segment strings instead. This builds
-    // N independent models and reports the heap delta.
-    // performance.memory is COARSE (quantised, GC-dependent), so this is an order-of-magnitude
-    // reading, not a precise one — it is reported as such. A structural count is included alongside
-    // so the estimate can be sanity-checked against something that isn't the GC's opinion.
+    // ⚠ `performance.memory` is quantised and GC-dependent, so REPORT THIS AS AN ORDER OF MAGNITUDE
+    // and carry the structural count beside it — a number that can only be checked against the GC's
+    // opinion is not evidence. → docs/archive/snapshot-scrub-rounds.md#trp-memory
     modelMem(n) {
       const mem = () => (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0
       const g = liveGeom()
@@ -833,21 +792,14 @@ export function installTextRenderProbe(editor: Editor): void {
     },
 
     // ── THE INCREMENTAL PROOF ────────────────────────────────────────────────────────────────
-    // Peter: "if we can get it under 1s we can just load it when the snapshots screen loads up."
-    //
-    // WHAT MUST BE TRUE AT ONCE, or the number is worthless:
-    //  (1) incremental == full, BYTE-IDENTICAL. An incremental build that is subtly wrong paints the
-    //      right words on the WRONG PAGE and looks completely fine. Compared at LINE level (top/pos/
-    //      startChar/endChar/height per line), not just the table's page starts — a drift inside a
-    //      page that happens not to move a break would pass a starts-only check.
-    //  (2) THE REUSE RATE BESIDE THE TIMING. 82ms → 8ms at 0% reuse means something else happened.
-    //  (3) THE POISONED-CACHE NEGATIVE. If a corrupted entry does NOT change the output, the hit path
-    //      never ran and every "identical" above is VACUOUS — the build silently fell back to full.
-    //      This is the trace-the-pass instrument: it proves the thing being measured is the thing.
-    //  (4) BOTH FIXTURE NEGATIVES. `nothing` (100% reuse) cannot test the DELTA path; `everything`
-    //      (0% reuse) cannot test REUSE. Only `realistic` exercises both, so only it can be believed
-    //      — and the other two prove the metric moves in the right directions rather than being a
-    //      constant.
+    // ⚠ FOUR THINGS MUST HOLD AT ONCE or the timing is worthless:
+    //  (1) incremental == full at LINE level, not just page starts — a drift inside a page that
+    //      moves no break paints the right words on the wrong page and looks fine.
+    //  (2) the REUSE RATE beside the timing: 82ms → 8ms at 0% reuse means something else happened.
+    //  (3) the POISONED-CACHE negative (R3) — if corrupting an entry changes nothing, the hit path
+    //      never ran and every "identical" above is vacuous.
+    //  (4) both fixture negatives: only `realistic` exercises reuse AND delta, so only it counts.
+    // → docs/archive/snapshot-scrub-rounds.md#trp-incremental
     incProof(o) {
       harvestNow()
       const g = liveGeom()
@@ -1080,13 +1032,9 @@ export function installTextRenderProbe(editor: Editor): void {
         if (c.whole) whole++; else { notWhole++; cov.push({ v, ...c }) }
         if (!c.reliable) unreliable++
       }
-      // THE REFERENCE MODEL MUST BE ONE THAT SURVIVED (fixed 2026-07-17). This read `coverageOf('v0')`
-      // — and the LRU evicts the OLDEST first, so v0 is the FIRST casualty at any n that overflows the
-      // budget. At n=116 it reported `pagesPerVersion: 0` and `lastPageReachableByContent: false`:
-      // both read exactly like the whole-document claim COLLAPSING, when the truth was that the probe
-      // asked an evicted key. A probe that reports a scary zero because it queried something it threw
-      // away is this project's signature failure — fourteen times over. Ask the MOST-RECENTLY-USED
-      // version, which the LRU guarantees is resident, and VOID loudly if somehow nothing survived.
+      // ⚠ ASK A VERSION THE LRU STILL HOLDS — the most-recently-used — and VOID loudly if none
+      // survived. Reading `v0` asks the FIRST eviction casualty, and its zeros read exactly like the
+      // whole-document claim collapsing. → docs/archive/snapshot-scrub-rounds.md#trp-lru
       const refId = `v${versions - 1}`
       const m0 = store.coverageOf(refId)
       const refResident = !!m0?.cached
@@ -1094,17 +1042,11 @@ export function installTextRenderProbe(editor: Editor): void {
       // at paint time) vs the current fat model that duplicates the text.
       const probe0 = buildRenderModel(doc, g, measure, fontLoaded, buildOpts())
       const leanPer = TextRenderStore.leanBytes(probe0)
-      // The content-anchored seam: the LAST page must be reachable by CONTENT, not page number —
-      // if the model only covered a window, a far position would clamp to the window's edge.
-      //
-      // ASK THE LAST BLOCK'S OWN POSITION, derived from the DOC (2026-07-17). `doc.content.size - 2`
-      // was wrong whenever the document ends in a LEAF ATOM (`nodeSize === 1` — a refList, a
-      // mathBlock): the atom occupies [size-1, size), so size-2 is inside the SECOND-TO-LAST block
-      // and resolves, correctly, to the second-to-last page. The assertion then read as "the last
-      // page is unreachable" when the probe had simply asked about a different page. It ALSO masked
-      // a real model bug underneath (a leaf atom's line claimed `offset + 1` — the position AFTER
-      // itself; see blockFirstLinePos in textRender.ts), which is why this was worth chasing rather
-      // than silencing: two independent faults, the probe's one hiding the model's.
+      // The content-anchored seam: the LAST page must be reachable by CONTENT, not page number.
+      // ⚠ DERIVE THE LAST BLOCK'S OWN POSITION FROM THE DOC — `doc.content.size - 2` lands inside
+      // the SECOND-to-last block whenever the document ends in a leaf atom, and the assertion then
+      // reads "last page unreachable" while the probe asked about a different page.
+      // → docs/archive/snapshot-scrub-rounds.md#trp-lastpage
       const lastChild = doc.lastChild
       const lastPos = lastChild ? doc.content.size - lastChild.nodeSize : Math.max(0, doc.content.size - 1)
       const pageOfLast = store.pageFor(refId, lastPos)
@@ -1132,16 +1074,11 @@ export function installTextRenderProbe(editor: Editor): void {
     },
 
     // ── THE CRUX: PREFIX-INDEPENDENT WINDOW LAYOUT ───────────────────────────────────────────
-    // Peter: "we only need the plaintext of the precise part of the doc that will be visible at the
-    // current zoom." That only works if page N can be laid out WITHOUT laying out pages 0..N-1.
-    // Line breaks cascade, so the prefix decides where page N BEGINS — but a break position IS a
-    // line start, and greedy wrap restarts deterministically at a line start. So the claim under
-    // test is: given the break position, the page's own layout is prefix-independent.
-    // TEST: build the full model; then for several pages, cut the doc at that page's break position
-    // and lay the REMAINDER out from scratch (no prefix at all). If the first lines of the cut
-    // layout match the full model's lines for that page, the claim holds.
-    // KNOWN-POSITIVE: a deliberately WRONG cut (2 chars off a line start) must FAIL the same check —
-    // otherwise the comparison proves nothing.
+    // The claim: given a break position, a page's own layout does not depend on the prefix (a break
+    // IS a line start and greedy wrap restarts deterministically there). Cut the doc at that
+    // position, lay the remainder out from scratch, compare first lines.
+    // ⚠ A deliberately WRONG cut (2 chars off a line start) must FAIL the same check (R6).
+    // → docs/archive/snapshot-scrub-rounds.md#trp-window
     windowProof() {
       harvestNow()
       const g = liveGeom()
@@ -1208,13 +1145,11 @@ export function installTextRenderProbe(editor: Editor): void {
       }
     },
 
-    // ── WINDOW MODE, AS BUILT ────────────────────────────────────────────────────────────────
-    // Two claims, both measured, neither assumed:
-    //  (1) EXACT — the window's line starts equal the full model's for that page (known-positive),
-    //      and mid-line cuts score STRICTLY worse (a negative that cannot fail is not a negative).
-    //  (2) O(WINDOW) — the cost must NOT scale with document size. The crux test laid out the whole
-    //      TAIL (57-60ms at 40k); if this shows the same curve, the early stop does not work and the
-    //      "1-2ms" claim is fiction.
+    // ── WINDOW MODE, AS BUILT — two claims, both measured ────────────────────────────────────
+    //  (1) EXACT: the window's line starts equal the full model's, and mid-line cuts score STRICTLY
+    //      worse — a negative that cannot fail is not a negative (R6).
+    //  (2) O(WINDOW): the cost must not scale with document size, or the early stop does not work.
+    // → docs/archive/snapshot-scrub-rounds.md#trp-window
     windowCost() {
       harvestNow()
       const g = liveGeom()
@@ -1265,13 +1200,10 @@ export function installTextRenderProbe(editor: Editor): void {
     },
 
     // ── BREAK TABLE: size, cost, and PORTABILITY VERIFIED (not assumed) ──────────────────────
-    // Canonical pagination claims breaks are device- and zoom-independent. That claim is what makes
-    // a table PORTABLE (bake once, valid at any zoom, across reloads) and it is why zoom is absent
-    // from contextSig. The codebase asserting it is not evidence, so: build the table, then rebuild
-    // it under DIFFERENT zoom/DPR conditions and require the starts to be byte-identical.
-    // KNOWN-NEGATIVE: a genuinely different context (a changed side margin, which really does move
-    // the breaks) MUST produce a different table — otherwise this comparison cannot fail and proves
-    // nothing.
+    // A table is portable — bake once, valid at any zoom, hence no zoom in `contextSig` — only if
+    // breaks really are device- and zoom-independent. ⚠ REBUILD under different zoom/DPR and require
+    // byte-identical starts, with a KNOWN-NEGATIVE (a changed side margin, which really does move
+    // the breaks) that must differ (R3). → docs/archive/snapshot-scrub-rounds.md#trp-table
     tableProof() {
       harvestNow()
       const g = liveGeom()
@@ -1312,12 +1244,10 @@ export function installTextRenderProbe(editor: Editor): void {
     },
 
     // ── THE KNOWN-POSITIVE GATE ──────────────────────────────────────────────────────────────
-    // "Measure X, compare to Y, report" is exactly the shape that failed silently before. So before
-    // any null result is believed, assert the instrument can SEE a known-positive:
-    //   • fonts really loaded (not the system fallback measuring against itself),
-    //   • the measure actually discriminates (two different strings ⇒ different widths),
-    //   • an INJECTED wrap error really moves the output (a 5% advance inflation must change the
-    //     line count — if it doesn't, the comparison is blind and nothing it reports means anything).
+    // ⚠ Before ANY null result here is believed, prove the instrument can SEE a positive (R3):
+    // fonts really loaded (not the system fallback measuring against itself), the measure
+    // discriminates two different strings, and an INJECTED 5% advance inflation really moves the
+    // line count. → docs/archive/snapshot-scrub-rounds.md#trp-gate
     selfTest() {
       const g = liveGeom()
       const base = buildRenderModel(editor.state.doc, g, measure, fontLoaded, buildOpts())
@@ -1373,21 +1303,11 @@ export function installTextRenderProbe(editor: Editor): void {
         }
       }
 
-      // THE DOCUMENT-LEVEL CHECK — and the trap it walked into first (2026-07-17).
-      //
-      // The obvious instrument is `Node.fromJSON(mine, liveDoc.toJSON()).eq(liveDoc)`. IT CAN NEVER
-      // RETURN TRUE. PM's `hasMarkup` is `this.type == type` — REFERENCE equality on NodeType — so
-      // two Schema instances (which is the entire premise here) always compare unequal, whatever the
-      // content. It reported `false` for the UNTOUCHED live document: a check structurally incapable
-      // of passing, i.e. one that would have condemned a perfectly correct schema. It was caught
-      // ONLY because the known-negative reads its positive arm too (clean must still say yes).
-      // Same family as canvasShapingMatchesEditor, the gate that always returned false and silently
-      // disabled arithLayout for months.
-      //
-      // The correct cross-schema comparison is STRUCTURAL: type NAMES, attrs, marks and text — i.e.
-      // the serialised form, which is schema-independent by construction and is also exactly what a
-      // snapshot's contentJson IS. Compared with a key-stable serialiser so attr enumeration order
-      // can never masquerade as a difference.
+      // ⚠ NEVER COMPARE TWO SCHEMAS WITH `Node.eq` — PM's `hasMarkup` is REFERENCE equality on
+      // NodeType, so it can never return true across Schema instances and reports `false` for an
+      // UNTOUCHED document. Compare STRUCTURALLY (type names, attrs, marks, text — the serialised
+      // form, which is what a snapshot's contentJson is) with a key-stable serialiser.
+      // → docs/archive/snapshot-scrub-rounds.md#trp-schema
       const liveDoc = editor.state.doc
       const liveJson0 = liveDoc.toJSON()
       const reparsed = nodeFromContentJson(liveJson0)

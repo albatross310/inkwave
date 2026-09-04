@@ -1,19 +1,12 @@
 // THE IN-APP SOURCE READER — read the page a citation points at, and cite what you select in it.
 //
-// Peter, 2026-08-28: "let's build a browser inside our app like ChatGPT does", after being shown
-// that an iframe can display a page but can never let us see a selection inside it. That is true of
-// an iframe and only of an iframe. So the page is FETCHED (api/_reader-core.mjs — read its header
-// for the privacy posture, which Peter authorised explicitly) and arrives as STRUCTURED BLOCKS,
-// which are rendered as React elements here. Two consequences, both the point:
-//   • the text is in OUR document, so `window.getSelection()` works and "highlight the heading and
-//     cite it" is finally expressible;
-//   • no HTML string exists anywhere in the path, so injection into an origin holding the writer's
-//     thesis and signing session is unrepresentable rather than merely filtered.
-//
-// The iframe survives as the FALLBACK. Some pages defeat extraction (a JS-rendered app has no prose
-// in its HTML) and some hosts refuse framing (JSTOR sends X-Frame-Options: DENY — checked). Between
-// them the panel always has something to offer, and it SAYS which mode it is in rather than leaving
-// the reader to guess why selection does or doesn't work.
+// The page is FETCHED (api/_reader-core.mjs carries the privacy posture) and arrives as STRUCTURED
+// BLOCKS rendered as React elements; the iframe survives as the fallback for pages that defeat
+// extraction or refuse framing.
+// ⚠ NO HTML STRING MAY EXIST ANYWHERE IN THIS PATH. Blocks in, elements out — injection into an
+// origin holding the thesis and the signing session is then unrepresentable, not merely filtered.
+// ⚠ The panel SAYS which mode it is in (R4), because selection works in one and not the other.
+// → docs/archive/reader-panels.md#sb-what
 
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -48,14 +41,12 @@ import { tabDocId } from '../storage/tabDoc'
 import { OPEN_PDF_EVENT, openPdf } from '../citations/pdfViewer'
 
 const INK = '#5c2d8a'
-// ── TWO SURFACES, TWO PALETTES, AND EVERY COLOUR HERE BELONGS TO EXACTLY ONE OF THEM ────────────
-// This panel is not one surface. Its HEADER is chrome (the dolphin-grey `.iw-nightable` panel);
-// its ARTICLE, its MARKUP BAR and every control face in that bar are reader PAPER, which now has
-// its own night (index.css, the reader token block). Getting a control's surface wrong is not a
-// near-miss — it produced BOTH of Peter's 2026-08-30 complaints at once, in opposite directions:
-// a literal `#5c2d8a` left on the night HEADER measured 1.13:1 (invisible), and chrome tokens
-// leaking onto the near-white markup BAR washed its labels out to ~1.2:1.
-// So: ask which surface the control sits on FIRST, then take that surface's token.
+// ── TWO SURFACES, TWO PALETTES ──────────────────────────────────────────────────────────────────
+// ⚠ ASK WHICH SURFACE A CONTROL SITS ON FIRST, then take that surface's token. The HEADER is chrome
+// (the `.iw-nightable` panel); the ARTICLE, the MARKUP BAR and every control face in that bar are
+// reader PAPER. Getting it wrong produced both of Peter's complaints at once, in opposite
+// directions — an invisible header glyph and a washed-out bar.
+// → docs/archive/reader-panels.md#sb-surfaces
 const INKC = 'var(--iw-ink, #5c2d8a)'                     // purple inside a floating chrome bubble
 const CHROME_FG = 'var(--iw-reader-chrome-fg, #5c2d8a)'   // the header strip's own ink
 const CHROME_DIM = 'var(--iw-reader-chrome-dim, #d6d3d1)' // …and its disabled glyphs
@@ -76,16 +67,13 @@ const MUTED_CHROME = 'var(--iw-pill-fg, #78716c)'
 const MUTED_PAPER = 'var(--iw-reader-muted, #6b645f)'
 
 // ── TOUCH SIZING ────────────────────────────────────────────────────────────────────────────────
-// The ICON buttons keep their painted size on every device and grow only their HIT REGION, via the
-// `.iw-tap` rule in index.css — see its header for why (a dense bar cannot grow to 44px per control
-// without wrapping to three rows inside a 50dvh phone dock).
-// A control you TYPE IN is the exception, and it is not a taste call: the global phone rule floors
-// every input/select at 16px (`input, select, textarea { font-size: max(16px, 1em) }` — iOS zooms
-// the whole page to anything smaller and STAYS zoomed), so a 22px box is shorter than the line it
-// now has to hold. The FONT was floored months ago and the BOXES were never grown with it.
-// 40, not 34: a `<select>` cannot borrow the `.iw-tap` hit region (a replaced element renders no
-// pseudo-element in Chrome or Safari), so for these controls the painted box IS the target and it
-// has to carry the whole size on its own.
+// ⚠ ICON buttons keep their painted size and grow only their HIT REGION (`.iw-tap`) — a dense bar
+// cannot give every control 44px without wrapping to three rows in a 50dvh phone dock.
+// ⚠ A CONTROL YOU TYPE IN IS THE EXCEPTION and its BOX must grow: the phone rule floors its font at
+// 16px (below that iOS zooms the page and STAYS zoomed), so a 22px box is shorter than its own line.
+// 40, not 34 — a `<select>` is a REPLACED element and renders no pseudo-element, so it can never
+// borrow `.iw-tap` and its painted box is the only target it has.
+// → docs/archive/reader-panels.md#sb-touch
 const TOUCH_FIELD_H = 40
 
 /**
@@ -125,11 +113,9 @@ function Katex({ tex, display }: { tex: string; display: boolean }) {
     dangerouslySetInnerHTML={{ __html: html }} />
 }
 
-// Reader-mode faces (Peter, 2026-08-28: "an option to change the font in the second mode to a
-// number of preset sexy fonts"). Drawn from the app's own certified set — these are already
-// fetched for the editor, so choosing one costs no new download and they sit beside the writing
-// rather than against it. Reader mode only: LIVE mode is the publisher's page and its typography
-// is theirs.
+// Reader-mode faces, drawn from the app's OWN certified set — already fetched for the editor, so
+// choosing one costs no download and they sit beside the writing rather than against it.
+// ⚠ Reader mode only: live mode is the publisher's page and its typography is theirs.
 // The PDF viewer's own palette, so a highlight means the same colour in both readers.
 const MARK_COLORS = ['#ffe066', '#a0e8a0', '#8ec5ff', '#ffb3c6']
 // No dark pair: a sticky note in maroon or navy is a note you cannot read (Peter, 2026-08-28).
@@ -480,17 +466,13 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     try { return localStorage.getItem('inkwave:readerLive') === '1' } catch { return false }
   })
   useEffect(() => { try { localStorage.setItem('inkwave:readerLive', framed ? '1' : '0') } catch { /* private */ } }, [framed])
-  // ── PAGE WIDTH IN LIVE MODE (Peter, 2026-08-28: "it's not using the whole space") ────────────
+  // ── PAGE WIDTH IN LIVE MODE ──────────────────────────────────────────────────────────────────
   // The iframe's width IS the CSS viewport the site lays out for, so "not using the whole space" is
-  // not something we can fix by stretching anything — it is the site's own responsive layout at
-  // whatever width we hand it. Britannica at ~900px picks its DESKTOP layout, right rail and all,
-  // and leaves the rail empty; the same site at ~500px picks its phone layout and fills the width.
-  // So this is a CHOICE, and it belongs to the reader:
-  //   auto   — the panel's real width, 1:1 (what it did before)
-  //   narrow — lay out at 520px and scale UP: the phone layout, big text, no empty rails
-  //   wide   — lay out at 1400px and scale DOWN: the full desktop layout, smaller text
-  // Implemented by sizing the iframe to the chosen viewport and transform-scaling it to fit, which
-  // is the only way to give a cross-origin document a viewport it did not ask for.
+  // the site's own responsive layout and not ours to stretch. It is therefore the READER's choice:
+  //   auto — the panel's real width 1:1 · narrow — lay out at 520 and scale UP · wide — 1400, down.
+  // ⚠ Size the frame to the chosen viewport and transform-scale it: that is the only way to give a
+  // cross-origin document a viewport it did not ask for.
+  // → docs/archive/reader-panels.md#sb-pagewidth
   const [pageWidth, setPageWidth] = useState<PageWidth>(() => {
     try { return (localStorage.getItem('inkwave:readerPageWidth') as PageWidth) || 'auto' } catch { return 'auto' }
   })
@@ -544,15 +526,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   const canFrameRef = useRef(false)
 
   const [frameRefused, setFrameRefused] = useState(false)
-  // ⚠ ASK THE SERVER; `onLoad` LIES (2026-08-28, Peter: "we need to replace this with a proper
-  // error message that explains some pages can't be read in their original form"). A refused frame
-  // FIRES `load` — on Chrome's own "refused to connect" page — so the deadline-cancelled-by-onLoad
-  // detector written earlier never fired at all, and the grey broken-page icon kept showing. I had
-  // written that exact trap down in a probe ("onLoad is worthless on its own") and then relied on it
-  // in the component anyway. Nothing INSIDE the page discriminates either: contentWindow and
-  // contentDocument throw identically for a real cross-origin document and for the error page.
-  // The HEADERS do, and only the server can read them (/api/reader?probe=1 → checkFramable).
-  // The probe runs IN PARALLEL with the frame, so a page that works is never delayed by the question.
+  // ⚠ ASK THE SERVER WHETHER A PAGE IS FRAMABLE; `onLoad` LIES. A refused frame FIRES `load` on
+  // Chrome's own error page, and nothing inside the frame discriminates either — contentWindow and
+  // contentDocument throw identically for a real cross-origin document. Only the HEADERS answer
+  // (/api/reader?probe=1 → checkFramable), and the probe runs IN PARALLEL so a working page waits
+  // for nothing. → docs/archive/reader-panels.md#sb-framable
   useEffect(() => {
     if (!framed) { setFrameRefused(false); return }
     if (isPlayable(here)) { setFrameRefused(false); return }   // an embed endpoint — known frameable
@@ -669,16 +647,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }, [orientation, dockSide, width, height])
 
   // ── WHO FETCHES THIS PAGE ────────────────────────────────────────────────────────────────────
-  // Peter, 2026-08-28: "is it possible for us to run the window from the user's IP?" — yes, through
-  // the extension this repo already ships (reader/pageSource.ts). MEASURED, from the DEPLOYED
-  // function and not from a laptop: duckduckgo, lite-ddg and mojeek answer "fetch failed", searx.be
-  // answers "Verifying your browser…", priv.au a captcha, marginalia 5 blocks and zero links, while
-  // wikipedia and plato.stanford.edu are served normally. Search engines serve people, not data
-  // centres — so the fetch moves to the writer's own browser when there is one to move it to.
-  //
-  // ⚠ THE PANEL MUST SAY WHICH HAPPENED. `via` is rendered, never inferred: a privacy posture the
-  // writer cannot see is a privacy posture they do not have, and this reader has already shipped
-  // two controls that looked identical whether or not they did anything.
+  // Search engines serve people, not data centres (measured from the DEPLOYED function: every
+  // engine blocked or challenged us; wikipedia and plato.stanford.edu were served normally), so the
+  // fetch moves to the writer's own browser through the extension when there is one.
+  // ⚠ `via` IS RENDERED, NEVER INFERRED (R4) — a privacy posture the writer cannot see is one they
+  // do not have. → docs/archive/reader-panels.md#sb-who-fetches
   const [via, setVia] = useState<Via | null>(null)
   const [extState, setExtState] = useState<ExtensionState>('absent')
   // Bumped to re-run the load after the permission is granted, so the page in front of the writer
@@ -702,12 +675,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       const st = await extensionState()
       if (!live) return
       setExtState(st)
-      // ⚠ A PDF IS NOT AN ARTICLE THAT FAILED TO EXTRACT, and it used to be told it was. The
-      // extractor reads prose out of HTML; handed a PDF it finds none, so the panel answered
-      // "That page couldn't be read here" — a dead end for the commonest thing an academic
-      // reader clicks. The address is enough to know that in advance, so the fetch is not spent
-      // and the PDF card below answers instead. `extState` is still resolved above, because the
-      // save action needs to know whether the extension can fetch on the writer's behalf.
+      // ⚠ A PDF IS NOT AN ARTICLE THAT FAILED TO EXTRACT (R1). The extractor finds no prose in one
+      // and answered "That page couldn't be read here" — a dead end on the commonest thing an
+      // academic reader clicks. The ADDRESS decides in advance, so the fetch is never spent.
+      // `extState` still resolves above: the save action needs to know who can fetch.
       if (looksLikePdfAddress(here)) return
       try {
         const { doc: d, via: v } = await loadSource(here, { port: st === 'ready' ? windowPort() : null })
@@ -722,12 +693,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     return () => { live = false }
   }, [here, reloadKey, selfOpen])
 
-  // ── "ALSO CAN WE HAVE A DOWNLOADS" (Peter, 2026-08-30) ────────────────────────────────────────
-  // He said it while browsing here, and he browses here to find papers to cite — so the reading
-  // that serves the writing is the one that closes that loop: the PDF in front of him becomes a
-  // SOURCE, bytes and all, in the same store every other source PDF uses. See
-  // reader/pdfAddress.ts for the whole argument, including why the literal reading (a downloads
-  // folder) is answered separately by `allow-downloads` on the live frame's sandbox.
+  // ── "ALSO CAN WE HAVE A DOWNLOADS" ────────────────────────────────────────────────────────────
+  // A PDF at the panel's address becomes a SOURCE, bytes and all, in the same store every other
+  // source PDF uses — the loop this reading serves. `reader/pdfAddress.ts` carries the argument,
+  // and the literal reading is answered separately by `allow-downloads` on the frame's sandbox.
   const isPdfHere = !selfOpen && looksLikePdfAddress(here)
   // ⚠ MEASURED, AND IT REFUTED THE FIRST DESIGN (`pnpm prove:reader`, 2026-08-30). The save cannot
   // simply "try and report": with no extension, a cross-origin fetch from this document is refused
@@ -771,34 +740,22 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }, [extState])
 
   // ── LIVE VIEW THROUGH THE EXTENSION ───────────────────────────────────────────────────────────
-  // Peter, 2026-08-30: "build the extension." X-Frame-Options and CSP frame-ancestors are enforced
-  // by the BROWSER, so no page can opt out of another site's refusal — but an extension can strip
-  // them before the browser reads them. Measured headed, with a canary proving the ruleset live and
-  // a control proving refusals were detectable at all: google / youtube-watch / abc.net.au /
-  // facebook all go REFUSED → framed (docs/SEARCH-AND-THE-EXTENSION.md).
-  //
-  // ⚠ THE RULE MUST BE INSTALLED BEFORE THE FRAME LOADS, which is what `frameKey` is for: it
-  // remounts the iframe once the rule lands. Without it the frame is refused first and the rule
-  // arrives at an error page that will not retry itself — the feature would appear to work only on
-  // the second attempt, which reads as flakiness rather than as ordering.
+  // X-Frame-Options and frame-ancestors are enforced by the BROWSER, so only an extension can strip
+  // them before it reads them (docs/SEARCH-AND-THE-EXTENSION.md).
+  // ⚠ THE RULE MUST BE INSTALLED BEFORE THE FRAME LOADS — that is what `frameKey` is for. Without
+  // the remount the rule arrives at an already-refused error page that never retries itself, and
+  // the feature works only on the second attempt, which reads as flakiness.
+  // → docs/archive/reader-panels.md#sb-framing-install
   useEffect(() => {
-    // ⚠ DO NOT SKIP `isPlayable` PAGES. It used to short-circuit here on the reasoning that an
-    // embed endpoint already frames, so a rule for it "buys nothing" — which ignored that the early
-    // return happens AFTER the previous run's cleanup ran. Opening one video tore down framing for
-    // the whole tab ("youtube stopped working… it just never loads"): worked once, then never,
-    // which is the signature of STATE rather than a race.
-    // DEFAULT OFF — see src/reader/liveFrameFlag.ts for why, and for what it does not fix.
+    // Live framing is DEFAULT ON — `reader/liveFrameFlag.ts` carries why, and what it does not fix.
+    // ⚠ Read the flag HERE, per effect, never from a cached resolve: the extension can be granted
+    // mid-session and the flag can be flipped.
     if (!liveFrameEnabled() || !framed || extState !== 'ready') { setFramingOn(false); return }
-    // ⚠ AN EMBED NEEDS NO RULE, AND ASKING FOR ONE KILLED A PLAYING VIDEO. Peter, watching a cat
-    // video: "youtube was working a minute ago." youtube-nocookie /embed/ sends no framing headers,
-    // so the rule buys nothing there — but installing it bumps `frameKey`, which REMOUNTS the
-    // iframe, which restarts the player under him.
-    //
-    // This skip existed before and I removed it, correctly at the time: back then the early return
-    // sat above a cleanup that RELEASED the tab's rule, so skipping also tore down framing for
-    // every other page. Now that teardown lives in its own effect below, the skip is inert rather
-    // than destructive — it declines to install and removes nothing. Both facts had to be true
-    // before this line was safe, which is why it is worth the paragraph.
+    // ⚠ AN EMBED NEEDS NO RULE, AND ASKING FOR ONE KILLS A PLAYING VIDEO — an /embed/ URL sends no
+    // framing headers, but installing bumps `frameKey`, which remounts the iframe and restarts the
+    // player. This early return is only SAFE because teardown lives in its own effect below: it
+    // declines to install and removes NOTHING. When the release still ran here, the same skip tore
+    // down framing for the whole tab. → docs/archive/reader-panels.md#sb-embed-skip
     if (isPlayable(here)) { setFramingOn(false); return }
     const port = windowPort()
     if (!port) { setFramingOn(false); return }
@@ -813,15 +770,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
         return true
       })
     }).catch(() => { /* likewise — never a thrown error in front of the writer */ })
-    // ⚠ NO RELEASE HERE, AND THAT IS THE FIX FOR "a lot of things are never loading now".
-    // This effect re-runs on every navigation, so releasing in its cleanup meant each new page
-    // fired BOTH a release and an install — two independent async chains to the worker
-    // (`releaseFraming` is fire-and-forget by design, `allowFramingVia` awaits a reply) with no
-    // ordering guarantee between them. When the release landed second it removed the rule that had
-    // just been installed, and the page never loaded. Intermittent, and worse the more the writer
-    // clicked, which is exactly how it was reported.
-    // Nothing needs releasing between pages anyway: the rule is per-tab and each install REPLACES
-    // it. Teardown belongs to leaving live view, which is the effect below.
+    // ⚠ NO RELEASE HERE — the install and the teardown are TWO effects with DIFFERENT lifetimes,
+    // deliberately (R7). This one re-runs per navigation, so a release in its cleanup raced the
+    // install (two unordered async chains to the worker) and intermittently removed the rule it had
+    // just added. Nothing needs releasing between pages: the rule is per-tab and each install
+    // REPLACES it. → docs/archive/reader-panels.md#sb-no-release
     return () => { live = false }
   }, [framed, here, extState])
 
@@ -834,65 +787,33 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     return () => { setFramingOn(false); releaseFraming(port) }
   }, [framed])
 
-  // Keep the ref in step. `ready` means the extension answered AND holds the <all_urls> grant, so
-  // it is exactly the condition under which a framing rule can be installed.
-  // ⚠ THIS MUST AGREE WITH THE INSTALL EFFECT OR SEARCH BREAKS. `canFrame` decides that a typed
-  // query becomes the REAL duckduckgo.com opened in the live frame rather than the no-JS endpoint
-  // read in the panel — so if it says yes while framing is disabled, every search routes to a page
-  // we then refuse to show. Peter hit exactly that within a minute of the flag landing: "not
-  // working", on a search, with the refusal card. `liveFrameEnabled()` is not optional here.
+  // ⚠ `canFrame` MUST AGREE WITH THE INSTALL EFFECT, `liveFrameEnabled()` included (R2). It decides
+  // whether a typed query opens the real engine in the live frame or the no-JS endpoint in the
+  // panel, so a yes here while framing is disabled routes every search to a page we then refuse.
+  // → docs/archive/reader-panels.md#sb-canframe
   useEffect(() => { canFrameRef.current = liveFrameEnabled() && extState === 'ready' }, [extState])
 
-  // ⚠ READER-ONLY IS AN INVARIANT, NOT A DECISION TAKEN AT NAVIGATION TIME. `go()` applies
-  // `mustUseReader` when the writer navigates — but the live/reader toggle is PERSISTED
-  // (`inkwave:readerLive`), so a reload restores live view without going through `go()` at all.
-  // Land on a reader-only address in that state and the panel shows the framing-refusal card for a
-  // page it was never going to frame, with no way out but the toggle. Peter hit it twice in a row
-  // on a search: "grr".
-  //
-  // It also has to be a live rule rather than a one-shot, because `canFrame` CHANGES underneath the
-  // panel — the extension can be granted mid-session, and `liveFrameEnabled()` can be flipped — and
-  // each change moves the answer for the page already on screen.
+  // ⚠ READER-ONLY IS AN INVARIANT, NOT A DECISION TAKEN AT NAVIGATION TIME (R7). The live/reader
+  // toggle is PERSISTED, so a reload restores live view without passing through `go()`; and
+  // `canFrame` changes underneath the panel (a mid-session grant, a flag flip), which moves the
+  // answer for the page already on screen. → docs/archive/reader-panels.md#sb-reader-only
   useEffect(() => {
     if (framed && mustUseReader(here, canFrameRef.current)) setFramed(false)
   }, [here, framed, extState])
 
-  // ⚠ A REFUSED SEARCH FALLS BACK TO THE READER INSTEAD OF SHOWING A CARD.
-  // Peter, repeatedly: "its broken again… its not doing basic things." Every time, the same chain —
-  // framing is ON, so a typed query routes to the real duckduckgo.com in the live frame; the
-  // extension's rule does not apply (most often because the worker is a build behind: reloading the
-  // EXTENSION is a separate act from reloading the tab, and I changed that worker six times today);
-  // Chrome refuses the frame; and the panel shows a refusal card on the one page he starts from. So
-  // the whole panel reads as dead when a single request failed.
-  //
-  // Searching is the load-bearing case, so it must not depend on an extension being current. If a
-  // search is refused, drop to the endpoint a plain fetch CAN read and show results. The live
-  // attempt is an upgrade; the reader is the floor, and a floor you fall through is not one.
-  //
-  // Scoped to searches deliberately: for an ordinary page the refusal card is correct and offers
-  // real choices (read it here / open in a tab). It is only a search — where we chose the live URL
-  // on the writer's behalf — that must repair itself rather than blame the site.
-  // ⚠ A SEARCH THAT COMES BACK EMPTY TRIES THE NEXT ENGINE.
-  // MEASURED: called four times in a row through the deployed function with one query,
-  // old-search.marginalia.nu answered 170 / 170 / 3 / 3 blocks. It works, and then intermittently
-  // does not — and an engine that returns a challenge page answers 200, so nothing upstream can
-  // tell that from a genuine "no results". Peter reported "not searching anything" five separate
-  // times; a chain is the difference between a search box and a coin toss.
-  //
-  // It advances only ONCE per address (the URL itself moves to the next engine), so there is no
-  // loop: when the chain is spent the reader shows the ordinary empty-search state.
-  // ⚠ AND IT MUST JUDGE *THIS* ADDRESS'S PAGE, NOT THE ONE BEFORE IT (2026-08-31, found by
-  // `pnpm prove:readerflow`). On the commit where `here` changes, this effect's `doc` is still the
-  // PREVIOUS page's — `setDoc(null)` was queued by the load effect above but closures capture the
-  // render's values, so the fallback read the article the writer had just been looking at. An
-  // article has fewer than five linked blocks by definition, so `searchLooksEmpty` was TRUE for
-  // every search issued from an ordinary page, and the chain advanced before the first engine had
-  // answered. MEASURED: the first engine was fetched and its results thrown away; the writer landed
-  // on the LAST engine in the chain every time, so a chain built to survive one engine going quiet
-  // had already spent itself on arrival — Peter's "not searching anything" if the last one blinks.
-  // It also truncated forward history, because `go` slices the stack at the current index.
-  // A REF, not another state: the load effect runs BEFORE this one in the same commit, so clearing
-  // it there is what makes the stale read unrepresentable rather than merely unlikely.
+  // ⚠ A REFUSED SEARCH FALLS BACK TO THE READER; AN ORDINARY PAGE SHOWS THE CARD. Search is the
+  // load-bearing case and must not depend on the extension being current — the live attempt is an
+  // upgrade and the reader is the floor. The scoping is deliberate: for an ordinary page the
+  // refusal card offers real choices, and only a search, whose live URL we chose on the writer's
+  // behalf, has to repair itself rather than blame the site.
+  // ⚠ SEARCH IS A CHAIN — an empty result tries the NEXT engine. One engine measurably answered
+  // 170/170/3/3 blocks on the same query, and a challenge page answers 200, so nothing upstream can
+  // tell a block from "no results". It advances ONCE per address, so there is no loop.
+  // ⚠ AND IT MUST JUDGE *THIS* ADDRESS'S PAGE. On the commit where `here` changes, `doc` is still
+  // the PREVIOUS page's, so the emptiness test read the article the writer had just left — every
+  // search from an ordinary page spent the whole chain on arrival. A REF cleared by the load
+  // effect, which runs first in the same commit, makes that unrepresentable rather than unlikely.
+  // → docs/archive/reader-panels.md#sb-search-chain
   useEffect(() => {
     if (framed || !doc || docForRef.current !== here || !isSearch(here)) return
     // ⚠ COUNT WHERE THE RESULTS GO, not how many links there are. Measured: bing answers a search
@@ -919,12 +840,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }, [framed, frameRefused, here])
 
   // ── A READABLE DIAGNOSTIC, BECAUSE "still broken" IS NOT A STAGE ─────────────────────────────
-  // Live view through the extension has FIVE places it can fail and they are indistinguishable
-  // from the panel: no content script in this tab (the commonest — Chrome injects them on page
-  // load, so a tab open before the install has no bridge), the extension present but not granted
-  // <all_urls>, the worker missing declarativeNetRequest, the rule refused, or the site refusing in
-  // its body afterwards. Each needs a different fix and they all look like one refusal message.
-  // window.__iwReader reports the stage instead of making the writer describe a screenshot.
+  // ⚠ Live framing has FIVE failure points that all render as one refusal message (no content
+  // script in this tab · installed but not granted · no declarativeNetRequest · rule refused · the
+  // site refusing in its body). `window.__iwReader` names the stage (R4).
+  // → docs/archive/reader-panels.md#sb-diagnostic
   useEffect(() => {
     ;(window as unknown as { __iwReader?: unknown }).__iwReader = {
       extension: extState,            // 'absent' | 'blocked' | 'ready'
@@ -947,25 +866,16 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     if (port) void openExtensionPopup(port)
   }
 
-  // ── "GET THE EXTENSION", AT THE WALL (Peter, 2026-08-30: "can we build a little 'download the
-  // extension' prompt for whenever the user hits a link or tries to search etc. to something not
-  // supported without the extension") ────────────────────────────────────────────────────────────
-  // There are exactly THREE walls it removes, and the panel already knows which one it is standing
-  // at: a site that refuses framing, a search our server is not served, and an article our server
-  // cannot fetch. So the offer goes INSIDE each of those three cards rather than floating as a
-  // banner — an offer that appears where the disappointment is, and nowhere else.
-  //
-  // ⚠ THREE RULES, AND EACH ONE IS THE DIFFERENCE BETWEEN AN OFFER AND A NAG:
-  //  1. ONLY WHEN IT IS GENUINELY ABSENT. `extState` is 'absent' | 'blocked' | 'ready', and
-  //     'blocked' means INSTALLED BUT NOT GRANTED — which already has its own correct affordance
-  //     (askForFetchPermission + the printed instruction). Offering a download to someone who has
-  //     it installed is telling them to install what they have.
-  //  2. DISMISSIBLE AND REMEMBERED — the anti-nag clause the unsynced-work notice established:
-  //     never again once waved away. Keyed per ORIGIN, not per document: whether you have a browser
-  //     extension is a fact about your browser, not about the essay you are writing.
-  //  3. NO DEAD "DOWNLOAD" BUTTON. It is in no store: it is built from the repo and loaded
-  //     unpacked. A button labelled Download that opens instructions is the dead control this panel
-  //     has already shipped twice, so the button says what it does — it shows the instructions.
+  // ── "GET THE EXTENSION", AT THE WALL ─────────────────────────────────────────────────────────
+  // The offer goes INSIDE each of the three cards whose wall it removes (framing refused · a search
+  // our server is not served · an article it cannot fetch) — never as a banner.
+  // ⚠ THREE RULES, each the difference between an offer and a nag:
+  //  1. ONLY WHEN GENUINELY ABSENT — 'blocked' means installed but not granted and has its own
+  //     affordance; offering a download there tells someone to install what they have.
+  //  2. DISMISSIBLE AND REMEMBERED, keyed per ORIGIN — having an extension is a fact about the
+  //     browser, not the essay (the unsynced-notice anti-nag clause).
+  //  3. NO DEAD "DOWNLOAD" BUTTON (R4) — it is loaded unpacked, so the button says what it does.
+  // → docs/archive/reader-panels.md#sb-extension-offer
   const [extOffer, setExtOffer] = useState(() => {
     try { return localStorage.getItem('inkwave:readerExtOffer') !== '0' } catch { return true }
   })
@@ -1053,13 +963,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // ⚠ ONE DOCK, ONE OCCUPANT (2026-08-28, Peter: "clicking a pdf when browser is open doesn't
-  // replace it. They should seamlessly replace each other with the same page sizing etc"). Both
-  // panels write the SAME four room variables (components/dockLayout.ts) — that is what makes their
-  // placement identical — which also means two open at once fight over one strip and the second one
-  // to write wins. So the reader stands down the moment a PDF is opened. It does NOT clear the room
-  // on the way out: the PDF panel is about to claim the same geometry, and blanking it first is a
-  // frame of the editor snapping wide and back, which is the opposite of seamless.
+  // ⚠ ONE DOCK, ONE OCCUPANT. Both panels write the SAME four room variables (dockLayout.ts) —
+  // which is what makes their placement identical, and also what makes two open at once fight over
+  // one strip. The reader stands down when a PDF opens, and does NOT clear the room on the way out:
+  // blanking it is a frame of the editor snapping wide and back.
+  // → docs/archive/reader-panels.md#sb-dock
   useEffect(() => {
     const onPdf = () => { handingOverRef.current = true; onCloseRef.current() }
     window.addEventListener(OPEN_PDF_EVENT, onPdf)
@@ -1144,14 +1052,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
       hs.forEach((h, i) => { if (h.getBoundingClientRect().top <= mark) n = i })
       setSectionNow(n)
     }
-    // ⚠ A SCROLL TO 0 BECAUSE THE ARTICLE VANISHED IS NOT THE READER GOING TO THE TOP — and until
-    // 2026-08-30 the two were the same write. MEASURED by `prove:reader`'s new refresh cell: the
-    // refresh button sets `doc` to null, the article is replaced by "reading…", the pane loses its
-    // height, the BROWSER clamps scrollTop to 0 and fires a real scroll event — which landed here
-    // and overwrote the remembered offset with 0 before anything could restore it. So refresh (and
-    // any re-render that shrinks the pane) silently sent the writer back to the top. Same family as
-    // this repo's other absence-vs-failure distinctions: the offset of a placeholder is not a
-    // reading position, so it is not recorded as one.
+    // ⚠ A SCROLL TO 0 BECAUSE THE ARTICLE VANISHED IS NOT THE READER GOING TO THE TOP (R1). A
+    // refresh replaces the article with "reading…", the pane loses its height, and the BROWSER
+    // clamps scrollTop and fires a real scroll event — which overwrote the remembered offset before
+    // anything could restore it. A placeholder's offset is not a reading position.
+    // → docs/archive/reader-panels.md#sb-scroll
     const onScroll = () => {
       if (!raf) raf = requestAnimationFrame(read)
       if (doc) readerScrollRef.current.set(here, el.scrollTop)
@@ -1360,12 +1265,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   }
 
   return createPortal(
-    // ⚠ THE DIVIDING LINE (Peter, 2026-08-30: "there's a dividing line between"). `dockPanelPos`
-    // already draws it on the edge facing the editor — it just drew it in a 20%-alpha DARK purple
-    // that vanished into the night panel. The colour is a token now (see dockLayout.ts), and
+    // ⚠ THE DIVIDING LINE BELONGS TO `dockPanelPos`, and its colour is a token (dockLayout.ts);
     // `iw-dock-panel` is what lets that token beat `.iw-nightable`'s !important border-color.
-    // Do NOT add a competing border here: dockPanelPos is spread AFTER this style object, so an
-    // inline `border` would be half-overridden per edge and the two rules would drift.
+    // Do NOT add a competing border here — dockPanelPos is spread AFTER this object, so an inline
+    // `border` is half-overridden per edge and the two drift (R2).
     <div className="iw-nightable iw-touch-guard iw-dock-panel flex flex-col bg-white"
       style={{ position: 'fixed', zIndex: 80, ...dockPanelPos({ orientation, dockSide, width, height }) }}
       onMouseDown={(e) => e.stopPropagation()}>
@@ -1621,12 +1524,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               it. The iframe fills the pane edge to edge and scrolls itself. */}
           <div ref={bodyRef} data-iw-selectable=""
             className={`flex-1 min-w-0 ${framed ? 'overflow-hidden' : 'iw-reader-page overflow-y-auto px-8 py-6'}`}
-            // EVERY TOOL CHANGES THE CURSOR (Peter: "each button needs to change the cursor"). An
-            // armed mode you cannot see is a mode you will forget you are in.
-            // ⚠ THE ATTRIBUTE IS ONLY HALF OF IT — it was written here for months with NOTHING
-            // reading it, which is a mechanism with no surface: indistinguishable, from the writer's
-            // chair, from the feature never having been built. The rules live in index.css under
-            // `[data-iw-tool]`; if you add a tool, add its cursor in the same commit.
+            // EVERY TOOL CHANGES THE CURSOR — an armed mode you cannot see is one you forget.
+            // ⚠ THE ATTRIBUTE IS ONLY HALF OF IT (R4): it was written here for months with nothing
+            // reading it. The rules live in index.css under `[data-iw-tool]` — add a tool, add its
+            // cursor in the same commit.
             data-iw-tool={tool ?? undefined}
             onClickCapture={framed ? undefined : onBodyClickCapture}
             // ⚠ NO `color` HERE. The article's ink is `.iw-reader-page`'s (index.css), because it
@@ -1821,17 +1722,14 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               </div>
             )}
             {!selfOpen && framed && !frameRefused && (
-              // Live page: readable, but the browser keeps its text out of our reach — so the
-              // selection actions are absent here rather than present and silently inert.
-              // ⚠ A REAL HORIZONTAL SCROLLER, AND THAT IS THE WHOLE PAN MECHANISM. MEASURED before
-              // it was built: a two-finger horizontal gesture over a cross-origin frame CHAINS out
-              // of it into the nearest scrollable ancestor (360px in six notches) while our own
-              // wheel listener is called ZERO times. So the browser pans this for free the moment
-              // the host can scroll — and a JS handler here would be a mechanism with no surface,
-              // which this repo has shipped before and had to go looking for.
-              // Vertical stays HIDDEN on purpose: the frame is sized so its painted height is
-              // exactly the host's, so the site keeps its own vertical scrolling and the reader
-              // never meets a second scrollbar wrapped around the first.
+              // Live page: readable, but its text is out of reach — so the selection actions are
+              // ABSENT here rather than present and silently inert (R4).
+              // ⚠ A REAL HORIZONTAL SCROLLER IS THE WHOLE PAN MECHANISM. A two-finger gesture over
+              // a cross-origin frame CHAINS out into the nearest scrollable ancestor while our own
+              // wheel listener is called zero times, so the browser pans this for free. Vertical
+              // stays HIDDEN: the frame is painted at exactly the host's height, so the site keeps
+              // its own scrolling and there is no second scrollbar around the first.
+              // → docs/archive/reader-panels.md#sb-frame-scroller
               <div ref={frameHostRef}
                 style={{ width: '100%', height: '100%', background: CTL,
                   overflowX: frameGeom.pannable ? 'auto' : 'hidden', overflowY: 'hidden' }}>
@@ -1841,27 +1739,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 <iframe key={frameKey} src={embeddableUrl(here)} title={doc?.title || here}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
                   allowFullScreen
-                  // ⚠ `allow-downloads` (2026-08-30) — THE LITERAL HALF OF "also can we have a
-                  // downloads", and a silent bug on its own account. Without it a download link
-                  // inside a framed page does NOTHING AT ALL: the browser blocks the navigation
-                  // and reports it only to its own console, so the site looks broken and Inkwave
-                  // looks like the reason. It was absent by omission, not by decision — every
-                  // other token here was chosen deliberately and this one was never considered.
-                  //
-                  // WHAT IT PERMITS, precisely: a framed page may start a download, which lands in
-                  // the writer's ordinary Downloads folder through the browser's own UI. It does
-                  // NOT let the page read anything of ours, write anywhere we can see, or install
-                  // anything — a sandboxed frame with `allow-downloads` still cannot reach this
-                  // origin, and the download is subject to the browser's normal prompts, its
-                  // Safe Browsing checks and the file-type rules it applies to every other tab.
-                  // The page could already navigate ITSELF anywhere (allow-scripts + allow-forms),
-                  // so the new capability is narrower than what it holds.
-                  //
-                  // NOT CONDITIONAL ON LIVE FRAMING BEING ON, and that is deliberate: this frame
-                  // only exists in live mode, so there is no second state to guard — and gating a
-                  // sandbox token on a feature flag would mean the same page behaved differently
-                  // in ways nothing in the UI could explain. The extension's framing rule widens
-                  // WHICH pages may be shown; it has no bearing on what a shown page may do.
+                  // ⚠ `allow-downloads` IS LOAD-BEARING: without it a download link inside a framed
+                  // page does NOTHING AT ALL, reported only to the browser's own console. It grants
+                  // no reach into this origin — the archive entry sets out the posture in full.
+                  // ⚠ NEVER GATE A SANDBOX TOKEN ON A FEATURE FLAG — the same page would behave
+                  // differently for no visible reason. → docs/archive/reader-panels.md#sb-sandbox
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-downloads"
                   // NO referrerPolicy override: many image CDNs use the referer for hotlink
                   // protection, and stripping it is a plausible cause of the missing pictures Peter
@@ -2015,13 +1897,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               </button>
             )}
             {onCite && (() => {
-              // ⚠ CITE THE SECTION THE SELECTION IS IN — not the selection (Peter, 2026-08-28: "if
-              // we cite as locator what we really want is for it to cite the heading or section
-              // number as the locator"). It used to hand the SELECTED SENTENCE to
-              // locatorForHeading, which of course found no number in it and returned the whole
-              // sentence verbatim as the locator: "(Smith 2005, Each object is, at the later time,
-              // composed…)". Nonsense, and my mistake — the function was built for headings and I
-              // fed it prose.
+              // ⚠ CITE THE SECTION THE SELECTION IS IN, never the selection itself. Feeding the
+              // selected sentence to `locatorForHeading` — a function built for headings — returned
+              // the whole sentence verbatim as the locator.
+              // → docs/archive/reader-panels.md#sb-locator
               const sec = sectionFor(sel.text)
               if (!sec) return null            // no heading above it ⇒ nothing honest to cite
               const loc = locatorForHeading(sec)
@@ -2088,12 +1967,10 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                   onPointerDown={() => { holdRef.current = setTimeout(() => { heldRef.current = true; setPaletteOpen(t.kind) }, 400) }}
                   onPointerUp={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
                   onPointerLeave={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
-                  // ⚠ POINTERCANCEL IS NOT OPTIONAL ON TOUCH, and it was missing here while the PDF
-                  // toolbar's identical gesture has always had it. A finger that drifts enough for
-                  // the browser to claim the gesture as a scroll gets `pointercancel` and NO
-                  // `pointerup`, so the 400ms timer went on to fire: the palette opened under a
-                  // finger that had already left, and `heldRef` stayed true and swallowed the NEXT
-                  // tap on the tool. Two wrong outcomes from one missing line.
+                  // ⚠ A HOLD GESTURE NEEDS `onPointerCancel`. A finger the browser claims as a
+                  // scroll gets `pointercancel` and NO `pointerup`, so the 400ms timer still fires:
+                  // the palette opens under a finger that has left, and `heldRef` stays set and
+                  // swallows the next tap. Two wrong outcomes from one missing line.
                   onPointerCancel={() => { if (holdRef.current) clearTimeout(holdRef.current) }}
                   onClick={() => {
                     if (heldRef.current) { heldRef.current = false; return }

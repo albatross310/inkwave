@@ -1,31 +1,17 @@
-// PLAINTEXT PAGE RENDERER (2026-07-16 — flag `inkwave:textRender`, default OFF).
+// PLAINTEXT PAGE RENDERER — canonical line breaks from canvas advances, painted with fillText.
+// No DOM, no editor, no reflow. Its only production caller is `snapshotBreaks.ts`, behind
+// `inkwave:snapBreaks` (DEFAULT OFF). NB `inkwave:textRender` is a DIFFERENT flag, gating
+// RichDiffView, and it is default ON — do not read this file's gating off that name.
 //
-// Peter's idea: a page PREVIEW is just text + highlight rectangles. It does not need ProseMirror,
-// the DOM, or a reflow. We already own the hard half — arithmeticLayout computes canonical line
-// breaks from canvas measureText advances, and that wrap is CERTIFIED to match the editor
-// (CERTIFIED_FAMILIES + the fonttools ligature strip + luFloor quantisation). So: run the arith
-// engine to get line breaks, then fillText each line onto a canvas. No DOM, no editor, no reflow.
-//
-// This module is a MEASUREMENT PROTOTYPE. It exists to answer "is this fast enough, and faithful
-// enough, to replace the snapshot thumbnail bake?" — not to ship. Read the honest limits below.
-//
-// TWO PAINT MODES (the map-pane hypothesis, 2026-07-16):
-//   • 'text'  — fillText each line's runs. The real preview.
-//   • 'rects' — one filled rect per line (x, baseline-ish band, run length). At MINIMAP scale no
-//               glyph is resolvable, so the only information that survives is WHERE lines are and
-//               HOW LONG they run — which the layout already knows.
-//     NB THE HONEST FRAMING: 'rects' does NOT "skip shaping". The line BREAKS come from
-//     measureText, which IS shaping — that cost is identical in both modes. 'rects' skips only
-//     RASTERISATION (fillText). So the mode difference measures exactly one thing: is a page's cost
-//     dominated by glyph raster, or by layout? Do not claim more than that from it.
-//
-// HONEST LIMITS (each is a DEFER, never a guess — the same discipline as the engine's eligibility):
-//   • Text blocks = `paragraph` only, in certified+loaded fonts, uniform size (blockEligibility).
-//   • EVERYTHING ELSE (figure, math, embedded PDF, list, rule, refList, heading) draws a LABELLED
-//     PLACEHOLDER BOX at a declared/estimated height. It does NOT pretend to render. A placeholder
-//     whose height is estimated is a real fidelity gap and the coverage map reports it.
-//   • `justify` alignment is NOT modelled (the browser distributes slack across spaces) — a
-//     justified paragraph renders left-aligned and is reported as a gap, not silently drawn wrong.
+// THE RULES, each load-bearing:
+//   1. DEFER, NEVER GUESS (R8). Only `paragraph` in a certified+loaded font at a uniform size
+//      lays out; everything else draws a LABELLED PLACEHOLDER and the coverage map reports it.
+//      `justify` is not modelled — such a paragraph renders left-aligned AND is reported as a gap.
+//   2. 'rects' MODE SKIPS RASTER, NOT SHAPING. Its line breaks still come from measureText, so
+//      the mode difference measures one thing only: raster cost vs layout cost. Claim no more.
+//   3. NEVER RE-DERIVE THE BREAK RULE — walk the splitter's own breaks, and ride paginate()'s
+//      default so a drift fails `breaks.prove.mjs` instead of being compensated for here.
+// → docs/archive/snapshot-scrub-rounds.md#textrender
 
 import type { Node as PMNode } from '@tiptap/pm/model'
 import {
@@ -102,16 +88,11 @@ export interface RenderModel {
   coverage: Record<string, number> // reason → block count (the honest coverage map)
   breaks: Array<{ at: number; botMargin: number }> // the splitter's own output (for prover comparison)
   sig: string             // the page-break signature — comparable byte-for-byte with the live path
-  // ── RELIABILITY IS POSITIONAL, NOT A DOCUMENT-WIDE BOOLEAN (2026-07-17) ────────────────────
-  // A placeholder with a guessed height does not merely look wrong — it MOVES EVERY PAGE BREAK
-  // AFTER IT, silently, and the pages then carry the wrong words while the renderer reports
-  // success. But it only moves the breaks BELOW it: everything above is unaffected.
-  // A whole-model boolean therefore reported EVERY thesis unreliable (they all have a
-  // bibliography, which is force-broken onto its own page at the very END) and said nothing about
-  // WHERE — throwing away ~57 of 58 perfectly exact pages. So:
-  //   pages [0, reliablePages) are trustworthy; from reliablePages on, they are not.
-  // This is the general contract for "we estimated something here" — any future estimated block
-  // inherits it, not just the refList.
+  // ⚠ RELIABILITY IS POSITIONAL, never a document-wide boolean (R9). A guessed height moves every
+  // break BELOW it and none above, so `pages [0, reliablePages)` are trustworthy and the rest are
+  // not. A whole-model boolean called every thesis unreliable for its bibliography alone. This is
+  // the contract for ANY estimated block, not just the refList.
+  // → docs/archive/snapshot-scrub-rounds.md#tr-positional
   breaksReliable: boolean        // convenience: reliablePages === pages (nothing estimated at all)
   reliablePages: number          // count of leading pages whose breaks are trustworthy
   firstEstimatedPos: number | null // doc position of the first estimated block (null ⇒ none)
@@ -155,19 +136,11 @@ const blockFirstLinePos = (node: PMNode, offset: number): number => {
   return node.isLeaf ? offset : offset + 1
 }
 
-// ─── Line-rect tone calibration (MEASURED 2026-07-16, not chosen) ─────────────────────────────
-// A line drawn as a solid bar is far darker than the text it stands for, and at map scale tone IS
-// the signal — the eye reads a page thumbnail as grey texture, so getting the density wrong makes
-// the strip read as a barcode even when every line is in exactly the right place.
-// Measured on the real editor's own pixels, downscaled to map scale (scripts/textrender-probe/
-// mapcompare.mjs), mean ink density over the content box:
-//     real thumbnail 6.71%   ·   text render 6.73%   ·   line-rects @0.42/0.72 = 22.27%
-// So the bar was 3.3× too dark. Effective coverage = bandRatio × alpha; matching 6.71/22.27 of the
-// old 0.42 × 0.72 = 0.3024 gives ≈0.091. Keeping the band at 0.42 (thinner bands alias away at map
-// scale, where a band is only ~3 device px) puts alpha at 0.217.
-// CAVEAT, stated rather than buried: this is calibrated to EB Garamond at the canonical 18px. A
-// different face/size has a different ink density, so this is a per-font constant that happens to be
-// hard-coded to the identity serif — re-measure before trusting it for another face.
+// ─── Line-rect tone calibration ───────────────────────────────────────────────────────────────
+// At map scale tone IS the signal, so these two were MEASURED against the real thumbnail's ink
+// density, not chosen. ⚠ They are calibrated to EB GARAMOND AT 18px — a per-font constant hard-coded
+// to the identity serif. Re-measure before trusting it for another face.
+// → docs/archive/snapshot-scrub-rounds.md#tr-tone
 const MAP_BAND_RATIO = 0.42
 const MAP_BAND_ALPHA = 0.217
 
@@ -190,19 +163,11 @@ function resolveSizePx(v: unknown, basePx: number): number {
   return isNaN(n) ? basePx : n
 }
 
-// One text node → an engine run. Mirrors arithMeasure.runOf (same mark resolution) so the two
-// paths can never disagree about what a run IS.
-// ⚠ THIS IS A SECOND COPY of arithMeasure.runOf — see runsOfParagraph below, whose comment claims
-// the two "Mirror … EXACTLY". THEY DID NOT. Fixing the unmodelled-mark hole in arithMeasure alone
-// changed nothing, because buildRenderModel calls THIS one: `code`-marked prose stayed eligible and
-// kept reporting full reliability. The rule that decides which mark is measurable now lives ONCE, in
-// arithMeasure (MODELLED_MARKS / METRIC_NEUTRAL_MARKS), and both copies call it — so a new mark can
-// no longer be handled in one and silently guessed in the other.
-//
-// The same shape has now bitten this project three times: staticPagination claimed "identical policy
-// (and 0.22 constant) to the editor" while carrying a rule the editor had retired; breaks.prove.mjs
-// claimed "byte-identical to the live editor" on a fixture with no citations; this claimed "can never
-// disagree". A COMMENT ASSERTING PARITY IS A REASON NOBODY CHECKS PARITY.
+// One text node → an engine run. ⚠ THIS IS A SECOND COPY of arithMeasure.runOf, and it once
+// diverged silently: the rule deciding which mark is MEASURABLE must live ONCE, in arithMeasure
+// (MODELLED_MARKS / METRIC_NEUTRAL_MARKS), with both copies calling it (R2).
+// ⚠ A COMMENT ASSERTING PARITY IS A REASON NOBODY CHECKS PARITY — this file, staticPagination and
+// breaks.prove.mjs each claimed it while diverging. → docs/archive/snapshot-scrub-rounds.md#tr-runof
 function runOf(node: PMNode, basePx: number): InlineRun {
   let family = DEFAULT_STACK, size = basePx, weight = 400, italic = false
   for (const m of node.marks || []) {
@@ -217,22 +182,12 @@ function runOf(node: PMNode, basePx: number): InlineRun {
   return { text: node.text || '', fontFamily: family, fontSizePx: size, fontWeight: weight, italic, ...(bad ? { unmodelledMark: bad } : {}) }
 }
 
-// One paragraph's inline content → engine runs. Mirrors arithMeasure.runsOfParagraph EXACTLY (same
-// mark resolution, same citeBox lookup) so the renderer and the canonical measure can never disagree
-// about what a paragraph contains.
-//
-// CITATIONS (wired 2026-07-16 — Peter: "can't you do a math version that includes citations? just
-// calculates how long they are and includes it in the math?"). A citation IS a proven opaque box:
-// CitationNodeView pins `white-space: nowrap`, so its label has no internal break opportunity and
-// the parent line can only break BEFORE or AFTER it — one unbreakable advance, measurable once and
-// cached by an immutable key (citations/citeBox.ts). Supplying it is what lets a citation-bearing
-// paragraph render arithmetically instead of placeholdering out; without it Peter's thesis (174
-// citations) would placeholder ~every paragraph.
-//
-// SELF-HEALING, NOT GUESSING: a key that isn't cached (new citekey, bibliography not yet hydrated,
-// CSL style switch, wrong measurement base) returns null ⇒ no box ⇒ blockEligibility's `!r.box` gate
-// DEFERS that block to a labelled placeholder. We never invent an advance that is about to change.
-// Anything else atomic (inline math) still supplies no box and still defers, by the same rule.
+// One paragraph's inline content → engine runs (the second copy of arithMeasure.runsOfParagraph —
+// see the ⚠ above). A CITATION is a proven opaque box: CitationNodeView pins `white-space: nowrap`,
+// so the line can break only before or after it — one unbreakable advance, cached by an immutable
+// key. ⚠ An UNCACHED key returns null ⇒ no box ⇒ the block DEFERS to a labelled placeholder (R8);
+// never invent an advance that is about to change. Inline math defers by the same rule.
+// → docs/archive/snapshot-scrub-rounds.md#tr-citations
 function runsOfParagraph(node: PMNode, basePx: number, citationStyle: string, bibEpoch: number): InlineRun[] {
   const runs: InlineRun[] = []
   node.forEach((child) => {
@@ -315,12 +270,10 @@ export interface BuildOpts {
    *  lookup misses and every citation-bearing block placeholders out. */
   citationStyle?: string
   bibEpoch?: number
-  // ── WINDOW MODE (2026-07-17) ─────────────────────────────────────────────────────────────────
-  // PROVED first, then built: a page laid out from its own break position reproduces the full
-  // model's line starts EXACTLY, with zero prefix (30/30, 31/31, 31/31 at 2k/10k/40k; mid-line
-  // negatives collapse to 0/31). Because a break `at` IS a line start and greedy wrap restarts
-  // deterministically there. So the prefix is needed ONLY to FIND the break — never to lay out
-  // the page.
+  // ── WINDOW MODE ──────────────────────────────────────────────────────────────────────────────
+  // A break `at` IS a line start and greedy wrap restarts deterministically there, so the prefix is
+  // needed ONLY to FIND the break, never to lay out the page (proved before it was built).
+  // → docs/archive/snapshot-scrub-rounds.md#tr-window
   /** Lay out starting at this doc position (must be a LINE START — a break table entry). */
   from?: number
   /** Stop once this much height is laid out. THE WHOLE POINT: cost becomes O(window), not O(doc).
@@ -334,33 +287,16 @@ export interface BuildOpts {
 }
 
 // ─── Incremental block cache ──────────────────────────────────────────────────────────────────
-// PETER'S TARGET: "if we can get it under 1s we can just load it when the snapshots screen loads
-// up" — <1s for 116 versions ⇒ <8.6ms/version, from a naive 62-82ms.
-//
-// THE THEOREM IT RESTS ON (confirmed, not assumed): `layoutParagraph(block, contentWidthPx, ratio,
-// measure, whiteSpace)` takes ONLY the block. No prefix, no preceding state, no document. Line
-// wrapping never crosses a block boundary, so a block's layout is a pure function of its own runs
-// and its width/font context. Everything a block's position depends on — `top`, `posBase`,
-// `blockIdx` — is applied by emitTextBlock as a pure OFFSET after the layout exists. So reuse is
-// the SAME ARITHMETIC, not an approximation: cache the block-relative geometry, re-emit at the new
-// offsets. This is the same rule the editor's `computeScoped` already runs on (unchanged blocks
-// reuse cached block-relative lines at the previous measure's tops).
-//
-// KEYED ON A CONTENT HASH, NEVER ON A DIFF. A diff (`opsBetween`) would be cheaper, but a wrong
-// diff SILENTLY REUSES WRONG LAYOUT — it paints the right words on the wrong page and reports
-// success. A content hash cannot: if the bytes differ, the key differs. The key is
-// self-validating, which is the whole difference between a fast renderer and a fast renderer that
-// is subtly wrong. Two independent 32-bit FNV-1a streams ⇒ an effective 64-bit key: collisions are
-// the ONLY way this can under-invalidate, and under-invalidation is the direction that paints wrong
-// words, so the extra stream is cheap insurance (the same asymmetry as bibSignature's whole-entry
-// hash).
-//
-// INVALIDATION IS THE CALLER'S JOB, and it is the same contract the canonical measure's block-line
-// WeakMap already carries: the key covers the block's CONTENT and its LAYOUT PARAMS, but NOT the
-// font-loading state that `measure` closes over. Fonts change advances. So the caller MUST drop the
-// cache whenever the canonical context moves (fonts ready/'loadingdone', page settings,
-// bibliography hydration) — exactly where clearLineCache already sits. A table's `contextSig`
-// covers the same ground for the persisted layer.
+// Rests on a confirmed theorem: `layoutParagraph` takes ONLY the block — wrapping never crosses a
+// block boundary — so reuse is the same arithmetic re-emitted at new offsets, not an approximation
+// (the rule the editor's `computeScoped` already runs on).
+// ⚠ KEY ON A CONTENT HASH, NEVER ON A DIFF. A wrong diff silently reuses wrong layout: right words,
+//   wrong page, success reported. A hash cannot — different bytes, different key. Two FNV-1a
+//   streams, because under-invalidation is the direction that paints wrong words.
+// ⚠ INVALIDATION IS THE CALLER'S JOB (R7). The key covers content and layout params, NOT the
+//   font-loading state `measure` closes over, so drop the cache wherever `clearLineCache` is
+//   dropped — fonts ready/'loadingdone', page settings, bibliography hydration.
+// → docs/archive/snapshot-scrub-rounds.md#tr-blockcache
 export interface BlockCacheStats {
   hits: number
   misses: number
@@ -569,12 +505,11 @@ export function buildRenderModel(
       const s = blockStyle(`heading:${lvl}`, geom.basePx)
       if (s) {
         const runs = sliceRuns(styledRuns(node, s), fromChar)
-        // styledRuns re-families EVERY run to the harvested style, so the strut IS that family and
-        // the mixed-family check is a tautology here. That is a real gap, stated: a
-        // textStyle:fontFamily mark INSIDE a heading is overwritten rather than modelled, so a
-        // heading in a picked font is laid out in the h2's own face. Headings are single-line in
-        // practice and the matrix's heading rows are byte-identical, so it is not moving a break
-        // today — but it is a guess, and it should become a defer when a fixture can catch it.
+        // ⚠ KNOWN GAP, stated not hidden: styledRuns re-families every run, so a
+        // textStyle:fontFamily mark inside a heading is overwritten rather than modelled. Headings
+        // are single-line in practice so it moves no break today — but it is a guess, and it should
+        // become a DEFER once a fixture can catch it.
+        // → docs/archive/snapshot-scrub-rounds.md#tr-heading-font
         const r = emitTextBlock(runs, s.fontSizePx, s.fontFamily, s.lineHeightRatio, geom.contentWidthPx,
           s.marginTopPx, s.marginBottomPx, bi, offset + 1 + fromChar)
         if (r.ok) {
@@ -595,21 +530,11 @@ export function buildRenderModel(
     }
 
     // ── LIST: ONE block (as the live DOM's <ul>/<ol> is one top-level block), many item lines ──
-    //
-    // ⚠ A LIST'S MARGINS COLLAPSE, AND THAT IS THE WHOLE OF THIS BRANCH'S DIFFICULTY (2026-07-17).
-    // The model used to add one `li > p` margin-bottom after EVERY item, including the last, then the
-    // list's own margin-bottom on top. CSS does not: the last item's paragraph has nothing below it
-    // inside the list — no padding-bottom, no border on the `li` or the `ul` — so its bottom margin
-    // COLLAPSES THROUGH both and merges with the list's own. The gap after a list is
-    // `max(itemMargin, listMargin)`, not their sum.
-    // MEASURED against the live DOM (scripts/textrender-probe/listdiag.mjs, 3-item lists, canonical
-    // 18px): the `ul`'s own rect is `Σ item paragraphs + (n−1) × 4.5`, and the real gap to its next
-    // sibling is 9 — while the model produced `Σ + n × 4.5` and then added 9, i.e. **+4.5px per
-    // list, every list**. Silent: `estimatedBlocks 0`, `reliablePages 55/55` — full reliability
-    // claimed while every break below the first list carried the wrong words. Six lists into a
-    // document that is one 29px line of drift.
-    // So: the item margin is added BETWEEN items (never after the last), and the list's trailing
-    // advance is the COLLAPSE of the last item's margin with the list's own.
+    // ⚠ A LIST'S MARGINS COLLAPSE. Add the item margin BETWEEN items only — never after the last —
+    // and make the list's trailing advance `max(itemMargin, listMargin)`, never their sum: the last
+    // item's paragraph has nothing below it inside the list, so its margin collapses through both.
+    // Summing them cost +4.5px per list, silently, at a claimed 55/55 reliability.
+    // → docs/archive/snapshot-scrub-rounds.md#tr-lists
     if (node.type.name === 'bulletList' || node.type.name === 'orderedList') {
       const ls = blockStyle(node.type.name, geom.basePx)
       const ip = blockStyle('listItemPara', geom.basePx)
@@ -687,15 +612,9 @@ export function buildRenderModel(
     }
 
     if (node.type.name === 'paragraph') {
-      // ROUTED THROUGH emitTextBlock (2026-07-17). This branch used to carry its OWN COPY of the
-      // layout+emit loop — a second implementation of the same rule, which is the pmToText/textMap
-      // drift trap wearing another hat: headings and list items went through emitTextBlock while
-      // PARAGRAPHS, the bulk of every real document, took a duplicate path. It was found by
-      // measurement, not by reading: the block cache reported 99% reuse and a 1.03x speedup at once,
-      // because it only ever saw 127 of ~380 emits (43 headings + the list items) — the 254
-      // paragraphs bypassed it entirely. Byte-identical by construction: posBase collapses to the
-      // old `offset + 1 + fromChar + sc`, margins are the same (0 / marginBottom), and the caller
-      // still pushes the block and advances `top` exactly as before.
+      // ⚠ EVERY block type emits through `emitTextBlock` (R2). Paragraphs once carried a duplicate
+      // layout+emit loop, so the block cache saw 127 of ~380 emits — 99% reuse and a 1.03× speedup
+      // in the same breath. → docs/archive/snapshot-scrub-rounds.md#tr-emit
       const runs = sliceRuns(runsOfParagraph(node, geom.basePx, citationStyle, bibEpoch), fromChar)
       const r = emitTextBlock(runs, geom.basePx, DEFAULT_STACK, geom.ratio, geom.contentWidthPx, 0, marginBottom, bi, offset + 1 + fromChar)
       if (r.ok) {
@@ -743,25 +662,16 @@ export function buildRenderModel(
   const splitLines: SplitLine[] = lines.map((l) => ({ top: l.top, blockIdx: l.blockIdx, pos: l.pos }))
   const splitBlocks = blocks.map((b) => ({ start: b.start }))
   const refBlock = blocks.find((b) => b.type === 'referenceList')
-  // paginate()'s default now MATCHES production (no orphan snap — see its ⚠ note). It used to snap,
-  // which put the WRONG WORDS on every page after the first (first break 2141 vs the editor's 2403;
-  // 17 pages vs 16). A preview showing different text than the editor is worse than no preview, so
-  // this deliberately rides the default: if the default ever drifts from computeBreaks again,
-  // breaks.prove.mjs fails against the live editor's own gap widgets rather than this file silently
-  // compensating for it.
+  // ⚠ RIDE paginate()'s DEFAULT, never pass an override here: a drift from computeBreaks must fail
+  // `breaks.prove.mjs` against the live editor's gap widgets rather than be compensated for in this
+  // file. → docs/archive/snapshot-scrub-rounds.md#tr-breaks
   const res = paginate(splitLines, splitBlocks, refBlock ? refBlock.start : -1, geom.pageHeightPx, geom.topMarginPx)
 
-  // Assign each line to a page by walking the breaks the splitter produced (never re-deriving them
-  // — a second copy of the break rule is a second chance to disagree with production).
-  //
-  // A break's `at` is one of TWO position kinds, and conflating them silently blanks the renderer:
-  //   • a mid-block break → `at` = the line's own pos (= blockOffset + 1 + startChar), or
-  //   • an ORPHAN-SNAP / refList break → `at` = the BLOCK START (= blockOffset), which is ONE LESS
-  //     than that block's first line's pos and therefore never equals any line's pos.
-  // Matching only on line.pos meant snapped breaks never fired: every line stayed on page 0,
-  // pageTop[1..] was undefined, and paintPage early-returned — so pages 1+ rendered BLANK while the
-  // timings still looked wonderful. Caught by the pixel diff (differing == ink exactly = "we drew
-  // nothing"), which is precisely why the fidelity check is not optional.
+  // Assign lines to pages by walking the splitter's breaks — never re-deriving them (R2).
+  // ⚠ A break's `at` is one of TWO position kinds and conflating them silently blanks the renderer:
+  // a mid-block break's `at` is the LINE's pos; an orphan-snap / refList break's is the BLOCK
+  // START, one less than its first line's pos, so it matches no line at all.
+  // → docs/archive/snapshot-scrub-rounds.md#tr-breaks
   const pageOfLine: number[] = new Array(lines.length).fill(0)
   const pageTop: number[] = []
   let page = 0
@@ -998,12 +908,11 @@ export function paintPage(
   return (typeof performance !== 'undefined' ? performance.now() : 0) - t0
 }
 
-// ─── CONTENT ANCHORING (2026-07-16 — the frame-registration requirement) ──────────────────────
-// Versions differ in LENGTH, so "page 7 of v3" and "page 7 of v4" are not the same content: a scrub
-// that preserves page number (or scroll offset) does not preserve what you're LOOKING AT, and the
-// sequence reads as noise even when every frame is correct and fast. So the renderer must be able to
-// answer "the page containing content X", not only "page N". Both directions are a lookup over the
-// model the build already produced — no extra layout.
+// ─── CONTENT ANCHORING ────────────────────────────────────────────────────────────────────────
+// ⚠ The renderer must answer "the page containing content X", not only "page N": versions differ in
+// LENGTH, so preserving a page number preserves nothing the reader is looking at. Both directions
+// are a lookup over the built model — no extra layout.
+// → docs/archive/snapshot-scrub-rounds.md#tr-anchoring
 
 /** The page index containing a doc position (clamped to the document's range). */
 export function pageContainingPos(model: RenderModel, pos: number): number {
@@ -1145,16 +1054,10 @@ export function canonicalGeom(pageWidthPx: number, pageHeightPx: number, sideMar
 
 export { MARGIN_BOTTOM_PX }
 
-// THE CANONICAL GEOMETRY, FROM SETTINGS ALONE (2026-07-17 — the /snapshot seam).
-//
-// Note what this does NOT touch: the DOM. The canonical geometry is a pure function of the page
-// SETTINGS — paper, orientation, margins, paragraph spacing — with a pinned 18px base and 1.618
-// ratio. That is precisely why /snapshot, which has no editor and no .ProseMirror, can compute the
-// SAME geometry the editor paginates under rather than a lookalike.
-//
-// It lived privately inside textRenderProbe.ts as `liveGeom`. /snapshot needs the identical rule,
-// and a second copy of "what is the canonical geometry" is how one route silently starts paginating
-// to a different page size. One implementation; the probe now calls this too.
+// ⚠ THE CANONICAL GEOMETRY IS A PURE FUNCTION OF THE PAGE SETTINGS — it must never touch the DOM,
+// which is what lets /snapshot (no editor, no .ProseMirror) compute the geometry the editor
+// paginates under rather than a lookalike. ONE implementation; the probe calls this too (R2).
+// → docs/archive/snapshot-scrub-rounds.md#tr-geometry
 export function canonicalGeomFromSettings(): RenderGeom {
   const paper = getPaperSize()
   const { pageWidthPx, pageHeightPx } = pageBoxPx({
