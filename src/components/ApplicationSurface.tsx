@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import {
+  screenAdjustedSurfaceWidth,
   surfaceMinHeight,
   surfaceWidthLimits,
+  surfaceWidthScale,
   symmetricSurfaceWidth,
   type ApplicationSurfaceResizeEdge,
 } from './applicationSurfaceResize'
@@ -25,7 +27,7 @@ interface ApplicationSurfaceProps {
 const WIDTH_STEP_PX = 12
 const HEIGHT_STEP_PX = 16
 
-function storedSizeKey(app: string, mode: ApplicationSurfaceMode, axis: 'widthPx' | 'height'): string {
+function storedSizeKey(app: string, mode: ApplicationSurfaceMode, axis: 'widthScale' | 'height'): string {
   return `inkwave:applicationSurface:${app}:${mode}:${axis}`
 }
 
@@ -45,7 +47,9 @@ export function ApplicationSurface({
     if (!surfaceRef.current) return
     const pixels = Math.round(width)
     surfaceRef.current.style.width = `${pixels}px`
-    try { localStorage.setItem(storedSizeKey(app, mode, 'widthPx'), String(pixels)) } catch { /* private mode */ }
+    try {
+      localStorage.setItem(storedSizeKey(app, mode, 'widthScale'), String(surfaceWidthScale(pixels, window.screen.width)))
+    } catch { /* private mode */ }
   }, [app, mode])
 
   const persistHeight = useCallback((height: number) => {
@@ -54,21 +58,32 @@ export function ApplicationSurface({
     try { localStorage.setItem(storedSizeKey(app, mode, 'height'), String(Math.round(height))) } catch { /* private mode */ }
   }, [app, mode])
 
-  const resetAxis = useCallback((axis: 'widthPx' | 'height') => {
+  const resetAxis = useCallback((axis: 'widthScale' | 'height') => {
     if (!surfaceRef.current) return
-    if (axis === 'widthPx') surfaceRef.current.style.removeProperty('width')
+    if (axis === 'widthScale') surfaceRef.current.style.removeProperty('width')
     else surfaceRef.current.style.removeProperty('min-height')
     try { localStorage.removeItem(storedSizeKey(app, mode, axis)) } catch { /* private mode */ }
   }, [app, mode])
 
   useEffect(() => {
     if (!resizable || !surfaceRef.current) return
+    const syncToScreen = () => {
+      const baseWidth = screenAdjustedSurfaceWidth(window.screen.width)
+      surfaceRef.current?.style.setProperty('--iw-application-default-width', `${baseWidth}px`)
+      try {
+        const scale = Number(localStorage.getItem(storedSizeKey(app, mode, 'widthScale')))
+        if (Number.isFinite(scale) && scale >= 0.35 && scale <= 2) {
+          surfaceRef.current!.style.width = `${Math.round(baseWidth * scale)}px`
+        }
+      } catch { /* private mode */ }
+    }
+    syncToScreen()
+    window.addEventListener('resize', syncToScreen)
     try {
-      const width = Number(localStorage.getItem(storedSizeKey(app, mode, 'widthPx')))
       const height = Number(localStorage.getItem(storedSizeKey(app, mode, 'height')))
-      if (Number.isFinite(width) && width >= 320) surfaceRef.current.style.width = `${width}px`
       if (Number.isFinite(height) && height >= 240) surfaceRef.current.style.minHeight = `${height}px`
     } catch { /* private mode */ }
+    return () => window.removeEventListener('resize', syncToScreen)
   }, [app, mode, resizable])
 
   useEffect(() => () => removeDragListenersRef.current?.(), [])
@@ -138,7 +153,7 @@ export function ApplicationSurface({
   }
 
   const resizeWidthByKey = (event: KeyboardEvent<HTMLDivElement>, edge: ApplicationSurfaceResizeEdge) => {
-    if (event.key === 'Enter' || event.key === 'Home') { event.preventDefault(); resetAxis('widthPx'); return }
+    if (event.key === 'Enter' || event.key === 'Home') { event.preventDefault(); resetAxis('widthScale'); return }
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
     const surface = surfaceRef.current
     const parent = surface?.parentElement
@@ -190,7 +205,7 @@ export function ApplicationSurface({
             tabIndex={0}
             onPointerDown={(event) => beginHorizontalResize(event, 'left')}
             onKeyDown={(event) => resizeWidthByKey(event, 'left')}
-            onDoubleClick={() => resetAxis('widthPx')}
+            onDoubleClick={() => resetAxis('widthScale')}
           />
           <div
             className="iw-application-surface__resize iw-application-surface__resize--right"
@@ -201,7 +216,7 @@ export function ApplicationSurface({
             tabIndex={0}
             onPointerDown={(event) => beginHorizontalResize(event, 'right')}
             onKeyDown={(event) => resizeWidthByKey(event, 'right')}
-            onDoubleClick={() => resetAxis('widthPx')}
+            onDoubleClick={() => resetAxis('widthScale')}
           />
           <div
             className="iw-application-surface__resize iw-application-surface__resize--bottom"

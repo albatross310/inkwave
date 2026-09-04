@@ -8,7 +8,10 @@ import { ApplicationSurface } from './ApplicationSurface'
 
 const css = readFileSync(resolve(__dirname, '../styles/index.css'), 'utf8')
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  Object.defineProperty(window.screen, 'width', { configurable: true, value: 1728 })
+})
 afterEach(cleanup)
 
 describe('ApplicationSurface', () => {
@@ -46,9 +49,9 @@ describe('ApplicationSurface', () => {
     expect(block).not.toContain('100dvh')
   })
 
-  it('gives isolated email a stable 900px desktop default while keeping contextual tools independent', () => {
+  it('gives isolated email a screen-calibrated pixel default while keeping contextual tools independent', () => {
     const block = css.match(/\[data-iw-application="email"\]\.iw-application-surface--isolated\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
-    expect(block).toContain('width: 900px')
+    expect(block).toContain('width: var(--iw-application-default-width, 900px)')
     expect(block).toContain('max-width: calc(100% - 48px)')
     expect(block).toContain('margin-inline: auto')
   })
@@ -60,7 +63,7 @@ describe('ApplicationSurface', () => {
     expect(screen.getByRole('separator', { name: /height from the bottom edge/ })).toBeTruthy()
   })
 
-  it('keeps keyboard width changes centred and persists them in pixels', () => {
+  it('keeps keyboard width changes centred and persists their scale against screen resolution', () => {
     render(<ApplicationSurface app="email" label="Email draft" resizable><p>Message</p></ApplicationSurface>)
     const surface = screen.getByRole('region', { name: 'Email draft' })
     Object.defineProperty(surface, 'getBoundingClientRect', { value: () => ({ width: 600, height: 400 }) })
@@ -69,6 +72,17 @@ describe('ApplicationSurface', () => {
     fireEvent.keyDown(screen.getByRole('separator', { name: /right edge/ }), { key: 'ArrowRight' })
 
     expect(surface.style.width).toBe('624px')
-    expect(localStorage.getItem('inkwave:applicationSurface:email:isolated:widthPx')).toBe('624')
+    expect(Number(localStorage.getItem('inkwave:applicationSurface:email:isolated:widthScale'))).toBeCloseTo(624 / 900)
+  })
+
+  it('does not recalculate the default from browser-window width', () => {
+    render(<ApplicationSurface app="email" label="Email draft" resizable><p>Message</p></ApplicationSurface>)
+    const surface = screen.getByRole('region', { name: 'Email draft' })
+    expect(surface.style.getPropertyValue('--iw-application-default-width')).toBe('900px')
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 620 })
+    fireEvent.resize(window)
+
+    expect(surface.style.getPropertyValue('--iw-application-default-width')).toBe('900px')
   })
 })

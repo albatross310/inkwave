@@ -1150,7 +1150,7 @@
     box-shadow: 0 8px 32px var(--iw-application-shadow, rgba(80, 50, 10, 0.18));
   }
   [data-iw-application="email"].iw-application-surface--isolated {
-    width: 900px;
+    width: var(--iw-application-default-width, 900px);
     max-width: calc(100% - 48px);
     margin-inline: auto;
   }
@@ -1249,7 +1249,7 @@
     box-shadow: none;
   }
   .inkwave-editor-surface.is-phone [data-iw-application="email"].iw-application-surface--isolated {
-    width: 100%;
+    width: 100% !important;
     max-width: 100%;
   }
   .inkwave-editor-surface.is-phone .iw-application-surface__resize--left,

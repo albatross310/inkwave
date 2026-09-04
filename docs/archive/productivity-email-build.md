@@ -58,14 +58,17 @@ signature/key, and versioned evidence bundle have been successfully verified and
 does not become permanent public proof, and delivery/read/Bcc remain outside the claim without their
 own evidence.
 
-The isolated email box now has a stable 900px desktop default (roughly half or slightly more than a
-16-inch laptop's logical width) and remains centred; it is not a percentage of the window or paper.
+The isolated email box now uses `900px × screen.width ÷ 1728` as its desktop default: 900px on the
+reference 1728-logical-pixel 16-inch display and a proportionally adjusted absolute pixel width on
+other screen resolutions. Browser APIs expose no trustworthy physical diagonal/PPI, so logical
+`screen.width` is the documented screen-size proxy; browser-window width is not the sizing input.
 A 24px-per-side safety cap lets narrower windows reflow it without scaling type. Phone remains
 full-width, and contextual application surfaces do not inherit the email-specific width.
 The same shared surface owns resize handles: either side adjusts total width at twice the pointer
 delta while CSS auto-margins keep its centre fixed, and the bottom adjusts only an optional minimum
-height. Resized width is persisted in pixels; width/height preferences stay local presentation state,
-have keyboard/reset paths, and never
+height. Resized width is persisted as a multiplier of the screen-calibrated pixel baseline, so it
+tracks a display change without becoming a percentage of the browser window. Width/height preferences
+stay local presentation state, have keyboard/reset paths, and never
 enter the document or its provenance.
 
 Application presentation is excluded from the document paper's fit-to-window transform. Its outer

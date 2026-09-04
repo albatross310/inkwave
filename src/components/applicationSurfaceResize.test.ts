@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { surfaceMinHeight, surfaceWidthLimits, symmetricSurfaceWidth } from './applicationSurfaceResize'
+import {
+  screenAdjustedSurfaceWidth,
+  surfaceMinHeight,
+  surfaceWidthLimits,
+  surfaceWidthScale,
+  symmetricSurfaceWidth,
+} from './applicationSurfaceResize'
 
 describe('application surface resizing', () => {
   it('mirrors an outward pull on the right around a fixed centre', () => {
@@ -25,5 +31,17 @@ describe('application surface resizing', () => {
   it('lets the bottom handle grow and shrink within safe limits', () => {
     expect(surfaceMinHeight({ startHeight: 420, pointerDelta: 80, minHeight: 240, maxHeight: 1800 })).toBe(500)
     expect(surfaceMinHeight({ startHeight: 420, pointerDelta: -500, minHeight: 240, maxHeight: 1800 })).toBe(240)
+  })
+
+  it('turns the 900px reference into a screen-resolution-adjusted pixel width', () => {
+    expect(screenAdjustedSurfaceWidth(1728)).toBe(900)
+    expect(screenAdjustedSurfaceWidth(1512)).toBe(788)
+    expect(screenAdjustedSurfaceWidth(2560)).toBe(1333)
+    expect(screenAdjustedSurfaceWidth(0)).toBe(900)
+  })
+
+  it('stores a resize relative to the screen baseline rather than the browser window', () => {
+    expect(surfaceWidthScale(990, 1728)).toBe(1.1)
+    expect(Math.round(screenAdjustedSurfaceWidth(1512) * surfaceWidthScale(990, 1728))).toBe(867)
   })
 })
