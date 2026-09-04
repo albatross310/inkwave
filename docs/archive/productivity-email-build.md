@@ -148,6 +148,7 @@ once it was a panel the "no routes, all panels" ethos applied and it shipped liv
 chart code stays a lazy import off the editor's own load path either way (`Report-*.js`, 21kB/7kB
 gzip). Nothing reads the `.studio` or walks the doc; aggregation is pure and runs on mount.
 
+<a id="phase-ratio-only"></a>
 **THE HEURISTIC DEVIATES FROM THE SPEC'S EXAMPLE, AND THE MEASUREMENT IS WHY.** §A3.3 offers "high
 add-to-delete ratio + long sessions → drafting; high delete + short → editing" as an `e.g.`. Scored
 against labelled synthetic writing (`phase.variants.test.ts`, 64 sessions, 48.4% drafting truth):
@@ -166,6 +167,7 @@ duration thresholds remain only as the scored alternative. ⚠ Peter to confirm 
 breaks (93.8%, 4 wrong). Residual, honest: it declines ~25% of HARD drafting sessions (they cut most
 of what they lay down — indistinguishable from editing to a word counter) and ~half of `revising`.
 
+<a id="phase-fixture-void"></a>
 **THE EVIDENCE ABOVE WAS ONCE A TAUTOLOGY — the F1 audit finding, and the fix (2026-07-17).** An
 external mutation audit found `phase.variants.test.ts` could not feel a wrong threshold: mutating
 `draftAddRatio` 0.70 → 0.65/0.75/0.78 and `editAddRatio` 0.50 → 0.79 ALL SURVIVED GREEN. The
@@ -190,6 +192,7 @@ a cut-point** (tuning thresholds on data invented by the same author who chose t
 other way) — real calibration needs real ledger rows. `phase.sweep.probe.test.ts` prints the
 distribution, the overlap band and the full sweep; read it before touching a threshold.
 
+<a id="phase-three-provenances"></a>
 **Three provenances, not two.** §A6.1 names measured + judged; the heuristic is neither (a rule
 anyone can re-run — not AI; still an inference — not a measurement), so it gets its own tag/legend
 `estimated`. STRUCTURAL, not conventional: a series' style is a function of `series.provenance`
