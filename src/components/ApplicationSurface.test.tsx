@@ -2,7 +2,11 @@
 
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { ApplicationSurface } from './ApplicationSurface'
+
+const css = readFileSync(resolve(__dirname, '../styles/index.css'), 'utf8')
 
 afterEach(cleanup)
 
@@ -25,5 +29,12 @@ describe('ApplicationSurface', () => {
     const surface = screen.getByRole('region', { name: 'Music work' })
     expect(surface.getAttribute('data-iw-surface-mode')).toBe('contextual')
     expect(surface.classList.contains('iw-application-surface--contextual')).toBe(true)
+  })
+
+  it('does not inherit document-page margins as an application-body indent', () => {
+    const block = css.match(/\.iw-application-surface__body\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
+    expect(block).toContain('var(--iw-application-inset)')
+    expect(block).not.toContain('--iw-page-side-margin')
+    expect(block).not.toContain('--iw-page-bottom-margin')
   })
 })

@@ -1136,6 +1136,7 @@
     box-shadow: none !important;
   }
   .iw-application-surface {
+    --iw-application-inset: 1.5rem;
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -1150,7 +1151,7 @@
     min-height: 0;
   }
   .iw-application-surface__label {
-    padding: 1.5rem var(--iw-page-side-margin, 3rem) 0.8rem;
+    padding: 1.5rem var(--iw-application-inset) 0.8rem;
     color: var(--iw-ink, #5c2d8a);
     font-family: 'EB Garamond', 'IM Fell DW Pica', Georgia, serif;
     font-size: 0.82rem;
@@ -1159,35 +1160,29 @@
     text-transform: uppercase;
   }
   .iw-email-snapshot-headers {
-    padding: 0 var(--iw-page-side-margin, 3rem) 1rem;
+    padding: 0 var(--iw-application-inset) 1rem;
   }
   .iw-application-surface__body {
     position: relative;
-    flex: 1;
-    padding: 1.5rem var(--iw-page-side-margin, 3rem) var(--iw-page-bottom-margin, 4rem);
+    flex: none;
+    padding: 1.5rem var(--iw-application-inset);
     border-top: 1px solid var(--iw-application-hair, rgba(92, 45, 138, 0.18));
   }
   .iw-application-surface__body .ProseMirror {
-    min-height: 28rem;
+    min-height: 10rem;
   }
   .iw-application-surface__disclosure {
-    padding: 0.8rem var(--iw-page-side-margin, 3rem) 1.25rem;
+    padding: 0.8rem var(--iw-application-inset) 1.25rem;
     border-top: 1px solid var(--iw-application-hair, rgba(92, 45, 138, 0.18));
   }
   .inkwave-editor-surface.is-phone .iw-application-surface {
+    --iw-application-inset: 1.25rem;
     min-height: 100dvh;
     border-left: 0;
     border-right: 0;
     border-radius: 0;
     box-shadow: none;
   }
-  .inkwave-editor-surface.is-phone .iw-application-surface__label,
-  .inkwave-editor-surface.is-phone .iw-application-surface__body,
-  .inkwave-editor-surface.is-phone .iw-application-surface__disclosure {
-    padding-left: 1.25rem;
-    padding-right: 1.25rem;
-  }
-
   /* Tiptap editor content styles */
   /* ProseMirror is the contenteditable div — tiptap-editor is a class
      we add to it directly via editorProps, so selectors target it directly. */

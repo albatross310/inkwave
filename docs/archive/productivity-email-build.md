@@ -42,6 +42,13 @@ paper top padding, and equal 794px surface/paper widths plus equal 1123px height
 237 test files, 3,055 tests passed (2 skipped), typecheck, and production build. W2 contextual studio,
 multi-message batches, subdoc sequencing, overview, containers, and sync fan-out remain spec only.
 
+Peter's first W1 visual pass found the message inset still inherited his document-page margin and the
+body flex/min-height left most of the page looking like an empty input. Application surfaces now own a
+fixed compact inset instead of reading `--iw-page-side-margin`; the body has a modest content-sized
+typing floor and the disclosure follows it. A browser check with a deliberately exaggerated 196px
+document margin measured the message at 25px from the application edge, proving the settings are no
+longer coupled.
+
 ---
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT ON since 2026-07-18)
