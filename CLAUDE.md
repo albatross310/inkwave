@@ -832,6 +832,10 @@ write shim, so metadata can say a PDF exists with no local bytes).
 - Phone typing scheduling: pagination re-measure 850ms (1200ms keyboard-up), SCAS tick 250ms,
   autosave 800ms, word count 1s — input latency owns the main thread; `inkwave:perflog=1` for
   on-device numbers.
+- SCAS suggestions are **OFF by default** and opt-in in Settings. The existing inverse storage key
+  is retained for compatibility: `inkwave:scasOff='0'` is an explicit ON, `'1'` is OFF, and an
+  absent/unreadable key takes the new OFF default. This switch remains display-only: the provenance
+  engine continues remembering words underneath, as before.
 - The SCAS tick is WINDOWED on BOTH platforms — INCLUDING deletion ticks (round-4, 2026-07-11,
   Peter's "deleting lags in waves"): the vanished-lemma pass needs whole-doc word PRESENCE, not a
   full rescan, and the controller now maintains a lemma-presence MULTISET (+ slot-original

@@ -157,7 +157,7 @@ export function SyncStatus({
             setOpen(!open)
           }}
           title={tooltip}
-          className={`iw-nightable ${compact || pdfOpen
+          className={`iw-nightable iw-toolbar-outline ${compact || pdfOpen
             // ⚠ STILL A PILL WITH A PANEL OPEN (Peter, 2026-08-28: "this button should be a pill
             // like the lhs pill of same height and have same midline horizontally as the main
             // pill"). It used to become a w-10 h-10 CIRCLE — 40px against the side pills' 30px, on

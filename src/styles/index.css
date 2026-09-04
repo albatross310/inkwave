@@ -861,6 +861,13 @@
     height: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
   }
 
+  /* Footer chrome has one literal neutral outline. Glyphs may change colour for hover/open/error
+     state, but their circles and the three sibling pills must remain the same grey. */
+  .iw-toolbar-outline,
+  .iw-toolbar-circles .w-9.rounded-full {
+    border-color: #a8a29e !important;
+  }
+
   /* Desktop footer toolbar: the circles shrink so the whole row fits the SAME budget that caps the
      pill's own max-width — `--iw-bar-budget`, written onto the pill in TiptapEditor.tsx and inherited
      down to here. Read that assignment's comment for the full story; the short version is that the

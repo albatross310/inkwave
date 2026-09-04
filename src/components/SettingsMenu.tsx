@@ -17,6 +17,7 @@ import { nightModeEnabled, setNightMode } from '../editor/theme'
 import { aiSummariesEnabled, setAiSummaries, urlLookupEnabled, setUrlLookup, aiConsentGiven, markAiConsent, type AiFeature } from '../editor/aiSettings'
 import { AiConsentDialog } from './AiConsentDialog'
 import { LimitSelector } from './LimitSelector'
+import { scasSuggestionsEnabled, setScasSuggestionsEnabled } from '../scas/display'
 
 const INK = '#302438'
 // Shared gap between a footer button and the panel it opens (keep the same across all footer panels).
@@ -170,13 +171,13 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
               />
             )}
 
-            {/* SCAS suggestions — turn the DISPLAY of the vocabulary suggestions off/on. Live toggle
+            {/* SCAS suggestions — OFF by default; an explicit choice is remembered. Live toggle
                 (no reload): only the highlight decorations are suppressed; the SCAS engine keeps running. */}
             <Row
               label="SCAS suggestions"
-              checked={!(typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:scasOff') === '1')}
+              checked={scasSuggestionsEnabled()}
               onChange={() => {
-                try { localStorage.setItem('inkwave:scasOff', localStorage.getItem('inkwave:scasOff') === '1' ? '0' : '1') } catch { /* private mode */ }
+                setScasSuggestionsEnabled(!scasSuggestionsEnabled())
                 window.dispatchEvent(new Event('inkwave:scas-display-changed'))
                 rerender(n => n + 1) // update this toggle's checked state
               }}

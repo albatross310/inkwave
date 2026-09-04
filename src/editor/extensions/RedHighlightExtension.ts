@@ -4,16 +4,20 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { lemmaOf, inPool } from '../../scas/engine'
 import { isColoured, type ScasLookup } from '../../scas/state'
+import { scasSuggestionsEnabled } from '../../scas/display'
 
 // TEMPORARY debug aid (NOT for the final product — a no-paste feature is coming): highlight EVERY
 // constrainable (pool) word, so pasted/typed text lights up densely for testing the word-cycle
 // animation. Off by default. Turn on with `?debughl=1` (works on the live site too) or via the
 // dev-only Options menu toggle (localStorage `inkwave:debugHighlightAll`).
-// User switch (Settings): turn the SCAS vocabulary suggestions off entirely — no green words, nothing
-// to cycle. The provenance engine still runs underneath; this only suppresses the display + interaction.
+// User switch (Settings): SCAS vocabulary suggestions default OFF — no green words, nothing to
+// cycle until explicitly enabled. The provenance engine still runs underneath; this suppresses
+// only the display + interaction.
 export function scasSuggestionsOff(): boolean {
+  // Pure decoration derivations run in Node/SSR without browser preferences; keep them testable.
+  // A real browser with an absent or unreadable key takes the opt-in OFF default below.
   if (typeof window === 'undefined') return false
-  try { return window.localStorage.getItem('inkwave:scasOff') === '1' } catch { return false }
+  return !scasSuggestionsEnabled()
 }
 
 function debugHighlightAll(): boolean {
