@@ -713,7 +713,7 @@
     position: absolute;
     left: 0;
     right: 0;
-    background-color: #f7f2e8;
+    background-color: #f3f1ec;
     background-image:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
     border-radius: 16px; /* corner rounding (+150% then -20%, Peter 2026-07-10) */
@@ -776,7 +776,7 @@
      parchment fills the screen edge-to-edge (driven by device type, not viewport width, so zoom
      doesn't change it). */
   .inkwave-editor-surface.is-phone {
-    background-color: #f1eadb; /* a shade under the sheet #f7f2e8, so gapped-mode gaps still read as bands */
+    background-color: #e9e7e3; /* a shade under the sheet #f3f1ec, so gapped-mode gaps still read as bands */
     /* PHONE PDF DOCK (Peter, 2026-07-10): the viewer takes the TOP half; padding-top pushes the
        writing into the bottom half. Body scroll means the content under the panel shifts down by
        exactly the inset, so the line you were reading lands just below the panel — the scroll
@@ -818,7 +818,7 @@
        blur (part of the page out of frame). Floor every form control at 16px on phone. */
     input, select, textarea { font-size: max(16px, 1em) !important; }
 
-    html, body { background-color: #f1eadb; }
+    html, body { background-color: #e9e7e3; }
   }
 
   /* Gapped sheets on phone: each page panel's 4-side 32px-blur drop shadow (+ radius) is expensive
@@ -1139,7 +1139,7 @@
      base + a tiled (400×400, repeating) noise texture. The old full-height linear-gradients made the
      tint vary top→bottom, which read as the paper "changing colour" as you scrolled a long document. */
   .scroll-paper {
-    background-color: #f7f2e8;
+    background-color: #f3f1ec;
     background-image:
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='400' height='400' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
   }
@@ -1488,7 +1488,7 @@
      night mode its dark sheet surface (see the night block). Subtle ring + shadow match the app's
      panels; radius per Peter (~8–10px). */
   .scas-cycle-backing {
-    background: var(--iw-paper, #f7f2e8);
+    background: var(--iw-paper, #f3f1ec);
     border: 1px solid var(--iw-paper-line, rgba(80, 50, 10, 0.18));
     border-radius: 9px;
     box-shadow: 0 2px 10px var(--iw-paper-shadow, rgba(60, 40, 10, 0.16));
@@ -2159,7 +2159,7 @@
 
    DELIBERATELY NOT MOVED HERE, because these are NOT one-value-per-token and a day definition would
    genuinely repaint something — Peter's call, reported rather than guessed:
-     --iw-paper      three day surfaces share one night value: the writing SHEET (#f7f2e8 parchment),
+     --iw-paper      three day surfaces share one night value: the writing SHEET (#f3f1ec parchment),
                      the music panel CARDS (#fff) and the score PAGE (#fcfaf6). One token, three
                      roles; picking any single day value repaints the other two.
      --iw-newbtn-fg  documented as "+ New text on its light-blue chip" (day #0369a1), but two other
@@ -2369,7 +2369,7 @@
   --iw-snap-divider-hover: rgba(48, 36, 56, 0.28);
   --iw-snap-divider-grip: rgba(48, 36, 56, 0.4);
   --iw-snap-map: #9fd9c8;                    /* minimap ground */
-  --iw-snap-map-page: #f7f2e8;               /* a page thumbnail on it */
+  --iw-snap-map-page: #f3f1ec;               /* a page thumbnail on it */
   --iw-snap-map-num: rgba(48, 36, 56, 0.8);
   --iw-snap-map-shadow: rgba(80, 50, 10, 0.15);
   --iw-snap-danger: #b91c1c;                 /* "✕ snapshot" — destructive, NOT the deletion mark */

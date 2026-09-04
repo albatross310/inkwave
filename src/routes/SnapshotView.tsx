@@ -629,7 +629,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
       )}
       {Array.from({ length: total }, (_, p) => (
         p < pages ? (
-          <div key={p} style={{ position: 'relative', background: 'var(--iw-snap-map-page, #f7f2e8)', borderRadius: 2, minHeight: 6, boxShadow: `0 1px 2px ${CARD_SHADOW}`, overflow: 'hidden' }}>
+          <div key={p} style={{ position: 'relative', background: 'var(--iw-snap-map-page, #f3f1ec)', borderRadius: 2, minHeight: 6, boxShadow: `0 1px 2px ${CARD_SHADOW}`, overflow: 'hidden' }}>
             {/* Text block (marks) inset with page-like margins — top/left/right, and a clear bottom margin
                 that leaves room for the logo + number below it (so they're never buried under a diff tick). */}
             <div style={{ position: 'absolute', top: 5, left: 4, right: 4, bottom: numFont + 9 }}>

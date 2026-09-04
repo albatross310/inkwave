@@ -793,7 +793,7 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   // Overlay mode (touch): the word isn't expanded, so size the opaque card to the widest
   // synonym (minWidth) and give it the paper colour so it masks the text it floats over.
   const cardWidth = cycle.overlay ? Math.ceil(cycle.minWidth) : width
-  const cardBg    = cycle.overlay ? 'var(--iw-paper, #f7f2e8)' : 'transparent'
+  const cardBg    = cycle.overlay ? 'var(--iw-paper, #f3f1ec)' : 'transparent'
   // Parchment backing behind the reel (see .scas-cycle-backing): visible exactly while the
   // neighbour rows are revealed (`moving`), because that's when the popup words overlap the text
   // lines above/below; at rest only the centre word shows, on its own line, so the paragraph
