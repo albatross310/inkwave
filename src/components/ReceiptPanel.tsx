@@ -4,6 +4,10 @@ import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
 import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
 
+// Peter, 2026-09-05: +50% horizontal breathing room (10px → 15px). The surrounding fixed-left
+// wrapper and bottom-left scale origin keep the pill's outer left edge anchored as it widens right.
+const SNAP_PILL_PAD_X = 15
+
 
 // ── Bitcoin coin icon ─────────────────────────────────────────────────────────
 function BitcoinIcon({ size = 14 }: { size?: number }) {
@@ -188,11 +192,12 @@ export function ReceiptPanel({
           <button
             type="button"
             onClick={() => setOpen(!open)}
-            className={`iw-nightable iw-toolbar-outline ${compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm px-2.5 py-1 max-w-[7.25rem] max-lg:max-w-[6.75rem]'}`}
+            className={`iw-nightable iw-toolbar-outline ${compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm py-1 max-w-[7.25rem] max-lg:max-w-[6.75rem]'}`}
             style={{
               border: `1px solid rgb(var(--iw-ink-rgb) / 0.75)`,
               borderRadius: compact ? 9999 : 12,
               color: 'var(--iw-pill-fg, #302438)',
+              paddingInline: compact ? undefined : SNAP_PILL_PAD_X,
               // Shared with the sync pill opposite so the pair reads as a matched set — see
               // components/sidePill.ts. Natural height here was ~27.5px, so this grows it ~2.5px.
               ...(compact ? {} : { height: SIDE_PILL_H, display: 'flex', alignItems: 'center', fontSize: SIDE_PILL_FONT }),
