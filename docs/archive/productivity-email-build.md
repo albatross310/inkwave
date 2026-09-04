@@ -1293,3 +1293,107 @@ HONEST LIMITS, and they are wide:
   that; this only catches the crude case.
 - Quoted spans are skipped — the narrative may legitimately quote the writer calling THEMSELF
   lazy, and flagging the writer's own words back at them would be absurd.
+
+---
+
+## `productivity/aggregate.ts` — the ledger → report/graphs seam (§A3.3)
+
+<a id="aggregate-client-side"></a>
+### Why the aggregates are client-side
+
+§A6.4 IS WHY THIS IS CLIENT-SIDE: these numbers are MEASURED. They are computed here,
+deterministically, from the writer's own ledger, and the model never gets to hand them back.
+Aggregating here is also what keeps AI payloads small regardless of window (§A6): the report
+sends compact day rollups, not raw logs.
+
+Everything is a pure function of the rows + a clock, so the arithmetic is testable without a disk.
+`feat/prod-graphs` owns the CHARTS; this is the data they read.
+
+The entry-provenance rules live in `sessionLogic.ts` (beside the row builders, so the drop-up can
+ask a one-field question without importing the whole rollup layer). RE-EXPORTED, never
+re-declared: two copies of "what counts as measured" is precisely how the two would drift apart.
+
+<a id="aggregate-posthoc-excluded"></a>
+### Every measured field reads `measured` only
+
+`dayAggregate` splits post-hoc rows out at the TOP of the function rather than at each `reduce`,
+deliberately: a field added later reads `measured` because that is the variable in scope, so the
+safe thing is also the easy thing. Post-hoc rows contribute to `posthoc_minutes` and
+`posthoc_session_count` and to nothing else.
+
+A session's active minutes are attributed to the hour it STARTED in. That is a convention, and
+the honest one available: the ledger records when a session ran, not minute-by-minute where the
+work fell inside it, and spreading minutes across a span would invent a distribution we never
+measured. Sessions are short (a Pomodoro is 25 min), so the attribution is close.
+
+`docTotals` EXCLUDES post-hoc rows for two independent reasons and either would do: the screen
+offers the writer a choice of DOCUMENTS to send text from, and a block he described from memory has
+no text to send (and no document — `doc_id: 'post-hoc'`); and its minutes are testimony, so listing
+them in a column of measured per-document minutes is exactly the merge §A6.1 forbids.
+
+<a id="aggregate-merge"></a>
+### The 2026-07-17 merge — two lanes, two `aggregate.ts`, one module
+
+MERGED 2026-07-17 (feat/prod-integrate). Both lanes wrote an `aggregate.ts`; this is ONE module
+now, over ONE schema. What was reconciled, and what deliberately was not:
+
+- ONE ROW TYPE. The graphs lane built against `ledger.ts`'s `LedgerSession` — an explicit
+  placeholder mirror of §A3.2, retired here in favour of the real `SessionRow` (types.ts), and
+  the day-grouping/rounding/time rules are now the same ones the window builder uses.
+  That is the swap its own THE LEDGER SEAM comment anticipated.
+- TWO OUTPUT SHAPES, KEPT — they answer different questions and are NOT a fork:
+  `DayAggregate` (types.ts, snake_case) = the §A3.3 WIRE contract the report payload emits;
+  `ChartDayAggregate` (here, camelCase) = the view model the SVG charts read.
+  The graphs lane's `DayAggregate` was renamed to `ChartDayAggregate` because two exported types
+  sharing one name in one module is exactly how a caller silently gets the wrong contract. The
+  wire name belongs to the schema owner.
+- THE HOUR HISTOGRAMS DIFFER ON PURPOSE, and both are honest about it: `busiest_hours`
+  attributes a session's minutes to the hour it STARTED in; `hourHistogram` apportions
+  them across the hours the session spans. Both conserve total active minutes, so they cannot
+  contradict each other on any total — they differ only in how they distribute WITHIN a day, and
+  each documents its own limitation. Collapsing them would have silently rewritten one lane's
+  measured behaviour to make a merge look tidy.
+
+PURE. No clock, no storage, no network, no React, no AI. Every number here is computed from the
+ledger's own bytes and is GROUND TRUTH (§A6.4): these must never round-trip through an LLM, which
+is the whole reason the graphs are worth believing.
+
+<a id="aggregate-hour-histogram"></a>
+### `hourHistogram` — an apportionment, and it says so
+
+Honest limitation, stated rather than hidden: the ledger records a session's start/end and its
+active_minutes, but NOT which minutes inside the span were active. So active time is spread
+proportionally over the hours the session covers. For a session inside one hour this is exact; for
+a session straddling hours it is an apportionment. The histogram is therefore reliable at the
+"which part of the day do you write in" scale it is drawn at, and should not be read as a
+minute-accurate record of any single hour.
+
+Only gaps BETWEEN a day's own sessions count as that day's breaks — the first session's
+`break_before_min` reaches back to the previous day (often overnight) and would swamp the stat.
+
+<a id="aggregate-correlation"></a>
+### `Correlation` — descriptive only, and `n` travels with `r`
+
+A descriptive association between break-taking and output (§A3.3: "break-vs-output correlations
+(DESCRIPTIVE ONLY)"). This is a Pearson r over days. It is an ASSOCIATION IN THIS WINDOW and
+nothing more — it cannot establish that breaks cause output (the writer who takes more breaks may
+simply be having a longer day). The panel renders it with a descriptive caption only, and never at
+the daily window (§A6.2). `n` travels with `r` so a coefficient can never be read without its
+sample size. Zero variance on either axis ⇒ r is undefined, not zero; don't report a made-up 0.
+
+<a id="aggregate-pearson-clamp"></a>
+### Why `pearson()` snaps rather than clamps — a silencer that hid a dropped axis
+
+For a correct Pearson, Cauchy–Schwarz puts |r| ≤ 1 ALWAYS: a clamp to [-1, 1] is unreachable in
+working code, and the only thing it can ever actually do is disguise a BROKEN formula as a
+plausible number. That is not hypothetical — this function shipped with `clamp(num/den, -1, 1)`
+and an external audit dropped the Y spread from the denominator (`sqrt(dx2*dy2)` →
+`sqrt(dx2*dx2)`); the mutant computed r=2 for a perfectly-correlated fixture and the clamp
+returned exactly the 1.0 the test asserted. The whole 1054-test repo stayed green while a
+correlation shown to the writer would have read 1.0 ("your breaks predict your output") where
+the truth was 0.70. The clamp was load-bearing for the bug, not for the user.
+
+So: snap only the floating-point hair (a legitimate ±1 can land at 1.0000000000000002), and
+REFUSE anything grossly out of range. An impossible r means the maths is wrong, and the honest
+response to "my measurement is impossible" is to stop reporting it — not to round it into the
+range where it looks fine. Unreportable is the one answer that cannot mislead (§A6.1).
