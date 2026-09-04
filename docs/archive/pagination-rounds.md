@@ -661,3 +661,373 @@ whole sheet. Full height = the average of the previous ≤5 page regions in this
 derived from the geometry alone, so step-cache hits reproduce it exactly, and it is correct under
 font zoom / phone reflow where the canonical pageH wouldn't match the live layout. Single-page docs
 fall back to the canonical pageH.
+
+---
+
+## `arithmeticLayout.ts` — the engine's body
+
+The engine's own design, its eligibility table and the reason it must not graduate are under
+[#arith-engine](#arith-engine) above. This section holds the body's rounds.
+
+<a id="fonts-certified"></a>
+### The certified palette — a retirement, and the Inter retraction
+
+ROUND-10 (2026-07-16) — all 18 shipped families verified on BOTH Chromium and WebKit, in the
+editor's real context, and (the load-bearing bit) their Chromium DOM wrap == their WebKit DOM wrap
+byte-for-byte at the canonical width. Hinting was equalised for that comparison: Chromium's default
+Linux fontconfig quantises advances to whole px while WebKit uses fractional, which manufactures
+false divergences (`--font-render-hinting=none` removes it; real devices use subpixel).
+
+RETIRED 2026-07-16: Lora + Gelasio — dropped from the PICKER, but their faces are STILL SERVED
+(fetch-fonts keeps them): deleting the woff2 would drop legacy marks down their own stacks to
+Cambria/Georgia SYSTEM fonts, whose metrics vary by device — silently repaginating old docs
+phone-vs-print. Unlisted in `CERTIFIED_FAMILIES` regardless: nobody new can select them, and they
+never went through the round-10 cross-engine pass, so the engine must DEFER rather than compute
+their wrap.
+
+INTER + OPTICAL SIZING — the correction (2026-07-16). An earlier pass EXCLUDED Inter for a
+cross-engine DOM wrap divergence (Δ −12.55px @18px). That was real for the font THAT HARNESS
+FETCHED — which requested Inter's OPTICAL SIZE axis (`Inter:ital,opsz,wght@…`). The shipped
+fetch-fonts.mjs never requests opsz (it asks `ital,wght@` only), so the font we actually serve
+carries NO opsz axis and was never affected: re-measured, Inter's Chromium DOM wrap == its
+WebKit DOM wrap byte-for-byte ([0,61,128,196,263,327]) under BOTH font-optical-sizing values,
+and it certifies on both engines. Added.
+
+The `:root { font-optical-sizing: none }` policy (index.css) STAYS regardless: measured a
+no-op for all 18 shipped faces, and it is the standing guard against any future opsz font —
+the hazard is genuine (Chromium resolves opsz from font-size, WebKit does not), it simply
+isn't one our current fetch pipeline can produce. NB canvas has no font-optical-sizing
+property, so an opsz font ALSO breaks canvas↔DOM parity once the DOM is pinned — an opsz
+face is unusable by this engine from both directions. Don't ship one.
+
+Certification is by PRIMARY family: the stack `'EB Garamond', Georgia, serif` is eligible because
+EB Garamond loads and is certified; the Georgia/serif tail only matters if the primary fails to
+load, in which case `document.fonts.check` is false and the gate defers.
+
+<a id="inline-atom-rect"></a>
+### Inline atoms collapse to one rect — the mid-line break fix
+
+**MERGED ENTRY.** The same fix is explained in `arithmeticLayout.ts` (the math-pill note, 22 lines
+plus its `mathEligible` rider) and in `PaginationExtension.ts`'s `collectLines` header (~19 lines of
+its 54). One fix, one entry.
+
+INLINE-ATOM NODEVIEWS COLLAPSE TO ONE RECT (2026-07-17 — the mid-line break fix).
+
+`range.selectNodeContents(block).getClientRects()` DESCENDS INTO NodeView subtrees, so an inline
+atom's internal boxes each contribute their own rect. The citation NodeView's ⤵ biblink button is
+`display:inline-flex` at a ~6px offset from the text line — MORE than the 3px same-line dedup
+tolerance — so it survived the filter as a PHANTOM LINE. Its sample point sits MID-LINE, and a
+break attributed to it opens a page gap in the middle of a rendered line: measured 6 of 55 live
+breaks (~11%) on thesis-shaped citation prose → 0 (scripts/textrender-probe/midline.prove.mjs),
+and this is what Peter reported as "space left on the last line" when paragraphs split. Inline
+math has the identical artifact (KaTeX sub/superscript + fraction spans): per-block phantom lines
+measured citations +29 / math +30 → 0 (linecount.prove.mjs — the mid-line RATE cannot see math,
+which is rare enough that no break happened to land on one).
+
+THE PRINCIPLE: an inline ATOM has no internal break opportunity — the parent line can only break
+AROUND it (CitationNodeView pins white-space:nowrap; MathInlineView is an inline-grid) — so it
+must contribute EXACTLY ONE rect: its own bounding box. PM decides what an atom is
+(`isInline && isAtom`); never a CSS class, which would silently miss a future NodeView.
+A block with NO inline atoms takes the byte-identical old path by construction — that is what
+keeps plain/headings/lists breaks bit-for-bit unchanged (they were already exact).
+SCOPE: inline atoms only. A TOP-LEVEL atom (refList, block math) is `atomLike` and keeps its
+deliberate pseudo-block-per-line treatment — a different rule, unchanged.
+
+The engine's own half of the story, from `LINE_STABILITY_EPS`:
+
+An inline math pill is an ATOMIC one-line unit: whatever its formula, inline KaTeX renders in
+TEXTSTYLE, so the pill is a stable box (~34px @18px base — fixed, formula-independent; even a
+`\frac` or `\sum` stays compact) that simply makes ITS line taller. That's fine for the arithmetic
+path (the line takes the pill's demand). The one catch was the DOM VERIFIER: collectLines reads
+line tops via range.getClientRects, and KaTeX's internal sub/superscript and fraction spans emit
+rects BELOW the baseline that the 3px dedup split into spurious extra lines — so the verifier
+OVER-counted a math paragraph's lines (a pre-existing inaccuracy, independent of this engine).
+
+COLLECTLINES CO-REQUISITE — ✅ LANDED 2026-07-17 (fix/collectlines-nodeview). MEASURED, not
+assumed — linecount.prove.mjs counts every block's lines three ways (truth / old rect path /
+collapsed path) on the REAL app: math pills over-counted 23 blocks (+30 phantom lines, e.g. a
+7-line paragraph read as 9) and citations 24 blocks (+29); both go to ZERO with the collapse,
+while the no-NodeView controls were exact on both paths.
+
+STILL GATED, DELIBERATELY. The source comment as it stood read: *"`mathEligible` remains FALSE at
+its call site (arithMeasure.ts). This co-requisite is satisfied, so flipping it is now unblocked —
+but that hands math paragraphs to the arithmetic engine, which is a separate behaviour change and
+needs its own end-to-end proof (isolate.prove.mjs has no math case yet). Do not flip it as a side
+effect of something else."* ⚠ VERIFY BEFORE QUOTING THAT SENTENCE: `buildArithMeasure`'s
+`mathEligible` parameter DEFAULTS false, but the three call sites in `PaginationExtension.ts` pass
+`true` explicitly (they are all behind default-OFF flags — `?arithLayout`, `?arithBands`,
+`?renderFill` — so nothing a writer sees is affected). The rule that survives is the imperative
+one: flipping it is a separate behaviour change and needs its own end-to-end proof.
+
+`LINE_STABILITY_EPS` still guards the MIXED-SIZE TEXT case (a genuine instability with no such fix
+— differently-sized text rects reorder unfixably). The engine's CAPABILITY is unconditional: it
+computes math paragraphs correctly either way; the flag only decides whether to trust the DOM
+verifier over them yet.
+
+<a id="mixed-family"></a>
+### Mixed family vs the strut is DOM-only — and why we defer rather than correct
+
+── MIXED FAMILY vs THE STRUT is DOM-ONLY too (2026-07-17) ──
+
+A line box is not `ratio × size`. It spans from the highest inline-box top to the lowest
+bottom over the STRUT (the block element's own font) AND every inline box on the line, each
+centring its own (ascent + descent) content area in its own line-height. So a run in a face
+whose BASELINE sits differently from the strut's makes the line TALLER — while the wrap, and
+therefore every self-consistency check built from it, stays perfect.
+
+MEASURED in the real editor (strut = EB Garamond, 18px, φ; a span per family inside the real
+.ProseMirror; scripts/textrender-probe/strutrule.mjs), line gap vs the model's 29.109375:
+
+    EB Garamond / bold / italic  29.109375  (+0)   ← the strut's own face: the known-negative
+    Crimson Pro                  30.109375  (+1)
+    Atkinson Hyperlegible        30.109375  (+1)   Bitter, Carlito, Cormorant: +1
+    Spectral, Gelasio            30.109375  (+1)
+    IM Fell DW Pica              31.109375  (+2)   ← the app's OWN identity serif is the worst
+
+At ~44 lines/page a +1px line is ~1.5 lines of drift per page. This is what made
+`mark textStyle:fontFamily` diverge Δ+76 at the FIRST break while claiming full reliability.
+
+WHY WE DEFER RATHER THAN CORRECT IT. The correction is exactly
+`max(strutTop, runTop) + max(strutBot, runBot)`, which needs each face's ascent/descent. The
+ONLY metrics canvas exposes are `fontBoundingBoxAscent/Descent`, and Chromium returns them
+ROUNDED TO WHOLE PIXELS: EB Garamond and JetBrains Mono BOTH report 18/5 though they are
+different faces. Fed those, the formula above mispredicts 6 of 16 measured cases by exactly
+0.5px per line (Crimson Pro: predicts +0.5, the DOM does +1.0) — ~22px, three quarters of a
+line, over one page: enough to move a break. The real ascent/descent live in the font file and
+in Blink's layout, not in any API this renderer can reach; /snapshot has no `.ProseMirror` to
+harvest them from either (ROUND 14). So the height is not computable here, and a height we
+cannot compute is one we do not invent — the same answer `mixed-size` and `blockStyle()` give.
+
+THE PATH BACK TO COVERAGE, measured and left deliberately unbuilt: `(ascent − descent)` is what
+decides growth (Gentium Plus has a+d = 27 vs the strut's 23 and does NOT grow — its a−d matches),
+and the ROUNDED a−d agreed with the DOM on all 16 cases, over-deferring none. That is an
+empirical claim over one palette on one engine, and rounding can hide a sub-pixel difference in
+the UNDER-deferring direction — the one that paints wrong words. It needs a certification sweep
+of every shipped family on both engines, the same way the fonts themselves were certified.
+
+MIXED FONT-SIZE among TEXT runs is DOM-ONLY for the neighbouring reason: a taller text run's rect
+top diverges >3px, and unlike a math pill there is NO single-rect fix (the size change is intrinsic
+to the text run) — the verifier is unfixably order-dependent, so it defers.
+
+<a id="shaping-gate"></a>
+### The shaping gate — an empirical probe, not a capability sniff
+
+**MERGED ENTRY.** The gate's design is in `arithmeticLayout.ts` (19 lines) and its canvas
+configuration in `makeCanvasMeasure` (14); the wire-in's own probe-span trap is in
+`PaginationExtension.ts` (10). One mechanism, one entry.
+
+── ENGINE SHAPING GATE (2026-07-16 — rev 2, after the ligature-strip result) ──
+
+The engine may only run where CANVAS SHAPES TEXT THE WAY THE EDITOR RENDERS IT. The editor
+renders with ligatures OFF (.ProseMirror { font-variant-ligatures: none }); canvas applies them
+by default and its only lever, ctx.textRendering, is Chromium/Firefox-only — **Safari has never
+shipped it, on any version, desktop or iOS**. So an API check said "never on any iPhone".
+
+THAT IS NO LONGER THE RIGHT QUESTION. The ligature tables in the faces we self-host are dead
+weight for document text (CSS already disables them), so we strip liga/clig/dlig/hlig/calt out
+of the served woff2 (scripts/fontStrip.mjs). MEASURED, all 18 families, real .ProseMirror:
+
+    • production measure == DOM on BOTH engines: 18/18 (WebKit Δ ≤ 0.0001, controls up to Δ27.5)
+    • DOM rendering unchanged by the strip: 18/18 at GLYPH level (per-char x positions) + wrap
+    • cross-engine DOM↔DOM on stripped faces: all 18 identical    • byte cost: +0.7KB (+0.01%)
+
+With no ligatures in the file, canvas has nothing to apply and matches the editor WITHOUT the API
+— i.e. on every iPhone. (The ZWNJ workaround was also measured, and FAILS: WebKit's canvas does
+not honour U+200C. Stripping the font is the only lever that works there.)
+
+So the gate is now EMPIRICAL, not a capability sniff: probe whether canvas actually agrees with
+the DOM for this font, once, and cache it. It is correct in every combination — API or not,
+stripped or not — and it self-corrects the moment the pipeline ships stripped faces.
+`canvasCanMatchEditorShaping()` (does this engine expose `ctx.textRendering`?) is NOT the gate —
+`makeCanvasMeasure` uses it opportunistically and it is worth logging, but a false there no longer
+means "cannot run".
+
+### The canvas configuration — match the editor's shaping or every ligature is a wrap error
+
+MATCH THE EDITOR'S SHAPING, or every ligature is a wrap error (2026-07-15). ProseMirror's
+injected sheet sets `.ProseMirror { font-variant-ligatures: none; font-feature-settings:
+"liga" 0 }` — the editor renders f+i SEPARATELY. Canvas measureText applies ligatures by
+DEFAULT, so it measured "first"/"office"/"affluent" 2-5px NARROWER than the editor renders
+them: the engine took a word the browser dropped, on any line with an fi/fl/ffi.
+MEASURED (delta canvas − DOM-inside-.ProseMirror, EB Garamond 18px):
+
+    default / optimizeLegibility → −2 … −5 on every ligature string (0 on ligature-free text)
+    textRendering 'optimizeSpeed' + fontKerning 'normal' → 0.000 on ALL strings
+    geometricPrecision → fractional drift; ZWNJ-injection also 0.000 but mangles the text
+
+`optimizeSpeed` disables ligatures; `fontKerning:'normal'` pins KERNING ON explicitly (the editor
+keeps kerning — its sheet only disables liga), so we never rely on optimizeSpeed's implied
+kerning behaviour. NB this was also a GAP IN THE ROUND-7 FONT CERTIFICATION: r7/r8 measured
+canvas vs a PLAIN span (ligatures on BOTH sides), so their Δ≤0.05px parity did not cover the
+editor's liga-off shaping.
+
+### The wire-in's probe span — a self-check that measured in a fiction
+
+THE EMPIRICAL SHAPING GATE runs once per editor, cached. `canvasShapingMatchesEditor` must
+measure its probe inside the REAL .ProseMirror — that is where the ligature state lives (the
+injected PM sheet sets `font-variant-ligatures:none`), and a plain-div harness certifies a fiction
+the editor never uses.
+
+The probe span had BOTH halves wrong. The `font:` SHORTHAND resets font-variant-ligatures to
+`normal` — so a probe span set from it renders WITH ligatures even inside .ProseMirror, whose
+injected sheet sets them off. That measured the editor's own shaping context as a fiction and the
+gate always failed. Re-assert the editor's real shaping longhands AFTER the shorthand (later
+declarations win) so the span shapes exactly as the body text.
+
+`content-visibility:visible` is LOAD-BEARING: the probe is a direct child of .ProseMirror, so
+during the zoom-live window the `> *` rule gives it `content-visibility:auto` — and parked
+off-screen it is SKIPPED, so its contents never lay out and the rect comes back a fraction of the
+true width (measured: 177px vs the real 1186px). The gate then always failed and the exit fell
+back.
+
+The span is removed SYNCHRONOUSLY: PM never sees a transaction, so its observer never rebuilds.
+
+<a id="white-space"></a>
+### White-space mode — whether a line's trailing space hangs
+
+── WHITE-SPACE MODE: whether a line's trailing space HANGS ──
+
+This is not a detail — it decides the fit test, and it bit hard (2026-07-15). ProseMirror's own
+stylesheet (prosemirror-view/style/prosemirror.css, injected by @tiptap/core) sets:
+
+    .ProseMirror { white-space: pre-wrap; white-space: break-spaces; }
+
+so the live editor computes `break-spaces`. Per CSS Text 3, break-spaces is pre-wrap EXCEPT that
+"any preserved white space that would otherwise hang instead takes up space and can be broken
+after" — i.e. THE TRAILING SPACE NEVER HANGS; it occupies width and counts toward the fit.
+MEASURED (1/64px sweep, "AAA BBB CCC", EB Garamond 18px, bare=73.0 full=77.0):
+
+    normal        → BBB first fits at w=72.98  (≈bare)  → HANGS
+    pre-wrap      → BBB first fits at w=72.98  (≈bare)  → HANGS
+    break-spaces  → BBB first fits at w=76.98  (≈full)  → NO HANG
+
+Consequence: the PRODUCTION fit test is the FULL token width (space included). A `normal`-mode
+harness silently takes a word the real editor drops — which is exactly how a plain-`<div>` prover
+certified a wrap the editor never produces.
+
+MIXED MODES DEFER. The editor is NOT globally break-spaces: the same injected PM sheet flips it
+per SUBTREE —
+
+    .ProseMirror [contenteditable="false"]                            { white-space: normal; }
+    .ProseMirror [contenteditable="false"] [contenteditable="true"]   { white-space: pre-wrap; }
+
+— i.e. every NodeView/atom subtree (citations, math, gap widgets) hangs while the body text around
+it does not. A citation NodeView is `display:inline`, so its label text FLOWS IN THE PARENT'S LINE
+in `normal` mode: a citation-bearing paragraph is genuinely MIXED-mode. The wire-in must read this
+per run (getComputedStyle on the run's element); mixed ⇒ DEFER. A text run in a different mode than
+the block wraps by a DIFFERENT rule (hang vs no-hang) on the SAME line — and `normal` additionally
+COLLAPSES runs of spaces, which this engine does not model. Both are unmodelled.
+
+This is the guard that keeps a future citation-eligible paragraph honest: a `normal` citation
+subtree inside break-spaces body text can only go arithmetic once the atom is a proven opaque box,
+never by guessing. Only the editor's own mode is proven end-to-end (break-spaces); anything else
+defers rather than trust an unproven rule.
+
+<a id="lu-grid"></a>
+### The LayoutUnit grid — quantise, and floor
+
+The browser's USED line-box height: the CSS line-height (ratio × font-size) does NOT render at its
+exact float — it is laid out on the LayoutUnit grid (1/64 px), FLOORED. Empirically (prover
+`_probe`): 18px φ → 1863/64 = 29.109375 (not 29.124); 24px φ → 2485/64 = 38.828125. Reproducing
+this exactly is what makes the arithmetic `used`/botMargin byte-identical to the DOM measure — the
+naive ratio×size drifts ~1px over a page and flips the gap-widget height. `fontSizePx` is itself
+snapped to the grid first (round), matching how the browser stores the computed size.
+
+THE FIT TEST TOO (2026-07-16). The browser lays text out on the same grid, and a line FITS the
+container when its grid-quantised width does — NOT its exact float width. WHY IT MATTERS at the
+RENDER font (22.5px phone, and 1.037em → 23.3325px): canvas measureText returns a raw float sum
+that runs ~0.01px WIDER than the browser's grid-accumulated width over a line — negligible at the
+canonical 18px (never reached a break boundary; the 18px cert was 23/23) but at the larger render
+size it flips a boundary word (measured: blk11 "…substrate of linguistic " canvas 360.6984 vs box
+360.6875 — floor(360.6984·64)/64 = 360.6875 = box ⇒ FITS, matching the DOM; the raw float said
+overflow ⇒ arith broke one word early ⇒ the render band drifted N·renderLH). Quantising reconciles
+it AND the AAA-BBB white-space case (full width ≈ grid boundary). floor, not round: the browser
+truncates in LayoutUnit arithmetic (measured: width:360.7px → getBoundingClientRect 360.6875 =
+floor(360.7·64)/64).
+
+HYPHEN-MINUS (U+002D) is a soft-break opportunity AFTER the hyphen (the browser breaks
+"constructed-language" → "constructed-" / "language"; the hyphen stays on the first line and
+counts toward its width). End the token AFTER the hyphen when it sits between two
+alphanumerics — an INTRA-WORD hyphen — so numeric ranges ("3-4") and leading/trailing dashes
+don't get a spurious break. Only reachable within a run; a hyphen exactly at a run boundary
+(mark change) keeps its token glued (rare — real compounds carry one mark). This is what the
+RENDER font (22.5px) exposed: a hyphenated compound the browser split but the engine kept
+whole wrapped as one unit → one extra line → the render band drifted by a line height.
+
+An inline ATOM GLUES to adjacent non-space text in the same token (CSS offers no break opportunity
+between an inline-block and neighbouring non-space text), so "x²" (atom) directly followed by "+1"
+(text) never breaks between them.
+
+<a id="leading"></a>
+### `firstLineLeadingPx` — a constant that cancels, except across a size boundary
+
+OPTIONAL first-line baseline LEADING (px). collectLines reads line tops via range.getClientRects,
+which returns the TEXT rect (baseline-positioned) — offset below the line-box top by a
+per-(size, base-strut) constant (EB Garamond @18px base: 16px→5, 18px→3, 18.666px→2, 24px→3). This
+is a pure constant per block, so it cancels in INTRA-block line deltas; it only affects the
+CROSS-block advance where adjacent blocks differ in size — i.e. the gap-widget botMargin at a size
+change. Supplying it (from a one-time per-certified-font calibration table, measured once like the
+font certification itself) makes the FULL signature byte-identical; omitting it (0) still yields
+byte-identical break POSITIONS + page count, only the cosmetic botMargin drifting ≤3px at size
+boundaries. Break positions — the load-bearing cross-device invariant — never depend on it.
+
+<a id="element-box-sources"></a>
+### Element box sources — the extension point, and the discipline it fixes
+
+── Element box SOURCES: how each measurable type produces its reflow-free box ──
+
+The wire-in obtains an element's box from its type. This registry is the extension point — a new
+measurable atom becomes a one-function plug-in, never a rewrite of the wrap/pagination core.
+
+TEXT (inline, computed) — handled inside `tokenize()`: advance = measureText, demand =
+`snappedLineHeight(fontSizePx)`. No provider needed.
+
+MATH (inline + block, CACHED ONE-TIME MEASURE) — the wire-in keeps a cache keyed by a STABLE
+content key and fills a miss with ONE measure off the node's already-rendered KaTeX geometry
+(no reflow of anything else; math renders synchronously and is immutable per node):
+
+    inline: key = `${latex}|${fontSizePx}` → InlineBox {
+      advanceWidth      = the pill's border-box width  (KaTeX box@0.826em + 6+4 padding + 2 border),
+      lineHeightDemand  = the line-box height the pill produces when set inline with text.
+    }  A miss measures the live node once (getBoundingClientRect on the pill + a one-line probe for
+       the demand) and caches it; the box is invalidated only if the latex changes (⇒ a new key).
+    block:  key = `${latex}|${align}` → BlockBox {
+      height = the rendered .katex-display height + the block's 0.4em×2 padding (min 1.8em),
+      marginTop/Bottom = 0.5em (× the block base font).
+    }
+
+The engine never re-measures on a normal pagination — it reads the cached box. This is the same
+"measure once, cache by an immutable key" discipline as the font-certification table.
+
+FIGURE / IMAGE (block, COMPUTED from attrs) — see `figureBlockBox()`. A figure's box is a PURE
+function of its specified/intrinsic dimensions + its caption's wrapped height + margins — no
+measure at all. Height honours a CSS `max-width:100%` shrink: a figure wider than the column scales
+down, keeping aspect ratio (the common editor rule). No figure node exists in the schema yet
+(StarterKit + Math + Citation + ReferenceList only) — so this is the documented extension point,
+ready to wire when one lands.
+
+THE DISCIPLINE that stays fixed for ANY new type: (1) the box must come from computation or a
+one-time measure cached by an immutable key — never a per-pagination reflow; (2) an INLINE box
+must clear the LINE_STABILITY_EPS fit check or the block defers (the DOM verifier would miscount
+its line); (3) if a type's geometry is NOT stable (a citation label reflows on bibliography
+hydration / style switch; a mixed-size text line's rects reorder), it DEFERS — the idle DOM
+measure remains the verifier, and pagCheck catches any divergence within the re-verify window.
+
+`resolveBlocks` handles three arithmetic shapes — paragraphs (wrap), block atoms (one region of
+`blockBox.height`), and empty paragraphs; everything else defers. Only TEXT runs gate on fonts;
+atoms carry their own already-measured box. Structural ineligibility keeps its own reason
+(`block:hr`, `inline-atom`, `mixed-size`, `uncertified:…`); only an ELIGIBLE block whose faces
+haven't loaded is `fonts-unloaded`. Sibling margins collapse adjacent (max, not sum).
+
+<a id="font-loaded"></a>
+### `makeFontLoaded` — `document.fonts.check()` lies, and the check lives here
+
+REAL font-loaded check. `document.fonts.check()` returns TRUE for a family with NO @font-face (the
+system fallback counts) — that trap silently measures a fallback against itself and "agrees" at
+0.000. So compare the family's advance against the monospace fallback's: a family that measures
+IDENTICALLY to `monospace` for a proportional probe string is not really loaded.
+
+LIVES HERE, NOT IN A CALLER (2026-07-17). It was private to textRenderProbe.ts, and /snapshot's
+break-table build needs the same check — an editor-less route cannot borrow the editor's. Copying
+it would put two definitions of "is this font loaded" in the tree, and the SECOND one is always
+the one that quietly stops agreeing (the pmToText/textMap lesson). One implementation, two callers.
