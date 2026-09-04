@@ -1,18 +1,11 @@
 // ThesaurusPopover — Word-cycle synonym interface.
-// Keyboard: j/k cycle, Space accept+advance, Tab prev word, Shift+Tab next, Esc dismiss
-// Slots: 0 = original word, 1–7 = synonyms (no delete slot — double-tap a word to delete it)
-// Mouse: press opens; drag spins the reel and it rests; short click commits,
-// press-and-hold (anywhere) keeps it open to keep changing; double-tap selects for deletion.
-// Touch (phone model, 2026-07-09): a still TAP opens the cycle (on pointerup) and it STAYS open;
-// browsing is then a NEW vertical drag starting on the open word/reel (touch-action:none there —
-// the reel owns that gesture exclusively, the page never moves); a pan starting anywhere else —
-// including an UNOPENED red word — is native page scroll exclusively and never touches the reel.
-// Tap the reel to confirm, tap outside to dismiss, double-tap to select for deletion.
-//
-// Stage D animation model: the reel is a CONTINUOUS scroll position (cycle.reelPos,
-// in slot units) rather than discrete steps. A drag moves it 1:1 with the pointer; on
-// release a single rAF physics loop coasts with the release velocity (exponential
-// decay) and then eases to the nearest slot — Apple-picker momentum, not snapping.
+// Keyboard: j/k cycle, Space accept+advance, Tab prev word, Shift+Tab next, Esc dismiss.
+// Slots: 0 = the original word, 1–7 = synonyms (no delete slot — double-tap a word to delete it).
+// ⚠ THE REEL IS A CONTINUOUS POSITION (`cycle.reelPos`, in slot units), never discrete steps: a
+// drag moves it 1:1 and release coasts on one rAF physics loop, then eases to the nearest slot.
+// ⚠ ON TOUCH THE CYCLE OPENS ON pointerUP, and only for a STILL tap — a moved finger is native page
+// scroll and nothing opens. Browsing is a SEPARATE gesture that must start on the open word/reel.
+// → docs/archive/panels-and-popovers.md#popover-interaction-model
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
@@ -28,14 +21,11 @@ import { scaleFor, unscale, subscribe as subscribeMagnify } from '../../magnify'
 // The selected slot for a given continuous position = nearest ring, wrapped into [0,SIZE).
 const slotAt = (pos: number) => ((Math.round(pos) % CYCLE_SIZE) + CYCLE_SIZE) % CYCLE_SIZE
 
-// Commit choreography — a strict 3-event clock, NOTHING else moving in between:
-//   EVENT 1  press        — open: reel out in a flash, no fade/drift (handled at open).
-//   EVENT 2  release (T=0) — the reel rolls back to centre (settleTo); nothing else.
-//   EVENT 3  the moment it lands — the action: neighbour rows REPLACED in-place by ghosts
-//                            (seamless freeze-frame, fading out), the line reflows/commits in one
-//                            clean SNAP, and FADE_MS later the cross-out + date fade in. Ghost-out
-//                            and fade-in never overlap.
-// GHOST_MS mirrored in CSS as scasReelOut; FADE_MS (500) as the annotations' animation-delay.
+// ⚠ COMMIT IS A STRICT 3-EVENT CLOCK, with nothing else moving in between: press opens (reel out,
+// no fade/drift) · release rolls the reel back to centre and nothing else · on landing the
+// neighbours are REPLACED in place by fading ghosts, the line reflows in one clean SNAP, and
+// FADE_MS later the cross-out + date fade in. Ghost-out and fade-in NEVER overlap.
+// → docs/archive/panels-and-popovers.md#popover-commit-clock
 const GHOST_MS = 500
 
 // ── Momentum tuning ──────────────────────────────────────────────────────────
@@ -296,16 +286,12 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
   useEffect(() => {
     if (!editor) return
     const edEl = editor.view.dom
-    // PHONE TAP-TO-OPEN (2026-07-09). A touch on a red word must NOT open (or scroll) the cycle on
-    // pointerDOWN — at gesture start the finger is ambiguous (tap vs page pan), and the old
-    // open-on-down model made the SAME gesture both open the cycle and steer the reel while the
-    // browser — whose gesture-start touch-action on the word is `pan-x pan-y` (the universal phone
-    // rule in index.css) — was equally entitled to take it as a page pan. Whoever won the first
-    // touchmove won: sometimes both ran (page panned WHILE the reel advanced), and a browser-claimed
-    // pan fired pointercancel and killed the drag mid-way ("they restrict each other"). New model:
-    // a still tap (< TAP_PX at release) opens the cycle on pointerUP; a moved finger is a native
-    // page scroll and nothing opens. Browsing is then a NEW gesture that must start on the open
-    // word/reel (see dragArmed), whose touch-action:none lets the reel own it outright.
+    // ⚠ PHONE TAP-TO-OPEN IS ON pointerUP, NEVER pointerDOWN. At gesture start a finger is ambiguous
+    // (tap vs page pan) and the word's touch-action is `pan-x pan-y`, so open-on-down let the SAME
+    // gesture steer the reel while the browser was equally entitled to pan: sometimes both ran, and
+    // a browser-claimed pan fired pointercancel and killed the drag mid-way. A still tap (< TAP_PX
+    // at release) opens; a moved finger scrolls and nothing opens.
+    // → docs/archive/panels-and-popovers.md#popover-tap-to-open
     let pendingTouchOpen: { id: number; x: number; y: number } | null = null
     function openFor(t: HTMLElement) {
       tabCursorRef.current = null
@@ -330,14 +316,12 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       if (e.clientX < r.left + 3 || e.clientX > r.right - 3) return
       e.preventDefault()
       openFor(t)
-      // The open REBUILDS this .scas-red span (PM dispatch destroys it). The browser gives the
-      // pointer an IMPLICIT capture to that span — but per spec it's set AFTER the pointerdown event
-      // finishes dispatching, so a setPointerCapture() we call *synchronously* here gets clobbered by
-      // it on some words (whichever way the per-word rebuild timing falls) → once that span detaches,
-      // the gesture's pointermove/up bubble up an orphaned tree and never reach the document reel-drag
-      // listener = "every second word won't scroll on first click". So re-assert capture on the editor
-      // root (never rebuilt) in a MICROTASK too: that runs after dispatch (after the implicit capture
-      // is set) but before the next pointer event, reliably overriding it. Belt-and-braces: both.
+      // ⚠ RE-ASSERT CAPTURE IN A MICROTASK TOO. The open REBUILDS this `.scas-red` span, and the
+      // browser's IMPLICIT capture to it is set AFTER pointerdown finishes dispatching — so a
+      // synchronous setPointerCapture is clobbered on some words, the span detaches, and the
+      // gesture's events bubble an orphaned tree ("every second word won't scroll on first click").
+      // A microtask runs after dispatch but before the next pointer event. Belt-and-braces: both.
+      // → docs/archive/panels-and-popovers.md#popover-pointer-capture
       const pid = e.pointerId
       const grab = () => { try { edEl.setPointerCapture(pid) } catch { /* pointer ended */ } }
       grab()
@@ -512,15 +496,10 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
       })
     }
 
-    // Press + drag up/down spins the reel 1:1 with the pointer (one row-height = one
-    // slot). Works for both mouse (button held) and touch (finger down) — we track
-    // clientY deltas ourselves rather than movementY, which mobile browsers report
-    // unreliably on touch pointers. Releasing flings with the gathered velocity and
-    // the reel RESTS.
-    //
-    // Commit model: a STILL click (no scroll, any duration) commits the rested word. A press-and-
-    // DRAG spins the reel; releasing a drag commits the landed word (or flings). Duration no longer
-    // matters — only whether the pointer moved — so a slow deliberate tap still confirms.
+    // Press + drag spins the reel 1:1 with the pointer (one row-height = one slot), tracking clientY
+    // deltas rather than `movementY`, which mobile browsers report unreliably on touch pointers.
+    // ⚠ COMMIT TURNS ON MOVEMENT, NOT DURATION: a STILL click commits the rested word at any
+    // duration, a drag commits the landed one (or flings), so a slow deliberate tap still confirms.
     let lastY: number | null = null
     let lastT = 0
     let downX = 0, downY = 0
@@ -670,14 +649,12 @@ export function ThesaurusPopover({ editor, paragraphIndex, containerEl, onHintCh
     }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // While a cycle is open, suppress text-selection on the editor. NOTE (phone model, 2026-07-09):
-  // the old blanket `touch-action: none` on the whole editor is GONE — it froze page scrolling
-  // everywhere while a popup was open (and, being applied after the opening gesture had started,
-  // never governed that gesture anyway). Reel exclusivity now lives on the elements themselves:
-  // .scas-focused (index.css) and the reel card (inline style) carry touch-action:none, which the
-  // browser reads at gesture start — so a drag beginning there can never become a page pan, while
-  // a pan beginning anywhere else scrolls natively. overscroll-behavior:none on the root scroller
-  // while open stops any leaked pan from rubber-banding / bouncing mid-cycle.
+  // ⚠ REEL EXCLUSIVITY LIVES ON THE ELEMENTS, never as a blanket `touch-action: none` on the editor
+  // — that froze page scrolling everywhere while a popup was open and, being applied after the
+  // opening gesture began, never governed that gesture anyway. `.scas-focused` and the reel card
+  // carry it, which the browser reads AT GESTURE START; `overscroll-behavior: none` on the root
+  // scroller stops a leaked pan rubber-banding mid-cycle.
+  // → docs/archive/panels-and-popovers.md#popover-touch-action-scope
   useEffect(() => {
     if (!cycle || !editor) return
     const el = editor.view.dom as HTMLElement

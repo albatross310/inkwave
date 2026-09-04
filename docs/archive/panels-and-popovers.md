@@ -645,3 +645,93 @@ Set views are built ONCE per pass: `classifyCommit`'s array scans (`locked.inclu
 `classifyCommit`'s exact decision order — locked → skip (loop 2 only acts on 'in-S'),
 immune-this-version → skip, in-S → kick, else pass. `locked`/`satisfied` cannot change inside this
 loop (`recordKick` touches only `liveKicks`/`kickTimes`), so the views hold.
+
+---
+
+## `editor/suggestions/ThesaurusPopover/ThesaurusPopover.tsx` — the word cycle
+
+<a id="popover-interaction-model"></a>
+### The interaction model, and the Stage D animation
+
+Keyboard: j/k cycle, Space accept+advance, Tab prev word, Shift+Tab next, Esc dismiss. Slots:
+0 = original word, 1–7 = synonyms (no delete slot — double-tap a word to delete it). Mouse: press
+opens; drag spins the reel and it rests; short click commits; press-and-hold (anywhere) keeps it
+open to keep changing; double-tap selects for deletion.
+
+Touch (phone model, 2026-07-09): a still TAP opens the cycle (on pointerup) and it STAYS open;
+browsing is then a NEW vertical drag starting on the open word/reel (touch-action:none there —
+the reel owns that gesture exclusively, the page never moves); a pan starting anywhere else —
+including an UNOPENED red word — is native page scroll exclusively and never touches the reel.
+Tap the reel to confirm, tap outside to dismiss, double-tap to select for deletion.
+
+Stage D animation model: the reel is a CONTINUOUS scroll position (`cycle.reelPos`, in slot units)
+rather than discrete steps. A drag moves it 1:1 with the pointer; on release a single rAF physics
+loop coasts with the release velocity (exponential decay) and then eases to the nearest slot —
+Apple-picker momentum, not snapping.
+
+Press + drag up/down spins the reel 1:1 with the pointer (one row-height = one slot). It works for
+both mouse (button held) and touch (finger down) because clientY deltas are tracked directly rather
+than `movementY`, which mobile browsers report unreliably on touch pointers. Commit model: a STILL
+click (no scroll, any duration) commits the rested word; a press-and-DRAG spins the reel and
+releasing commits the landed word (or flings). Duration no longer matters — only whether the
+pointer moved — so a slow deliberate tap still confirms.
+
+<a id="popover-commit-clock"></a>
+### The commit choreography is a strict 3-event clock
+
+Nothing else moves in between:
+
+1. press — open: reel out in a flash, no fade/drift (handled at open).
+2. release (T=0) — the reel rolls back to centre (settleTo); nothing else.
+3. the moment it lands — the action: neighbour rows REPLACED in-place by ghosts (seamless
+   freeze-frame, fading out), the line reflows/commits in one clean SNAP, and FADE_MS later the
+   cross-out + date fade in. Ghost-out and fade-in never overlap.
+
+`GHOST_MS` is mirrored in CSS as `scasReelOut`; `FADE_MS` (500) as the annotations'
+`animation-delay`.
+
+<a id="popover-tap-to-open"></a>
+### Phone tap-to-open (2026-07-09) — why it is on pointerUP
+
+A touch on a red word must NOT open (or scroll) the cycle on pointerDOWN — at gesture start the
+finger is ambiguous (tap vs page pan), and the old open-on-down model made the SAME gesture both
+open the cycle and steer the reel while the browser — whose gesture-start touch-action on the word
+is `pan-x pan-y` (the universal phone rule in index.css) — was equally entitled to take it as a
+page pan. Whoever won the first touchmove won: sometimes both ran (page panned WHILE the reel
+advanced), and a browser-claimed pan fired pointercancel and killed the drag mid-way ("they
+restrict each other").
+
+New model: a still tap (< TAP_PX at release) opens the cycle on pointerUP; a moved finger is a
+native page scroll and nothing opens. Browsing is then a NEW gesture that must start on the open
+word/reel (see `dragArmed`), whose `touch-action: none` lets the reel own it outright. The
+`preventDefault` at pointerdown suppresses only the compatibility mouse events (no PM caret
+placement / iOS keyboard) — NOT the native pan, which stays free.
+
+On mouse/pen the press-opens model is unchanged, with the effective click target shrunk by 3px each
+side so a click right at the word's edge falls through to ProseMirror's normal cursor placement.
+
+<a id="popover-pointer-capture"></a>
+### Re-assert pointer capture in a MICROTASK — "every second word won't scroll on first click"
+
+The open REBUILDS the `.scas-red` span (PM dispatch destroys it). The browser gives the pointer an
+IMPLICIT capture to that span — but per spec it is set AFTER the pointerdown event finishes
+dispatching, so a `setPointerCapture()` called *synchronously* gets clobbered by it on some words
+(whichever way the per-word rebuild timing falls). Once that span detaches, the gesture's
+pointermove/up bubble up an orphaned tree and never reach the document reel-drag listener — which
+is exactly "every second word won't scroll on first click".
+
+So capture is re-asserted on the editor root (never rebuilt) in a MICROTASK too: that runs after
+dispatch (after the implicit capture is set) but before the next pointer event, reliably overriding
+it. Belt-and-braces: both.
+
+<a id="popover-touch-action-scope"></a>
+### Reel exclusivity lives on the elements, not on the editor
+
+While a cycle is open, text-selection on the editor is suppressed. NOTE (phone model, 2026-07-09):
+the old blanket `touch-action: none` on the whole editor is GONE — it froze page scrolling
+everywhere while a popup was open (and, being applied after the opening gesture had started,
+never governed that gesture anyway). Reel exclusivity now lives on the elements themselves:
+`.scas-focused` (index.css) and the reel card (inline style) carry `touch-action: none`, which the
+browser reads at gesture start — so a drag beginning there can never become a page pan, while
+a pan beginning anywhere else scrolls natively. `overscroll-behavior: none` on the root scroller
+while open stops any leaked pan from rubber-banding / bouncing mid-cycle.
