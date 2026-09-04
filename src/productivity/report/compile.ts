@@ -1,37 +1,23 @@
 // Compile — spec §A7.1.1. Assembles the analysis-ready payload for a window.
 //
-// COMPACT ROLLUPS, NOT RAW LOGS (§A3.3): this is what keeps the payload small regardless of
-// window, and it is why a monthly report neither blows up token counts nor degrades. Session
-// rows go out ONLY for the daily window, where the judged rows are per-session and there are a
-// handful of them; weekly and monthly send day rollups alone.
+// COMPACT ROLLUPS, NOT RAW LOGS (§A3.3) — session rows go out ONLY at DAILY; weekly and monthly
+// send day rollups alone, which is what keeps a monthly report from blowing up token counts.
 //
-// ON §A6.4: measured numbers DO go out — the model cannot narrate a day it cannot see. What the
-// rule forbids is the ROUND TRIP: they must not come BACK. That half is enforced in judged.ts
-// (a judged table carrying measured columns is rejected outright) and claims.ts (numbers in the
-// narrative that Inkwave did not send are flagged). Nothing here is graphed from the reply.
+// ⚠ THE PAYLOAD IS AN ALLOW-LIST: every field that leaves is NAMED in this file, and nothing
+// iterates a row emitting what it finds. A field the ledger gains tomorrow cannot leak by default
+// — adding it here forces someone to choose its consent tier. NEVER a deny-list: it fails the
+// opposite way, silently. (§A6.4 permits measured numbers OUT; judged.ts and claims.ts enforce
+// that they never come BACK.)
 //
-// ─── THE PAYLOAD IS AN ALLOW-LIST, AND THAT IS THE POINT ────────────────────────────────────
-// Every field that leaves is NAMED in this file. Nothing iterates a ledger row and emits what it
-// finds. So a field the ledger gains tomorrow — a place label, a diary note, whatever comes
-// after — cannot leak by default: it is simply not emitted until someone deliberately adds it
-// here, and adding it means choosing a consent tier for it. A deny-list would have the opposite
-// failure mode, and that failure is silent.
-//
-// FOUR TIERS (Peter, 2026-07-17 — notes and places SPLIT on his instruction):
-//   1. session metadata (times, words, edits) — always included
-//   2a. diary notes                          — opt-in, OFF by default   ← `includeNotes`
-//   2b. place labels                         — opt-in, OFF by default   ← `includePlaces`
-//   3. per-document text                     — opt-in, OFF by default, per document (§A7.3)
-//   3b. per-session excerpts                 — the ledger+doc combo; gated by 3, daily only
-// Tier 2 exists because tiers 1 and 3 alone would let the writer's own prose ride out inside
-// "metadata": "metadata only" would quietly mean "and what I wrote about my day".
-//
-// WHY 2a AND 2b ARE SEPARATE (Peter: "separate session notes from places into two tick boxes"):
-// they are one tier by provenance — both are words the writer typed — and two different
-// disclosures by SENSITIVITY. A place label is one word ("library"); a diary note is a paragraph
-// about the writer's day, and may be about anything at all. Bundling them forced an
-// all-or-nothing choice across a real gap in exposure. Note the place label is text the WRITER
-// TYPED — not geolocation, nothing harvested (§C1.4).
+// FOUR TIERS (Peter, 2026-07-17 — notes and places SPLIT on his instruction). Tier 2 exists
+// because tiers 1 and 3 alone would let the writer's own prose ride out inside "metadata"; 2a and
+// 2b are separate because a place label is one word and a diary note is a paragraph about a day.
+//   1.  session metadata (times, words, edits) — always included
+//   2a. diary notes   — opt-in, OFF by default  ← `includeNotes`
+//   2b. place labels  — opt-in, OFF by default  ← `includePlaces`   (TYPED, never geolocation)
+//   3.  per-document text — opt-in, OFF by default, per document (§A7.3)
+//   3b. per-session excerpts — the ledger+doc combo; gated by 3, daily only
+// → docs/archive/productivity-email-build.md#compile-allow-list
 
 import type { DocGoals } from '../../types/document'
 import type { DayAggregate, SessionRow, WindowAggregate, WindowDoc } from '../types'
@@ -158,25 +144,13 @@ interface NoteLine { when: string; place: string; note: string }
 /**
  * THE TIER-2 CARRIER (§A7.3) — read from the ledger's `note_digest` first, sessions second.
  *
- * WHY BOTH, and why the digest leads (feat/prod-integrate, 2026-07-17): this module was built while
- * `feat/prod-ledger` was still in flight, and it asked that branch for session rows at every window
- * because a note is per-session. The ledger lane ANSWERED — `sessions` is `[]` at weekly/monthly and
- * opted-in notes travel as `note_digest`, per LOCAL day — because rows at monthly would put a SECOND
- * copy of every measured number beside the day rollups (§A6.4), and two copies is how a narrative
- * ends up contradicting the bars. This function is that answer being honoured.
- *
- * It was a SILENT break, which is why it is worth this comment: reading only `agg.sessions`, a
- * writer who ticked "include my notes" on a WEEKLY or MONTHLY report got a payload with no notes in
- * it, `notesIncluded: false`, and no error anywhere — the tick-box simply did nothing. Both lanes'
- * suites were green; the demo fixtures still carried the old shape, so the path a developer eyeballs
- * worked while the real ledger's did not. Proved end-to-end in emailLedger.integration.test.ts.
- *
- * The session fallback is kept deliberately: DAILY rows legitimately carry notes, and a source that
- * predates the digest (the `?prodReport=demo` fixtures) must not silently lose them either.
- *
- * THE TWO GATES ARE APPLIED HERE, AT THE READ (Peter's split, 2026-07-17). `notes`/`places` are
- * read only when their own tick is on, so an un-ticked field is never in the returned data at all —
- * not filtered out later, not blanked at render. There is no downstream place for it to leak from.
+ * ⚠ THE DIGEST LEADS: `sessions` is `[]` at weekly/monthly (§A6.4), so reading only `agg.sessions`
+ * gave a writer who ticked "include my notes" a payload with no notes, `notesIncluded: false` and
+ * no error anywhere — with both lanes' suites green, because the demo fixtures carried the old
+ * shape. The session fallback stays for DAILY rows and the demo source.
+ * ⚠ THE TWO GATES ARE APPLIED HERE, AT THE READ: an un-ticked field is never in the returned data
+ * at all — not filtered later, not blanked at render, so there is nowhere downstream to leak from.
+ * → docs/archive/productivity-email-build.md#compile-note-digest
  */
 function noteLines(agg: WindowAggregate, wantNotes: boolean, wantPlaces: boolean): NoteLine[] {
   const lines: NoteLine[] = []
@@ -184,8 +158,7 @@ function noteLines(agg: WindowAggregate, wantNotes: boolean, wantPlaces: boolean
     for (const d of agg.note_digest) {
       const place = wantPlaces ? d.places.join(', ').trim() : ''
       const notes = wantNotes ? d.notes.map(n => n.trim()).filter(Boolean) : []
-      // A day with places but no note still says where the writer worked — it is their word either
-      // way, and dropping it would quietly discard part of what they opted into.
+      // A day with places but no note still says where the writer worked — their word either way.
       if (!notes.length) {
         if (place) lines.push({ when: d.day, place, note: '' })
         continue
@@ -203,13 +176,10 @@ function noteLines(agg: WindowAggregate, wantNotes: boolean, wantPlaces: boolean
 }
 
 /**
- * The place label is rendered as the plain string the writer typed. It is deliberately NOT
- * parsed, geocoded or interpreted — it is a word, and treating it as anything more would be the
- * beginning of exactly the claim we must not make.
- *
- * The COLUMNS follow the ticks: a payload with places and no notes carries no `note` column at
- * all. An empty column would tell the model a note existed and was withheld, which is a different
- * (and wrong) statement from "the writer did not share notes".
+ * ⚠ The place label is rendered as the plain string the writer TYPED — never parsed, geocoded or
+ * interpreted. ⚠ THE COLUMNS FOLLOW THE TICKS: a payload with places and no notes carries no
+ * `note` column at all, because an empty column would say a note existed and was withheld.
+ * → docs/archive/productivity-email-build.md#compile-place-column
  */
 function notesSection(lines: NoteLine[], hasNotes: boolean, hasPlaces: boolean): string {
   const headers = ['when', ...(hasPlaces ? ['place'] : []), ...(hasNotes ? ['note'] : [])]
@@ -260,10 +230,9 @@ function notesSection(lines: NoteLine[], hasNotes: boolean, hasPlaces: boolean):
  * supplies excerpts for TICKED documents only, so this renders what it is handed and never reads
  * a document itself.
  *
- * Sessions whose excerpt is missing are LISTED, not omitted (§A9). A silent gap would read to the
- * model — and to the writer — as "nothing happened here", when the truth is "the snapshot record
- * has no boundary here"; the measured words_added for that session may be substantial. Saying so
- * is the difference between an honest gap and a fabricated zero.
+ * ⚠ A SESSION WITH NO EXCERPT IS LISTED, NEVER OMITTED (§A9). A silent gap reads as "nothing
+ * happened here" when the truth is "the record has no boundary here" — an honest gap versus a
+ * fabricated zero. → docs/archive/productivity-email-build.md#compile-excerpt-gaps
  */
 function excerptsSection(sessions: SessionRow[], excerpts: SessionExcerpt[]): string {
   const byId = new Map(excerpts.map(e => [e.session_id, e]))
@@ -294,17 +263,15 @@ function excerptsSection(sessions: SessionRow[], excerpts: SessionExcerpt[]): st
 }
 
 /**
- * §A5b — the writer's goals, verbatim.
- *
- * Rendered as the writer typed them. Nothing here summarises, normalises or interprets a goal:
- * the entire legitimacy of §A5's reversed tone rests on the model quoting the writer's OWN
- * standard back at them, and a goal we paraphrased is no longer theirs.
+ * §A5b — the writer's goals, VERBATIM. Nothing summarises, normalises or interprets a goal: §A5's
+ * reversed tone is legitimate only because the model quotes the writer's OWN standard back, and a
+ * goal we paraphrased is no longer theirs.
  */
 /**
- * §A6.4 — Inkwave computes whether a dated milestone was MET (a comparison of two dates the writer
- * supplied); the model is handed the VERDICT, never the raw dates to compare. "Did I hit my
- * deadline" is exactly the claim an LLM must not silently re-derive. The due date rides along as
- * context (it is the writer's own datum), but the met/missed judgement is Inkwave's.
+ * §A6.4 — Inkwave computes whether a dated milestone was MET and hands the model the VERDICT,
+ * never two dates to compare. The due date rides along as context (the writer's own datum), but
+ * "did I hit my deadline" is not a claim an LLM may re-derive.
+ * → docs/archive/productivity-email-build.md#compile-goals-verbatim
  */
 function milestoneVerdict(status: GoalStatus, days?: number): string {
   const d = Math.abs(days ?? 0)

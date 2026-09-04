@@ -1397,3 +1397,105 @@ So: snap only the floating-point hair (a legitimate ±1 can land at 1.0000000000
 REFUSE anything grossly out of range. An impossible r means the maths is wrong, and the honest
 response to "my measurement is impossible" is to stop reporting it — not to round it into the
 range where it looks fine. Unreportable is the one answer that cannot mislead (§A6.1).
+
+---
+
+## `productivity/report/compile.ts` — the payload (§A7.1.1)
+
+<a id="compile-allow-list"></a>
+### The payload is an ALLOW-LIST, and the four consent tiers
+
+COMPACT ROLLUPS, NOT RAW LOGS (§A3.3): this is what keeps the payload small regardless of
+window, and it is why a monthly report neither blows up token counts nor degrades. Session
+rows go out ONLY for the daily window, where the judged rows are per-session and there are a
+handful of them; weekly and monthly send day rollups alone.
+
+ON §A6.4: measured numbers DO go out — the model cannot narrate a day it cannot see. What the
+rule forbids is the ROUND TRIP: they must not come BACK. That half is enforced in judged.ts
+(a judged table carrying measured columns is rejected outright) and claims.ts (numbers in the
+narrative that Inkwave did not send are flagged). Nothing here is graphed from the reply.
+
+THE PAYLOAD IS AN ALLOW-LIST, AND THAT IS THE POINT. Every field that leaves is NAMED in this
+file. Nothing iterates a ledger row and emits what it finds. So a field the ledger gains tomorrow
+— a place label, a diary note, whatever comes after — cannot leak by default: it is simply not
+emitted until someone deliberately adds it here, and adding it means choosing a consent tier for
+it. A deny-list would have the opposite failure mode, and that failure is silent.
+
+FOUR TIERS (Peter, 2026-07-17 — notes and places SPLIT on his instruction):
+
+1. session metadata (times, words, edits) — always included
+2. a. diary notes — opt-in, OFF by default ← `includeNotes`
+   b. place labels — opt-in, OFF by default ← `includePlaces`
+3. per-document text — opt-in, OFF by default, per document (§A7.3)
+   b. per-session excerpts — the ledger+doc combo; gated by 3, daily only
+
+Tier 2 exists because tiers 1 and 3 alone would let the writer's own prose ride out inside
+"metadata": "metadata only" would quietly mean "and what I wrote about my day".
+
+WHY 2a AND 2b ARE SEPARATE (Peter: "separate session notes from places into two tick boxes"):
+they are one tier by provenance — both are words the writer typed — and two different
+disclosures by SENSITIVITY. A place label is one word ("library"); a diary note is a paragraph
+about the writer's day, and may be about anything at all. Bundling them forced an
+all-or-nothing choice across a real gap in exposure. Note the place label is text the WRITER
+TYPED — not geolocation, nothing harvested (§C1.4).
+
+<a id="compile-note-digest"></a>
+### `noteLines` — the digest leads, and the silent break that made it
+
+WHY BOTH, and why the digest leads (feat/prod-integrate, 2026-07-17): this module was built while
+`feat/prod-ledger` was still in flight, and it asked that branch for session rows at every window
+because a note is per-session. The ledger lane ANSWERED — `sessions` is `[]` at weekly/monthly and
+opted-in notes travel as `note_digest`, per LOCAL day — because rows at monthly would put a SECOND
+copy of every measured number beside the day rollups (§A6.4), and two copies is how a narrative
+ends up contradicting the bars. This function is that answer being honoured.
+
+It was a SILENT break, which is why it is worth the comment: reading only `agg.sessions`, a
+writer who ticked "include my notes" on a WEEKLY or MONTHLY report got a payload with no notes in
+it, `notesIncluded: false`, and no error anywhere — the tick-box simply did nothing. Both lanes'
+suites were green; the demo fixtures still carried the old shape, so the path a developer eyeballs
+worked while the real ledger's did not. Proved end-to-end in emailLedger.integration.test.ts.
+
+The session fallback is kept deliberately: DAILY rows legitimately carry notes, and a source that
+predates the digest (the `?prodReport=demo` fixtures) must not silently lose them either.
+
+THE TWO GATES ARE APPLIED AT THE READ (Peter's split, 2026-07-17). `notes`/`places` are
+read only when their own tick is on, so an un-ticked field is never in the returned data at all —
+not filtered out later, not blanked at render. There is no downstream place for it to leak from.
+
+A day with places but no note still says where the writer worked — it is their word either way,
+and dropping it would quietly discard part of what they opted into.
+
+<a id="compile-place-column"></a>
+### The place column follows the tick
+
+The place label is rendered as the plain string the writer typed. It is deliberately NOT
+parsed, geocoded or interpreted — it is a word, and treating it as anything more would be the
+beginning of exactly the claim we must not make.
+
+The COLUMNS follow the ticks: a payload with places and no notes carries no `note` column at
+all. An empty column would tell the model a note existed and was withheld, which is a different
+(and wrong) statement from "the writer did not share notes".
+
+<a id="compile-excerpt-gaps"></a>
+### A missing excerpt is LISTED, never omitted
+
+`excerptsSection` pairs each session with the prose that appeared during it. §A7.3 gates every
+word: the caller supplies excerpts for TICKED documents only, so this renders what it is handed
+and never reads a document itself.
+
+Sessions whose excerpt is missing are LISTED, not omitted (§A9). A silent gap would read to the
+model — and to the writer — as "nothing happened here", when the truth is "the snapshot record
+has no boundary here"; the measured `words_added` for that session may be substantial. Saying so
+is the difference between an honest gap and a fabricated zero.
+
+<a id="compile-goals-verbatim"></a>
+### Goals go out verbatim; the milestone verdict is Inkwave's
+
+§A5b — the writer's goals, rendered as the writer typed them. Nothing summarises, normalises or
+interprets a goal: the entire legitimacy of §A5's reversed tone rests on the model quoting the
+writer's OWN standard back at them, and a goal we paraphrased is no longer theirs.
+
+§A6.4 — Inkwave computes whether a dated milestone was MET (a comparison of two dates the writer
+supplied); the model is handed the VERDICT, never the raw dates to compare. "Did I hit my
+deadline" is exactly the claim an LLM must not silently re-derive. The due date rides along as
+context (it is the writer's own datum), but the met/missed judgement is Inkwave's.
