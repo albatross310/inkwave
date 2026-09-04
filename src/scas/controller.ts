@@ -38,36 +38,28 @@ interface ScannedWord {
 export interface ScanWindow { from: number; to: number }
 
 /**
- * Collect the document's *committed* words. A word is committed unless it is the one under the
- * cursor still being typed (no trailing boundary yet) — matching the renderer's definition, so a
- * word nudge fires exactly when the word turns red.
+ * Collect the document's *committed* words — a word is committed unless it is the one under the
+ * cursor still being typed, matching the renderer's definition, so a nudge fires exactly when the
+ * word turns red.
  *
- * `window` (phone input priority, 2026-07-10): scan only the paragraphs intersecting the given
- * range instead of the whole document. The full scan is O(doc) (~3ms/12k words in Node, tens of ms
- * on a phone CPU) and ran on EVERY 250ms typing pause; a caret/edit window is ~500× cheaper.
- * SAFE BY CONSTRUCTION for passes 1–2: words can only newly commit (caret leaves them) or newly
- * substitute (doc changes there) INSIDE the tick's edit+caret window, and verdicts for text outside
- * it are frozen state (never re-derived from S_v — the no-retroactive-reflag invariant). The
- * DELETION pass needs whole-document presence, so processDoc ignores the window when a deletion
- * happened (see below) — a window is never allowed to hide a removal.
+ * ⚠ THE WINDOW IS SAFE ONLY FOR PASSES 1–2: words can only newly commit or newly substitute INSIDE
+ * the tick's edit+caret range, and verdicts outside it are FROZEN state (never re-derived from S_v
+ * — the no-retroactive-reflag invariant). The DELETION pass needs whole-document presence, which
+ * the index below supplies — a window is never allowed to hide a removal.
+ * → docs/archive/panels-and-popovers.md#scas-windowed-scan
  */
-// Per-paragraph scan cache (2026-07-11 typing-lag ablation). ScannedWord is position-free and —
-// for a paragraph NOT containing the cursor — a pure function of the paragraph node (persistent
-// PM structure: same reference ⇔ identical text+marks), so its word list can be reused across
-// ticks. The FULL scan stays semantically full (the deletion pass still sees whole-document word
-// presence — the hard invariant); it's just assembled from cached per-paragraph arrays, so a
-// desktop tick (or a phone deletion tick) costs O(changed paragraphs), not O(doc). The cursor's
-// paragraph is never cached (the uncommitted-word test depends on cursorPos).
+// ⚠ THE FULL SCAN STAYS SEMANTICALLY FULL — it is merely assembled from cached per-paragraph
+// arrays, so a tick costs O(changed paragraphs). Legal because ScannedWord is position-free and a
+// non-cursor paragraph is a pure function of its node. The cursor's paragraph is NEVER cached.
+// → docs/archive/panels-and-popovers.md#scas-scan-cache
 const _scanCache = new WeakMap<PMNode, ScannedWord[]>()
 
-// ─── Whole-document lemma-presence index (2026-07-11, round-4 "deleting lags in waves") ────────
-// The deletion pass needs whole-doc WORD PRESENCE, not a full rescan: the controller keeps two
-// multisets — every word's lemma, and every slot-marked word's ORIGINAL lemma — updated per tick
-// by a top-level block diff against the previous doc (persistent PM structures: identical
-// reference ⇔ identical content, so only ADDED/REMOVED block identities contribute). A deletion
-// tick then answers "is this nudged lemma still present anywhere" in O(changed blocks) and the
-// scan itself can stay WINDOWED. Per-block contributions are position-free and cached by node
-// identity; word definition matches scanCommitted exactly (paragraph descendants, [a-zA-Z]{2,}).
+// ─── Whole-document lemma-presence index ─────────────────────────────────────
+// ⚠ THE DELETION PASS NEEDS WHOLE-DOC WORD PRESENCE, NOT A FULL RESCAN. Two multisets (every word's
+// lemma; every slot-marked word's ORIGINAL lemma) are updated per tick by a top-level block
+// IDENTITY diff, so a deletion tick answers "is this lemma still anywhere" in O(changed blocks) and
+// the scan itself stays WINDOWED. The word definition must match scanCommitted exactly.
+// → docs/archive/panels-and-popovers.md#scas-presence-index
 interface BlockLemmas { lemmas: string[]; slots: string[] }
 const _blockLemmaCache = new WeakMap<PMNode, BlockLemmas>()
 
@@ -291,12 +283,8 @@ export class ScasController {
    * Process a document change: fire word nudges, resolve substitutions, and (only when content was
    * removed) lock deleted nudged lemmas. Returns true if the state changed.
    *
-   * `window` (optional): bound the scan to the tick's edit+caret range — the O(doc)-off-the-
-   * typing-path optimisation. DELETION ticks stay windowed too (round-4 "deleting lags in
-   * waves"): the vanished-lemma pass needs whole-document WORD PRESENCE, not a full rescan, and
-   * the presence INDEX (syncIndex above — O(changed blocks) per tick) answers it exactly. The
-   * phantom-snapshot guard holds because the index is global by construction: a removal anywhere
-   * decrements it whether or not the window saw it.
+   * ⚠ DELETION TICKS STAY WINDOWED TOO. The phantom-snapshot guard holds because the presence index
+   * is GLOBAL BY CONSTRUCTION: a removal anywhere decrements it whether or not the window saw it.
    */
   processDoc(pmDoc: PMNode, cursorPos: number, hadDeletion: boolean, window?: ScanWindow | null): boolean {
     if (this.setSize === 0) return false // Infinite mode: no constraint encounters
@@ -328,14 +316,11 @@ export class ScasController {
       }
     }
 
-    // 2. Fresh word nudges — a committed in-S lemma (not immune/locked) becomes an outstanding nudge.
-    //    Stamp the moment it FIRST turns purple (kickTimes) — the slot's true "first-written" time,
-    //    persisted with the state so it survives reload (read later via firstNudgeAt).
-    //    Set views built ONCE per pass: classifyCommit's array scans (locked.includes +
-    //    satisfied.find) made this loop O(words × session-state) on every keystroke. The inline
-    //    checks below are classifyCommit's exact decision order — locked → skip (loop 2 only acts
-    //    on 'in-S'), immune-this-version → skip, in-S → kick, else pass. locked/satisfied can't
-    //    change inside this loop (recordKick touches only liveKicks/kickTimes), so the views hold.
+    // 2. Fresh word nudges — a committed in-S lemma (not immune/locked) becomes an outstanding
+    //    nudge, stamped at the moment it FIRST turns purple (kickTimes; persisted, so it survives
+    //    reload). ⚠ SET VIEWS BUILT ONCE PER PASS: classifyCommit's array scans made this loop
+    //    O(words × session-state) per keystroke. The inline checks are its exact decision order,
+    //    and locked/satisfied cannot change inside the loop, so the views hold.
     const lockedSet = new Set(st.locked)
     const immuneSet = new Set(st.satisfied.filter((s) => s.satisfiedAtVersion === st.version).map((s) => s.lemma))
     const liveKickSet = new Set(st.liveKicks)

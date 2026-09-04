@@ -35,7 +35,7 @@ nothing; no account, no key, never paywalled (§C6). Path 2 (backend) and Path 3
 import; its demo-fixtures import is now gated on demo MODE, not the flag, so a real writer's session
 never fetches the fixtures chunk.
 
-- **⚠️ §A5 WAS REVERSED 2026-07-17 — the tone is "honest first, funny second, kind third".** Peter:
+- <a id="a5-tone-reversal"></a>**⚠️ §A5 WAS REVERSED 2026-07-17 — the tone is "honest first, funny second, kind third".** Peter:
   *"it's too nice and not enough humour… read like a comedian wrote it"* / *"It doesn't need to be
   kind. It needs to be honest."* Do NOT restore the kind/non-shaming rule from an earlier draft; a
   test asserts it is GONE. **What makes the reversal safe is §A5's surviving distinction, and it is
@@ -148,6 +148,7 @@ once it was a panel the "no routes, all panels" ethos applied and it shipped liv
 chart code stays a lazy import off the editor's own load path either way (`Report-*.js`, 21kB/7kB
 gzip). Nothing reads the `.studio` or walks the doc; aggregation is pure and runs on mount.
 
+<a id="phase-ratio-only"></a>
 **THE HEURISTIC DEVIATES FROM THE SPEC'S EXAMPLE, AND THE MEASUREMENT IS WHY.** §A3.3 offers "high
 add-to-delete ratio + long sessions → drafting; high delete + short → editing" as an `e.g.`. Scored
 against labelled synthetic writing (`phase.variants.test.ts`, 64 sessions, 48.4% drafting truth):
@@ -166,6 +167,7 @@ duration thresholds remain only as the scored alternative. ⚠ Peter to confirm 
 breaks (93.8%, 4 wrong). Residual, honest: it declines ~25% of HARD drafting sessions (they cut most
 of what they lay down — indistinguishable from editing to a word counter) and ~half of `revising`.
 
+<a id="phase-fixture-void"></a>
 **THE EVIDENCE ABOVE WAS ONCE A TAUTOLOGY — the F1 audit finding, and the fix (2026-07-17).** An
 external mutation audit found `phase.variants.test.ts` could not feel a wrong threshold: mutating
 `draftAddRatio` 0.70 → 0.65/0.75/0.78 and `editAddRatio` 0.50 → 0.79 ALL SURVIVED GREEN. The
@@ -190,6 +192,7 @@ a cut-point** (tuning thresholds on data invented by the same author who chose t
 other way) — real calibration needs real ledger rows. `phase.sweep.probe.test.ts` prints the
 distribution, the overlap band and the full sweep; read it before touching a threshold.
 
+<a id="phase-three-provenances"></a>
 **Three provenances, not two.** §A6.1 names measured + judged; the heuristic is neither (a rule
 anyone can re-run — not AI; still an inference — not a measurement), so it gets its own tag/legend
 `estimated`. STRUCTURAL, not conventional: a series' style is a function of `series.provenance`
@@ -687,3 +690,1031 @@ the modules under test (`vi.resetModules()` first) — `feat/email-compose`'s `r
 this for the same reason, and its comment about `_snapCache` is the other half of the same discipline.
 `testOpfsShim` also gained `text()`: `storage/opfs`'s readJson reads TEXT where snapshots read
 arrayBuffer, and its absence surfaced only as an empty ledger.
+
+---
+
+# The source-file narrative (moved out of `src/` 2026-09-04)
+
+Peter: *"the core is the bottleneck on future AI understanding of my code."* The rules stayed beside
+the code as one- and two-line imperatives (`docs/RULES.md` form); everything below is the reasoning
+they point at, verbatim with its numbers. Nothing was deleted on either side.
+
+---
+
+## `productivity/types.ts` — the schema contract (§A3.2)
+
+<a id="types-doc-label"></a>
+### `doc_label` — tier 1, and the suppression control that does not exist
+
+User-visible title. OPTIONAL and suppressible per-doc — omitted entirely when suppressed.
+
+⚠ THE SUPPRESSION IS NOT REACHABLE BY A WRITER (probed 2026-07-17). `isLabelSuppressed` IS wired
+into the capture path (capture.ts closeDraft), so the mechanism works — but `setLabelSuppressed`
+has ZERO non-test callers: no UI anywhere turns it on. §A3.2 promises "suppressible per-doc" and
+the writer currently has no way to exercise it, so in practice every title travels.
+
+THIS IS TIER 1 (always included) WHILE `note`/`place` ARE TIER 2, and a title is writer-authored
+prose too — compile.ts's own tier-2 rationale ("tiers 1 and 3 alone would let the writer's own
+prose ride out inside 'metadata'") applies to it verbatim. The deliberate distinction: a label is
+the IDENTIFIER of the thing being measured, not an extra disclosure about it. Drop a note and you
+lose a diary line; drop the label and §B1's primary goal — "2h10m writing, of which 40m on email"
+— cannot be read at all, because every row becomes `doc-a1b2f3`. It is also the one prose field
+already on screen at the moment of consent: §A7.3's tick-box lists documents BY LABEL so the
+writer can choose which to include.
+
+That reasoning covers the ordinary case, NOT the sharp one: a title can be far more revealing
+than a note ("Chapter 3 — my mother's illness"). Which is precisely why §A3.2 asks for
+per-doc suppression — and why the missing control is a real gap, not a nicety. RAISED WITH PETER
+2026-07-17; the placement of a consent control is his call, not an agent's guess.
+
+<a id="types-entered"></a>
+### `entered: 'timer' | 'post-hoc'` — why it is a flag and not a fourth provenance
+
+HOW THE TIME GOT HERE — measured by the timer, or told to us afterwards (Peter, 2026-07-17:
+"we can also add a manual add for if you forget to use the timer. But then it's flagged post-hoc").
+
+AN EXPLICIT UNION, WRITTEN ON EVERY ROW — never `entered?: 'post-hoc'` with absence meaning
+timer. Absence-as-classification is the exact trap `doc_type` just escaped: it defaulted to
+'essay', so every unclassified session was FILED AS ESSAY WRITING whether it was or not. A field
+whose commonest value is carried by silence cannot be read as a claim, and this one has to be.
+
+WHY THIS IS NOT A FOURTH `provenance` TAG, AND THE REASONING IS LOAD-BEARING (§A6.1's three tags
+are `measured` / `estimated` / `judged`): **`estimated` means a deterministic rule WE ran that
+anyone can recompute.** A post-hoc block is **testimony** — uncheckable, not recomputable. Different
+epistemics, so it must not borrow that tag. It is a FLAG ON THE ROW, not a provenance: the row is
+still measured-SHAPED (a duration, a category, a day); what differs is the SOURCE OF THE TIME.
+
+⚠ IT MUST NEVER MERGE INTO THE MEASURED BARS (§A6.1). The report has to be able to say
+"3h40m measured, plus 45m you added from memory". Silently totalling them is the lie. What
+ENFORCES it: `aggregate.ts` sums the measured fields from TIMER ROWS ONLY and carries post-hoc
+time in its own `posthoc_minutes` column — a different column, so conflation is unrepresentable
+rather than merely discouraged.
+
+IT IS A REPAIR TOOL, NOT AN AUDIT (§A5's register: "a friend letting you correct the record, not
+a supervisor auditing your timesheet"). Neither nag it nor scold its use.
+
+LEGACY ROWS: rows written before this field existed carry no `entered`. They predate the manual
+add entirely, so every one of them was timer-entered — that is a fact about history, not a
+default. `isPostHoc()` (aggregate.ts) is the ONE place that reads it, and it asks the positive
+question ("did this row SAY post-hoc?") so no other code can accidentally re-derive a default.
+
+<a id="types-no-deny-list"></a>
+### What actually keeps `note`/`place` out of an export (§A7.3) — and the deny-list that did nothing
+
+THE ALLOW-LIST IN `report/compile.ts`, and nothing else. Every field that leaves is NAMED there
+(`sessionRows()` lists its 12 columns literally); nothing iterates a row and emits what it finds.
+So a prose field the ledger gains tomorrow cannot leak by default — it is simply not emitted
+until someone adds it there, which forces them to choose a consent tier. The writer's opt-in
+(`includeNotes`, default false) gates the one section that may carry prose.
+
+A DENY-LIST USED TO SIT HERE — `LEDGER_PRIVATE_FIELDS = ['note','place']`, `stripPrivateFields()`,
+`PublicSessionRow` — described as "the DEFAULT payload shape". It was REMOVED on 2026-07-17
+because it was never the default, or anything else: it had ZERO non-test callers on every branch
+including master, and `/privacy`'s own header cited it as the enforcing mechanism. The privacy
+property held the whole time (the allow-list is real), so this was not a leak — it was worse in a
+quieter way: **editing `LEDGER_PRIVATE_FIELDS` to protect a new field would have done nothing at
+all, silently**, while reading like the guard that mattered. Two rules for one question, only one
+live, and the docs pointed at the dead one.
+
+DO NOT REINTRODUCE A DENY-LIST HERE. compile.ts's own banner has the argument: a deny-list fails
+the opposite way, and that failure is silent. If a future path must export rows, name its columns
+there. `report/compile.test.ts` pins the allow-list property directly — including that an
+unforeseen prose field cannot ride out even with tier 2 ON.
+
+<a id="types-attestation-days"></a>
+### `LedgerAttestation` — why days are independent and not chained to each other
+
+A design decision a failing test forced, and the right one: a cross-day prevHash chain means ANY
+late append invalidates every later day's blockHash — and late appends are the NORMAL case here,
+because §A9 says the ledger syncs through the writer's own cloud and two devices append
+concurrently. Yesterday's row arriving from a phone would burn the Bitcoin anchor on every day
+after it, forcing a re-stamp of the whole month. So each day's block hashes only its own rows
+(bound to its month + day, so a block cannot be replayed elsewhere) and is independently
+OTS-anchorable.
+
+This is exactly how the existing spine already works — snapshots are NOT chained to one another;
+each snapshot's bundleHash is independently OTS-anchored, and the hash CHAIN lives inside a
+signing session (receipts). Ordering evidence comes from Bitcoin's own timestamps, which is
+stronger than a self-asserted prevHash anyway.
+
+<a id="types-reflection"></a>
+### `Reflection` — why it is its own object and not a field on a row
+
+The writer's reflection on a STRETCH of work — "what did I actually do?" (Peter, 2026-07-17).
+
+WHY THIS IS ITS OWN OBJECT AND NOT A FIELD ON A ROW. A reflection is not a property of one
+session: it is about a SPAN across many rows, and the writer thinks in CATEGORIES ("an hour on
+the essay, forty minutes reading"), not in session ids they have never seen. `note?` on the row
+asked the wrong question — it made them annotate an accounting artefact.
+
+IT IS ALSO WHAT RESCUES `misc`. Nothing sets a type on an ordinary document, so most rows are an
+honest unknown; this is where the writer NAMES them, after the fact, from memory, while it is
+fresh. The chart is the recall prompt — the measured stretch is shown, and they say what it was.
+
+§A5: ALWAYS SKIPPABLE, never re-prompted, and no reflection is a failure. The bar for every word
+of copy around it: would he fill this in on a bad Tuesday?
+
+<a id="types-sessions-empty"></a>
+### `WindowAggregate.sessions` — `[]` at weekly/monthly
+
+Session rows are supplied for the DAILY window, whose judged rows are per-session.
+
+CONTRACT (decided by prod-ledger, 2026-07-17, answering the note-digest question): at
+WEEKLY/MONTHLY this is `[]` and opted-in notes travel as `note_digest` instead. Two reasons,
+and the first is the serious one:
+
+- §A6.4. Shipping full session rows at monthly puts a SECOND copy of every measured number
+  in the payload alongside the day rollups. The rule that measured numbers never round-trip
+  through the model exists because it silently tidies them — and two copies is precisely how
+  a narrative ends up contradicting the bars. One representation of measurement, always.
+- §A6/§A7. "Compact rollups, not raw logs" is what keeps a monthly payload bounded. The note
+  TEXT dominates tokens either way, so the digest costs the writer's own words and nothing
+  more — it just stops the schema from dragging 150 rows of measurement along with them.
+
+NB "where do I work best" must be computed CLIENT-SIDE as a measured by-place rollup, not
+inferred by the model from raw rows — same §A6.4 rule.
+
+<a id="types-posthoc-minutes"></a>
+### `DayAggregate.posthoc_minutes` — a separate column IS the enforcement
+
+Minutes the writer ADDED FROM MEMORY (`entered: 'post-hoc'`) — testimony, not measurement.
+
+A SEPARATE COLUMN, and that is the whole enforcement (§A6.1). Every other number on this
+aggregate comes from rows the timer watched; this one comes from the writer telling us
+afterwards. They are never summed here, and a consumer that wants a grand total has to write the
+addition itself — at which point it is a choice someone made, not a lie the schema told for them.
+
+---
+
+## `types/document.ts` — the document model
+
+The document is where the productivity ledger, the email layer and the music module all read their
+classification from, which is why this file's stories live beside theirs.
+
+<a id="doc-doctype"></a>
+### `DocType` — declared once, and `misc` is the honest default
+
+A document's OWN property — it knows what it is. The productivity ledger READS this to tag its
+session rows (`doc_type: email`), which is what makes email writing show up in the report.
+Optional, so every pre-existing document still loads without a migration write.
+
+OWNERSHIP: this is the classification only. RESOLVING an absent docType to a row's `doc_type` is
+the LEDGER's rule and lives there (`productivity/capture.ts` resolveDocType / DEFAULT_DOC_TYPE) —
+deliberately NOT duplicated here. An accessor with its own default used to sit in this file and
+answered 'note' where the ledger answers 'essay': two rules for one question, which is how two
+implementations drift apart (cf. citationText, exported rather than copied). One rule, in the
+module that owns the ledger.
+
+**`misc` IS THE DEFAULT, AND IT IS THE HONEST ONE** (Peter, 2026-07-17: "if the productivity
+tracker doesn't know what they were doing but they were working"). It used to default to
+`'essay'`, which meant every unclassified session was COUNTED AS ESSAY WRITING whether it was or
+not — a claim dressed as a measurement. This is the same shape the rest of the codebase converged
+on today (`found | absent | error`, no null member; StorageReadError; RemoteRead): **absence of
+classification must not masquerade as a classification.** A session gets a real type only when
+something SETS one — never a guess.
+
+⚠ **`misc` IS NOT `other` — do not collapse them.** The next person will want to:
+
+- `other` — a real kind we RECOGNISE but have not enumerated. We know what it was.
+- `misc` — we know they were WORKING; we do not know at what. An honest unknown.
+
+A window that is mostly `misc` is a finding about OUR INSTRUMENTATION, not about the writer, and
+must never be reported to them as a failing.
+
+`reading`/`annotating` are BEHAVIOURAL, not inferential (Peter, 2026-07-17: "pure reading time and
+annotating time can be 2 separate things"). They are set by observed EVENTS on the PDF surface —
+scroll activity, an annotation in the last 5 minutes — in the same class as the ledger's
+inactivity boundary. That is why they are legitimate where a note-vs-essay heuristic (guessing
+INTENT from length or title) is not: one is a fact about what happened, the other is a guess about
+what it meant. §A6.1 forbids the second, not the first.
+
+**READING TIME IS NEVER SUMMED INTO "WORDS WRITTEN"** — a report that added them would lie about
+both. Reading rows carry no words by construction (nothing was typed), so a sum is safe; the rule
+is about NARRATIVE, and it is the report lane's policy.
+
+<a id="doc-goals"></a>
+### `DocGoals` — the standing that lets §A5 push, and the goal nobody can author yet
+
+Peter: "each doc has the writers goals in it and a rough plan — and the AI's prompts need to
+include the goals so it can give users a kick up the butt if they're not meeting their goals."
+
+WHY THIS LIVES ON THE DOCUMENT, and why that matters more than it looks: §A5b says "stored on
+the document, like any other content", and it is the DOCUMENT's property — what this document
+is for. Declared HERE, once, for the same reason `DocType` is: two lanes writing identical shapes
+in parallel is not harmless, and the productivity/AI-report lane reads goals rather than owning
+them.
+
+WHAT THEY ARE FOR — the whole of §A5's reversal rests on this type existing. The tone rule was
+reversed on 2026-07-17 (honest first, funny second, kind third), and the ONLY thing separating
+that from productivity guilt is the distinction §A5 draws: guilt is a standard IMPOSED on the
+writer; accountability is a goal the writer SET. "You only managed 200 words, poor effort" is
+imposed and still banned. "You said you'd finish the lit review by Friday and you've opened it
+twice" is the writer's own words quoted back, and is the point. So a goal is what gives the
+report STANDING to push — and §A5b's honesty boundary is the corollary: with no goal set, the
+report must not invent a standard to measure against. No goal ⇒ describe, don't push.
+
+The report path enforces that boundary structurally rather than by asking: goals travel only on
+their own consent tick, so a model that was sent no goal has nothing to hold the writer to and
+is told so explicitly (see productivity/report/compile.ts + prompt.ts).
+
+⚠ NOT YET AUTHORABLE. Nothing writes this field: the editor UI for setting a goal is a design
+question Peter owns and has not answered (raised 2026-07-17). Until it exists, every document's
+goals are `undefined`, which the report path handles as the honest "no goal ⇒ describe, don't
+push" case rather than as an error. Do NOT default it to an empty goal — an empty goal and no
+goal are different states, and only the second is honest about itself.
+
+<a id="doc-milestone"></a>
+### `DocMilestone` — additive to `plan`, never a replacement for it
+
+ONE dated milestone — the TIMELINE (Peter, 2026-07-17: "goals should include a timeline and then
+ai can fill in how they actually do").
+
+WHY THIS EXISTS ALONGSIDE `plan` RATHER THAN REPLACING IT. DocGoals' original note warns: do not
+upgrade the plan to a schema of dates, because "the moment it needs to be filled in properly, it
+stops being written at all". That warning is RIGHT and `plan` stays free text, untouched. But
+Peter asked for a report on "how they meet each of their timed goals" — and a free-text plan
+cannot be tracked per-goal, because there is nothing to compare to a date. So the timeline is
+ADDITIVE and OPTIONAL: write nothing and the plan behaves exactly as before.
+
+§A6.4 APPLIES: whether a milestone was MET is a MEASURED comparison of two dates the writer
+supplied. It is computed client-side (`productivity/goals.ts` milestoneStatus) and handed to the
+model as a VERDICT — never as two dates for a narrator to compare. The model says what it MEANS;
+it never decides whether it happened.
+
+<a id="doc-music-anchor"></a>
+### `MusicAnnotationRecord` — §B4 is unbuilt, but the anchor question is settled
+
+§B4 IS NOT BUILT, but THE ANCHOR QUESTION IS SETTLED (2026-07-17). This file used to record it as
+open: `MusicXmlAnchor` declared `measure: number`, and MusicXML bar numbers are STRINGS by spec, so
+a numeric anchor cannot express a '0' pickup or an '8a' repeat ending. The Piece's owner ruled —
+and the answer was not "make it a string": a printed bar number is also NOT UNIQUE (repeat endings
+reuse it, multi-movement files restart at 1), so it cannot be a key at all. `music/types.ts` BarRef
+has the full argument. The shape is now `bar_index` (0-based ORDINAL — identical to `parse.ts`
+`Measure.index`, so this lane needs no conversion) + `bar_label` (the printed string; display and
+citation only, never a key), both optional because they are known at different times.
+
+This stays deliberately open ANYWAY: the ARRAY is hashed today (see musicAttachmentsHash) so that
+populating it later needs no new bundle version, and it is empty today so no anchored hash can be
+affected by whatever §B4 records per annotation.
+
+<a id="doc-media-unanchored"></a>
+### `media` — references only, and NOT anchored (an open ruling)
+
+Peter: "a photo import button (which has photo or audio or video)" — general, into any
+document. REFERENCES ONLY: the bytes live in OPFS (`library/media/`), exactly as an embedded
+source PDF's do (`pdfName` above). A .studio that inlined a 20MB video would re-break every
+load-performance rule the PDF precedent exists to keep.
+
+⚠ NOT ANCHORED YET, AND THAT IS AN OPEN RULING, NOT A DECISION MADE HERE. `bundleHash` is v:1
+/v:2/v:3/v:4 (content · bib · email · music) and this adds no version, so a media asset is
+currently OUTSIDE what Bitcoin commits to — the PDF precedent (bytes unanchored) rather than
+the music precedent (masters anchored by {id, contentHash} in v:4). That is defensible while
+media is a reference the prose does not depend on, and it stops being defensible the moment a
+photo is part of the argument. Do not fold it into a bundle version without Peter's ruling —
+and note `musicHash.test.ts` pins v:1 against a hand-computed literal, so an attempt to
+sneak it in fails a test that already exists.
+
+<a id="doc-toolbar-unanchored"></a>
+### `toolbar` — per-document layout, structurally outside the hash
+
+Peter: "we should encode the toolbar configuration into a .studio document" — the layout is
+per-DOCUMENT and task-based (a score gets music tools, an essay gets writing tools) rather
+than one global preference. The rules, the shape and the resolution chain all live in
+`editor/toolbarContract.ts`; read it before touching this field.
+
+NOT ANCHORED, and structurally so: `contentHash()` takes contentJson only — never this
+document — and `bundleHash()` takes four EXPLICIT hash arguments, so no document field can
+ride in. `musicHash.test.ts` already pins the v:1 form against a hand-computed literal, so
+any attempt to fold this in fails a test that exists. Rearranging your buttons must never
+read as tampering with your thesis. Same class of field as `citationStyle`.
+
+<a id="doc-piece-vs-music"></a>
+### `piece` vs `music` — two fields, both right, and the parallel container that was retired
+
+⚠️ `piece` AND `music` ARE DIFFERENT THINGS AND BOTH ARE RIGHT. Read this before merging them:
+
+- `music: MusicAttachments` (§B5/§B6) — this document is PROSE that quotes music. An essay
+  with a MusicXML master attached and bar-range excerpts transcluded into the writing.
+- `piece: Piece` (§1) — this document IS the music. A photographed score with markup, a
+  heatmap, lesson notes and a practice record. The prose, if any, is incidental.
+
+An essay about Chopin has `music`; the Chopin the student is learning has `piece`. A document
+could legitimately have both (write about the piece you are practising — §A6's "write about the
+piece in Inkwave and cite bars"), which is exactly why they are not one field.
+
+WHY IT LIVES HERE AT ALL, and this RETIRES A FORK I SHIPPED: §1 says "the whole thing … is
+bundled in a single `.studio` file (the Inkwave document container)". `music/store.ts` did not
+do that — it wrote a PARALLEL container at `music/<pieceId>/piece.json`, a second document store
+beside `documents/<id>/current.json`. §1 explicitly says not to have one, and the cost was not
+theoretical: a Piece got no edit history, no provenance hashing, no session capture and no cloud
+sync, because all of those are things that happen to DOCUMENTS.
+
+The precedent is the email lane's, verbatim: "An email is an ORDINARY document — that is the
+whole design." A Piece is an ordinary document too. `docType: 'music'` + this field; the photo
+pages are assets; everything else applies for free rather than because `src/music/` arranges it.
+
+Absent ⇒ every existing document is byte-identical, as with `email` and `music`.
+
+⚠️ OPEN, for the MusicXML lane + coordinator: a `PieceSource {type:'musicxml', xml_ref}` and
+`music.masters[]` can both name the same MusicXML bytes. They must not become two copies —
+§B6's whole design is "stored ONCE as an embedded source attachment on the document/Piece
+(deduplicated)". The seam is that `xml_ref` should REFERENCE a master, not duplicate one.
+Unresolved deliberately: it is that lane's field, and guessing is how the dedup silently dies.
+
+<a id="doc-snapshot-optional-hashes"></a>
+### Snapshot's optional frozen copies — one rule, written three times
+
+`bibliography`/`bibHash`, `email`/`emailHash` and `music`/`musicHash` each carried their own
+paragraph of the SAME sentence: present only when the document has that feature; absent ⇒ the
+bundle keeps its earlier v-form, so every document anchored before the feature existed hashes
+byte-identically to before. Three copies of one rule is how a rule drifts — it is stated once
+above the group now, and each field keeps only what is specific to it (what its hash is over).
+
+<a id="doc-snapshot-meta"></a>
+### `SnapshotMeta` — the snapshot memory diet
+
+Everything the editor chrome renders (labels, OTS status, summaries, hashes) WITHOUT the heavy
+payload — contentJson, the receipts array, and the frozen bibliography can each be MBs, and
+hundreds of snapshots × full content in React state was hundreds of MB resident (GC pauses). The
+full array lives ONCE in the snapshots.ts cache; consumers fetch it via `listSnapshots()` at
+action time (export, verify, diff). Derived via `toSnapshotMeta()` in provenance/snapshots.ts.
+
+---
+
+## `productivity/sessionLogic.ts` — boundaries and row arithmetic (§A2, §A4)
+
+Everything in the module is a pure function of its arguments (clock injected), so the boundary
+rules and the arithmetic are unit-testable without an editor, a DOM or a disk. The impure
+orchestration (timers, the edit stream, disk writes) lives in `capture.ts`.
+
+<a id="session-typing-shape"></a>
+### The typing-performance shape — why `words_start` is carried in, not counted
+
+The editor's per-keystroke path may do NO O(doc) work. So a session's `words_start` is NOT counted
+when the session opens — it is carried in from the previous close's baseline. That is exact, not an
+approximation: a session boundary IS an inactivity gap (or an explicit start/stop, or a doc switch),
+and the document cannot change while nobody is editing it. So the word count at the previous close
+is the word count at the next open, and a keystroke costs O(steps). See capture.ts for the baseline.
+
+<a id="session-active-cap"></a>
+### `ACTIVE_GAP_CAP_MS` — the one judgement call in the arithmetic
+
+`active_minutes` is "time actually editing (excludes idle within session)" (§A3.2), so it is the
+sum of gaps BETWEEN consecutive edits, each capped: a writer who types, thinks for 3 minutes
+(under the 5-minute boundary) and types again was not editing for those 3 minutes. The cap is the
+one judgement call in the arithmetic — it is deliberately a named constant so the number it
+produces is explainable ("we count up to 60s of thinking between two keystrokes as working
+time"), never a black box.
+
+<a id="session-open-edits"></a>
+### `openDraft(edits)` — 1 for a keystroke, 0 for the timer
+
+`edits` is how many edit events the OPENING itself represents: 1 when a keystroke opened the
+session (the ordinary case), and **0 when the TIMER did** — a Pomodoro block opens a session with
+no edit behind it (Peter: reading printed paper), and counting a phantom keystroke there would put
+a fictional `edit_events: 1` on a session in which nothing was typed.
+
+<a id="session-local-day"></a>
+### Local day / local hour (§A9) — the one time rule, and the mirror that was retired
+
+`isoWithOffset` emits the UTC instant AND the writer's local offset, e.g.
+`2026-07-17T09:14:03.000+10:00`. §A9 requires UTC + offset so aggregation can happen in the
+writer's LOCAL day; a bare `Z` string loses the offset and with it the local day. `offsetMin` is
+minutes to ADD to UTC to get local time (Brisbane = +600), i.e. the negation of
+`Date.prototype.getTimezoneOffset()`. Injected so tests are timezone-independent.
+
+Aggregates roll up by the WRITER'S local day, not by UTC day — a 9pm Brisbane session belongs to
+that evening, not to the next UTC date. The offset in the ISO string is the source of truth when
+present, so aggregation is a pure function of the ledger's own bytes and does NOT depend on the
+machine's TZ. (A test suite that silently passes only in Australia/Brisbane is the kind of check
+that can't see its own failure — the fixtures therefore carry explicit offsets.)
+
+MERGED 2026-07-17 (feat/prod-integrate): `feat/prod-graphs` shipped these same five functions in
+its placeholder `ledger.ts` mirror. That mirror is retired and its implementations live HERE, the
+module that already owned `localDayOf`/`localMonthOf` — one rule for one question. The graphs
+lane's version is the one kept: it is strictly stronger than this module's original
+`iso.slice(0, 10)`, which agreed with it on every offset-bearing ISO the ledger emits (the date
+part as written IS the local day) but answered garbage-in-garbage-out on unparseable input.
+
+<a id="session-ispost-hoc"></a>
+### `isPostHoc` / `splitByEntry` — the positive question, and the second implementation that lied
+
+THE ONE PLACE `entered` IS READ, and it asks the POSITIVE question deliberately: "did this row SAY
+post-hoc?". A row must CLAIM to be testimony to be treated as testimony. Legacy rows (written
+before the field existed) predate the manual add entirely, so they are timer rows as a matter of
+history — not because absence defaults to anything. Keeping that reasoning in one named function is
+what stops it being silently re-derived as `!row.entered` somewhere else.
+
+It lives in `sessionLogic.ts`, beside the builders, rather than in `aggregate.ts`, because the panel
+needs it too and must not drag the whole rollup layer in to ask a one-field question.
+`aggregate.ts` re-exports.
+
+`splitByEntry` is exported rather than kept private to the aggregates because ⚠ THE DROP-UP'S
+`daySummary` IS A REAL CALLER. It sums the day's minutes independently, it reduced over ALL rows,
+and it reported 45 remembered minutes to the writer as "focused minutes" while every unit test
+stayed green — the tests guard `aggregate.ts`, and the panel never calls it. Caught by driving the
+real UI. A guard on one implementation of a rule says nothing about the other.
+
+<a id="session-posthoc-row"></a>
+### `buildPostHocRow` — do not make him precise
+
+**DO NOT MAKE HIM PRECISE.** A form demanding start/end times won't get used on a Tuesday, and this
+whole feature dies if the ritual becomes data entry. So the input is a rough duration and a rough
+category, and we derive the span: it ENDS when he told us and reaches back by the duration he said.
+That span is not a measurement and does not pretend to be one — `entered: 'post-hoc'` flags the
+entire row as testimony, so every field on it, the span included, is read as his word rather than
+ours. It lands in the local day he is standing in, which is the day he means.
+
+Every MEASURED field is ZERO, deliberately, and that is not missing data — it is the true value.
+We did not see him type, so `words_added: 0` is exactly right: nothing was measured. The minutes
+live in `active_minutes` and are kept out of the measured bars by `entered`, never by being blank.
+
+`break_before_min` is 0: a break is a gap between two MEASURED sessions, and we have no idea what
+ran before something we never saw.
+
+`doc_id` is the literal `'post-hoc'`, not the open document: he is repairing the RECORD, and the
+work he forgot to time may not have been in Inkwave at all (a printed article, a library
+afternoon). Attributing it to whatever happened to be on screen when he remembered would be a guess
+wearing a measurement's clothes.
+
+<a id="session-recordable"></a>
+### `isRecordable` — a Pomodoro block counts with no edits at all
+
+ANY real edit counts — a thinking-heavy, low-output session is still work, and discarding it is
+exactly the judgement §A5 forbids.
+
+**AND A POMODORO BLOCK COUNTS WITH NO EDITS AT ALL** (Peter, 2026-07-17). This used to be
+`editEvents > 0`, which threw away the paper-reading case entirely: reading a printed article for
+25 minutes produces zero events, so the block was measured, closed, and then SILENTLY DROPPED on
+its way to the ledger. Starting the timer is the writer saying *count this*; a rule that requires
+a keystroke to believe them is the tracker calling a real day thin.
+
+<a id="session-reflection"></a>
+### `REFLECT_AFTER_ACTIVE_MS = 25 minutes` — every part of the number is a decision
+
+- NOT per Pomodoro block — a toll booth every 25 minutes of clock time kills the ritual it is
+  meant to be. This counts ACTIVE minutes, which accrue slower than the clock.
+- NOT at day's close — you cannot remember by then, and the chart only works as a recall prompt
+  while the stretch is still warm.
+- Once per stretch, never re-prompted, always skippable. A skipped reflection is not a failure
+  and nothing anywhere may treat it as one.
+
+The bar for all of it: would he fill this in on a bad Tuesday?
+
+Asking is OFFERING — `shouldOfferReflection` returns true at most once per stretch because
+accepting or skipping resets the accumulator (the caller marks the stretch), never because we track
+whether they complied. `unreflectedRows` is extracted so the drop-up (which SHOWS the prompt) and
+the session-close watcher (which OPENS the panel to it) read ONE rule — two copies of "what counts
+as unreflected" is exactly how the two would drift. A row is spoken-for when it ends at/before the
+newest reflection's `to`.
+
+---
+
+## `productivity/report/claims.ts` — enforcing what the prompt can only request
+
+"A prompt is a request, not a guarantee." Every check in this module runs on the reply, on the
+device, after the fact.
+
+<a id="claims-limits"></a>
+### They FLAG, they never rewrite — and the honest limits
+
+Both checks FLAG; they do not rewrite (§A9: never silently drop data — a narrative quietly edited
+by Inkwave would be its own integrity problem, and the writer would never know their model had
+misbehaved).
+
+HONEST LIMITS — these are heuristics over prose, and they are stated in the panel too:
+
+- `findCausalClaims` is a marker-word scan over CLAUSES. Its real limits, in the order you
+  will actually hit them (F18's lesson: a documented limit should be the one people meet,
+  not a curiosity — the old note pinned "the break definitely helped, maybe", a sentence
+  nobody writes, and read as though that were the boundary):
+  1. NO MARKER, NO FLAG. "Your best writing came after the walk" asserts a cause with no
+     causal word in it. Invisible here, and this is the commonest miss by far.
+  2. A HEDGE ANYWHERE IN THE CLAIM'S OWN CLAUSE exempts it, even when it governs some
+     other part of that clause: "Maybe you should protect your peak hours, which are nine
+     to eleven" asserts the hours inside a hedged clause. Clause splitting fixed the
+     cross-clause case; the within-clause case needs a parser, not a regex.
+  3. Punctuation is the clause boundary, so a run-on sentence with no commas is one clause.
+
+  All accepted. The scan is a flag for the reader's judgement, not a proof, and over-flagging
+  the hunches Peter asked for would be the worse error.
+- `findUnverifiedNumbers` only knows the numerals Inkwave actually sent. It cannot check a
+  number written as a word ("forty minutes") — which the fixed prompt encourages for exactly
+  the small counts where a numeral would be noise.
+
+Both are one-directional: a clean result means "nothing detected", never "verified honest".
+
+<a id="claims-hedge"></a>
+### §A6.2 — Peter moved the line, and the rule was re-derived around the hedge
+
+PETER MOVED THIS LINE ON 2026-07-17: "I sort of want them to hazard guesses at causality too.
+They don't have to commit, but something like 'the break maybe helped' or 'you could've taken
+more breaks' I think would be really helpful."
+
+He moved it; he did not delete it. The scan used to fire on causal language as such — which
+would now flag EXACTLY what he asked for. So the rule is re-derived around the hedge:
+
+    "the break helped."        → an assertion from one data point.        FLAGGED.
+    "the break maybe helped."  → a hypothesis, announced as one.          NOT flagged.
+
+A guess that announces itself is honest; a guess dressed as a finding is not. That is the whole
+of it, and it is the same distinction the prompt now draws.
+
+THIS SITS INSIDE §A6.2 RATHER THAN AGAINST IT, which is worth noticing before anyone "fixes" it
+back. The spec line, quoted IN FULL and un-ellipsed because it is load-bearing
+(`docs/specs/Inkwave-Productivity-Email-BuildSpec-v0.2.md`, §A6.2, line 139 — re-verified
+verbatim 2026-07-17):
+
+> "Confident *pattern* claims (breaks help/hurt, best time of day) are permitted only at
+> weekly+ where there's enough data."
+
+HEDGING REMOVES THE CONFIDENCE. The spec drew this line already; we had been reading a ban on
+the SUBJECT where it bans the CERTAINTY — and the trailing clause ("where there's enough data")
+is why: it is a rule about evidence supporting a claim's strength, not about naming causes.
+
+<a id="claims-hedge-clause"></a>
+### F18 — the hedge must govern the claim it exempts, and `may` is case-sensitive
+
+`isHedged` used to be a substring match over the WHOLE SENTENCE, which is a category error: the
+argument is about a claim's MODALITY, and modality belongs to a clause, not to a string. So a
+hedge in a *different clause* exempted a perfectly confident claim next to it. The two misses
+that made the case, both of which an Opus narrative produces constantly:
+
+    "Your peak hours are nine to eleven, which suggests protecting them."
+       → the claim is asserted; "suggests" hedges the SUGGESTION, not the claim. Now flagged.
+    "You always write best in the morning, as you have since May."
+       → "always" is asserted; the exemption came from a MONTH NAME. Now flagged (twice over:
+         the clause split separates it, and `may` is case-sensitive).
+
+`may` is CASE-SENSITIVE, and that is the entire fix for the second miss: `/\bmay\b/i` matched the
+MONTH, so a date silently exempted the sentence. The modal is lower-case in every sentence anyone
+writes ("may have", "may well be"); the month is always capitalised. A sentence-initial modal
+"May the..." is archaic and does not occur in a work report.
+
+The clause split is on PUNCTUATION ONLY, deliberately: the obvious extension is to split on
+connectives too ("which", "and", "but"), and it would BREAK THE MARKERS — "which is why" is itself
+a causal marker, and "because" is the commonest one. Splitting on either destroys the very thing
+being looked for and the scan would go quiet on its own controls. Punctuation cannot collide with
+a marker, so it is the granularity that is safe by construction.
+
+The hedge markers are scoped deliberately: they are only ever consulted for a sentence in which a
+causal or pattern marker ALREADY fired, so an ordinary "could not find the thread" is not at risk
+of being read as a hedge — nothing is looking at it.
+
+<a id="claims-person-verdicts"></a>
+### §A5 — the re-derived guilt list, and why it is a list of three words rather than seven
+
+THE OLD LIST WAS A LIST OF WORDS, AND THAT WAS THE MISTAKE. The kind/non-shaming prompt banned
+"only", "just", "failed to", "should have", "fell short", "wasted", "unproductive". When §A5
+reversed (honest first, funny second, kind third) that list had to be re-derived rather than
+deleted — because most of those words are exactly right when the writer set a goal and missed
+it. "You said Friday. You've opened it twice. You failed to touch it since Tuesday" is the
+FEATURE now. Banning "failed to" would ban the thing Peter asked for.
+
+SO THE RULE IS NOT ABOUT VOCABULARY, IT IS ABOUT THE SUBJECT AND THE STANDARD:
+
+- Measuring the writer against a goal THEY SET → accountability. Any word goes.
+- Measuring them against a standard WE invented → guilt. Banned regardless of politeness.
+- A verdict on the PERSON rather than the work → banned, and no goal licenses it.
+
+The first two are enforced STRUCTURALLY: goals travel only on their own tick, so a model with
+no goal is told it has no standard (prompt.ts) and has nothing to quote. That is not a word
+problem and no matcher could see it.
+
+What a matcher CAN see is the third: words that can only ever be a verdict on a human being.
+That list is short, and it is short on purpose — every entry had to survive the question "is
+there a sentence where a comedian could use this ABOUT THE WEEK rather than about the writer?"
+"Lazy" fails that test (a Tuesday cannot be lazy; only a person can). "Wasted" passes it — "you
+wasted three sessions circling the same paragraph" is about the sessions and is fair game — so
+it is NOT on the list, though it was on the old one.
+
+HONEST LIMITS, and they are wide:
+
+- One-directional. Clean means "nothing detected", never "this reply is honest".
+- It cannot see an imposed STANDARD, which is the commoner and more serious failure ("200
+  words is a thin day" contains no banned word at all). The structural gate is what covers
+  that; this only catches the crude case.
+- Quoted spans are skipped — the narrative may legitimately quote the writer calling THEMSELF
+  lazy, and flagging the writer's own words back at them would be absurd.
+
+---
+
+## `productivity/aggregate.ts` — the ledger → report/graphs seam (§A3.3)
+
+<a id="aggregate-client-side"></a>
+### Why the aggregates are client-side
+
+§A6.4 IS WHY THIS IS CLIENT-SIDE: these numbers are MEASURED. They are computed here,
+deterministically, from the writer's own ledger, and the model never gets to hand them back.
+Aggregating here is also what keeps AI payloads small regardless of window (§A6): the report
+sends compact day rollups, not raw logs.
+
+Everything is a pure function of the rows + a clock, so the arithmetic is testable without a disk.
+`feat/prod-graphs` owns the CHARTS; this is the data they read.
+
+The entry-provenance rules live in `sessionLogic.ts` (beside the row builders, so the drop-up can
+ask a one-field question without importing the whole rollup layer). RE-EXPORTED, never
+re-declared: two copies of "what counts as measured" is precisely how the two would drift apart.
+
+<a id="aggregate-posthoc-excluded"></a>
+### Every measured field reads `measured` only
+
+`dayAggregate` splits post-hoc rows out at the TOP of the function rather than at each `reduce`,
+deliberately: a field added later reads `measured` because that is the variable in scope, so the
+safe thing is also the easy thing. Post-hoc rows contribute to `posthoc_minutes` and
+`posthoc_session_count` and to nothing else.
+
+A session's active minutes are attributed to the hour it STARTED in. That is a convention, and
+the honest one available: the ledger records when a session ran, not minute-by-minute where the
+work fell inside it, and spreading minutes across a span would invent a distribution we never
+measured. Sessions are short (a Pomodoro is 25 min), so the attribution is close.
+
+`docTotals` EXCLUDES post-hoc rows for two independent reasons and either would do: the screen
+offers the writer a choice of DOCUMENTS to send text from, and a block he described from memory has
+no text to send (and no document — `doc_id: 'post-hoc'`); and its minutes are testimony, so listing
+them in a column of measured per-document minutes is exactly the merge §A6.1 forbids.
+
+<a id="aggregate-merge"></a>
+### The 2026-07-17 merge — two lanes, two `aggregate.ts`, one module
+
+MERGED 2026-07-17 (feat/prod-integrate). Both lanes wrote an `aggregate.ts`; this is ONE module
+now, over ONE schema. What was reconciled, and what deliberately was not:
+
+- ONE ROW TYPE. The graphs lane built against `ledger.ts`'s `LedgerSession` — an explicit
+  placeholder mirror of §A3.2, retired here in favour of the real `SessionRow` (types.ts), and
+  the day-grouping/rounding/time rules are now the same ones the window builder uses.
+  That is the swap its own THE LEDGER SEAM comment anticipated.
+- TWO OUTPUT SHAPES, KEPT — they answer different questions and are NOT a fork:
+  `DayAggregate` (types.ts, snake_case) = the §A3.3 WIRE contract the report payload emits;
+  `ChartDayAggregate` (here, camelCase) = the view model the SVG charts read.
+  The graphs lane's `DayAggregate` was renamed to `ChartDayAggregate` because two exported types
+  sharing one name in one module is exactly how a caller silently gets the wrong contract. The
+  wire name belongs to the schema owner.
+- THE HOUR HISTOGRAMS DIFFER ON PURPOSE, and both are honest about it: `busiest_hours`
+  attributes a session's minutes to the hour it STARTED in; `hourHistogram` apportions
+  them across the hours the session spans. Both conserve total active minutes, so they cannot
+  contradict each other on any total — they differ only in how they distribute WITHIN a day, and
+  each documents its own limitation. Collapsing them would have silently rewritten one lane's
+  measured behaviour to make a merge look tidy.
+
+PURE. No clock, no storage, no network, no React, no AI. Every number here is computed from the
+ledger's own bytes and is GROUND TRUTH (§A6.4): these must never round-trip through an LLM, which
+is the whole reason the graphs are worth believing.
+
+<a id="aggregate-hour-histogram"></a>
+### `hourHistogram` — an apportionment, and it says so
+
+Honest limitation, stated rather than hidden: the ledger records a session's start/end and its
+active_minutes, but NOT which minutes inside the span were active. So active time is spread
+proportionally over the hours the session covers. For a session inside one hour this is exact; for
+a session straddling hours it is an apportionment. The histogram is therefore reliable at the
+"which part of the day do you write in" scale it is drawn at, and should not be read as a
+minute-accurate record of any single hour.
+
+Only gaps BETWEEN a day's own sessions count as that day's breaks — the first session's
+`break_before_min` reaches back to the previous day (often overnight) and would swamp the stat.
+
+<a id="aggregate-correlation"></a>
+### `Correlation` — descriptive only, and `n` travels with `r`
+
+A descriptive association between break-taking and output (§A3.3: "break-vs-output correlations
+(DESCRIPTIVE ONLY)"). This is a Pearson r over days. It is an ASSOCIATION IN THIS WINDOW and
+nothing more — it cannot establish that breaks cause output (the writer who takes more breaks may
+simply be having a longer day). The panel renders it with a descriptive caption only, and never at
+the daily window (§A6.2). `n` travels with `r` so a coefficient can never be read without its
+sample size. Zero variance on either axis ⇒ r is undefined, not zero; don't report a made-up 0.
+
+<a id="aggregate-pearson-clamp"></a>
+### Why `pearson()` snaps rather than clamps — a silencer that hid a dropped axis
+
+For a correct Pearson, Cauchy–Schwarz puts |r| ≤ 1 ALWAYS: a clamp to [-1, 1] is unreachable in
+working code, and the only thing it can ever actually do is disguise a BROKEN formula as a
+plausible number. That is not hypothetical — this function shipped with `clamp(num/den, -1, 1)`
+and an external audit dropped the Y spread from the denominator (`sqrt(dx2*dy2)` →
+`sqrt(dx2*dx2)`); the mutant computed r=2 for a perfectly-correlated fixture and the clamp
+returned exactly the 1.0 the test asserted. The whole 1054-test repo stayed green while a
+correlation shown to the writer would have read 1.0 ("your breaks predict your output") where
+the truth was 0.70. The clamp was load-bearing for the bug, not for the user.
+
+So: snap only the floating-point hair (a legitimate ±1 can land at 1.0000000000000002), and
+REFUSE anything grossly out of range. An impossible r means the maths is wrong, and the honest
+response to "my measurement is impossible" is to stop reporting it — not to round it into the
+range where it looks fine. Unreportable is the one answer that cannot mislead (§A6.1).
+
+---
+
+## `productivity/report/compile.ts` — the payload (§A7.1.1)
+
+<a id="compile-allow-list"></a>
+### The payload is an ALLOW-LIST, and the four consent tiers
+
+COMPACT ROLLUPS, NOT RAW LOGS (§A3.3): this is what keeps the payload small regardless of
+window, and it is why a monthly report neither blows up token counts nor degrades. Session
+rows go out ONLY for the daily window, where the judged rows are per-session and there are a
+handful of them; weekly and monthly send day rollups alone.
+
+ON §A6.4: measured numbers DO go out — the model cannot narrate a day it cannot see. What the
+rule forbids is the ROUND TRIP: they must not come BACK. That half is enforced in judged.ts
+(a judged table carrying measured columns is rejected outright) and claims.ts (numbers in the
+narrative that Inkwave did not send are flagged). Nothing here is graphed from the reply.
+
+THE PAYLOAD IS AN ALLOW-LIST, AND THAT IS THE POINT. Every field that leaves is NAMED in this
+file. Nothing iterates a ledger row and emits what it finds. So a field the ledger gains tomorrow
+— a place label, a diary note, whatever comes after — cannot leak by default: it is simply not
+emitted until someone deliberately adds it here, and adding it means choosing a consent tier for
+it. A deny-list would have the opposite failure mode, and that failure is silent.
+
+FOUR TIERS (Peter, 2026-07-17 — notes and places SPLIT on his instruction):
+
+1. session metadata (times, words, edits) — always included
+2. a. diary notes — opt-in, OFF by default ← `includeNotes`
+   b. place labels — opt-in, OFF by default ← `includePlaces`
+3. per-document text — opt-in, OFF by default, per document (§A7.3)
+   b. per-session excerpts — the ledger+doc combo; gated by 3, daily only
+
+Tier 2 exists because tiers 1 and 3 alone would let the writer's own prose ride out inside
+"metadata": "metadata only" would quietly mean "and what I wrote about my day".
+
+WHY 2a AND 2b ARE SEPARATE (Peter: "separate session notes from places into two tick boxes"):
+they are one tier by provenance — both are words the writer typed — and two different
+disclosures by SENSITIVITY. A place label is one word ("library"); a diary note is a paragraph
+about the writer's day, and may be about anything at all. Bundling them forced an
+all-or-nothing choice across a real gap in exposure. Note the place label is text the WRITER
+TYPED — not geolocation, nothing harvested (§C1.4).
+
+<a id="compile-note-digest"></a>
+### `noteLines` — the digest leads, and the silent break that made it
+
+WHY BOTH, and why the digest leads (feat/prod-integrate, 2026-07-17): this module was built while
+`feat/prod-ledger` was still in flight, and it asked that branch for session rows at every window
+because a note is per-session. The ledger lane ANSWERED — `sessions` is `[]` at weekly/monthly and
+opted-in notes travel as `note_digest`, per LOCAL day — because rows at monthly would put a SECOND
+copy of every measured number beside the day rollups (§A6.4), and two copies is how a narrative
+ends up contradicting the bars. This function is that answer being honoured.
+
+It was a SILENT break, which is why it is worth the comment: reading only `agg.sessions`, a
+writer who ticked "include my notes" on a WEEKLY or MONTHLY report got a payload with no notes in
+it, `notesIncluded: false`, and no error anywhere — the tick-box simply did nothing. Both lanes'
+suites were green; the demo fixtures still carried the old shape, so the path a developer eyeballs
+worked while the real ledger's did not. Proved end-to-end in emailLedger.integration.test.ts.
+
+The session fallback is kept deliberately: DAILY rows legitimately carry notes, and a source that
+predates the digest (the `?prodReport=demo` fixtures) must not silently lose them either.
+
+THE TWO GATES ARE APPLIED AT THE READ (Peter's split, 2026-07-17). `notes`/`places` are
+read only when their own tick is on, so an un-ticked field is never in the returned data at all —
+not filtered out later, not blanked at render. There is no downstream place for it to leak from.
+
+A day with places but no note still says where the writer worked — it is their word either way,
+and dropping it would quietly discard part of what they opted into.
+
+<a id="compile-place-column"></a>
+### The place column follows the tick
+
+The place label is rendered as the plain string the writer typed. It is deliberately NOT
+parsed, geocoded or interpreted — it is a word, and treating it as anything more would be the
+beginning of exactly the claim we must not make.
+
+The COLUMNS follow the ticks: a payload with places and no notes carries no `note` column at
+all. An empty column would tell the model a note existed and was withheld, which is a different
+(and wrong) statement from "the writer did not share notes".
+
+<a id="compile-excerpt-gaps"></a>
+### A missing excerpt is LISTED, never omitted
+
+`excerptsSection` pairs each session with the prose that appeared during it. §A7.3 gates every
+word: the caller supplies excerpts for TICKED documents only, so this renders what it is handed
+and never reads a document itself.
+
+Sessions whose excerpt is missing are LISTED, not omitted (§A9). A silent gap would read to the
+model — and to the writer — as "nothing happened here", when the truth is "the snapshot record
+has no boundary here"; the measured `words_added` for that session may be substantial. Saying so
+is the difference between an honest gap and a fabricated zero.
+
+<a id="compile-goals-verbatim"></a>
+### Goals go out verbatim; the milestone verdict is Inkwave's
+
+§A5b — the writer's goals, rendered as the writer typed them. Nothing summarises, normalises or
+interprets a goal: the entire legitimacy of §A5's reversed tone rests on the model quoting the
+writer's OWN standard back at them, and a goal we paraphrased is no longer theirs.
+
+§A6.4 — Inkwave computes whether a dated milestone was MET (a comparison of two dates the writer
+supplied); the model is handed the VERDICT, never the raw dates to compare. "Did I hit my
+deadline" is exactly the claim an LLM must not silently re-derive. The due date rides along as
+context (it is the writer's own datum), but the met/missed judgement is Inkwave's.
+
+---
+
+## `productivity/capture.ts` — the impure orchestration (§A4)
+
+<a id="capture-typing-cost"></a>
+### Typing cost is the design
+
+HOW IT HOOKS THE EDIT STREAM: it does NOT add instrumentation. `record()` is called from the
+editor's existing `onTransaction` — the same stream the provenance spine already listens to — and
+derives its counts from `countSteps` (provenance/cadence.ts), which is the repo's existing
+steps→counts primitive. Counts only; never characters, never content.
+
+TYPING PERFORMANCE IS SACRED (CLAUDE.md). The per-keystroke path here is:
+`countSteps(steps)` → compare two numbers → increment three fields. That is it. Specifically it
+does NOT:
+
+- walk the document (words_start is carried from the previous close's baseline)
+- touch localStorage (the flag is cached; label suppression is cached)
+- allocate a timer per keystroke (idle is found by ONE low-frequency interval, not a
+  clearTimeout/setTimeout churn per input)
+- touch the disk or React state
+
+Every O(doc) number is computed at session CLOSE, off the input path.
+
+THE BASELINE (why words_start is free): a session boundary IS an inactivity gap (or an explicit
+Pomodoro start/stop, or a doc switch). The document cannot change while nobody is editing it, so
+the word count measured at the previous close IS the word count at the next open. Carrying it
+forward is exact, not an approximation — and it costs O(1) on the keystroke that opens a session.
+
+<a id="capture-word-diff"></a>
+### `wordDiffStats` — two measured failures, not theory
+
+(1) `diffWords` tokenises as [word][trailing-whitespace] so that re-joining reproduces the
+original exactly — right for the diff VIEW it was built for, wrong as a measurement: appending
+to a paragraph makes the old last token ("three\n") differ from the new one ("three "), so a
+2-word addition measured 3 added + 1 deleted. Collapsing whitespace and giving BOTH sides a
+trailing space makes the shared prefix match, so only real changes are counted.
+
+(2) `diffStats` counts `\S+` runs while `countWords` (which produces words_start/words_end) counts
+`[\p{L}\p{N}]+` runs. Left alone, punctuation tokens would make `words_added - words_deleted`
+disagree with `net_words` in the same row — two numbers on one graph contradicting each other.
+Reducing both sides to countWords' OWN word notion before diffing keeps the row coherent.
+
+Exported so the arithmetic is unit-testable on its own.
+
+<a id="capture-default-doc-type"></a>
+### `DEFAULT_DOC_TYPE = 'misc'` — an honesty fix, not a rename
+
+It defaulted to 'essay', so every unclassified session was FILED AS ESSAY WRITING whether it was
+or not: a guess dressed as a measurement, in the one field §A6.1 says must be measured. `misc`
+says the true thing — they were working; we don't know at what. See DocType's note for why `misc`
+and `other` are different words.
+
+The refusal that produced it STANDS: nothing distinguishes a note from an essay, and a rule based
+on length or title would be invention. A type is SET, never guessed — by the email layer's
+explicit `docType: 'email'`, by the PDF surface's reading/annotating, or by the writer's own
+reflection. A window that is mostly `misc` is a finding about OUR instrumentation, never a failing
+of the writer's.
+
+<a id="capture-pomodoro-boundary"></a>
+### A running Pomodoro suppresses the inactivity close — and IS the claim of work
+
+**A RUNNING POMODORO SUPPRESSES THE INACTIVITY CLOSE** (Peter, 2026-07-17). §A4 names the
+Pomodoro as a boundary source in its own right, and the two rules would otherwise fight: silence
+means "gone" only when nobody has claimed the time. Reading a printed article for 25 minutes
+produces ZERO events, so the 5-minute rule would kill the session at minute five and throw the
+other twenty away. While a block runs, the BLOCK is the boundary — nothing else closes it.
+
+PETER, 2026-07-17: "even if you read physical articles you still use the pomodoro timer."
+Starting the timer IS the writer saying *count this*. So `pomodoroStart` OPENS a session
+immediately rather than waiting for a keystroke — otherwise 25 minutes of reading a printed
+article produces no events, no session, and NO ROW, and the report calls it a thin day. That is
+the tracker being wrong about him. The block is measured; only its TYPE is unknown (⇒ `misc`), and
+the end-of-stretch reflection is where he names it ("reading Leibniz, printed").
+
+WHEN DID IT END, AND HOW MUCH OF IT WAS WORK? A typing session ends at its LAST EDIT — otherwise
+every session banks the idle time it took to notice, and `active_minutes` is the sum of capped
+inter-edit gaps (see sessionLogic). A POMODORO block is different in kind: the timer running is
+the claim, so the block ends when the block ends and ALL of it is active. Without this a 25-minute
+silent reading block reports `active_minutes: 0` — it has no inter-edit gaps to sum — which is the
+same lie as not recording it at all.
+
+<a id="capture-sync-import"></a>
+### The ledger sync is dynamically imported
+
+The sync + provider adapters must not ride the editor's load path just because capture.ts does.
+Chunking is not laziness (a lane shipped 16KB gzip onto every writer's load while claiming zero
+cost) — an `import()` behind a runtime boundary is. Fire-and-forget: a sync failure must never
+surface as a broken close.
+
+---
+
+## `productivity/ledgerStore.ts` — the ledger's own file (§A3.1)
+
+<a id="ledgerstore-zero-retention"></a>
+### Zero-retention and grow-only
+
+ZERO-RETENTION: the ledger is stored exactly like any other Inkwave document — in the writer's
+own storage (OPFS, via the same app-level JSON helpers the rest of the app uses). Inkwave's
+servers never hold it. The ONLY thing that ever leaves the device from this module is a
+BLOCK HASH sent to the OTS relay for Bitcoin anchoring (a hash of metadata hashes — it carries no
+prose, and the relay logs nothing; see provenance/ots.ts).
+
+GROW-ONLY (§A9, and the real 2026-07-05 truncation incident in CLAUDE.md): every write reads the
+target's current rows and UNIONS first. A write can only ever grow the ledger.
+
+<a id="ledgerstore-read-throws"></a>
+### `loadLedger` THROWS on a failed read — and that is the whole point
+
+(auditor, 2026-07-17.) This used to read through `readAppJson`, which answers `null` to BOTH "no
+ledger yet" and "the disk just failed". Every caller is a read-modify-WRITE, so the lie was
+destructive: `flushMonth` unions against `stored.rows` and would write the buffered rows ALONE
+over a real month; `saveReflection` would write a 0-row ledger, so saving a reflection erased the
+sessions it was about. One transient failure, no race. The 2026-07-15 shape, in the ledger's local
+store.
+
+THE FIX IS MOSTLY DELETION, because the recovery was already written and simply unreachable:
+every writer here runs inside `.then(...).catch(...)`, and those catches already do the right
+thing — `flushMonth` puts the rows back for the next flush ("A failed write must not lose the
+rows"), the others decline to write and warn. They were built for a failure the read swallowed
+before they could ever see it. Making the read honest is what turns them on.
+
+An ABSENT file still returns an empty ledger: that is a real answer (a first-ever month), and it
+is the one case where writing cannot lose anything.
+
+Do not "fix" a noisy console by wrapping this in `.catch(() => emptyLedger(month))` — that is the
+bug again in eleven characters, it typechecks, and `ledgerStore.readfail.test.ts` will go red.
+
+<a id="ledgerstore-one-write-path"></a>
+### One write path for every kind of row
+
+`addPostHocRow` goes through `queueRow`, so it takes the SAME grow-only, read-then-union,
+re-attested path as a measured row: it is a real row in the writer's real ledger, inside the day's
+tamper-evident block. What makes it different is `entered: 'post-hoc'` on the row itself, not a
+softer write path — the flag is the honesty, and a second storage route would be a second rule for
+one question. It flushes immediately rather than waiting on the 2s debounce: he typed this on
+purpose and expects to see it.
+
+`annotateRow` attaches the writer's diary note / place label to an already-written session (§A5 —
+the note is written at session END, by which time the row is on disk). It flushes first so a row
+still sitting in the debounce buffer can be annotated, then does one read-modify-write on the
+ledger's own chain, and re-attests so the note is inside the day's tamper-evident block like
+everything else.
+
+`mergeIntoLocalLedger` unions an incoming ledger (another device's, via cloud sync) into the LOCAL
+file, grow-only, on the SAME per-month write chain as every other write — which is the point: a
+row queued by the capture engine between sync's load and its write-back cannot be interleaved
+away. It reads local FRESH inside the chain rather than trusting a copy the caller loaded earlier,
+because the gap between a read and a write is exactly where a blind overwrite lives.
+
+<a id="ledgerstore-ots"></a>
+### `stampClosedDays` — never on load, and only for days that are DONE
+
+CLAUDE.md's load-performance rule is explicit — the OTS sweep used to cost ~10s on every open — so
+this runs only on demand/idle, and only for days that are DONE: today's block still gains rows, so
+its hash still changes and stamping it would burn a proof on a block that no longer exists by
+evening.
+
+---
+
+## `productivity/report/prompt.ts` — the transparent prompt (§A7.1.2)
+
+<a id="prompt-two-halves"></a>
+### Two halves, and the first is shown verbatim
+
+The payload the writer copies has two halves:
+
+1. A FIXED first half, generated in `prompt.ts` and shown VERBATIM in the export panel before it
+   is copied. The writer must be able to see exactly what Inkwave asks their AI to do. It is
+   the same text every time for a given window/content choice — no hidden steering.
+2. An OPTIONAL user-written second half, layered over sensible defaults so that most
+   writers never write a prompt at all.
+
+<a id="prompt-strong-model"></a>
+### Written for a strong model — and why §A7.2's cost note does not apply
+
+Peter runs this in his own Claude session and wants OPUS: "really detailed qualitative reports
+written by opus", with examples, inspirational moments, which sessions produced his best work.
+§A7.2's "Opus is unnecessary… ~5× the cost" reasoning is about PATH 2, the backend, where
+Inkwave pays. THIS IS PATH 1 — the writer runs it themselves, so the model is their choice and
+costs us nothing. (Path 2's model choice stays open; nothing here decides it.)
+
+So this asks for an ESSAY, not a form. The first cut read as a scorecard to fill in — five
+bullet points and a table — which is exactly what a strong model will dutifully produce if you
+ask for it. The constraints are unchanged in force and stricter in wording; what changed
+is the shape of what is asked for.
+
+<a id="prompt-asked-and-enforced"></a>
+### Four hard rules, asked here and enforced on the reply
+
+A prompt is a request, not a guarantee, so none of the spec's hard rules is trusted to the prompt
+alone — each is also enforced after the fact:
+
+- §A5 no verdicts on the PERSON → asked here; flagged by `claims.ts` findPersonVerdicts
+- §A6.2 statistical honesty → asked here; enforced by `claims.ts` on daily replies
+- §A6.4 never round-trip measured → asked here; enforced by `judged.ts` (measured columns are
+  REJECTED) and `claims.ts` (invented numbers are flagged)
+- quality/insight without content → asked here; enforced by `judged.ts` (CONTENT_ONLY_COLUMNS)
+
+<a id="prompt-content-only-columns"></a>
+### `CONTENT_ONLY_COLUMNS` — you cannot judge writing from minutes and word counts
+
+THE HONESTY THIS ENFORCES (§A6.1): a `quality` or `insight` verdict derived from "45 active
+minutes, 400 words added" is vibes-as-numbers wearing a judged label — the exact failure §A6.1
+exists to prevent, and the most tempting one here, because Peter is ASKING for "which sessions
+produced your best content" and a model will happily oblige from telemetry alone. So the columns
+exist only when their evidence does, and judged.ts REFUSES them otherwise. Structural, not a
+prompt request.
+
+There are no content-only columns at weekly/monthly, deliberately. At weekly+ the ledger sends day
+rollups and WHOLE documents (§A3.3 / the `sessions: []` contract) — there is no per-session excerpt
+to ground a per-day quality verdict against, so asking for one would invite exactly the ungrounded
+judgement the daily gate refuses. Quality lives on the daily window, where the session→prose
+pairing makes it real. `character` is what answers Peter's "what the good days were, what the bad":
+it describes the day, never grades the writer.

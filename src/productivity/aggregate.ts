@@ -1,12 +1,10 @@
 // Client-side aggregates (spec §A3.3) — the ledger → report/graphs seam.
 //
-// §A6.4 IS WHY THIS IS CLIENT-SIDE: these numbers are MEASURED. They are computed here,
-// deterministically, from the writer's own ledger, and the model never gets to hand them back.
-// Aggregating here is also what keeps AI payloads small regardless of window (§A6): the report
-// sends compact day rollups, not raw logs.
-//
-// Everything is a pure function of the rows + a clock, so the arithmetic is testable without a disk.
-// `feat/prod-graphs` owns the CHARTS; this is the data they read.
+// ⚠ CLIENT-SIDE BECAUSE THESE NUMBERS ARE MEASURED (§A6.4): computed deterministically from the
+// writer's own ledger, never handed back by the model. It is also what keeps AI payloads small at
+// every window (§A6) — compact day rollups, not raw logs. Pure: rows + a clock, testable without a
+// disk. `feat/prod-graphs` owns the CHARTS; this is the data they read.
+// → docs/archive/productivity-email-build.md#aggregate-client-side
 
 import { loadLedger } from './ledgerStore'
 import { localDayOf, localHourOf, localMonthOf, monthOf, splitByEntry, weekStartOf, weekdayOf } from './sessionLogic'
@@ -19,12 +17,10 @@ const startHourOf = (r: SessionRow): number => Number(r.start.slice(11, 13))
 const round1 = (n: number): number => Math.round(n * 10) / 10
 
 /**
- * §A3.3's drafting-vs-editing signal, as a MEASURED, deterministic rule: the share of the day's
+ * §A3.3's drafting-vs-editing signal as a MEASURED, deterministic rule: the share of the day's
  * gross word churn that was ADDITION. 1 = pure drafting, 0 = pure cutting, 0.5 = balanced revision.
- * A day with no churn has no signal, and says so with 0 rather than inventing a midpoint.
- *
- * Deliberately NOT the model's judged `phase` (§A6.1) — this is a rule anyone can recompute from
- * the same rows and get the same answer.
+ * A day with no churn has NO signal and says so with 0, never an invented midpoint.
+ * ⚠ NOT the model's judged `phase` (§A6.1) — anyone can recompute this from the same rows.
  */
 export function deepShallowRatio(rows: readonly SessionRow[]): number {
   const added = rows.reduce((a, r) => a + r.words_added, 0)
@@ -41,18 +37,17 @@ export { isPostHoc, splitByEntry } from './sessionLogic'
 /**
  * Roll one local day's rows up (§A3.3).
  *
- * EVERY MEASURED FIELD READS `measured` ONLY. Post-hoc rows contribute to `posthoc_minutes` and
- * `posthoc_session_count` and to nothing else — see DayAggregate's note. This is why the split
- * happens at the TOP of the function rather than at each `reduce`: a field added later reads
- * `measured` because that is the variable in scope, so the safe thing is also the easy thing.
+ * ⚠ EVERY MEASURED FIELD READS `measured` ONLY; post-hoc rows reach `posthoc_minutes` /
+ * `posthoc_session_count` and nothing else. The split happens at the TOP so a field added later
+ * reads `measured` because that is the variable in scope — the safe thing is the easy thing.
+ * → docs/archive/productivity-email-build.md#aggregate-posthoc-excluded
  */
 export function dayAggregate(day: string, allRows: readonly SessionRow[]): DayAggregate {
   const { measured: rows, postHoc } = splitByEntry(allRows)
   const busiest = new Array<number>(24).fill(0)
-  // A session's active minutes are attributed to the hour it STARTED in. That is a convention, and
-  // the honest one available: the ledger records when a session ran, not minute-by-minute where the
-  // work fell inside it, and spreading minutes across a span would invent a distribution we never
-  // measured. Sessions are short (a Pomodoro is 25 min), so the attribution is close.
+  // Active minutes are attributed to the hour the session STARTED in — a convention, and the honest
+  // one: the ledger never recorded where inside the span the work fell, and spreading them would
+  // invent a distribution we never measured. Sessions are short, so it lands close.
   for (const r of rows) busiest[startHourOf(r)] += r.active_minutes
 
   // A "break" is a real gap BEFORE a session — the first session of the ledger has none (0).
@@ -91,10 +86,9 @@ export function groupByDay(rows: readonly SessionRow[]): Map<string, SessionRow[
 /**
  * Per-document totals for the content tick-box screen (§A7.3). Carries no prose.
  *
- * POST-HOC ROWS ARE EXCLUDED, for two independent reasons and either would do: this screen offers the
- * writer a choice of DOCUMENTS to send text from, and a block he described from memory has no text to
- * send (and no document — `doc_id: 'post-hoc'`); and its minutes are testimony, so listing them in a
- * column of measured per-document minutes is exactly the merge §A6.1 forbids.
+ * ⚠ POST-HOC ROWS EXCLUDED: a remembered block has no text to send and no document
+ * (`doc_id: 'post-hoc'`), and listing testimony in a column of measured per-document minutes is
+ * the merge §A6.1 forbids. → docs/archive/productivity-email-build.md#aggregate-posthoc-excluded
  */
 export function windowDocs(allRows: readonly SessionRow[]): WindowDoc[] {
   const { measured: rows } = splitByEntry(allRows)
@@ -179,9 +173,8 @@ export function buildWindow(
     from,
     to,
     days,
-    // §A6.4 (see types.ts): raw session rows only at DAILY, where judged rows are per-session. At
-    // weekly/monthly the day rollups are the ONLY copy of the measured numbers, and the writer's
-    // opted-in words travel as the digest.
+    // §A6.4: raw rows only at DAILY. At weekly/monthly the day rollups are the ONLY copy of the
+    // measured numbers, and the writer's opted-in words travel as the digest.
     sessions: window === 'daily' ? [...inWindow] : [],
     ...(digest.length ? { note_digest: digest } : {}),
     docs: windowDocs(inWindow),
@@ -205,32 +198,16 @@ export const monthOfDay = (day: string): string => localMonthOf(day)
 
 
 // ═══ THE CHART AGGREGATES (§A3.3) — `feat/prod-graphs`' rollups ══════════════════════════════════
-//
-// MERGED 2026-07-17 (feat/prod-integrate). Both lanes wrote an `aggregate.ts`; this is ONE module
-// now, over ONE schema. What was reconciled, and what deliberately was not:
-//
-// • ONE ROW TYPE. The graphs lane built against `ledger.ts`'s `LedgerSession` — an explicit
-//   placeholder mirror of §A3.2, retired here in favour of the real `SessionRow` (types.ts), and
-//   the day-grouping/rounding/time rules below are now the same ones the window builder uses.
-//   That is the swap its own THE LEDGER SEAM comment anticipated.
-//
-// • TWO OUTPUT SHAPES, KEPT — they answer different questions and are NOT a fork:
-//     `DayAggregate`      (types.ts, snake_case) = the §A3.3 WIRE contract the report payload emits.
-//     `ChartDayAggregate` (here,     camelCase)  = the view model the SVG charts read.
-//   The graphs lane's `DayAggregate` was renamed to `ChartDayAggregate` because two exported types
-//   sharing one name in one module is exactly how a caller silently gets the wrong contract. The
-//   wire name belongs to the schema owner.
-//
-// • THE HOUR HISTOGRAMS DIFFER ON PURPOSE, and both are honest about it: `busiest_hours` (above)
-//   attributes a session's minutes to the hour it STARTED in; `hourHistogram` (below) apportions
-//   them across the hours the session spans. Both conserve total active minutes, so they cannot
-//   contradict each other on any total — they differ only in how they distribute WITHIN a day, and
-//   each documents its own limitation. Collapsing them would have silently rewritten one lane's
-//   measured behaviour to make a merge look tidy.
-//
-// PURE. No clock, no storage, no network, no React, no AI. Every number here is computed from the
-// ledger's own bytes and is GROUND TRUTH (§A6.4): these must never round-trip through an LLM, which
-// is the whole reason the graphs are worth believing.
+// Merged 2026-07-17: both lanes wrote an `aggregate.ts` and this is ONE module over ONE schema (R2).
+// ⚠ TWO OUTPUT SHAPES, KEPT — they are not a fork: `DayAggregate` (types.ts, snake_case) is the
+// §A3.3 WIRE contract the payload emits; `ChartDayAggregate` (here, camelCase) is the charts' view
+// model. Two exported types sharing one name is how a caller silently gets the wrong contract.
+// ⚠ THE TWO HOUR HISTOGRAMS DIFFER ON PURPOSE and each states its own limit: `busiest_hours`
+// attributes minutes to the STARTING hour, `hourHistogram` apportions across the span. Both
+// conserve total active minutes, so no total can contradict — collapsing them would rewrite one
+// lane's measured behaviour to make a merge look tidy.
+// PURE, and GROUND TRUTH (§A6.4): no clock, storage, network, React or AI, and these must never
+// round-trip through an LLM. → docs/archive/productivity-email-build.md#aggregate-merge
 
 // ─── Day ──────────────────────────────────────────────────────────────────────
 
@@ -276,12 +253,10 @@ export interface ChartDayAggregate {
 /**
  * Attribute a session's ACTIVE minutes across the wall-clock hours it spans.
  *
- * Honest limitation, stated rather than hidden: the ledger records a session's start/end and its
- * active_minutes, but NOT which minutes inside the span were active. So active time is spread
- * proportionally over the hours the session covers. For a session inside one hour this is exact; for
- * a session straddling hours it is an apportionment. The histogram is therefore reliable at the
- * "which part of the day do you write in" scale it is drawn at, and should not be read as a
- * minute-accurate record of any single hour.
+ * ⚠ AN APPORTIONMENT, NOT A RECORD: the ledger never stored WHICH minutes inside the span were
+ * active, so they are spread proportionally. Exact within one hour; read it at the "which part of
+ * the day do you write in" scale it is drawn at, never as a minute-accurate hour.
+ * → docs/archive/productivity-email-build.md#aggregate-hour-histogram
  */
 function spreadActiveMinutes(s: SessionRow, into: number[]): void {
   const t0 = Date.parse(s.start), t1 = Date.parse(s.end)
@@ -332,10 +307,8 @@ function breakStats(gaps: number[]): BreakStats {
 
 /**
  * Group ledger rows into per-day aggregates, ascending by day — the CHARTS' view model.
- *
- * Post-hoc rows are split out at the top (see `dayAggregate`'s note) so no BAR on any graph can be
- * part-measured, part-remembered. `postHocMinutes` rides alongside for a chart that wants to show it
- * as its own mark — which is a design question for its own lane, not a default this one invents.
+ * ⚠ Post-hoc rows are split out at the top, so no BAR on any graph can be part-measured,
+ * part-remembered. `postHocMinutes` rides alongside for a chart that chooses to draw it.
  */
 export function aggregateDays(sessions: readonly SessionRow[]): ChartDayAggregate[] {
   const byDay = new Map<string, SessionRow[]>()
@@ -392,13 +365,12 @@ export function aggregateDays(sessions: readonly SessionRow[]): ChartDayAggregat
 // ─── Week ─────────────────────────────────────────────────────────────────────
 
 /**
- * A descriptive association between break-taking and output (§A3.3: "break-vs-output correlations
- * (DESCRIPTIVE ONLY)").
+ * A descriptive association between break-taking and output (§A3.3 "DESCRIPTIVE ONLY").
  *
- * This is a Pearson r over days. It is an ASSOCIATION IN THIS WINDOW and nothing more — it cannot
- * establish that breaks cause output (the writer who takes more breaks may simply be having a longer
- * day). The panel renders it with a descriptive caption only, and never at the daily window (§A6.2).
- * `n` travels with `r` so a coefficient can never be read without its sample size.
+ * ⚠ AN ASSOCIATION IN THIS WINDOW AND NOTHING MORE — it cannot establish that breaks cause output.
+ * Descriptive caption only, never at the daily window (§A6.2), and `n` travels WITH `r` so a
+ * coefficient can never be read without its sample size.
+ * → docs/archive/productivity-email-build.md#aggregate-correlation
  */
 export interface Correlation {
   r: number
@@ -424,20 +396,12 @@ export function pearson(xs: readonly number[], ys: readonly number[]): Correlati
   if (den === 0) return { r: 0, n, reportable: false }
 
   const r = num / den
-  // ─── WHY THIS IS NOT A CLAMP ────────────────────────────────────────────────
-  // For a correct Pearson, Cauchy–Schwarz puts |r| ≤ 1 ALWAYS: a clamp to [-1, 1] is unreachable in
-  // working code, and the only thing it can ever actually do is disguise a BROKEN formula as a
-  // plausible number. That is not hypothetical — this function shipped with `clamp(num/den, -1, 1)`
-  // and an external audit dropped the Y spread from the denominator (`sqrt(dx2*dy2)` →
-  // `sqrt(dx2*dx2)`); the mutant computed r=2 for a perfectly-correlated fixture and the clamp
-  // returned exactly the 1.0 the test asserted. The whole 1054-test repo stayed green while a
-  // correlation shown to the writer would have read 1.0 ("your breaks predict your output") where
-  // the truth was 0.70. The clamp was load-bearing for the bug, not for the user.
-  //
-  // So: snap only the floating-point hair (a legitimate ±1 can land at 1.0000000000000002), and
-  // REFUSE anything grossly out of range. An impossible r means the maths is wrong, and the honest
-  // response to "my measurement is impossible" is to stop reporting it — not to round it into the
-  // range where it looks fine. Unreportable is the one answer that cannot mislead (§A6.1).
+  // ⚠ SNAP THE FLOATING-POINT HAIR, NEVER CLAMP. |r| ≤ 1 always for a correct Pearson, so a clamp
+  // can only ever disguise a BROKEN formula: this shipped with `clamp(num/den,-1,1)`, an audit
+  // dropped the Y spread from the denominator, the mutant computed r=2, and the clamp returned
+  // exactly the 1.0 the test asserted — 1054 tests green while the writer would have read "your
+  // breaks predict your output". REFUSE an impossible r; unreportable cannot mislead (§A6.1).
+  // → docs/archive/productivity-email-build.md#aggregate-pearson-clamp
   if (!Number.isFinite(r) || Math.abs(r) > 1 + 1e-9) return { r: 0, n, reportable: false }
   return { r: clamp(r, -1, 1), n, reportable: true }
 }
