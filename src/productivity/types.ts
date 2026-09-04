@@ -1,29 +1,19 @@
 // Productivity ledger — THE SCHEMA CONTRACT (build spec §A3.2).
 //
-// This module is the integration surface for the productivity layer: the graphs, the AI report and
-// the email layer all read `SessionRow`. Treat the field names as a wire protocol — they are
-// snake_case (not the repo's usual camelCase) BECAUSE they are a cross-agent/CSV contract, and the
-// AI-report path emits/parses CSV keyed by exactly these column names. Do not "tidy" them.
-//
-// DATA MINIMISATION (§A3.2, §C1.3) — a hard product constraint, not a preference. A row carries
-// only metadata about HOW the writer worked. It stores NONE of:
-//   • geolocation (explicitly not collected — habits + whereabouts, for no feature benefit)
-//   • IP address
-//   • keystroke-level content
-//   • the prose itself
-// Anything added here later must clear the "does a real feature need this?" bar. What you don't
-// hold can't leak or be subpoenaed.
+// The graphs, the AI report and the email layer all read `SessionRow`, so:
+//   • FIELD NAMES ARE A WIRE PROTOCOL — snake_case, not the repo's camelCase, because the
+//     AI-report path emits and parses CSV keyed by exactly these columns. Do not "tidy" them.
+//   • DATA MINIMISATION IS A HARD CONSTRAINT (§A3.2, §C1.3), not a preference. A row carries only
+//     HOW the writer worked — never geolocation, IP, keystroke content, or the prose itself.
+//     Anything added later must clear "does a real feature need this?".
+//     → docs/archive/productivity-email-build.md
 
 /**
  * Which kind of document a session was spent in. `email` is set by the email layer (spec Part B).
  *
- * DECLARED IN `types/document.ts`, RE-EXPORTED HERE — not redeclared (feat/prod-integrate,
- * 2026-07-17). This lane and `feat/email-compose` wrote identical unions in parallel: a document
- * type is a property of the DOCUMENT, so the document model owns the classification and the ledger
- * reads it. Two identical declarations are not harmless — they agree today and drift the first time
- * one side gains a member, and the ledger would silently keep tagging rows against a stale union.
- * (The email lane deleted its own competing `docTypeOf` accessor for exactly this reason; the rule
- * that RESOLVES an absent docType to a row's `doc_type` stays in capture.ts, which owns the ledger.)
+ * ⚠ RE-EXPORTED, NEVER REDECLARED. A document type is a property of the DOCUMENT, so
+ * `types/document.ts` owns it and the ledger reads it. Two identical unions agree today and drift
+ * the first time one side gains a member — the ledger would go on tagging rows against a stale one.
  */
 export type { DocType } from '../types/document'
 import type { DocType } from '../types/document'
