@@ -268,8 +268,8 @@ export function Scroll({
   }, [])
 
   // HYBRID ZOOM scope: only the desktop LIVE DOCUMENT (fill) with fixed-size paper gets the
-  // transform-magnify + fit-to-width cap. Application surfaces reflow inside a responsive capped
-  // width so narrowing the window never shrinks their type. Phone has its own model
+  // transform-magnify + fit-to-width cap. Isolated application surfaces own an equivalent local
+  // fit wrapper because their natural width is app-defined rather than paper-defined. Phone has its own model
   // (canonically-narrower render + pinch font zoom); SnapshotView's in-flow Scroll and 'scroll'
   // paper (no mm width) stay plain.
   // getPaperSize() is re-read on the page-settings rerender above, so switching paper flips this.
@@ -1657,8 +1657,8 @@ export function Scroll({
             const ps = getPaperSize()
             if (ps === 'scroll') return undefined
             // The SAME physical mm the break model (pageModel) and the print @page size use —
-            // one source of truth for document paper. Applications own a stable pixel width inside
-            // the available window and reflow below it instead of transform-shrinking their type.
+            // one source of truth for document paper. Applications own a stable pixel width and
+            // their shared inner wrapper transform-fits that layout when the window is too narrow.
             return presentedPaperWidth(presentation, paperCssSize(ps, getOrientation()).width)
           })(),
           // box-shadow (not filter: drop-shadow) so the absolutely-positioned cycle card

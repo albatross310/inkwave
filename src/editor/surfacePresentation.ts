@@ -2,7 +2,7 @@ import type { PaperSize } from './pageSettings'
 
 export type SurfacePresentation = 'document' | 'application'
 
-/** Document paper preserves its physical layout by scaling; applications reflow at a stable type size. */
+/** Document paper uses Scroll's magnify pipeline; isolated applications own their equivalent fit wrapper. */
 export function usesTransformMagnify({
   fill,
   phone,

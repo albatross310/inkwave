@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   getMagnify, getUserMagnify, setUserMagnify, setFitContext, subscribe, scaleFor, unscale,
-  MIN_MAGNIFY, MAX_MAGNIFY, WATER_MARGIN_PX,
+  fitScaleForWidth, MIN_MAGNIFY, MAX_MAGNIFY, WATER_MARGIN_PX,
 } from './magnify'
 
 // Module is a singleton — put it back to a known state before each test.
@@ -36,6 +36,12 @@ describe('user magnify clamping', () => {
 })
 
 describe('fit-to-width cap (never a partial page)', () => {
+  it('shares the continuous fixed-layout fit ratio with application surfaces', () => {
+    expect(fitScaleForWidth(600, 800)).toBe(0.75)
+    expect(fitScaleForWidth(400, 800)).toBe(0.5)
+    expect(fitScaleForWidth(1, 800)).toBe(MIN_MAGNIFY)
+  })
+
   it('caps zoom-IN at the fit scale on a narrow window', () => {
     setUserMagnify(1.8)
     setFitContext(600, 800)

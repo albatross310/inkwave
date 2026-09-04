@@ -11,6 +11,7 @@ const css = readFileSync(resolve(__dirname, '../styles/index.css'), 'utf8')
 beforeEach(() => {
   localStorage.clear()
   Object.defineProperty(window.screen, 'width', { configurable: true, value: 1728 })
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
 })
 afterEach(cleanup)
 
@@ -52,8 +53,33 @@ describe('ApplicationSurface', () => {
   it('gives isolated email a screen-calibrated pixel default while keeping contextual tools independent', () => {
     const block = css.match(/\[data-iw-application="email"\]\.iw-application-surface--isolated\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
     expect(block).toContain('width: var(--iw-application-default-width, 900px)')
-    expect(block).toContain('max-width: calc(100% - 48px)')
+    expect(block).not.toContain('max-width: calc(100% - 48px)')
     expect(block).toContain('margin-inline: auto')
+  })
+
+  it('uses the main editor fit ratio only when an isolated surface no longer fits', () => {
+    render(<ApplicationSurface app="email" label="Email draft" resizable><p>Message</p></ApplicationSurface>)
+    const surface = screen.getByRole('region', { name: 'Email draft' })
+    const fitBox = surface.parentElement!
+    const container = fitBox.parentElement!
+    Object.defineProperty(surface, 'offsetWidth', { configurable: true, value: 900 })
+    Object.defineProperty(surface, 'offsetHeight', { configurable: true, value: 600 })
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 648 })
+
+    fireEvent.resize(window)
+
+    expect(surface.style.getPropertyValue('--iw-application-fit-scale')).toBe(String(2 / 3))
+    expect(surface.classList.contains('iw-application-surface--fit-capped')).toBe(true)
+    expect(fitBox.style.width).toBe('600px')
+    expect(fitBox.style.height).toBe('400px')
+
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 948 })
+    fireEvent.resize(window)
+
+    expect(surface.style.getPropertyValue('--iw-application-fit-scale')).toBe('1')
+    expect(surface.classList.contains('iw-application-surface--fit-capped')).toBe(false)
+    expect(fitBox.style.width).toBe('900px')
+    expect(fitBox.style.height).toBe('600px')
   })
 
   it('offers symmetric side handles and an independent bottom handle when enabled', () => {
@@ -66,8 +92,13 @@ describe('ApplicationSurface', () => {
   it('keeps keyboard width changes centred and persists their scale against screen resolution', () => {
     render(<ApplicationSurface app="email" label="Email draft" resizable><p>Message</p></ApplicationSurface>)
     const surface = screen.getByRole('region', { name: 'Email draft' })
+    const container = surface.parentElement!.parentElement!
+    Object.defineProperty(surface, 'offsetWidth', { configurable: true, value: 600 })
+    Object.defineProperty(surface, 'offsetHeight', { configurable: true, value: 400 })
     Object.defineProperty(surface, 'getBoundingClientRect', { value: () => ({ width: 600, height: 400 }) })
-    Object.defineProperty(surface.parentElement, 'getBoundingClientRect', { value: () => ({ width: 800 }) })
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 800 })
+    Object.defineProperty(container, 'getBoundingClientRect', { value: () => ({ width: 800 }) })
+    fireEvent.resize(window)
 
     fireEvent.keyDown(screen.getByRole('separator', { name: /right edge/ }), { key: 'ArrowRight' })
 

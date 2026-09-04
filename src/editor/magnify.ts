@@ -32,6 +32,12 @@ export const MIN_MAGNIFY = 0.02  // practical floor only (degenerate-maths guard
 export const MAX_MAGNIFY = 2.5
 export const WATER_MARGIN_PX = 24 // minimum water visible either side of a fit-capped page
 
+/** Shared fixed-layout fit ratio used by document paper and isolated application surfaces. */
+export function fitScaleForWidth(availablePx: number, contentWidthPx: number): number {
+  if (!Number.isFinite(contentWidthPx) || contentWidthPx <= 0) return Number.POSITIVE_INFINITY
+  return Math.max(MIN_MAGNIFY, availablePx / contentWidthPx)
+}
+
 function clampUser(v: number): number {
   return Number.isFinite(v) && v > 0 ? Math.min(MAX_MAGNIFY, Math.max(MIN_MAGNIFY, v)) : 1
 }
@@ -87,7 +93,7 @@ export function persistMagnify(): void {
  */
 export function setFitContext(availablePx: number | null, pageWidthPx?: number): void {
   if (availablePx == null || !pageWidthPx || pageWidthPx <= 0) fitCap = Number.POSITIVE_INFINITY
-  else fitCap = Math.max(MIN_MAGNIFY, availablePx / pageWidthPx)
+  else fitCap = fitScaleForWidth(availablePx, pageWidthPx)
   refresh()
 }
 

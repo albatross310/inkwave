@@ -580,11 +580,12 @@ itself is the writing surface.
   height and must not manufacture an empty page-height
   tail after a short message. Its header, body, record/send controls, status, and concise provenance
   disclosure form one continuous box.
-- The ordinary document-page width does not constrain application width and is not a transform target.
-  When the editor window is narrower, the application surface and its content reflow while every font
-  retains its chosen CSS size. Viewport width must never invoke the document paper's fit-to-width
-  transform or otherwise shrink application typography. Only the writer's explicit editor/font zoom
-  changes text size.
+- The ordinary document-page width does not constrain application width. At normal window sizes the
+  application keeps its calibrated pixel width and chosen CSS type sizes. Once the editor window is
+  too narrow to show that complete width plus 24px of water on each side, the whole isolated surface
+  follows the main editor's continuous fit-to-width behaviour: fixed internal layout, centred
+  transform shrink, and a size-compensated wrapper. Widening the window restores it to scale 1.
+  Phone remains a native full-width layout rather than a transformed desktop surface.
 - The isolated box is resizable. Dragging either side changes both sides by the same amount around a
   fixed horizontal centre, so the box never walks left or right as its width changes. A resized width
   is stored as a multiplier of the screen-calibrated pixel baseline—not the window width—so moving to
@@ -932,14 +933,16 @@ multi-target fault injection proves that one unreadable destination cannot damag
 #### Surface and navigation
 
 - An email renders as one centred screen-calibrated pixel-width box on desktop—900px at a 1728px
-  logical display width—and full-width on phone. It is capped safely by a narrower window and grows
+  logical display width—and full-width on phone. A narrower desktop window continuously shrinks the
+  complete fixed-layout box, with the same 24px-per-side water boundary as the main editor. It grows
   with its content, with its body inside it, no forced blank page-height tail, and no second paper
   visibly behind it.
 - Pulling either side expands/contracts the opposite side equally and preserves the box's horizontal
   centre. Bottom resizing changes only its optional minimum height. Keyboard and reset paths work,
   and no resize operation changes the email's authored bytes or provenance.
-- Narrowing the editor window reflows the email without changing computed or visually rendered font
-  sizes; widening it restores available line width rather than changing type scale.
+- Narrowing the editor window below the email's natural width shrinks the whole fixed-layout surface
+  continuously rather than reflowing its internals; widening it restores the exact natural layout
+  and type scale.
 - New email work defaults to isolated mode; switching to contextual studio mode preserves the same
   email identity, bytes, history, memberships, and send state.
 - Contextual studio mode keeps every message body inside its email box and allows clearly separate

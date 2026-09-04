@@ -1149,9 +1149,17 @@
     border-radius: 16px;
     box-shadow: 0 8px 32px var(--iw-application-shadow, rgba(80, 50, 10, 0.18));
   }
+  .iw-application-fit-box {
+    position: relative;
+    max-width: 100%;
+    margin-inline: auto;
+  }
+  .iw-application-surface--fit-capped {
+    transform: scale(var(--iw-application-fit-scale, 1));
+    transform-origin: top left;
+  }
   [data-iw-application="email"].iw-application-surface--isolated {
     width: var(--iw-application-default-width, 900px);
-    max-width: calc(100% - 48px);
     margin-inline: auto;
   }
   .iw-application-surface__label {
@@ -1248,9 +1256,14 @@
     border-radius: 0;
     box-shadow: none;
   }
+  .inkwave-editor-surface.is-phone .iw-application-fit-box {
+    width: 100% !important;
+    height: auto !important;
+  }
   .inkwave-editor-surface.is-phone [data-iw-application="email"].iw-application-surface--isolated {
     width: 100% !important;
     max-width: 100%;
+    transform: none !important;
   }
   .inkwave-editor-surface.is-phone .iw-application-surface__resize--left,
   .inkwave-editor-surface.is-phone .iw-application-surface__resize--right {
