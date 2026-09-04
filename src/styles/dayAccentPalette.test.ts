@@ -43,7 +43,7 @@ describe('day accent palette', () => {
   const css = readFileSync(join(REPO, 'src/styles/index.css'), 'utf8')
 
   it('ties the primary UI ink to the water gradient and keeps one restrained companion', () => {
-    expect(css).toContain('--iw-water-gradient: linear-gradient(98.5deg, #302438 0%, #41425b 18%, #3b606a 88%, #3b6f75 100%)')
+    expect(css).toContain('--iw-water-gradient: linear-gradient(165deg, #302438 0%, #41425b 18%, #3b606a 88%, #3b6f75 100%)')
     expect(css).toContain(':root { --iw-ink: #302438; }')
     expect(css).toContain(':root { --iw-ink-rgb: 48 36 56; }')
     expect(css).toContain('--iw-light: #41425b;')

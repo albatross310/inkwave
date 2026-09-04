@@ -616,7 +616,8 @@ measure the artifact per block, not the coincidence.
 
 Muted indigo→teal gradient, two 140px SVG wave tiles drifting at 72px/s, a precomputed pool of
 glitters and wave-marks, and an S-curve slow-down at reveal. The day palette is deliberately more
-serious than the former saturated cyan: `--iw-water-gradient` is the single background source
+serious than the former saturated cyan: `--iw-water-gradient` is the single background source,
+angled at CSS `165deg` (75° downward declension from the left-to-right horizontal),
 (`#302438` → reflective indigo `#41425b` by 18% → blue-teal `#3b606a` by 88% → `#3b6f75`), with one
 flat warm-ivory `#f3edcf` shared by wave marks, specks and sparkles. The wave SVGs contain no vertical
 colour gradient; line weight and opacity alone provide depth. The early indigo reflection keeps the surface glossy, while

@@ -5,7 +5,7 @@
 @layer base {
   :root {
     --iw-water-base: #3b6f75;
-    --iw-water-gradient: linear-gradient(98.5deg, #302438 0%, #41425b 18%, #3b606a 88%, #3b6f75 100%);
+    --iw-water-gradient: linear-gradient(165deg, #302438 0%, #41425b 18%, #3b606a 88%, #3b6f75 100%);
   }
 
   html {
