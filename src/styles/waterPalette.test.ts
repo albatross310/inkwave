@@ -25,11 +25,11 @@ describe('day water palette', () => {
     expect(root).toContain('media="(prefers-color-scheme: light)" content="#3f827e"')
   })
 
-  it('uses restrained blue-grey wave marks and muted brass glints', () => {
+  it('uses restrained blue-grey wave marks and page-toned glints', () => {
     expect(css).toContain("stop-color='%23b7c9c8'")
     expect(css).toContain("stroke='%23d5dede'")
-    expect(twinkles).toContain("SPARK_COLOR = '#c3a86c'")
-    expect(twinkles).toContain("SPARK_CORE = '#e8e0cf'")
+    expect(twinkles).toContain("SPARK_COLOR = '#f7f2e8'")
+    expect(twinkles).toContain("SPARK_CORE = '#fffdf8'")
     expect(twinkles).toContain("DASH_COLOR = '#b7c9c8'")
   })
 })

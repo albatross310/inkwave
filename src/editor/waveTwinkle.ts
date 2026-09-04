@@ -48,8 +48,8 @@
 // transforms via swayFields() (the --wave-x inheritance firebreak — see index.css).
 
 // ─── Colour knobs (one const each, per Peter's spec) ─────────────────────────────────────────
-export const SPARK_COLOR = '#c3a86c' // muted brass sparkle strokes/satellites (day)
-export const SPARK_CORE = '#e8e0cf' // warm-grey sparkle centre dot (day)
+export const SPARK_COLOR = '#f7f2e8' // parchment-white sparkle strokes/satellites (day)
+export const SPARK_CORE = '#fffdf8' // bright paper-white sparkle centre dot (day)
 export const SPARK_COLOR_NIGHT = '#ffe14d' // night sparkles stay yellow (no objection recorded)
 export const SPARK_CORE_NIGHT = '#fffbe0'
 export const DASH_COLOR = '#b7c9c8' // muted blue-grey — matches the day wave strokes
