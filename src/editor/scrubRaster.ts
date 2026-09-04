@@ -1,34 +1,21 @@
-// ── Scrub raster layer (round 3, 2026-07-12 — Peter: "preload their views as PNGs or something
-//    so that the user can scroll through real fast … same with the minimap … raster them as PNGs
-//    at current resolution of screen") ─────────────────────────────────────────────────────────
+// ── Scrub raster layer — pre-rasterised pane bitmaps for rapid snapshot stepping ──────────────
+// During rapid stepping the doc pane, diff panel and minimap flip through cached <canvas> bitmaps
+// swapped into an overlay per step; ~150ms after the last step the overlay hides and the live DOM
+// shows. Capture is SVG-foreignObject rasterisation of a clone of the pane.
 //
-// During RAPID snapshot stepping (armed multi-scrub, or single flips <~250ms apart) the doc pane,
-// the diff panel and the minimap flip through PRE-RASTERISED bitmaps: one <canvas> per pane,
-// swapped into an absolutely-positioned overlay per step — zero layout work on the input path.
-// At rest (~150ms after the last step, once the live DOM for the landing snapshot has painted)
-// the overlay hides and the real view shows — bitmap and DOM are pixel-aligned because each
-// bitmap is captured from the live pane at its own scroll offset + the current zoom.
-//
-// CAPTURE — SVG foreignObject rasterisation, no dependencies: clone the pane subtree, inline the
-// app stylesheet (same-origin CSSOM text; `:root`/`html` selectors re-pointed at the clone
-// wrapper so theme vars + wave-tile URIs still resolve) and the LOADED webfont faces as data:
-// URIs (fonts are self-hosted → same-origin fetch; an SVG-image document may not fetch ANYTHING,
-// so every subresource must be a data: URI — that also satisfies the strict CSP: img-src has
-// data:, not blob:). The crop is the pane's viewport region (thesis panes are >60,000px tall —
-// a full strip would blow any budget), selected by negative margins inside a pane-sized
-// foreignObject (NOT viewBox/transform cropping — WebKit's foreignObject handling of those is
-// historically buggy). Raster = draw the SVG <img> into a canvas at DEVICE resolution: pane box
-// × DPR × (CSS zoom where the zoom wraps the pane — the diff panel). Peter said "current
-// resolution of screen": desktop captures at full DPR; phone caps at 2 (memory).
-//
-// CACHE — LRU keyed `${kind}|${snapshot.id}|${paneW}x${paneH}|z${zoom}|d${dpr}` under a hard
-// byte budget (60MB desktop / 24MB touch). Snapshot content is immutable, so entries only go
-// stale on scroll (the owning pane recaptures on scroll settle) or on a key change (zoom /
-// pane size / DPR → different bucket, old bucket ages out). Misses during a scrub show the
-// NEAREST cached snapshot's bitmap (by snapshot order) — never a blank flash; the live counter
-// stays truthful (it renders outside the overlays) and the real render catches up at rest.
-// Capture runs strictly OFF the input path: idle-pumped, paused while scrubbing or within
-// 350ms of any nav input.
+// THE RULES, each load-bearing:
+//   1. NOTHING ON THE INPUT PATH. Capture is idle-pumped and pauses while scrubbing or within
+//      350ms of a nav input; a step is an overlay swap and no layout.
+//   2. EVERY SUBRESOURCE IS A `data:` URI — an SVG-image document may fetch nothing at all, and
+//      the CSP allows img-src `data:` but not `blob:`. Stylesheet and loaded webfaces are inlined,
+//      with `:root`/`html` selectors re-pointed at the clone wrapper.
+//   3. CROP WITH NEGATIVE MARGINS inside a pane-sized foreignObject, never viewBox/transform —
+//      WebKit mishandles those, and a thesis pane is >60,000px tall.
+//   4. A MISS SHOWS THE NEAREST CACHED VERSION, never a blank. The counter renders outside the
+//      overlays, so it stays truthful while the bitmap is approximate.
+//   5. Key `${kind}|${id}|${w}x${h}|z${zoom}|d${dpr}`. Content is immutable, so an entry goes
+//      stale only on scroll or a key change.
+// → docs/archive/snapshot-scrub-rounds.md#raster
 
 import { probePerf } from './perflog'
 import { snapThumbsEnabled, thumbScale, putThumb, getThumb, hasThumb, loadThumbIndex, thumbHash, type ThumbPane } from './snapThumbs'
@@ -41,19 +28,16 @@ export type ScrubPaneKind = 'doc' | 'diff' | 'map'
 // and the minimap has none, so both raster at plain DPR.
 const ZOOM_IN_SCALE: Record<ScrubPaneKind, boolean> = { doc: false, diff: true, map: false }
 
-// Byte budgets. Round 5 (2026-07-14 — Peter "keep + salvage"): the raster DPR is now CAPPED (see
-// RASTER_DPR_CAP / dprOf), so each doc-pane bitmap is ~¼ its DPR2 size and 60MB again holds ~38
-// entries (~12 snapshots × doc/diff/map — the round-3 measured depth). Deep enough that a fast
-// scrub finds the intermediate versions CACHED instead of falling back to a stale nearest — the
-// regression-#3 fix ("only some versions seen; lags; catches up on stop"). Bitmaps are GPU-backed
-// (ImageBitmap) → bounded native memory, not JS heap.
+// Byte budgets — sized WITH the DPR cap so 60MB holds ~38 entries (~12 versions × doc/diff/map).
+// ⚠ Depth is the point: too shallow and a fast scrub falls back to a stale nearest instead of the
+// real intermediate versions. Bitmaps are GPU-backed, so this bounds native memory, not JS heap.
+// → docs/archive/snapshot-scrub-rounds.md#raster-budgets
 const DESKTOP_BUDGET = 60 * 1024 * 1024
 const TOUCH_BUDGET = 24 * 1024 * 1024
-// Cap the RASTER DPR (NOT the display). The felt scrub jank was the per-step compositor texture
-// upload of a full-DPR bitmap (measured DPR2 ≈ 20MB/swap → 28% of burst frames >32ms); capping to
-// 1 quarters that upload AND ~4×s the cache depth (more intermediate versions stay cached → fewer
-// stale-nearest skips). Text at reading size stays crisp at 1. A harness may override via
-// window.__iwRasterDprCap to A/B the cap.
+// ⚠ RASTER_DPR_CAP = 1 — cap the RASTER DPR, never the display. A full-DPR bitmap's per-step
+// texture upload was the felt jank; 1 quarters it and quadruples cache depth, which is what keeps
+// real intermediate versions resident. `window.__iwRasterDprCap` A/Bs it (R3).
+// → docs/archive/snapshot-scrub-rounds.md#raster-budgets
 const RASTER_DPR_CAP = 1
 const REST_MS = 150          // quiet time after the last step before the at-rest swap arms
 const CAPTURE_QUIET_MS = 350 // captures never run this close to a nav input
@@ -331,14 +315,11 @@ function smallDataUri(src: string, displayPx: number): Promise<string | null> {
 }
 
 // ── Band trimming — the capture-cost fix ─────────────────────────────────────────────────────
-// Serialising + laying out the WHOLE pane in the SVG document cost seconds on a thesis-scale doc
-// (measured 4.5-13s per capture). Only the crop band matters, so the clone is trimmed to it:
-// far content is Range-deleted at SAFE block boundaries and a pixel-exact spacer preserves the
-// kept band's offsets. Safe boundaries: the canonical `.inkwave-page-gap` widgets (block-in-
-// inline — text after one always starts a fresh line, so removing content before an earlier gap
-// or after a later one can't re-wrap the kept band; the absolute `.inkwave-sheets` panel layer
-// lives OUTSIDE the text flow and is untouched); fallback for the diff panel: its own block
-// children. The minimap (short content) skips trimming entirely.
+// Trim the clone to the crop band (laying the whole pane out in the SVG cost 4.5-13s per capture),
+// with a pixel-exact spacer holding the kept band's offsets.
+// ⚠ Cut only at SAFE block boundaries — `.inkwave-page-gap` widgets, whose block-in-inline split
+// guarantees the kept band cannot re-wrap; the diff panel falls back to its own block children.
+// → docs/archive/snapshot-scrub-rounds.md#raster-band-trim
 function trimCloneToBand(liveEl: HTMLElement, clone: HTMLElement, y0: number, y1: number): void {
   if (liveEl.scrollHeight <= (y1 - y0) * 3 + 400) return // short content — not worth it
   const elRect = liveEl.getBoundingClientRect()
@@ -439,11 +420,10 @@ export async function captureRegion(el: HTMLElement, scale: number): Promise<Cap
 
   const clone = el.cloneNode(true) as HTMLElement
   await prepareClone(clone)
-  // Pin the live client box EXACTLY: width w (clientWidth excludes the scrollbar; with overflow
-  // visible the clone grows none, so line wrapping is identical) AND height h — percent-height
-  // children (the diff panel's lead/trail spacers, the minimap's 1fr grid rows) resolve against
-  // the box height and would collapse under height:auto. Taller content simply overflows
-  // (visible) and the crop picks the scrolled band.
+  // ⚠ Pin the live client box EXACTLY — width AND height. Width keeps wrapping identical; height
+  // is load-bearing because percent-height children (spacers, the minimap's 1fr rows) collapse
+  // under `auto`. Taller content overflows visibly and the crop takes the band.
+  // → docs/archive/snapshot-scrub-rounds.md#raster-band-trim
   clone.style.margin = '0'
   clone.style.width = `${w}px`
   clone.style.height = `${h}px`
@@ -624,15 +604,12 @@ export interface ScrubRecEntry {
   centre: number               // CONTENT identity under the pane's centre line (0 = unknown)
 }
 
-// ── REGISTRATION (Peter, 2026-07-16: "nothing happens except the version number") ──────────────
-// Versions differ in LENGTH, so preserving the SCROLL OFFSET does not preserve the CONTENT: every
-// frame can be individually correct while the text slides under the viewport and the sequence
-// reads as mush rather than animation. Apple Photos flickers legibly precisely BECAUSE consecutive
-// frames are registered to each other. So the recorder carries a CONTENT identity per present: the
-// text under the pane's centre line, hashed at CAPTURE time (idle — never in the hot path) and
-// INTERNED to an integer, so recording it is one array write of a number already on the entry.
-// Consecutive presents with the same `centre` = registered; a changing `centre` = the frames are
-// sliding, and no amount of presenting speed can fix that.
+// ── REGISTRATION ──────────────────────────────────────────────────────────────────────────────
+// ⚠ A frame carries a CONTENT identity, not a scroll offset: versions differ in LENGTH, so every
+// frame can be individually correct while the sequence slides and reads as mush. Hash the text
+// under the pane's centre line at CAPTURE time (idle) and intern it, so recording a present is one
+// array write. Same `centre` across presents = registered.
+// → docs/archive/snapshot-scrub-rounds.md#raster-registration
 const centreIds = new Map<string, number>()
 function internCentre(sig: string): number {
   let id = centreIds.get(sig)
@@ -698,15 +675,10 @@ export function paneCentreSig(el: HTMLElement): string {
 }
 
 // ── Burst RECORDER ────────────────────────────────────────────────────────────────────────────
-// The `?snapThumbs=debug` overlay is a DOM node re-rendering on the SAME main thread a scrub
-// saturates — so a mid-burst screenshot of it is a stale render of the INSTRUMENT, and every
-// number read off it was really an at-rest sample (Peter's mid-scrub capture came back
-// byte-identical to his idle one). This codebase has been burned repeatedly by instruments that
-// can't see the thing they measure (canvasShapingMatchesEditor returning false forever, silently
-// disabling arithLayout for months) — so the burst is RECORDED, not watched: a preallocated ring
-// buffer written per present with no allocation, no string building, no DOM and no console in the
-// hot path, serialised only once the burst has settled. `resetRecord()`/`record()` on the
-// presenter; window.__iwScrub.record() for a harness or for Peter's clipboard.
+// ⚠ RECORD A BURST, NEVER WATCH ONE (R5). The debug overlay repaints on the thread the scrub
+// saturates, so a mid-burst reading of it is the idle state. This is a preallocated ring buffer
+// written per present — no allocation, string building, DOM or console in the hot path —
+// serialised only after the burst settles. → docs/archive/snapshot-scrub-rounds.md#raster-recorder
 const REC_CAP = 4096 // power of two — the write is an & mask, not a modulo
 const PANE_ID: Record<ScrubPaneKind, number> = { doc: 0, diff: 1, map: 2 }
 const PANE_NAME: ScrubPaneKind[] = ['doc', 'diff', 'map']
@@ -1101,15 +1073,11 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     if (el && el.isConnected && s) {
       const dpr = dprOf()
       const zoom = s.getZoom()
-      // ONE SOURCE OF TRUTH for the key: the SURFACE this bitmap will be PRESENTED into and looked
-      // up against. The box used to come from `el` — the CAPTURED element, which for a sweep job is
-      // a warm DocLayer or an offscreen replica, not the surface — while `hydrate()`/`show()` key
-      // off the surface. Two elements that merely HAPPEN to agree (both DocLayers share CSS, and
-      // `scrollbar-gutter:stable` keeps the gutter reserved so clientWidth can't drift with content
-      // height). Traced verbatim they match byte-for-byte today — but a latent second source keys
-      // every bake to a box no lookup ever asks for the day it diverges, which reads as "all baked,
-      // never hit" and is unfalsifiable from the outside. The MAP keeps its bake permanently even
-      // if doc/diff move to on-demand text rendering, so this contract has to be sound, not lucky.
+      // ⚠ ONE SOURCE OF TRUTH for the key box: the SURFACE this bitmap is presented into, which is
+      // what `hydrate()`/`show()` look up against — never the CAPTURED element (a sweep job's is a
+      // warm layer or an offscreen replica). The two agree today by coincidence (R2); the day they
+      // diverge, every bake keys to a box no lookup asks for and it reads as "all baked, never
+      // hit". → docs/archive/snapshot-scrub-rounds.md#raster-key
       const sEl = s.getEl()
       const w = sEl ? sEl.clientWidth : el.clientWidth
       const h = sEl ? sEl.clientHeight : el.clientHeight
@@ -1210,13 +1178,10 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
       if (e && attached.get(e.kind) !== e) evictOne(e)
     }
     probePerf('scrub.evict', (before - bytes) / 1e6)
-    // NAME THE BOUND. `planEviction` walks both passes and then falls through with `freed < over`
-    // and says NOTHING, and this loop additionally REFUSES to evict anything still attached — so
-    // the plan's own `freed` can promise bytes that never come back. A budget that is silently
-    // exceeded reads exactly like a budget that holds. Measured on ACTUAL bytes after the sweep,
-    // never on the plan's promise: if we could not get under, that is the eviction rule failing
-    // and it must say so by name (the doc/diff bitmaps may retire to the plaintext renderer, but
-    // the MAP keeps its bake permanently — this rule is the long-lived one).
+    // ⚠ NAME THE BOUND (R4). Judge the budget on ACTUAL bytes after the sweep, never on
+    // `planEviction`'s promised `freed` — the plan can fall through silently and this loop refuses
+    // to evict anything still attached. A budget silently exceeded reads exactly like one that
+    // holds. → docs/archive/snapshot-scrub-rounds.md#raster-eviction
     if (bytes > budget) probePerf('scrub.mem.overBudget', (bytes - budget) / 1e6)
   }
 

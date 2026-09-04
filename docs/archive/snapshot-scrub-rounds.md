@@ -1319,3 +1319,576 @@ This is **R1** (an unknown is not a known-empty), the family that caused six dat
 > that the lozenge is INACTIVE — which is what licenses its deliberately faint colours in both
 > themes (WCAG 1.4.3 exempts inactive components, and a contrast sweep must be able to tell an
 > unavailable control from an illegible one rather than being handed an exemption list).
+
+---
+
+# <a id="raster"></a>`editor/scrubRaster.ts` — the narrative, moved out of the raster layer (2026-09-04)
+
+## <a id="raster-architecture"></a>Capture and cache, as the header used to tell it
+
+> Scrub raster layer (round 3, 2026-07-12 — Peter: "preload their views as PNGs or something
+>    so that the user can scroll through real fast … same with the minimap … raster them as PNGs
+>    at current resolution of screen")
+>
+> During RAPID snapshot stepping (armed multi-scrub, or single flips <~250ms apart) the doc pane,
+> the diff panel and the minimap flip through PRE-RASTERISED bitmaps: one `<canvas>` per pane,
+> swapped into an absolutely-positioned overlay per step — zero layout work on the input path.
+> At rest (~150ms after the last step, once the live DOM for the landing snapshot has painted)
+> the overlay hides and the real view shows — bitmap and DOM are pixel-aligned because each
+> bitmap is captured from the live pane at its own scroll offset + the current zoom.
+>
+> CAPTURE — SVG foreignObject rasterisation, no dependencies: clone the pane subtree, inline the
+> app stylesheet (same-origin CSSOM text; `:root`/`html` selectors re-pointed at the clone
+> wrapper so theme vars + wave-tile URIs still resolve) and the LOADED webfont faces as data:
+> URIs (fonts are self-hosted → same-origin fetch; an SVG-image document may not fetch ANYTHING,
+> so every subresource must be a data: URI — that also satisfies the strict CSP: img-src has
+> data:, not blob:). The crop is the pane's viewport region (thesis panes are >60,000px tall —
+> a full strip would blow any budget), selected by negative margins inside a pane-sized
+> foreignObject (NOT viewBox/transform cropping — WebKit's foreignObject handling of those is
+> historically buggy). Raster = draw the SVG `<img>` into a canvas at DEVICE resolution: pane box
+> × DPR × (CSS zoom where the zoom wraps the pane — the diff panel). Peter said "current
+> resolution of screen": desktop captures at full DPR; phone caps at 2 (memory).
+>
+> CACHE — LRU keyed `${kind}|${snapshot.id}|${paneW}x${paneH}|z${zoom}|d${dpr}` under a hard
+> byte budget (60MB desktop / 24MB touch). Snapshot content is immutable, so entries only go
+> stale on scroll (the owning pane recaptures on scroll settle) or on a key change (zoom /
+> pane size / DPR → different bucket, old bucket ages out). Misses during a scrub show the
+> NEAREST cached snapshot's bitmap (by snapshot order) — never a blank flash; the live counter
+> stays truthful (it renders outside the overlays) and the real render catches up at rest.
+> Capture runs strictly OFF the input path: idle-pumped, paused while scrubbing or within
+> 350ms of any nav input.
+
+## <a id="raster-budgets"></a>The byte budget and `RASTER_DPR_CAP`
+
+> Byte budgets. Round 5 (2026-07-14 — Peter "keep + salvage"): the raster DPR is now CAPPED (see
+> RASTER_DPR_CAP / dprOf), so each doc-pane bitmap is ~¼ its DPR2 size and 60MB again holds ~38
+> entries (~12 snapshots × doc/diff/map — the round-3 measured depth). Deep enough that a fast
+> scrub finds the intermediate versions CACHED instead of falling back to a stale nearest — the
+> regression-#3 fix ("only some versions seen; lags; catches up on stop"). Bitmaps are GPU-backed
+> (ImageBitmap) → bounded native memory, not JS heap.
+
+> Cap the RASTER DPR (NOT the display). The felt scrub jank was the per-step compositor texture
+> upload of a full-DPR bitmap (measured DPR2 ≈ 20MB/swap → 28% of burst frames >32ms); capping to
+> 1 quarters that upload AND ~4×s the cache depth (more intermediate versions stay cached → fewer
+> stale-nearest skips). Text at reading size stays crisp at 1. A harness may override via
+> window.__iwRasterDprCap to A/B the cap.
+
+## <a id="raster-band-trim"></a>Band trimming — the capture-cost fix
+
+> Serialising + laying out the WHOLE pane in the SVG document cost seconds on a thesis-scale doc
+> (measured 4.5-13s per capture). Only the crop band matters, so the clone is trimmed to it:
+> far content is Range-deleted at SAFE block boundaries and a pixel-exact spacer preserves the
+> kept band's offsets. Safe boundaries: the canonical `.inkwave-page-gap` widgets (block-in-
+> inline — text after one always starts a fresh line, so removing content before an earlier gap
+> or after a later one can't re-wrap the kept band; the absolute `.inkwave-sheets` panel layer
+> lives OUTSIDE the text flow and is untouched); fallback for the diff panel: its own block
+> children. The minimap (short content) skips trimming entirely.
+
+> Pin the live client box EXACTLY: width w (clientWidth excludes the scrollbar; with overflow
+> visible the clone grows none, so line wrapping is identical) AND height h — percent-height
+> children (the diff panel's lead/trail spacers, the minimap's 1fr grid rows) resolve against
+> the box height and would collapse under height:auto. Taller content simply overflows
+> (visible) and the crop picks the scrolled band.
+
+## <a id="raster-registration"></a>Registration — a frame carries a CONTENT identity
+
+> REGISTRATION (Peter, 2026-07-16: "nothing happens except the version number").
+> Versions differ in LENGTH, so preserving the SCROLL OFFSET does not preserve the CONTENT: every
+> frame can be individually correct while the text slides under the viewport and the sequence
+> reads as mush rather than animation. Apple Photos flickers legibly precisely BECAUSE consecutive
+> frames are registered to each other. So the recorder carries a CONTENT identity per present: the
+> text under the pane's centre line, hashed at CAPTURE time (idle — never in the hot path) and
+> INTERNED to an integer, so recording it is one array write of a number already on the entry.
+> Consecutive presents with the same `centre` = registered; a changing `centre` = the frames are
+> sliding, and no amount of presenting speed can fix that.
+
+## <a id="raster-recorder"></a>The burst is RECORDED, not watched
+
+> The `?snapThumbs=debug` overlay is a DOM node re-rendering on the SAME main thread a scrub
+> saturates — so a mid-burst screenshot of it is a stale render of the INSTRUMENT, and every
+> number read off it was really an at-rest sample (Peter's mid-scrub capture came back
+> byte-identical to his idle one). This codebase has been burned repeatedly by instruments that
+> can't see the thing they measure (canvasShapingMatchesEditor returning false forever, silently
+> disabling arithLayout for months) — so the burst is RECORDED, not watched: a preallocated ring
+> buffer written per present with no allocation, no string building, no DOM and no console in the
+> hot path, serialised only once the burst has settled. `resetRecord()`/`record()` on the
+> presenter; window.__iwScrub.record() for a harness or for Peter's clipboard.
+
+Pattern **R5** — measure in the real context. An instrument that repaints on the thread it is
+measuring reports the idle state under any load.
+
+## <a id="raster-key"></a>One source of truth for the cache key
+
+> ONE SOURCE OF TRUTH for the key: the SURFACE this bitmap will be PRESENTED into and looked
+> up against. The box used to come from `el` — the CAPTURED element, which for a sweep job is
+> a warm DocLayer or an offscreen replica, not the surface — while `hydrate()`/`show()` key
+> off the surface. Two elements that merely HAPPEN to agree (both DocLayers share CSS, and
+> `scrollbar-gutter:stable` keeps the gutter reserved so clientWidth can't drift with content
+> height). Traced verbatim they match byte-for-byte today — but a latent second source keys
+> every bake to a box no lookup ever asks for the day it diverges, which reads as "all baked,
+> never hit" and is unfalsifiable from the outside. The MAP keeps its bake permanently even
+> if doc/diff move to on-demand text rendering, so this contract has to be sound, not lucky.
+
+Pattern **R2**, and the interesting half is that the two sources agree *today*: the bug it
+prevents is invisible until the day they stop.
+
+## <a id="raster-eviction"></a>Name the bound
+
+> NAME THE BOUND. `planEviction` walks both passes and then falls through with `freed < over`
+> and says NOTHING, and this loop additionally REFUSES to evict anything still attached — so
+> the plan's own `freed` can promise bytes that never come back. A budget that is silently
+> exceeded reads exactly like a budget that holds. Measured on ACTUAL bytes after the sweep,
+> never on the plan's promise: if we could not get under, that is the eviction rule failing
+> and it must say so by name (the doc/diff bitmaps may retire to the plaintext renderer, but
+> the MAP keeps its bake permanently — this rule is the long-lived one).
+
+---
+
+# <a id="textrender"></a>`editor/textRender.ts` — the narrative, moved out of the plaintext renderer (2026-09-04)
+
+## <a id="tr-overview"></a>What it is, its two paint modes, and its honest limits
+
+> PLAINTEXT PAGE RENDERER (2026-07-16 — flag `inkwave:textRender`, default OFF).
+>
+> Peter's idea: a page PREVIEW is just text + highlight rectangles. It does not need ProseMirror,
+> the DOM, or a reflow. We already own the hard half — arithmeticLayout computes canonical line
+> breaks from canvas measureText advances, and that wrap is CERTIFIED to match the editor
+> (CERTIFIED_FAMILIES + the fonttools ligature strip + luFloor quantisation). So: run the arith
+> engine to get line breaks, then fillText each line onto a canvas. No DOM, no editor, no reflow.
+>
+> This module is a MEASUREMENT PROTOTYPE. It exists to answer "is this fast enough, and faithful
+> enough, to replace the snapshot thumbnail bake?" — not to ship. Read the honest limits below.
+>
+> TWO PAINT MODES (the map-pane hypothesis, 2026-07-16):
+>   • 'text'  — fillText each line's runs. The real preview.
+>   • 'rects' — one filled rect per line (x, baseline-ish band, run length). At MINIMAP scale no
+>               glyph is resolvable, so the only information that survives is WHERE lines are and
+>               HOW LONG they run — which the layout already knows.
+>     NB THE HONEST FRAMING: 'rects' does NOT "skip shaping". The line BREAKS come from
+>     measureText, which IS shaping — that cost is identical in both modes. 'rects' skips only
+>     RASTERISATION (fillText). So the mode difference measures exactly one thing: is a page's cost
+>     dominated by glyph raster, or by layout? Do not claim more than that from it.
+>
+> HONEST LIMITS (each is a DEFER, never a guess — the same discipline as the engine's eligibility):
+>   • Text blocks = `paragraph` only, in certified+loaded fonts, uniform size (blockEligibility).
+>   • EVERYTHING ELSE (figure, math, embedded PDF, list, rule, refList, heading) draws a LABELLED
+>     PLACEHOLDER BOX at a declared/estimated height. It does NOT pretend to render. A placeholder
+>     whose height is estimated is a real fidelity gap and the coverage map reports it.
+>   • `justify` alignment is NOT modelled (the browser distributes slack across spaces) — a
+>     justified paragraph renders left-aligned and is reported as a gap, not silently drawn wrong.
+
+⚠ **The flag line above names the wrong flag, and the compression pass corrected it rather than
+carrying it forward.** `inkwave:textRender` gates `RichDiffView` (the /snapshot doc pane's rich
+pages) and has been **DEFAULT ON** since round 15 (`ef96306`) — `textRenderFlag.ts` says so in its
+own header. Nothing reaches THIS module through it: the only production caller is
+`editor/snapshotBreaks.ts`, behind `inkwave:snapBreaks`, which is default OFF
+(`localStorage.getItem(FLAG) === '1'`). Everything else importing it is a probe, a store or a test.
+So the header read as though the renderer had been dark since 2026-07-16 under a flag that has in
+fact been live for a different feature for six weeks — the exact archaeology CLAUDE.md warns about
+when a stale entry describes a lane's state. The rewritten header names `inkwave:snapBreaks`.
+
+## <a id="tr-positional"></a>Reliability is POSITIONAL
+
+> RELIABILITY IS POSITIONAL, NOT A DOCUMENT-WIDE BOOLEAN (2026-07-17).
+> A placeholder with a guessed height does not merely look wrong — it MOVES EVERY PAGE BREAK
+> AFTER IT, silently, and the pages then carry the wrong words while the renderer reports
+> success. But it only moves the breaks BELOW it: everything above is unaffected.
+> A whole-model boolean therefore reported EVERY thesis unreliable (they all have a
+> bibliography, which is force-broken onto its own page at the very END) and said nothing about
+> WHERE — throwing away ~57 of 58 perfectly exact pages. So:
+>   pages [0, reliablePages) are trustworthy; from reliablePages on, they are not.
+> This is the general contract for "we estimated something here" — any future estimated block
+> inherits it, not just the refList.
+
+Pattern **R9** — scope by what the mechanism actually needs. A document-wide boolean is the wrong
+axis for a defect that only propagates downward.
+
+## <a id="tr-tone"></a>Line-rect tone calibration
+
+> Line-rect tone calibration (MEASURED 2026-07-16, not chosen).
+> A line drawn as a solid bar is far darker than the text it stands for, and at map scale tone IS
+> the signal — the eye reads a page thumbnail as grey texture, so getting the density wrong makes
+> the strip read as a barcode even when every line is in exactly the right place.
+> Measured on the real editor's own pixels, downscaled to map scale (scripts/textrender-probe/
+> mapcompare.mjs), mean ink density over the content box:
+>     real thumbnail 6.71%   ·   text render 6.73%   ·   line-rects @0.42/0.72 = 22.27%
+> So the bar was 3.3× too dark. Effective coverage = bandRatio × alpha; matching 6.71/22.27 of the
+> old 0.42 × 0.72 = 0.3024 gives ≈0.091. Keeping the band at 0.42 (thinner bands alias away at map
+> scale, where a band is only ~3 device px) puts alpha at 0.217.
+> CAVEAT, stated rather than buried: this is calibrated to EB Garamond at the canonical 18px. A
+> different face/size has a different ink density, so this is a per-font constant that happens to be
+> hard-coded to the identity serif — re-measure before trusting it for another face.
+
+## <a id="tr-runof"></a>The second copy of `runOf`, and the comments that asserted parity
+
+> One text node → an engine run. Mirrors arithMeasure.runOf (same mark resolution) so the two
+> paths can never disagree about what a run IS.
+> ⚠ THIS IS A SECOND COPY of arithMeasure.runOf — see runsOfParagraph below, whose comment claims
+> the two "Mirror … EXACTLY". THEY DID NOT. Fixing the unmodelled-mark hole in arithMeasure alone
+> changed nothing, because buildRenderModel calls THIS one: `code`-marked prose stayed eligible and
+> kept reporting full reliability. The rule that decides which mark is measurable now lives ONCE, in
+> arithMeasure (MODELLED_MARKS / METRIC_NEUTRAL_MARKS), and both copies call it — so a new mark can
+> no longer be handled in one and silently guessed in the other.
+>
+> The same shape has now bitten this project three times: staticPagination claimed "identical policy
+> (and 0.22 constant) to the editor" while carrying a rule the editor had retired; breaks.prove.mjs
+> claimed "byte-identical to the live editor" on a fixture with no citations; this claimed "can never
+> disagree". A COMMENT ASSERTING PARITY IS A REASON NOBODY CHECKS PARITY.
+
+That last sentence is the file's own best line and it survives in the source, because it is a rule
+about how to read every other comment here.
+
+## <a id="tr-citations"></a>Citations are a proven opaque box; an unknown one DEFERS
+
+> One paragraph's inline content → engine runs. Mirrors arithMeasure.runsOfParagraph EXACTLY (same
+> mark resolution, same citeBox lookup) so the renderer and the canonical measure can never disagree
+> about what a paragraph contains.
+>
+> CITATIONS (wired 2026-07-16 — Peter: "can't you do a math version that includes citations? just
+> calculates how long they are and includes it in the math?"). A citation IS a proven opaque box:
+> CitationNodeView pins `white-space: nowrap`, so its label has no internal break opportunity and
+> the parent line can only break BEFORE or AFTER it — one unbreakable advance, measurable once and
+> cached by an immutable key (citations/citeBox.ts). Supplying it is what lets a citation-bearing
+> paragraph render arithmetically instead of placeholdering out; without it Peter's thesis (174
+> citations) would placeholder ~every paragraph.
+>
+> SELF-HEALING, NOT GUESSING: a key that isn't cached (new citekey, bibliography not yet hydrated,
+> CSL style switch, wrong measurement base) returns null ⇒ no box ⇒ blockEligibility's `!r.box` gate
+> DEFERS that block to a labelled placeholder. We never invent an advance that is about to change.
+> Anything else atomic (inline math) still supplies no box and still defers, by the same rule.
+
+## <a id="tr-window"></a>Window mode
+
+> WINDOW MODE (2026-07-17).
+> PROVED first, then built: a page laid out from its own break position reproduces the full
+> model's line starts EXACTLY, with zero prefix (30/30, 31/31, 31/31 at 2k/10k/40k; mid-line
+> negatives collapse to 0/31). Because a break `at` IS a line start and greedy wrap restarts
+> deterministically there. So the prefix is needed ONLY to FIND the break — never to lay out
+> the page.
+
+## <a id="tr-blockcache"></a>The incremental block cache
+
+> Incremental block cache.
+> PETER'S TARGET: "if we can get it under 1s we can just load it when the snapshots screen loads
+> up" — <1s for 116 versions ⇒ <8.6ms/version, from a naive 62-82ms.
+>
+> THE THEOREM IT RESTS ON (confirmed, not assumed): `layoutParagraph(block, contentWidthPx, ratio,
+> measure, whiteSpace)` takes ONLY the block. No prefix, no preceding state, no document. Line
+> wrapping never crosses a block boundary, so a block's layout is a pure function of its own runs
+> and its width/font context. Everything a block's position depends on — `top`, `posBase`,
+> `blockIdx` — is applied by emitTextBlock as a pure OFFSET after the layout exists. So reuse is
+> the SAME ARITHMETIC, not an approximation: cache the block-relative geometry, re-emit at the new
+> offsets. This is the same rule the editor's `computeScoped` already runs on (unchanged blocks
+> reuse cached block-relative lines at the previous measure's tops).
+>
+> KEYED ON A CONTENT HASH, NEVER ON A DIFF. A diff (`opsBetween`) would be cheaper, but a wrong
+> diff SILENTLY REUSES WRONG LAYOUT — it paints the right words on the wrong page and reports
+> success. A content hash cannot: if the bytes differ, the key differs. The key is
+> self-validating, which is the whole difference between a fast renderer and a fast renderer that
+> is subtly wrong. Two independent 32-bit FNV-1a streams ⇒ an effective 64-bit key: collisions are
+> the ONLY way this can under-invalidate, and under-invalidation is the direction that paints wrong
+> words, so the extra stream is cheap insurance (the same asymmetry as bibSignature's whole-entry
+> hash).
+>
+> INVALIDATION IS THE CALLER'S JOB, and it is the same contract the canonical measure's block-line
+> WeakMap already carries: the key covers the block's CONTENT and its LAYOUT PARAMS, but NOT the
+> font-loading state that `measure` closes over. Fonts change advances. So the caller MUST drop the
+> cache whenever the canonical context moves (fonts ready/'loadingdone', page settings,
+> bibliography hydration) — exactly where clearLineCache already sits. A table's `contextSig`
+> covers the same ground for the persisted layer.
+
+## <a id="tr-heading-font"></a>The heading font-family gap, stated
+
+> styledRuns re-families EVERY run to the harvested style, so the strut IS that family and
+> the mixed-family check is a tautology here. That is a real gap, stated: a
+> textStyle:fontFamily mark INSIDE a heading is overwritten rather than modelled, so a
+> heading in a picked font is laid out in the h2's own face. Headings are single-line in
+> practice and the matrix's heading rows are byte-identical, so it is not moving a break
+> today — but it is a guess, and it should become a defer when a fixture can catch it.
+
+## <a id="tr-lists"></a>A list's margins COLLAPSE
+
+> LIST: ONE block (as the live DOM's `<ul>`/`<ol>` is one top-level block), many item lines.
+>
+> ⚠ A LIST'S MARGINS COLLAPSE, AND THAT IS THE WHOLE OF THIS BRANCH'S DIFFICULTY (2026-07-17).
+> The model used to add one `li > p` margin-bottom after EVERY item, including the last, then the
+> list's own margin-bottom on top. CSS does not: the last item's paragraph has nothing below it
+> inside the list — no padding-bottom, no border on the `li` or the `ul` — so its bottom margin
+> COLLAPSES THROUGH both and merges with the list's own. The gap after a list is
+> `max(itemMargin, listMargin)`, not their sum.
+> MEASURED against the live DOM (scripts/textrender-probe/listdiag.mjs, 3-item lists, canonical
+> 18px): the `ul`'s own rect is `Σ item paragraphs + (n−1) × 4.5`, and the real gap to its next
+> sibling is 9 — while the model produced `Σ + n × 4.5` and then added 9, i.e. **+4.5px per
+> list, every list**. Silent: `estimatedBlocks 0`, `reliablePages 55/55` — full reliability
+> claimed while every break below the first list carried the wrong words. Six lists into a
+> document that is one 29px line of drift.
+> So: the item margin is added BETWEEN items (never after the last), and the list's trailing
+> advance is the COLLAPSE of the last item's margin with the list's own.
+
+## <a id="tr-emit"></a>Routed through `emitTextBlock`
+
+> ROUTED THROUGH emitTextBlock (2026-07-17). This branch used to carry its OWN COPY of the
+> layout+emit loop — a second implementation of the same rule, which is the pmToText/textMap
+> drift trap wearing another hat: headings and list items went through emitTextBlock while
+> PARAGRAPHS, the bulk of every real document, took a duplicate path. It was found by
+> measurement, not by reading: the block cache reported 99% reuse and a 1.03x speedup at once,
+> because it only ever saw 127 of ~380 emits (43 headings + the list items) — the 254
+> paragraphs bypassed it entirely. Byte-identical by construction: posBase collapses to the
+> old `offset + 1 + fromChar + sc`, margins are the same (0 / marginBottom), and the caller
+> still pushes the block and advances `top` exactly as before.
+
+## <a id="tr-breaks"></a>The splitter's default, and the two kinds of break `at`
+
+> paginate()'s default now MATCHES production (no orphan snap — see its ⚠ note). It used to snap,
+> which put the WRONG WORDS on every page after the first (first break 2141 vs the editor's 2403;
+> 17 pages vs 16). A preview showing different text than the editor is worse than no preview, so
+> this deliberately rides the default: if the default ever drifts from computeBreaks again,
+> breaks.prove.mjs fails against the live editor's own gap widgets rather than this file silently
+> compensating for it.
+
+> Assign each line to a page by walking the breaks the splitter produced (never re-deriving them
+> — a second copy of the break rule is a second chance to disagree with production).
+>
+> A break's `at` is one of TWO position kinds, and conflating them silently blanks the renderer:
+>   • a mid-block break → `at` = the line's own pos (= blockOffset + 1 + startChar), or
+>   • an ORPHAN-SNAP / refList break → `at` = the BLOCK START (= blockOffset), which is ONE LESS
+>     than that block's first line's pos and therefore never equals any line's pos.
+> Matching only on line.pos meant snapped breaks never fired: every line stayed on page 0,
+> pageTop[1..] was undefined, and paintPage early-returned — so pages 1+ rendered BLANK while the
+> timings still looked wonderful. Caught by the pixel diff (differing == ink exactly = "we drew
+> nothing"), which is precisely why the fidelity check is not optional.
+
+## <a id="tr-anchoring"></a>Content anchoring
+
+> CONTENT ANCHORING (2026-07-16 — the frame-registration requirement).
+> Versions differ in LENGTH, so "page 7 of v3" and "page 7 of v4" are not the same content: a scrub
+> that preserves page number (or scroll offset) does not preserve what you're LOOKING AT, and the
+> sequence reads as noise even when every frame is correct and fast. So the renderer must be able to
+> answer "the page containing content X", not only "page N". Both directions are a lookup over the
+> model the build already produced — no extra layout.
+
+## <a id="tr-geometry"></a>The canonical geometry, from settings alone
+
+> THE CANONICAL GEOMETRY, FROM SETTINGS ALONE (2026-07-17 — the /snapshot seam).
+>
+> Note what this does NOT touch: the DOM. The canonical geometry is a pure function of the page
+> SETTINGS — paper, orientation, margins, paragraph spacing — with a pinned 18px base and 1.618
+> ratio. That is precisely why /snapshot, which has no editor and no .ProseMirror, can compute the
+> SAME geometry the editor paginates under rather than a lookalike.
+>
+> It lived privately inside textRenderProbe.ts as `liveGeom`. /snapshot needs the identical rule,
+> and a second copy of "what is the canonical geometry" is how one route silently starts paginating
+> to a different page size. One implementation; the probe now calls this too.
+
+---
+
+# <a id="textrenderprobe"></a>`editor/textRenderProbe.ts` — the narrative, moved out of the harness (2026-09-04)
+
+Almost every block here is an instance of **R3** (a guard must be proved to fire), **R5** (measure in
+the real context) or **R6** (a control that cannot fail proves nothing). The rules stayed; the
+account of which instrument lied, and how it was caught, is here.
+
+## <a id="trp-surface"></a>Why the probe is armed by the URL param, not by the flag
+
+> TEXT-RENDER PROBE SURFACE — MEASUREMENT ONLY, armed by the FRESH `?textRender` URL param.
+>
+> NOT gated on textRenderEnabled(): that flag graduated to DEFAULT ON (2026-07-18 — the rich
+> /snapshot pane ships live), so gating this 1477-line harness on it would install it for every
+> writer. TiptapEditor arms it instead on `?textRender` being present in the URL at mount — which
+> only the .prove.mjs scripts navigate to — so a normal load of `/` never fetches this chunk.
+>
+> The whole point of this round is an HONEST measurement, and this codebase has been burned five
+> times by results proven in a context production never uses (a plain-div wrap harness; a ligatures-
+> on font grid; a font we don't ship; a Chromium hinting artifact; and canvasShapingMatchesEditor,
+> a gate that always returned false and silently disabled arithLayout for months). So the renderer
+> is measured HERE — inside the running app, against the LIVE editor's document, with the REAL
+> shipped fonts at the REAL device DPR — not in a harness that reimplements the context.
+>
+> Loaded by a dynamic import from TiptapEditor, so it costs nothing when unarmed.
+
+## <a id="trp-harvest"></a>Harvest styles only where the live layout IS canonical
+
+> Harvest heading/list styles from the LIVE .ProseMirror. This is only legitimate in the CANONICAL
+> context — a rendered value is the canonical value only when the live layout IS canonical, which on
+> desktop at defaults it is (PaginationExtension's `canonicalIsLive`: no phone rules, zoom 1,
+> magnify 1). Asserted, not assumed: harvesting under a zoom would bake the zoomed font size into a
+> "canonical" table and every break would be wrong in a way that looks like an engine bug.
+> PRODUCTION HOME (not this file): beside harvestCiteBoxes inside the DOM canonical measure, which
+> forces that context explicitly. Here the probe drives it because the prototype has no wire-in.
+
+## <a id="trp-canvas"></a>The persistent canvas, and `flushedMs` vs `recordedMs`
+
+> PERSISTENT CANVAS. Allocating a fresh 3.5-megapixel canvas per page is a HARNESS artifact, not
+> the renderer's cost — production reuses one canvas per pane (scrubRaster's round-4 lesson: the
+> per-step attach re-layerized + re-uploaded a full texture every step). Measuring the alloc as
+> if it were render cost would overstate the renderer by ~4×. `fresh: true` measures the alloc
+> path deliberately, so the difference is visible rather than assumed.
+> RETURNS BOTH NUMBERS, ALWAYS. Canvas 2D `fillText` RECORDS a command; it does not rasterise.
+> Timing only the record loop yields ~0ms and is a LIE of exactly the shape that already bit this
+> codebase (round-4: "the show() 0.4ms was JS-only and hid the real cost" — the felt lag the JS
+> timer never saw). `flushedMs` forces the raster to complete (a 1px readback drains the command
+> queue) and is THE number to quote. `recordedMs` is kept only to show the gap.
+
+## <a id="trp-midline"></a>The mid-line break audit, and the two ways it was vacuous
+
+> THE MID-LINE BREAK AUDIT.
+> A page break must land at a LINE START. If it lands mid-line, the page gap opens in the middle
+> of a rendered line — the "space left on the last line" of a split paragraph.
+>
+> ⚠ MEASURE THE NATURAL LAYOUT, NOT THE GAPPED ONE. The page-gap widget is a display:block span,
+> so it FORCES a line break at its own position ("the break it forces coincides with the line
+> start it sits at" — pageGap.ts). Asking the GAPPED DOM whether a break sits at a line start is
+> therefore VACUOUS: every break trivially does, and the audit reports a confident 0 for a
+> document full of real mid-line breaks. That is exactly the house failure mode, and the first
+> version of this audit fell into it. So the gaps are removed from flow first, and the question
+> is asked of the NATURAL wrapping — the gap-free canonical layout collectLines claims to
+> measure (compute() clears the widgets before measuring; on desktop at defaults the live layout
+> IS canonical, so hiding the gaps reproduces that context).
+>
+> Line starts are derived INDEPENDENTLY of collectLines: a document-order walk of the real text
+> characters, plus each inline ATOM as ONE unit via its own outer box. An atom's INTERIOR boxes
+> never vote — they are the fiction under test (the citation NodeView's inline-flex ⤵ button sits
+> ~6px off the line, past the 3px dedup, and became a phantom line). An atom that begins a line
+> IS a line start, so it must be counted, or a legitimate break before a line-leading citation
+> false-positives.
+>
+> POLARITY — both must hold before any number here is believed:
+>   • known-NEGATIVE: plain prose (no NodeViews) must audit 0 mid-line breaks;
+>   • known-POSITIVE: pre-fix, citation-dense prose must reproduce real mid-line breaks.
+> An audit that reports 0 everywhere is blind, not passing.
+
+> ⚠ THE VERDICT IS ONLY MEANINGFUL WHERE THE RENDERING IS CANONICAL. Breaks are measured in a
+> FORCED canonical context (18px base, desktop margins, zoom 1, magnify 1). The phone RENDERS
+> the same doc at 22.5px in a ~350px column — a different reflow entirely — so a canonical
+> break lands wherever it falls in the phone's own wrapping. That is canonical pagination
+> working as designed (same words on the same page everywhere), not a mid-line bug; auditing
+> canonical positions against a non-canonical reflow measures the question, not the code.
+> Desktop at defaults IS canonical (canonicalIsLive), which is where the verdict counts.
+
+## <a id="trp-linecount"></a>The line over-count audit — measure the artifact, not the coincidence
+
+> THE LINE OVER-COUNT AUDIT.
+> The mid-line rate only fires when a page break HAPPENS to land on a phantom line, so it is a
+> poor instrument for a NodeView that is rare in the doc: inline math measured 0 mid-line breaks
+> even UNFIXED, which says "no break landed there", not "no bug". The ARTIFACT itself is the
+> phantom line, so measure THAT directly and per block: how many lines does the rect path report
+> versus how many the block really has?
+>   • truth  — line starts from the validated char/atom walk (the same rule midlineAudit uses);
+>   • old    — keepLineRects(whole-block range rects): descends into NodeViews ⇒ over-counts;
+>   • fixed  — keepLineRects(blockLineRects(...)): atoms collapsed to one box each.
+> Both paths call the REAL production functions, not copies. Gaps are removed from flow first
+> (a gap widget splits a block's rects and would corrupt every count).
+
+## <a id="trp-memory"></a>The memory reading is an order of magnitude, and says so
+
+> MEMORY: what a cached MODEL costs vs a cached BITMAP.
+> The bitmap pool holds ~62.7MB for 57 bitmaps because a bitmap is W×H×4 bytes no matter how
+> little ink is on it. A render model holds geometry + the segment strings instead. This builds
+> N independent models and reports the heap delta.
+> performance.memory is COARSE (quantised, GC-dependent), so this is an order-of-magnitude
+> reading, not a precise one — it is reported as such. A structural count is included alongside
+> so the estimate can be sanity-checked against something that isn't the GC's opinion.
+
+## <a id="trp-incremental"></a>The incremental proof — four things that must hold at once
+
+> THE INCREMENTAL PROOF.
+> Peter: "if we can get it under 1s we can just load it when the snapshots screen loads up."
+>
+> WHAT MUST BE TRUE AT ONCE, or the number is worthless:
+>  (1) incremental == full, BYTE-IDENTICAL. An incremental build that is subtly wrong paints the
+>      right words on the WRONG PAGE and looks completely fine. Compared at LINE level (top/pos/
+>      startChar/endChar/height per line), not just the table's page starts — a drift inside a
+>      page that happens not to move a break would pass a starts-only check.
+>  (2) THE REUSE RATE BESIDE THE TIMING. 82ms → 8ms at 0% reuse means something else happened.
+>  (3) THE POISONED-CACHE NEGATIVE. If a corrupted entry does NOT change the output, the hit path
+>      never ran and every "identical" above is VACUOUS — the build silently fell back to full.
+>      This is the trace-the-pass instrument: it proves the thing being measured is the thing.
+>  (4) BOTH FIXTURE NEGATIVES. `nothing` (100% reuse) cannot test the DELTA path; `everything`
+>      (0% reuse) cannot test REUSE. Only `realistic` exercises both, so only it can be believed
+>      — and the other two prove the metric moves in the right directions rather than being a
+>      constant.
+
+## <a id="trp-lru"></a>Ask a version the LRU still holds
+
+> THE REFERENCE MODEL MUST BE ONE THAT SURVIVED (fixed 2026-07-17). This read `coverageOf('v0')`
+> — and the LRU evicts the OLDEST first, so v0 is the FIRST casualty at any n that overflows the
+> budget. At n=116 it reported `pagesPerVersion: 0` and `lastPageReachableByContent: false`:
+> both read exactly like the whole-document claim COLLAPSING, when the truth was that the probe
+> asked an evicted key. A probe that reports a scary zero because it queried something it threw
+> away is this project's signature failure — fourteen times over. Ask the MOST-RECENTLY-USED
+> version, which the LRU guarantees is resident, and VOID loudly if somehow nothing survived.
+
+## <a id="trp-lastpage"></a>The last block's own position, and the model bug it was masking
+
+> The content-anchored seam: the LAST page must be reachable by CONTENT, not page number —
+> if the model only covered a window, a far position would clamp to the window's edge.
+>
+> ASK THE LAST BLOCK'S OWN POSITION, derived from the DOC (2026-07-17). `doc.content.size - 2`
+> was wrong whenever the document ends in a LEAF ATOM (`nodeSize === 1` — a refList, a
+> mathBlock): the atom occupies [size-1, size), so size-2 is inside the SECOND-TO-LAST block
+> and resolves, correctly, to the second-to-last page. The assertion then read as "the last
+> page is unreachable" when the probe had simply asked about a different page. It ALSO masked
+> a real model bug underneath (a leaf atom's line claimed `offset + 1` — the position AFTER
+> itself; see blockFirstLinePos in textRender.ts), which is why this was worth chasing rather
+> than silencing: two independent faults, the probe's one hiding the model's.
+
+## <a id="trp-window"></a>Prefix-independent window layout
+
+> THE CRUX: PREFIX-INDEPENDENT WINDOW LAYOUT.
+> Peter: "we only need the plaintext of the precise part of the doc that will be visible at the
+> current zoom." That only works if page N can be laid out WITHOUT laying out pages 0..N-1.
+> Line breaks cascade, so the prefix decides where page N BEGINS — but a break position IS a
+> line start, and greedy wrap restarts deterministically at a line start. So the claim under
+> test is: given the break position, the page's own layout is prefix-independent.
+> TEST: build the full model; then for several pages, cut the doc at that page's break position
+> and lay the REMAINDER out from scratch (no prefix at all). If the first lines of the cut
+> layout match the full model's lines for that page, the claim holds.
+> KNOWN-POSITIVE: a deliberately WRONG cut (2 chars off a line start) must FAIL the same check —
+> otherwise the comparison proves nothing.
+
+> WINDOW MODE, AS BUILT.
+> Two claims, both measured, neither assumed:
+>  (1) EXACT — the window's line starts equal the full model's for that page (known-positive),
+>      and mid-line cuts score STRICTLY worse (a negative that cannot fail is not a negative).
+>  (2) O(WINDOW) — the cost must NOT scale with document size. The crux test laid out the whole
+>      TAIL (57-60ms at 40k); if this shows the same curve, the early stop does not work and the
+>      "1-2ms" claim is fiction.
+
+## <a id="trp-table"></a>Break-table portability, verified rather than asserted
+
+> BREAK TABLE: size, cost, and PORTABILITY VERIFIED (not assumed).
+> Canonical pagination claims breaks are device- and zoom-independent. That claim is what makes
+> a table PORTABLE (bake once, valid at any zoom, across reloads) and it is why zoom is absent
+> from contextSig. The codebase asserting it is not evidence, so: build the table, then rebuild
+> it under DIFFERENT zoom/DPR conditions and require the starts to be byte-identical.
+> KNOWN-NEGATIVE: a genuinely different context (a changed side margin, which really does move
+> the breaks) MUST produce a different table — otherwise this comparison cannot fail and proves
+> nothing.
+
+## <a id="trp-gate"></a>The known-positive gate
+
+> THE KNOWN-POSITIVE GATE.
+> "Measure X, compare to Y, report" is exactly the shape that failed silently before. So before
+> any null result is believed, assert the instrument can SEE a known-positive:
+>   • fonts really loaded (not the system fallback measuring against itself),
+>   • the measure actually discriminates (two different strings ⇒ different widths),
+>   • an INJECTED wrap error really moves the output (a 5% advance inflation must change the
+>     line count — if it doesn't, the comparison is blind and nothing it reports means anything).
+
+## <a id="trp-schema"></a>`Node.eq` across two schemas can never return true
+
+> THE DOCUMENT-LEVEL CHECK — and the trap it walked into first (2026-07-17).
+>
+> The obvious instrument is `Node.fromJSON(mine, liveDoc.toJSON()).eq(liveDoc)`. IT CAN NEVER
+> RETURN TRUE. PM's `hasMarkup` is `this.type == type` — REFERENCE equality on NodeType — so
+> two Schema instances (which is the entire premise here) always compare unequal, whatever the
+> content. It reported `false` for the UNTOUCHED live document: a check structurally incapable
+> of passing, i.e. one that would have condemned a perfectly correct schema. It was caught
+> ONLY because the known-negative reads its positive arm too (clean must still say yes).
+> Same family as canvasShapingMatchesEditor, the gate that always returned false and silently
+> disabled arithLayout for months.
+>
+> The correct cross-schema comparison is STRUCTURAL: type NAMES, attrs, marks and text — i.e.
+> the serialised form, which is schema-independent by construction and is also exactly what a
+> snapshot's contentJson IS. Compared with a key-stable serialiser so attr enumeration order
+> can never masquerade as a difference.
