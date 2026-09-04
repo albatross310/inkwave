@@ -87,8 +87,16 @@ decoration face in place (continuous zero-size markers ↔ document page gaps), 
 canonical break model. The selected mode is local per-email presentation state—not document or
 provenance state—and recorded snapshots read the same choice. `ApplicationSurfaceModeSwitch`, the
 stable fit-box wrapper, and the local presentation store are reusable by later application tools.
-Multi-email contextual workspaces, journal annotations, duplicate-as-new, and batch sending remain
-the next W2 slices.
+
+**W2 duplicate-as-new seam (2026-09-05).** Both email presentations expose “Duplicate as new”. The
+action rebuilds the source from the live EditorView, flushes and explicitly saves it before creating
+anything, then persists and opens a new ordinary email document with copied headers/body and editor
+configuration. The copy receives a new document ID, timestamps, session seed and SCAS seed reference;
+identity-bound receipts, SCAS verdict state, and green anchors do not cross. The constructor is a
+UI-independent `duplicateEmailAsNew`, so the future workspace can append the returned subdoc beside
+the source instead of reimplementing cloning. Today it opens as a separate one-document draft;
+multi-email contextual placement, journal annotations, selection/preflight, and batch results remain
+the next W2 slices. The production browser probe now proves the source/copy bytes and identity split.
 
 ---
 

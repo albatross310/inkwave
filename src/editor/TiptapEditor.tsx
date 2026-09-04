@@ -131,9 +131,10 @@ const TOOLBAR_SIDE_RESERVE_PX = 140
 interface TiptapEditorProps {
   doc: InkwaveDocument
   onDocChange: (updated: InkwaveDocument) => void
+  onDuplicateEmail: (source: InkwaveDocument) => Promise<void>
 }
 
-export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
+export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEditorProps) {
   const docRef = useRef(doc)
   useEffect(() => {
     docRef.current = doc
@@ -2953,6 +2954,7 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
                 writeApplicationSurfaceMode('email', doc.id, mode)
                 setEmailSurfaceMode(mode)
               }}
+              onDuplicateAsNew={onDuplicateEmail}
               onDocChange={(updated) => {
                 // ⚠ A header edit is a document edit and NOTHING else saves it — autosave is driven
                 // by the editor's own update handler, which a header field never fires. This is the

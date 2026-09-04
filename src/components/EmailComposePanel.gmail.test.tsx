@@ -105,6 +105,29 @@ describe('EmailComposePanel Gmail integration', () => {
     expect(screen.getByRole('button', { name: 'Studio' }).getAttribute('aria-pressed')).toBe('true')
   })
 
+  it('duplicates from the fresh editor document rather than the stale render prop', async () => {
+    const fresh = {
+      ...doc,
+      updatedAt: '2026-09-05T04:30:00+10:00',
+      contentJson: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Latest duplicate body' }] }] },
+    } as InkwaveDocument
+    const getCurrentDoc = vi.fn(() => fresh)
+    const duplicate = vi.fn(async () => {})
+
+    render(
+      <EmailComposePanel
+        doc={doc}
+        getCurrentDoc={getCurrentDoc}
+        onDocChange={() => {}}
+        onDuplicateAsNew={duplicate}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate as new email' }))
+
+    await waitFor(() => expect(duplicate).toHaveBeenCalledWith(fresh))
+    expect(getCurrentDoc).toHaveBeenCalledOnce()
+  })
+
   it('authorises, records, and only then sends', async () => {
     render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))

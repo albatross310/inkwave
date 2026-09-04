@@ -13,13 +13,14 @@ import { v4 as uuidv4 } from 'uuid'
 const tiptapEditorImport = typeof window !== 'undefined' ? import('../editor/TiptapEditor') : null
 import { Scroll, EmptyEditorSurface, isTouchDevice } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
-import { readDocument, saveDocument, emptyTiptapDoc, StorageReadError } from '../storage/opfs'
+import { readDocument, saveDocument, emptyTiptapDoc, flushPendingSave, StorageReadError } from '../storage/opfs'
 import { listMeta, upsertMeta } from '../storage/indexeddb'
 import { withScasDefaults } from '../scas/defaults'
 import { resolveTabDocId, claimTabDoc, claimDocLock, releaseDocLock, switchTabToDocument, isExplicitDocIntent, isBlankUntitledDocument } from '../storage/tabDoc'
 import { installHolder, requestSwitch, takeOverHere } from '../storage/singleOpen'
 import { StorageUnavailable } from '../components/StorageUnavailable'
 import { DocumentOpenElsewhere, SurrenderedBanner } from '../components/DocumentOpenElsewhere'
+import { duplicateEmailAsNew } from '../email/duplicateEmail'
 
 function newDocument(): InkwaveDocument {
   return withScasDefaults({
@@ -295,6 +296,20 @@ export function Edit() {
     setDoc(updated)
   }
 
+  async function handleDuplicateEmail(source: InkwaveDocument) {
+    // The source must exist durably before a derivative does. `source` is rebuilt from the live
+    // EditorView by the caller; flushing first resolves any older queued thunk, then the explicit
+    // save covers the no-pending case. A failed source write creates no copy and switches nowhere.
+    await flushPendingSave()
+    await saveDocument(source)
+    await upsertMeta({ id: source.id, title: source.title, updatedAt: source.updatedAt })
+
+    const duplicate = duplicateEmailAsNew(source)
+    await saveDocument(duplicate)
+    await upsertMeta({ id: duplicate.id, title: duplicate.title, updatedAt: duplicate.updatedAt })
+    switchTabToDocument(duplicate.id)
+  }
+
   // SINGLE-OPEN, holder side: while this tab holds a document, listen for another window on this
   // device asking to switch to it or take it over. installHolder also arms the freeze-on-steal
   // backstop. Re-runs on every document this tab comes to hold — a normal open, a take-over, a copy.
@@ -414,7 +429,12 @@ export function Edit() {
   return (
     <>
       {doc && EditorComp && (
-        <EditorComp key={doc.id} doc={doc} onDocChange={handleDocChange} />
+        <EditorComp
+          key={doc.id}
+          doc={doc}
+          onDocChange={handleDocChange}
+          onDuplicateEmail={handleDuplicateEmail}
+        />
       )}
       {shellUp !== 'down' && (
         <Scroll phone={shellPhone} fill revealed={false}>

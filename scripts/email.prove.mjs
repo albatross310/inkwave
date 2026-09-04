@@ -87,10 +87,15 @@ ok('the compose panel renders for a docType:email document', hasPanel > 0)
 // The copy assertions are only READABLE if the panel actually rendered. "No forbidden claim" on a
 // page with no copy is a pass that means nothing — the same vacuity as auditing a gapped DOM for
 // mid-line breaks (CLAUDE.md). A metric that collects nothing must VOID, never read as zero.
-const bodyText = hasPanel ? await page.locator('body').innerText() : ''
+// The long explanation intentionally lives in a collapsed <details> after W1. `innerText` excludes
+// closed details in Chromium, so it would accuse present copy of being absent. This check asks
+// whether the disclosure is in the product; a separate assertion keeps its visible summary.
+const bodyText = hasPanel ? await page.locator('body').textContent() : ''
 if (!hasPanel) {
   results.push(['VOID', 'copy checks — no panel rendered, nothing to read', ''])
 } else {
+  ok('the detailed honesty boundary has a visible disclosure control',
+    (await page.getByText('How recording and sending work', { exact: true }).count()) === 1)
   ok('copy states the real claim ("existed by")', /existed by/i.test(bodyText))
   ok('copy states the limit ("does not prove")', /does not prove/i.test(bodyText))
   ok('copy denies E2E ("not end-to-end encrypted")', /not end-to-end encrypted/i.test(bodyText))
@@ -174,6 +179,44 @@ const flat = decoded.replace(/\+/g, ' ')
 ok('"Open in provider" → a pre-filled Gmail compose URL',
   !!handoffUrl && flat.includes('mail.google.com/mail/') && flat.includes('view=cm') && flat.includes('ada@example.com') && flat.includes('Re: the proposal') && flat.includes('Dear Ada'),
   flat.slice(0, 150))
+
+// ── 7. Duplicate as new → preserve the message, replace the identity ─────────
+const originalId = await page.evaluate(() => localStorage.getItem('inkwave:activeDocumentId'))
+const duplicateBtn = page.getByRole('button', { name: 'Duplicate as new email' })
+ok('the duplicate-as-new action is available', (await duplicateBtn.count()) === 1)
+if (await duplicateBtn.count()) {
+  await duplicateBtn.click()
+  await page.waitForFunction(
+    (id) => localStorage.getItem('inkwave:activeDocumentId') !== id,
+    originalId,
+    { timeout: 20000 },
+  ).catch(() => {})
+  await page.locator('input[aria-label="To"]').waitFor({ state: 'visible', timeout: 20000 }).catch(() => {})
+}
+
+const duplicated = await page.evaluate(async (sourceId) => {
+  const copyId = localStorage.getItem('inkwave:activeDocumentId')
+  const root = await navigator.storage.getDirectory()
+  const docs = await root.getDirectoryHandle('documents')
+  const read = async (id) => {
+    const dir = await docs.getDirectoryHandle(id)
+    return JSON.parse(await (await dir.getFileHandle('current.json')).getFile().then((f) => f.text()))
+  }
+  return { sourceId, copyId, source: await read(sourceId), copy: await read(copyId) }
+}, originalId).catch((e) => ({ error: String(e) }))
+
+ok('duplicate-as-new mints a different document identity',
+  duplicated && !duplicated.error && duplicated.copyId && duplicated.copyId !== duplicated.sourceId,
+  duplicated?.error || `${duplicated?.sourceId} → ${duplicated?.copyId}`)
+if (duplicated && !duplicated.error) {
+  ok('duplicate-as-new preserves headers and body',
+    JSON.stringify(duplicated.copy.email) === JSON.stringify(duplicated.source.email) &&
+    JSON.stringify(duplicated.copy.contentJson) === JSON.stringify(duplicated.source.contentJson))
+  ok('duplicate-as-new starts a fresh provenance identity',
+    !duplicated.copy.scasReceipts &&
+    duplicated.copy.scasSeedRef === duplicated.copy.scasSessionSeed &&
+    duplicated.copy.scasSeedRef !== duplicated.source.scasSeedRef)
+}
 
 // ── report ──────────────────────────────────────────────────────────────────
 console.log('\n─── EMAIL LAYER LIVE PROBE ───')

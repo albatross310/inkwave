@@ -444,6 +444,11 @@ or the tone.
   subtree. The per-email choice lives only under `inkwave:applicationSurface:email:mode:<docId>`;
   it is absent from snapshots, export bundles and provenance hashes. Historical email snapshots read
   that local choice for presentation only. Spec: Productivity & Email v0.5, §D2.
+- **Duplicate-as-new is a new identity, never copied evidence.** `email/duplicateEmail.ts` copies the
+  current headers/body and ordinary editor configuration only after the source flushes successfully;
+  the new email gets a new document/session/SCAS identity and inherits no receipts, verdict state, or
+  green anchors. Today it opens as a separate one-subdoc draft. The future workspace must reuse this
+  constructor and place its result; it must not grow a second cloning path.
 - **TYPING COST IS THE DESIGN.** Capture rides the existing `onTransaction` stream and reuses
   `countSteps`: ~0.30µs/keystroke, flat from 200 to 40k words. Every O(doc) number is computed at
   session CLOSE — a session boundary IS an inactivity gap, so the word count at the previous close

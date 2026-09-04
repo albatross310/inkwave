@@ -913,8 +913,11 @@ W2's first seam is also implemented: an explicit Focus/Studio switch moves the s
 email subdoc between isolated application chrome and contextual document paper, without recreating
 the EditorView. The choice is local presentation state scoped to the email document and historical
 snapshots follow it; it never enters document content or provenance. Multi-subdoc contextual pages,
-annotations, duplicate-as-new, selection/preflight, and batch results remain specification only, as
-do W3–W7.
+annotations, selection/preflight, and batch results remain specification only, as do W3–W7.
+Duplicate-as-new is implemented as the next W2 seam: it saves the exact current source first, then
+creates a separate email document with copied headers/body but a new identity and no inherited
+receipts or live SCAS evidence. Until workspace placement lands, the new draft opens as its own
+one-subdoc document rather than appearing beside the source.
 
 1. **W1 — Isolated surface:** make the default email one centred screen-calibrated pixel-width box
    (900px at a 1728px logical screen width) on desktop and full-width on phone, ending after its content;

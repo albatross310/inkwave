@@ -26,6 +26,8 @@ interface Props {
   /** Presentation only. The same email subdoc/data path serves both modes. */
   surfaceMode?: ApplicationSurfaceMode
   onSurfaceModeChange?: (mode: ApplicationSurfaceMode) => void
+  /** Create a fresh email identity from the exact current editor state. */
+  onDuplicateAsNew?: (source: InkwaveDocument) => Promise<void>
   children?: ReactNode
 }
 
@@ -41,13 +43,14 @@ export function EmailComposePanel({
   onDocChange,
   surfaceMode = 'isolated',
   onSurfaceModeChange,
+  onDuplicateAsNew,
   children,
 }: Props) {
   const headers = doc.email
   const [showCc, setShowCc] = useState(() => !!(headers?.cc?.length || headers?.bcc?.length))
   const [status, setStatus] = useState<string | null>(null)
   const [recordedAt, setRecordedAt] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busyAction, setBusyAction] = useState<'record' | 'gmail' | 'duplicate' | null>(null)
   const [handoffOpen, setHandoffOpen] = useState(false)
   const handoffRef = useRef<HTMLDivElement>(null)
 
@@ -79,7 +82,7 @@ export function EmailComposePanel({
   }
 
   const onFinalise = async () => {
-    setBusy(true)
+    setBusyAction('record')
     setStatus(null)
     try {
       const r = await finaliseEmail(getCurrentDoc())
@@ -90,7 +93,7 @@ export function EmailComposePanel({
         setStatus(r.stamped ? null : (r.reason ?? null))
       }
     } finally {
-      setBusy(false)
+      setBusyAction(null)
     }
   }
 
@@ -106,7 +109,7 @@ export function EmailComposePanel({
   }
 
   const onGmailSend = async () => {
-    setBusy(true)
+    setBusyAction('gmail')
     setStatus('Waiting for Google…')
     try {
       // Authorization must be the first awaited operation after the click: Google's account chooser
@@ -148,13 +151,28 @@ export function EmailComposePanel({
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Could not connect to Google')
     } finally {
-      setBusy(false)
+      setBusyAction(null)
+    }
+  }
+
+  const onDuplicate = async () => {
+    if (!onDuplicateAsNew) return
+    setBusyAction('duplicate')
+    setStatus('Creating a new email…')
+    try {
+      await onDuplicateAsNew(getCurrentDoc())
+      setStatus(null)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not duplicate this email')
+    } finally {
+      setBusyAction(null)
     }
   }
 
   const suspect = suspectAddresses(headers)
   const draft = draftFor(doc)
   const ready = canHandOff(doc)
+  const busy = busyAction !== null
 
   const field = 'flex-1 bg-transparent outline-none text-sm py-1'
   const row = 'flex items-baseline gap-2 border-b px-3'
@@ -247,7 +265,7 @@ export function EmailComposePanel({
           onClick={onFinalise}
           disabled={busy}
         >
-          {busy ? 'Recording…' : copy.FINALISE_LABEL}
+          {busyAction === 'record' ? 'Recording…' : copy.FINALISE_LABEL}
         </button>
 
         {gmailConfigured() && (
@@ -258,7 +276,19 @@ export function EmailComposePanel({
             disabled={busy || !ready}
             title={ready ? 'Record this draft, then send it with Gmail' : 'Add a recipient first'}
           >
-            {busy ? 'Working…' : 'Send with Gmail'}
+            {busyAction === 'gmail' ? 'Working…' : 'Send with Gmail'}
+          </button>
+        )}
+
+        {onDuplicateAsNew && (
+          <button
+            className="text-xs px-2.5 py-1 rounded border disabled:opacity-40"
+            style={{ color: 'var(--iw-ink, #302438)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
+            onClick={onDuplicate}
+            disabled={busy}
+            title="Keep this email and start a separate editable draft from it"
+          >
+            {busyAction === 'duplicate' ? 'Creating…' : 'Duplicate as new email'}
           </button>
         )}
 
