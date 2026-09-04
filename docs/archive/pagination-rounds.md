@@ -1031,3 +1031,639 @@ LIVES HERE, NOT IN A CALLER (2026-07-17). It was private to textRenderProbe.ts, 
 break-table build needs the same check — an editor-less route cannot borrow the editor's. Copying
 it would put two definitions of "is this font loaded" in the tree, and the SECOND one is always
 the one that quietly stops agreeing (the pmToText/textMap lesson). One implementation, two callers.
+
+---
+
+## `PaginationExtension.ts` — the live editor's measure
+
+<a id="canonical-measure"></a>
+### True canonical pagination — the forced context, and why the measure is loop-free
+
+Page-break measurement for BOTH page modes. A ProseMirror plugin that measures the document's
+real line layout and places a widget at each page boundary (breaks land at line starts, so a
+line is never cut):
+
+    gapped   → a full-bleed "page gap" widget — content reflows onto separate parchment sheets,
+               with the sheet panels + page numbers painted behind the text.
+    ungapped → an invisible zero-size break MARKER at the SAME measured positions — the Scroll
+               PageGuides draw the dashed rule + page number at it, and the print stylesheet
+               breaks the page there.
+
+One shared break model → toggling the gapped switch never moves content across pages, and screen
+breaks = print/PDF breaks in both modes.
+
+Page height comes from pageModel (physical mm through the canonical 96dpi px), NOT from
+sheet.clientWidth — clientWidth's integer rounding flips with browser zoom / DPR, which made
+the pagination browser-zoom-dependent (see pageModel.ts).
+
+TRUE CANONICAL PAGINATION (2026-07): the geometry above fixed the page HEIGHT, but lines were
+still measured against the LIVE layout — editor font-zoom reflowed different words onto each
+page, and phones measured at their own narrow width. Now every measure runs inside a forced
+CANONICAL CONTEXT (canonicalMeasure.ts): mm paper width, desktop side margins, zoom 1, base
+font — so breaks are document positions identical at every zoom, on phone and desktop, and in
+print. The live layout only affects rendering.
+
+Measurement is loop-free: block positions are read as INTRINSIC (the gap-widget heights are
+subtracted back out), so adding gaps never changes the measured layout. A signature guard stops
+the recompute→dispatch→recompute cycle once nothing changes.
+
+### The forced context, in full
+
+CANONICAL MEASUREMENT CONTEXT — the breaks must be the SAME document positions at every editor
+zoom and on every device (phone = desktop = print). So the measure runs in ONE forced canonical
+layout: true mm paper width (overrides the phone's fluid width), desktop print side margins (phone
+renders a slim 1.25rem), `--iw-editor-zoom` 1 (defeats Ctrl+wheel AND phone pinch) and the 1.125rem
+base font inline (defeats the phone ×1.25 boost — see .ProseMirror in index.css). Live zoom / device
+width then affect RENDERING only: the widgets ride their document positions through any reflow, so
+pinch-zoom grows/shrinks pages without moving words across them. Set → measure → restore is all
+synchronous inside one rAF, extending the existing no-paint window (getClientRects forces layout,
+not paint); cost: 2 extra full-document reflows per measure, which is fine because measures are
+debounced (150ms after edits / zoom-settle / settings) — never per-keystroke.
+
+Fluid 'scroll' paper keeps its RENDERED width (its pages are a ratio of that width by design — no
+mm identity), but the FONT context must still be canonical: skipping the force entirely there
+measured the live zoomed font, so on scroll paper the words per page changed with the editor zoom
+at measure time — the "different amount of text per page depending on how zoomed in you are"
+regression (2026-07-09). Passing no paper/sheet keeps width + margins live; zoom/magnify/font are
+still pinned.
+
+The gap widgets are display:block, so they FORCE line breaks — which means a word can't wrap back
+across a page boundary, and measuring the line layout with them present shows the forced break, not
+the natural wrap (so deletions never reflowed back). Fix: clear the gaps first so the DOM reflows to
+its NATURAL wrapping, measure THAT, then re-add the gaps — the cleared state never paints (same
+window).
+
+The canonical context forces `--iw-magnify` to 1 on BOTH paths (fluid included) — the transform is
+scale(var(--iw-magnify)), so inside this window the DOM is genuinely unscaled and rects come back in
+layout px. `scale = 1` there is therefore CORRECT; do NOT wire the live `magnify.getMagnify()` in,
+which describes the DOM OUTSIDE this window. collectLines keeps its scale param for any future
+out-of-window measure.
+
+Only update the decoration set when gap positions actually changed (sig differs). When sig is the
+same, restore the PREVIOUS set (not the freshly-computed one) to avoid propagating sub-pixel
+rounding differences in botMargin — the main cause of page-height flicker on typing near a gap.
+Both sets are semantically equivalent; using the stable cached one prevents the gap widget height
+from jittering by ±1px on every keystroke.
+
+**Decision 6 (arithmetic acquisition, flag `inkwave:arithLayout`).** When the whole doc is
+arithmetic-eligible text, compute lines+blocks reflow-free and SKIP forceCanonicalContext (+ both
+its full-document reflows) — the phone per-pause reflow win. Gated to `!canonicalIsLive` (phone /
+zoomed): desktop-at-defaults already skips the reflow, so there's nothing to win and the DOM path
+stays authoritative. ANY ineligible block ⇒ `buildArithMeasure` returns null ⇒ the DOM path runs.
+The lazy full DOM re-verify + pagCheck are the safety net; meta stays null (the next scoped measure
+bails to full, which is this cheap arith path again).
+
+**Decision 1 (render-fill phone splits, flag `inkwave:renderFill`).** Peter: "abandon perfect
+pagination for the better look." On the LIVE PHONE editor ONLY, compute mid-paragraph splits at the
+RENDER width (via the arithmetic engine) instead of canonical A4, so the last line before a split
+FILLS (kills the ~50%-empty last line). This DIVERGES from canonical — so it is gated to the live
+phone editor and NEVER touches print/export/verify/snapshot (those force the canonical measure via
+measure-now → forceFullOnce, which this path skips). Phone page numbers then differ from print — an
+accepted consequence. Zoom-independent (read at the live content width, font base 18 — like
+canonical, only the WIDTH differs). Any ineligible block ⇒ null ⇒ falls through to the canonical
+paths.
+
+DEFAULT OFF (2026-07-15): `renderFill` was reverted from default-on. The fill rides the SAME arith
+greedy wrap that diverged from the browser's real wrap on eligible prose — a split 2 words off the
+render would spill the "filled" last line, so the fill must wait on the wrap root-cause too. (It
+also shares the whole-doc eligibility gate, so it never engaged on a citation-heavy doc anyway.)
+
+DEFAULT OFF for `arithLayout` (2026-07-15): reverted from default-on for a deterministic wrap
+divergence from the DOM canonical measure on REAL eligible prose (~1 break in 20 — arith fit ~2 more
+words on a borderline line). ⚠ THAT RATIONALE IS NOW STALE: the LU-quantisation wrap fix (88ebf39)
+landed the DAY AFTER this revert and addresses exactly that class. RE-MEASURED 2026-07-18
+(arith.prove.mjs, the real wired whole-doc arith path, `__iwPagArith` confirmed engaged):
+BYTE-IDENTICAL to the DOM canonical measure across 4k/6k/8k-word fully-eligible prose incl.
+hyphenated compounds (15/23/31 breaks, 0 divergences). So the wrap root-cause appeared CLOSED on
+Chromium. STILL OFF, and the remaining blocker was honest: canonical breaks are a CROSS-DEVICE
+invariant and arith.prove.mjs is Chromium-only — graduation needs a WebKit pass on Peter's device
+class (the same bar the font certification carries) + a scoped-arith (desktop typing) A/B. DO NOT
+flip the default on the Chromium proof alone. **And see [#arith-engine](#arith-engine): those "0
+divergences" are themselves stale now.**
+
+<a id="collect-lines"></a>
+### `collectLines` — intrinsic tops, lazy positions, and the per-block line cache
+
+Collect every LINE as { intrinsic top, LAZY doc position } — so a page break can land
+mid-paragraph (a gap widget at a line-start splits the paragraph in two). "Intrinsic" = the layout
+AS IF no gap widgets existed: each line's top has the total height of all gap widgets ABOVE it (by
+screen Y) subtracted. Subtracting by Y — not by walking top-level children — is what makes this
+correct even when a gap renders NESTED inside a paragraph (a mid-paragraph break); otherwise that
+gap's height is missed and the measured page heights drift/oscillate. Intrinsic tops are invariant
+to the gaps, so the pagination is a stable fixpoint.
+
+`scale` = the current transform-magnify on the parchment (hybrid zoom). getBoundingClientRect
+returns VISUAL (scaled) coordinates, but pageH is derived from clientWidth which the transform
+DOESN'T scale — so divide all measured distances by `scale` to bring lines into the parchment's own
+(unscaled) coords. Height-only gap heights (set in unscaled px) also render scaled, so accumAbove is
+scaled too → the single division keeps everything consistent. scale=1 (no magnify / reflow zone) is
+a no-op.
+
+LAZY POSITIONS (2026-07-11, the typing-lag ablation): the old collector called view.posAtCoords
+for EVERY line — ~4,400 browser hit-tests on a 100-page doc, the bulk of the 2.4s (4× throttle)
+measure freeze. Only ~1 line per PAGE ever needs its position (the line a break lands on), so
+each line now carries the coords the old call used and resolves its pos on demand (identical
+posAtCoords formula ⇒ identical break positions). Block identity/boundaries — needed per line
+for orphan snapping — come from ONE view.posAtDOM per top-level block instead of per-line
+doc.resolve. Everything downstream (snap rule, refList forcing, sig strings) is unchanged.
+
+PER-BLOCK LINE CACHE (2026-07-11, the desktop "waves of lag" — merged with lazy positions):
+the per-line range.getClientRects walk over EVERY block was 1.5-4s of forced-layout reads on a
+20k-word doc (4×-throttled probe) at every 150ms desktop typing pause. PM docs are persistent
+structures: an untouched block keeps its NODE IDENTITY across edits, and inside the forced
+canonical context (fixed width/margins/font/zoom) the same node renders the same line geometry
+— so each block's line geometry is cached RELATIVE to its own rect, keyed by the node object.
+An edit re-measures only the block(s) whose identity changed; every other block costs one
+getBoundingClientRect. Positions stay LAZY on both paths: a cache entry starts with relPos NaN
+and posOf writes each resolution back BLOCK-RELATIVE, so a break line pays its one hit-test at
+most once per node identity — future measures rebuild it by offset arithmetic alone.
+
+THE CACHE'S THREE INVARIANTS. The caller owns the WeakMap and REPLACES it whenever the canonical
+context itself changes (fonts ready/loadingdone, page settings, bibliography label hydration). No
+cache is passed for fluid 'scroll' paper — its canonical width IS the live width. And cache entries
+are only written/read on the gap-free measure (compute clears the widgets first), so gap subtraction
+can never bake into a cached top.
+
+Citation boxes are keyed by citekeys+style+bib-epoch — which covers a hydration or a style switch —
+but NOT a change to the canonical CONTEXT itself (fonts finish loading, page settings/paper change):
+the same label then renders at a different width under the same key. So the boxes die exactly where
+the line cache does (`clearLineCache` clears both, and `incState` with them).
+
+ATOM BLOCKS: the OLD per-line resolve gave every line inside an atom its own degenerate block
+(posAtCoords at an atom returns its boundary → the {p, p+1} fallback), so the orphan baseline reset
+per line. That is replicated with one pseudo-block PER LINE — the snap/orphan decisions (and hence
+the sig) stay byte-identical around tall atoms.
+
+<a id="citation-harvest"></a>
+### The citation opaque-box harvest — the one place a canonical citation width exists
+
+CITATION OPAQUE-BOX HARVEST (2026-07-16): the DOM measure is the ONE place a citation's CANONICAL
+rendered width exists — we are inside the forced canonical context, the layout is already flushed
+for the line collection, so each box costs one getBoundingClientRect and no reflow. The arith path
+can never measure this itself (it skips the force by design), so it reads these cached boxes; an
+un-harvested key defers that block back here, which harvests it. See citations/citeBox.ts.
+
+basePx 18 = the canonical base we are forced to here (CANONICAL_FONT_SIZE 1.125rem), and the base
+these boxes are keyed under. A RENDER-base measure asks for its own base, misses, and defers —
+never wraps on a canonical-width citation (117px vs 143px at the phone's 22.5px).
+
+The harvest is wrapped in try/catch: it must never break a measure.
+
+<a id="zoom-snap"></a>
+### A canonical line start is not a rendered line start at any other zoom
+
+⚠ A CANONICAL LINE START IS NOT A RENDERED LINE START AT ANY OTHER ZOOM — and that is the whole
+of Peter's "lines cutting at arbitrary points when you go over the page" (2026-08-28).
+
+Breaks are CANONICAL by design: measured at zoom 1 in a forced context so the same words land on
+page N on every device and in print. The rendered layout at another font zoom wraps SOMEWHERE
+ELSE, so a break placed at a canonical line start lands in the MIDDLE of a rendered line — and
+the gap widget is `display:block`, so it slices that line and leaves a fragment ("an") alone at
+the bottom of the page. MEASURED, and it is not marginal:
+
+    editor zoom 1.00 → 0/10 mid-line breaks     1.08 → 7/10     1.26 → 9/10     0.86 → 10/10
+
+i.e. every zoom except exactly 1 cuts almost every page. midline.prove.mjs reported 0/194 clean
+for a year because it runs at defaults — the fixtures were canonical, so the bug was structurally
+invisible to them.
+
+A BLOCK BOUNDARY IS A LINE START IN EVERY LAYOUT, at any zoom, by construction — no measurement
+required. So when the rendering is not canonical the break snaps to the block boundary instead of
+splitting mid-paragraph: the page is a little less full, and no line is ever cut. At canonical
+rendering (the default desktop view, and every print/PDF path) NOTHING changes — the mid-block
+split Peter chose in 2026-07-15 ("probably split") is exactly as it was, byte for byte.
+
+The `snap` machinery this uses is the pre-2026-07-15 widow/orphan path, still present and still
+correct (`brokeUsed`, `used = orphan`); only its trigger changed.
+
+TWO CONDITIONS BEYOND "the rendering is not canonical", and both are load-bearing:
+
+* `orphan > 0` — the block must have STARTED on this page. With orphan 0 the block begins at
+  this very line, so blockStart IS the break and snapping is a no-op.
+* `blockStart > lastBreakAt` — never snap back to a position we already broke at. A block TALLER
+  than a page would otherwise be pushed whole, overflow again on the next page, and snap to the
+  same boundary forever. It is pushed once, then split mid-block (one cut line, not a loop).
+
+`shouldSnapToBlock` is pure and exported because the whole fix is one predicate and a browser probe
+that ran once is not a guard.
+
+⚠ `liveIsCanonical` is set by the measure BEFORE it enters the forced context — inside that window
+the DOM is canonical by construction, so `canonicalIsLive` cannot be asked there and would answer
+about the wrong layout.
+
+ALWAYS SPLIT mid-block so the page fills (Decision 5, Peter 2026-07-15: "probably split"). The
+widow/orphan snap is gone: a straddling paragraph is broken at the overflow line wherever it falls,
+accepting the occasional lone 1-line orphan/widow (softened by the render-fill + the dotted
+continuation bracket). `orphan` is still tracked for the sig/used accounting. History: flat ≤22%
+pushed every straddler whole → wasted page bottoms; fa11bf0 split only when both sides kept ≥2
+lines; Peter now wants the fuller look outright.
+
+Decision 1's dotted continuation bracket is INDEPENDENT of renderFill (2026-07-15): it marks a
+MID-PARAGRAPH split — semantically true at canonical breaks too (Decision 5 splits every straddler
+mid-block) — and carries zero measure risk, so it renders whatever the measure path.
+
+`ignoreSelection` on the gap widget: it is a TALL block widget, and without it ProseMirror folds its
+height into cursor/selection mapping, so a click at the page-above end jumps the caret past the gap.
+
+The reference list always starts on a fresh page (position from `findRefListPos`). It is an atom the
+paginator can't split internally, so this at least guarantees a clean start (Peter's call). The test
+is block-level: a line is at/after the refList exactly when its block starts at/after refListPos.
+
+<a id="scoped-measure"></a>
+### The scoped canonical measure — exact near the writer, deferred far away
+
+── SCOPED CANONICAL MEASURE (2026-07-12, round-6 — Peter's redesign spec) ──
+
+Round-5's measurement-host clones could not replicate NodeView-rendered content exactly (a
+cloned `<math-field>` loses its shadow DOM; citation labels are React output; atom-interior DOM
+positions map wrongly), and one bad lazily-baked position poisons every later measure. Peter's
+verdict: EXACT behaviour near the writer is non-negotiable — approximate nothing locally, defer
+distance instead. So the scoped measure runs in the REAL forced canonical context (the same
+context the full measure uses — real DOM, real NodeViews, real posAtCoords), but with the
+live-reflow window (.iw-zoom-live: content-visibility on off-screen blocks) so the forced
+layout renders ~only the region around the edit instead of the whole document:
+
+* unchanged blocks reuse their cached block-relative lines at the previous measure's tops
+  (bit-identical above the edit; one telescoped delta below) — that data itself came from
+  earlier REAL canonical measures, never from clones;
+* changed blocks are measured LIVE inside the window (scrolled into the canonical viewport so
+  content-visibility renders them fully);
+* gap widgets inside/adjacent to the changed region are cleared by a REGION-SCOPED decoration
+  dispatch (natural wrapping, exactly like the full measure's whole-set clear);
+* any break line whose doc position isn't baked yet resolves via the SAME view.posAtCoords
+  sample the full path uses (its block scrolled into the window first) — exact by identity.
+
+A full measure still runs LAZILY after every scoped one (idle-scheduled, input-gated): it
+re-verifies everything quietly (sig-guard = no visible change when the scoped result was right)
+and refreshes the incremental base. And it runs SYNCHRONOUSLY before print (the hard floor —
+the beforeprint/measure-now wiring). FALLBACK IS THE RULE: non-paragraph blocks in or beside the
+changed region, refLists there, pure end-appends, unrendered blocks, failed resolutions, >24 changed
+blocks — the full measure answers instead.
+
+`canonicalIsLive`: the live layout IS the canonical layout whenever nothing canonical-relevant is
+overridden — desktop (no phone width/font rules), editor zoom 1, magnify 1 (mm paper width + desktop
+side margins are the live defaults, both read from the same settings the canonical force uses). Then
+forceCanonicalContext would be a byte-level no-op — skip it and save BOTH full-document reflows (the
+force's first read and the restore's live relayout).
+
+⚠ NO CONTENT-VISIBILITY WINDOW IN THE SCOPED MEASURE (round-6 storms): cv-rendered blocks measure
+subtly differently — ~9px advance drift even on plain paragraphs, worse around citation nodeviews.
+EXACTNESS RULES: the scoped measure runs in the plain forced canonical context. The reflow cost is
+skipped entirely whenever the live context already IS canonical (desktop at default zoom/magnify),
+which is the common desktop case; elsewhere (phone) the reflows are the price of correctness and the
+savings come from region-scoped reads + baked positions.
+
+ROUND-7 (Peter: "paras should split over pages even if they render 0.2s late; the cursor line moves
+instantly"): where the full measure is CHEAP (desktop at defaults — canonicalIsLive skips both
+reflows), re-verify FAST (450ms) so any deferred mid-paragraph split lands ~0.5s after the pause,
+not 2.5s. Phone keeps the long fuse (2500ms — its full measure costs real time).
+
+`'inkwave:pagCheck=1'` runs BOTH the scoped and full paths per measure and compares signatures; the
+full result is authoritative either way. The scoped path publishes `__iwPagSig` too, because it
+RETURNS EARLY — without that a probe reading `__iwPagSig` sees the last FULL measure's (pre-edit)
+sig and compares two different doc states.
+
+`window.__iwPagInc.reasons` counts scoped-bail causes for on-device diagnosis.
+
+### ARITH FIRST — and why the arith branch was unreachable
+
+── ARITH FIRST (2026-07-16) ──
+
+The arithmetic path is the CHEAPEST acquisition (no reflow at all), so it must be tried BEFORE the
+scoped measure — not after. It used to live in the FULL path only, which meant it ran on the FIRST
+measure and never again: the first DOM measure sets incState, every later measure then took the
+SCOPED branch, and the arith branch was unreachable. That is fatal now that citation boxes WARM UP
+(they are harvested BY a DOM measure), because the one measure arith ever got was the one before any
+box existed — it deferred, and nothing ever re-tried. Trying arith first makes the warm-up
+self-healing: measure 1 defers + harvests, measure 2 is arithmetic.
+
+On success incState is cleared: the incremental base belongs to the DOM regime, and a later arith
+FAILURE should re-establish it with one full measure rather than build a scoped delta on a base the
+arith era never maintained.
+
+── SCOPED ARITH — the cheapest acquisition there is ──
+
+Only the CHANGED blocks are laid out (arithmetically, ~0.1ms each); everything else reuses its
+cached entry at telescoped tops. No forced context, no reflow, no DOM read at all — which is the
+whole point: the DOM scoped path's cost IS its forced canonical context (two full-document reflows
+on phone, 400–1100ms). Whole-doc arith still re-lays every block each pause; this re-lays only what
+the writer just touched. It runs BEFORE whole-doc arith, and unlike that path it PRESERVES incState
+(it maintains the incremental base exactly as the DOM scoped path does), so consecutive typing
+pauses keep hitting it instead of collapsing back to a full measure.
+
+Decision 1's render-fill on phone always takes the FULL path (the render-width arith measure) so
+breaks never flip between the canonical scoped measure and the render-width full one — the scoped
+path is a canonical regime, incompatible there.
+
+<a id="arith-bands"></a>
+### Arith band geometry — the zoom-exit that never un-skips the document
+
+── ARITH BAND GEOMETRY (Job 2, flag `inkwave:arithBands`) ──
+
+The pinch exit un-skips the whole document (drops .iw-zoom-live) and forces ONE full-document
+relayout to re-pin the anchor — O(doc), measured 240/722/2688ms at 5k/20k/40k words. With the
+arithmetic engine the band geometry AND every block's render height are computable with NO layout
+read, so the exit can keep the content-visibility window ON (with EXACT per-block reservations)
+and lay out only what's on screen. Gated: the whole doc must be arith-eligible AND canvas shaping
+must empirically match the editor — otherwise computeArithBands returns null and the caller falls
+back to the un-skip, which is always correct.
+
+Compute BandGeo REFLOW-FREE, so the zoom-exit never un-skips the whole document (the
+240/722/1642ms@5k/20k/40k spike). The bands sit at the CANONICAL break positions (which don't move
+with zoom) but at RENDER pixel tops (which do). Two cheap arith passes, no DOM read: (1) a CANONICAL
+measure reproduces the exact break set + each gap's botMargin (byte-identical to the DOM canonical
+measure — proven); (2) a RENDER-zoom measure gives each break line's render pixel top. The gap
+WIDGETS are FIXED px (baked at canonical measure — botMargin+GAP+topM), so they don't scale: the
+rendered top of break k is its render line top + the fixed gap heights ABOVE it. Returns null (⇒
+caller falls back to the DOM readBands/un-skip) when any block defers or the faces aren't loaded.
+
+⚠ THE LIVE RENDER WRAP CONTEXT IS THE PARAGRAPH'S OWN CONTENT BOX, NOT `clientWidth`. clientWidth is
+INTEGER-rounded and disagrees with the true floored fractional content box ~6/88 times at 22.5px
+(box 316.578 → clientWidth 317, +0.42px too generous → fits one word too many, one line short, and
+the per-page error compounds). Floor to the 1/64px LayoutUnit grid the browser stores used lengths
+on. ONE helper (`renderWrapCtx`) feeds both the arith band geometry AND the render-fill measure so
+they can never drift — the bug the arith agent found in the live renderFill path.
+
+The canonical break positions are fed back into the RENDER pass as FORCED line-ends: a mid-paragraph
+page gap is a display:block widget that ends the pre-gap line partial, so the render wrap MUST break
+there too — else it fills that slack and loses a render line, drifting every band below.
+
+The zoom-exit itself: Scroll.tsx's gesture exit asks US for the geometry before it decides how to
+land. If we answer, the bands are applied in THIS task (atomic with the caller's anchor re-pin) and
+the caller keeps content-visibility ON using our exact per-block heights — so it never un-skips, and
+the exit costs O(visible) instead of O(doc). No answer ⇒ it falls back to the un-skip + readBands,
+which is always correct. Every refusal is NAMED in `d.why` (flag-off / not-gapped / other-surface /
+shaping / arith-null).
+
+<a id="step-cache"></a>
+### The predictive step cache — atomicity beats freeze, and the between-notch warm
+
+── PREDICTIVE STEP CACHE (Peter, 2026-07-09: "the pages wait until the scrolling is finished to
+change") ──
+
+Zoom levels live on the shared zoomStep lattice, and the CANONICAL breaks don't move with zoom — so
+per step only the band GEOMETRY differs, and ONE hypothetical-reflow measure per step is the whole
+cost. While idle, the whole lattice is precomputed nearest-first (one step per frame, aborting on
+any activity); when a gesture commits a step (the 'inkwave:zoom-step' event Scroll dispatches
+synchronously with the zoom var), the cached geometry is applied IMMEDIATELY as pure style writes
+that batch into the same reflow as the font change — the pages track the zoom live. A cache MISS
+reads the bands LIVE in the same task instead (one extra synchronous reflow that frame): leaving the
+panels pinned at stale geometry while the text reflowed made the gap visually collapse and let text
+paint out over the water (Peter, 2026-07-10) — bands and text must land in the SAME frame, cached or
+not. The settle's verify paint still snaps everything atomically at the end (a no-op when the cache
+was accurate).
+
+TWO CACHES, AND THEY MUST NOT MIX. Band geometry read under the live-reflow window's placeholder
+heights (.iw-zoom-live content-visibility) is a DIFFERENT geometry regime: it must never leak into
+`stepCache` (placeholder-squashed panels replayed at rest) and stepCache's full-layout geometry must
+never apply mid-gesture. Routing mid-gesture steps to `liveCache` keeps a within-gesture step
+RETRACE pure style writes.
+
+── ATOMIC TEXT+BAND through reflow zoom (round-6, Peter: "Zooming should change text and page
+atomically … the gapped page arbitrarily joining up or the text flowing over the water") ──
+
+The round-5 FREEZE (bands held while text reflowed) regressed exactly this: a page's rendered height
+changes NON-uniformly with zoom (font-reflow rewraps → discrete lines-per-page jumps, which no
+smooth (z/z0)² factor can track), so a frozen band no longer matched its page — the gap collapsed or
+text overran the sheet onto the water. Peter's ruling: ATOMICITY BEATS FREEZE. So the bands are
+re-derived in the SAME task as every reflow step — the original round-3/4 contract. Correctness
+guarantee: the VISIBLE page bands are read from the live DOM, where content-visibility renders
+on-screen blocks EXACTLY (only off-screen — invisible — pages sit at placeholder heights), so what
+the eye sees is pixel-matched to the reflowed text every frame.
+
+── THE BETWEEN-NOTCH WARM — what actually makes a notch cheap (2026-08-30) ──
+
+MEASURED (`pnpm prove:zoomcost`, 13k words / 325 blocks / 55 gaps): a notch's commit is ~110ms, of
+which the reflow+anchor is ~33 and the step event ~78 — and 98% of that 78 is `readBands()`, i.e.
+the MISS path, on 11 of 12 notches. The idle precompute is not broken and it does not help: it fills
+`stepCache`, while a live gesture reads `liveCache`, because the placeholder regime is a different
+geometry regime and mixing them is forbidden. So during a gesture every step measured the bands
+synchronously, on the input path.
+
+TWO WRONG THEORIES WERE MEASURED AND DISCARDED FIRST, and they are why the fix is scheduling rather
+than a cheaper read: (1) deriving the band from its gap's rect + the band's own inline top/height
+matched to 0.0000px across 55 bands and was NOT faster (1.08×); (2) exempting the gap widgets from
+the live window's content-visibility did nothing either. A standalone diagnostic then settled it:
+repeating the identical band loop immediately after itself costs 0.2ms. The 78ms is ONE forced
+layout that the anchor read did not cover — not 55 per-element unlocks — so no read is cheaper, and
+the only lever left is WHEN it happens.
+
+A zoom gesture is monotonic and a real wheel leaves 150–260ms between notches, so the next step is
+nearly always ±1 in the same direction and there is idle time to measure it in. This warms exactly
+that one step, in the PLACEHOLDER REGIME (so it lands in liveCache, never stepCache — the separation
+is untouched), strictly BETWEEN notches:
+
+* armed on a committed step, and CANCELLED by the next one, so a fast trackpad stream (~16ms apart)
+  never fires it — at that cadence there is no idle to spend and the warm would compete with the
+  gesture, which is the one thing the idle precompute exists to avoid. It also skips outright once
+  the observed cadence is faster than the warm can finish in.
+* a MISS stays exactly as correct as before: it measures live in the same task. This only makes the
+  miss rarer, never the answer different.
+
+The SCHEDULING RULE itself lives in `editor/zoomWarm.ts` as a pure function, because a browser probe
+is not a guard: warming too eagerly puts the measure back on the input path, warming never restores
+the old cost, and neither shows up as a wrong pixel. `LIVE_WARM_DELAY_MS = 45` is > a trackpad's
+~16ms cadence, so a fast stream cancels it.
+
+A live warm must also move `--iw-cis-scale` — Scroll.tsx recomputes it per commit as (z/z0)², and
+the placeholder heights it drives are part of this regime's geometry. Reading the bands at the next
+step's zoom WITHOUT it would cache geometry no commit will ever reproduce. And the conditions are
+re-checked AT FIRE TIME, not at schedule time: 45ms is long enough for the gesture to have ended,
+the live window to have come down, or another step to have landed, and a warm under any of those
+caches geometry no commit will ever reproduce.
+
+ARM THE NEXT STEP'S WARM from the PREVIOUS committed step where there is one, else from the
+gesture's own start zoom (z0) — the first notch of a gesture is exactly the one a writer notices, so
+it must not be the one that cannot predict. A step seen a second ago is this gesture's previous
+notch (and catches a mid-gesture reversal); anything older belongs to a finished gesture and must
+not be trusted as "where we came from".
+
+THE AUDIT (probe-only, `window.__iwWarmAudit = true`): is a cached entry the same geometry a live
+measure would have produced at this instant? A cache that is fast and WRONG is the regression this
+whole subsystem exists to prevent, so the question has to be askable rather than argued about.
+
+RESYNC: the zoom guard (Scroll.tsx) can detect a content-visibility relevancy wave between commits —
+the layout shifted, so every placeholder-regime entry is stale. Drop them and re-derive the bands
+from the CURRENT layout in the same task.
+
+### Idle precompute, the zoom-scoped window, and the early warm
+
+Idle precompute: one step per frame, nearest-first from the current step until the WHOLE lattice is
+warm (it's only ~18 steps — a fast gesture can cross any window, and a miss now costs a synchronous
+mid-gesture reflow, so warm everything). Each measure is the canonicalMeasure trick on the LIVE zoom
+var: force `--iw-editor-zoom` to the step's lattice value, read the band rects + content height,
+restore — all inside one task, so the hypothetical layout never paints. Strictly desktop + genuinely
+idle: never during a gesture (`__iwZoomHold`), never in a typing pause (the edit debounce is the
+typing signal), never on phone, never while hidden.
+
+GENUINELY idle only (2026-07-11, "Chrome still a bit slow opening a document"): each precompute step
+is a full-document hypothetical reflow (~100ms+ of layout on a long doc), and the warm-up used to
+start 350ms after the mount's first measure — ~18 consecutive long frames landing exactly while the
+reveal chain, the wave coast and the writer's first scrolls run (profiled: the post-open longtask
+churn). Any input or load-choreography activity now pushes the warm-up back; a zoom during the cold
+window stays CORRECT — onZoomStep measures a miss live in the same task.
+
+`lastInputAt` is kept alongside `quietUntil` rather than derived from it: `quietUntil` is a POLICY (a
+1500ms hold tuned for the full-lattice sweep), and the early warm needs the underlying FACT so it can
+apply its own, much shorter hold.
+
+CANCEL the zoom-scoped warm on any input (round-4, Peter: "scrolling is jittery"): each warm step is
+a full-document hypothetical reflow — running them under a scroll/keystroke is exactly the jank Peter
+felt. The 150ms grace exempts the settle's OWN scroll events (the atomic exit's correction fires
+'scroll' right after zoomCb opens the window); anything later is a real user input.
+
+ZOOM-SCOPED WARM WINDOW (round-3, Peter: "build/refresh the step cache only on zoom-zone entry /
+first step / idle after settle — never on the typing path"): the genuine-idle gate's activity events
+include 'wheel'/'scroll', so a zoom session kept pushing its own warm-up out 1.5s forever — the cache
+was measured COLD through whole gestures (0 precomputed). A zoom SETTLE opens this window: inside it
+the quietUntil input gate is bypassed (typing/edit debounce + the gesture hold still block) and the
+warm is RADIUS-LIMITED to the steps around the current one — the next notches' exit/settle frames
+hit, without the full-lattice reflow burst on every settle. The full lattice still warms at genuine
+idle, exactly as before.
+
+EARLY WARM (2026-08-20, Peter: "are we warm loading the first few levels of zoom in and out… it
+feels slow coz its lagging, not the actual distance"). The full-lattice precompute is correctly gated
+behind `preBusy()`'s `quietUntil` — and EVERY reveal-chain event (open-begin / reveal-imminent /
+editor-revealed) bumps that gate by another 3000ms, so the FULL warm genuinely cannot start until
+several seconds after the page is already visible and interactive. A writer who opens a document and
+reaches for zoom immediately — an entirely ordinary thing to do — hits a stone-cold cache: the first
+notch is a synchronous, full-document hypothetical reflow measured live (onZoomStep's miss path),
+which is exactly what reads as "laggy" rather than "needs more finger travel" — the two are easy to
+conflate from the outside, which is why TRACKPAD_ZOOM_SENSITIVITY/FIRST_STEP_BONUS alone couldn't
+fully fix the feel.
+
+This does NOT touch quietUntil or preBusy — it is a SEPARATE warm fired once, a short beat after the
+editor is actually revealed, so it lands well before the full-lattice gate would even consider
+starting. It still defers behind a genuine gesture/edit in progress (never the reveal-chain's own 3s
+hold) — it only skips the PART of preBusy that exists to protect the reveal's OWN visual settling
+from a much bigger full-lattice sweep. Its own busy check uses 250ms, deliberately much shorter than
+the full-lattice precompute's 1500ms `quietUntil` bump: that gate is tuned to keep a ~20-step sweep
+away from the reveal choreography entirely, whereas this warm needs to resume promptly between a
+writer's interactions to be ready before their next zoom.
+
+WHOLE LATTICE, nearest-first (2026-08-20, round 2 — Peter: "goes like three zooms then stops then
+another three. so maybe we need to warm load more"). This was radius 2 (five steps: k0, k0±1, k0±2),
+and that symptom is precisely what a five-step cache produces: the first few notches present
+instantly off the warm cache, then the gesture walks off its edge into cold steps that each cost a
+synchronous full-document hypothetical reflow (onZoomStep's miss path), stalls, and only recovers
+once the post-settle zoom window (ZOOM_WARM_RADIUS, also 5) warms the next few — hence "another
+three". The lattice is only ~20 steps end to end, so warming all of it removes the cliff entirely
+rather than moving it a few notches further out. Cost is bounded and paced: one hypothetical reflow
+per frame, each deferred by the busy check, so it yields to the writer throughout and never lands a
+burst on the reveal choreography.
+
+A hypothetical layout can be SHORTER than the live one → the browser would clamp the scroll; save
+and restore it exactly (the same pattern as the canonical measure window).
+
+### The zoom settle
+
+Re-measure ONCE when the editor font-zoom settles (see Scroll.tsx). Breaks are now measured in the
+canonical context, so this recomputes IDENTICAL document positions (the stable-set guard makes the
+dispatch a no-op) — but it still drives the paint() pass that repositions the sheet panels/bands
+against the REFLOWED live text, which IS zoom-dependent. Scroll.tsx re-anchors the viewport around
+it (pagination-measured).
+
+BOTH PLATFORMS defer everything heavy off the settle (round-4, Peter: "text reflow should be no
+slower than before; pages painted instantly from the math"): canonical breaks cannot move with zoom
+by construction, and the ATOMIC EXIT already applied full-regime band geometry in the exit task — so
+the settle needs NO immediate measure and NO immediate paint. The full verify re-measure runs at
+genuine idle (scheduleIdleFull — input-gated, cancelled by any activity), and the zoom-scoped
+step-cache warm runs in the same quiet gaps (cancelled on input; desktop only — precompute never
+runs on phone). The gesture being over also makes every placeholder-regime `liveCache` entry stale
+for the next gesture.
+
+<a id="measure-scheduling"></a>
+### Scheduling — input priority, the ResizeObserver, and doc identity
+
+INPUT PRIORITY: edit-driven re-measures are debounced OFF the keystroke. recompute forces a
+full-document layout read (clientWidth + getClientRects per block) and dispatches two meta
+transactions — per keystroke that was the single biggest stutter source (and worst on backspace,
+where line heights shrink). The existing gap decorations are position-mapped through each edit in
+apply(), so the gaps ride along correctly while we wait; the breaks re-settle 150ms after typing
+pauses. Resize/fonts/settings still re-measure immediately.
+
+PHONE (2026-07-09, "character input is priority #1 — reflow can wait"): each measure is THREE forced
+full-document reflows (gap-clear → canonical-context force → measure → restore) — cheap on desktop,
+~100-300ms of layout on a phone CPU with a long doc. At 150ms it landed in ordinary inter-word typing
+pauses, freezing the next keystroke. So edit-driven re-measures on phone wait for a GENUINE pause:
+850ms after the last transaction, stretched to 1200ms while the on-screen keyboard is up
+(TiptapEditor mirrors it to `window.__iwKeyboardUp` — reflowing mid-composition is worthless).
+Trailing debounce: every further keystroke pushes a queued measure back. Desktop stays 150ms, and
+the FIRST measure (the pagination-ready reveal latch) is `schedule()`d directly — untouched.
+
+THE RESIZE OBSERVER MUST FOLD INTO THE EDIT DEBOUNCE (both platforms since 2026-07-11). A keystroke
+that adds/removes a LINE resizes the sheet, so this observer fired one frame after the edit and — doc
+size changed ⇒ fresh inputSig — ran the full multi-reflow measure IMMEDIATELY, bypassing the edit
+debounce entirely (CLAUDE.md pagination rule (b); the desktop path had crept back to immediate and
+every line-wrapping keystroke paid a full canonical measure the very next frame — the ablation's
+biggest desktop longtask source). A resize arriving while an edit's re-measure is pending folds into
+that debounce (pushes it back); genuine resizes (rotate, keyboard, panel dock — no edit pending)
+still measure straight away.
+
+ZOOM-GESTURE HOLD (the page-boundary flicker fix): every font-zoom frame resizes the sheet, so this
+observer re-ran per frame — recompute early-returns on the unchanged inputSig but still
+schedulePaint()s, repositioning the gapped panels/bands 1–2 frames BEHIND the reflowing text: the
+sheet edge visibly oscillated up/down at the zoom target. Scroll.tsx raises `__iwZoomHold` for the
+whole gesture (cleared just before it dispatches zoom-settled), so the panels stay pinned during the
+gesture and the settle re-measure repaints them once, cleanly, against the settled layout.
+
+ONLY RE-MEASURE WHEN THE CANONICAL LAYOUT CHANGED — the `inputSig` guard (doc size, page height, top
+margin). Our own setMeta dispatches don't change these, so they can't loop. Window/sheet resizes no
+longer re-measure at all (canonical breaks don't depend on the rendered width) — the RO-scheduled
+pass lands here and early-returns, just repositioning the gapped panels. NB: editor font-zoom is
+deliberately NOT in this signature (canonical breaks don't depend on it either). Re-measuring DURING
+the zoom gesture lurched the text; instead Scroll.tsx fires 'inkwave:zoom-settled' → one clean
+re-measure, which confirms the same breaks and re-paints the panels against the reflowed text.
+
+Web fonts (EB Garamond) load AFTER first paint and reflow the text, moving every line — but a font
+swap changes neither the doc size nor the page width, so the inputSig guard would skip re-measuring
+(the break sits wrong until an edit nudges it). Force a fresh measure once fonts are ready, and on
+any later font load. The bibliography does the same thing: citation labels render "?key" until the
+library loads, then rebuild asynchronously to their real widths ("Author & Author, 2004") — a
+whole-document reflow that changes NOTHING in inputSig, so on a citation-heavy doc the load-time
+breaks stayed measured against the placeholder layout until some unrelated trigger (zoom-settle, an
+edit) re-measured — which read as "the pages move when you zoom". Debounced past the nodeviews' own
+queueMicrotask/setState rebuild; the sig guards make it a no-op when breaks didn't move.
+
+THE UPDATE HOOK FIRES FOR EVERY TRANSACTION, so both its jobs gate on DOC IDENTITY. Step-cache
+invalidation (Peter, 2026-07-10: "we might as well cache the steps we've gone through so going back
+is instant"): this hook fires for our own settle-time setMeta dispatches, SCAS decoration repaints,
+and each React re-render's updateState — and clearing per transaction wiped the whole warmed lattice
+at every settle, so a zoom-in → zoom-out retrace missed on every step it had just visited. Only a
+real doc change makes per-step band geometry stale. And on PHONE only a DOC change pushes the queued
+measure back: measured on-device, the word-count re-render alone stacked the phone measure to ~1.9s
+after the last keystroke. Doc object identity is the cheap test (ProseMirror docs are persistent
+structures — unchanged doc ⇒ same reference); a skipped reschedule loses nothing, since a no-edit
+recompute early-returns on inputSig anyway. Desktop keeps the original unconditional reset.
+
+PRINT FLOOR (round-6, Peter: "render it all properly at time of print"): canonical consumers must
+NEVER see lazily-stale breaks. Before the print dialog (and on the explicit measure-now request the
+export paths dispatch), run the FULL measure SYNCHRONOUSLY — with a warm line cache it is cheap;
+correctness is absolute. The panels/bands must match the fresh breaks before the dialog snapshots
+layout.
+
+`lastMinH` — applyBands' full-final-page sheet extension — must be respected by recompute's
+baseline: writing bare pageH there shrank the sheet the paint pass had just grown, and the RO
+ping-ponged between the two writes forever. Stale-larger for one pass after an edit is fine — the
+paint recomputes the true extension from the fresh geometry. The sheet also enforces a minimum
+one-page scroll height so the footer (logo + number, `position:absolute; bottom:22px`) always lands
+at the page bottom, never mid-content on short documents.
+
+<a id="scroll-reassert"></a>
+### Re-assert the scroll AFTER the gaps are back
+
+⚠ RE-ASSERT THE SCROLL AFTER THE GAPS ARE BACK (2026-08-28) — Peter's "the doc keeps jumping down…
+it doesn't happen straight away… it's either on a timer or when something loads", reported while he
+was reading in the SOURCE PANEL with the editor idle. That is the signature of this measure: it is
+idle-gated, so it fires seconds after you stop, with nobody looking at the document it moves.
+
+THE ORDER WAS WRONG. The measure CLEARS the gap widgets first (so the DOM reflows to its natural
+wrapping), which makes a paginated document dramatically SHORTER — every page gap is a tall block.
+The browser then CLAMPS scrollTop to that shorter range. `savedTop` was restored inside the
+`finally`, i.e. while the gaps were still gone — so the write was clamped a second time, and only
+then were the gaps dispatched back. The document grew again around a scroll position that had
+already been squashed.
+
+Same shape as the PDF zoom anchor fixed earlier that day: the arithmetic was right and applied one
+layout too early. Assert it again now that the document is its real height, and once more next frame
+for the paint that follows.
