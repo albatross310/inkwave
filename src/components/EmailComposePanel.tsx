@@ -161,7 +161,13 @@ export function EmailComposePanel({
   const borderStyle = { borderColor: 'var(--iw-nightable-border, #e7e5e4)' }
 
   return (
-    <ApplicationSurface app="email" label="Email draft" mode={surfaceMode} nightable>
+    <ApplicationSurface
+      app="email"
+      label="Email draft"
+      mode={surfaceMode}
+      nightable
+      resizable={surfaceMode === 'isolated'}
+    >
       {/* ── Headers ───────────────────────────────────────────────────────── */}
       <div className={row} style={borderStyle}>
         <span className={labelCls} style={labelStyle}>To</span>

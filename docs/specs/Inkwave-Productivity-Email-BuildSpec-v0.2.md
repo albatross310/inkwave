@@ -575,6 +575,13 @@ itself is the writing surface.
   remains full-width. It grows to its content height and must not manufacture an empty page-height
   tail after a short message. Its header, body,
   record/send controls, status, and concise provenance disclosure form one continuous box.
+- The isolated box is resizable. Dragging either side changes both sides by the same amount around a
+  fixed horizontal centre, so the box never walks left or right as its width changes. Width is
+  clamped to the available editor window. A bottom-centre handle sets an optional minimum height;
+  without that explicit resize, the box continues to end after its content. Double-click/Enter/Home
+  resets the relevant axis, arrow keys provide a non-pointer equivalent, and the local preference is
+  restored without changing document content or provenance. Phone keeps full width and exposes only
+  the vertical resize.
 - The editable body begins immediately beneath the email header/actions inside that box. There is no
   second paper surface visibly continuing behind or beneath it.
 - To, Cc, Bcc, Subject, body, send state, and recorded-at state remain part of the active email
@@ -915,6 +922,9 @@ multi-target fault injection proves that one unreadable destination cannot damag
 - An email renders as one centred box at 75% of page width on desktop (full-width on phone) that grows
   with its content, with its body inside it, no forced blank page-height tail, and no second paper
   visibly behind it.
+- Pulling either side expands/contracts the opposite side equally and preserves the box's horizontal
+  centre. Bottom resizing changes only its optional minimum height. Keyboard and reset paths work,
+  and no resize operation changes the email's authored bytes or provenance.
 - New email work defaults to isolated mode; switching to contextual studio mode preserves the same
   email identity, bytes, history, memberships, and send state.
 - Contextual studio mode keeps every message body inside its email box and allows clearly separate

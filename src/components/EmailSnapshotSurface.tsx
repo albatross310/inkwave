@@ -35,6 +35,7 @@ export function EmailSnapshotSurface({
       app="email"
       label="Recorded email"
       ariaLabel="Email recorded in this snapshot"
+      resizable
     >
       <dl className="iw-email-snapshot-headers" style={{ margin: 0 }}>
         <HeaderRow label="To" value={to || '(no recipient)'} />

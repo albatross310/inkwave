@@ -60,6 +60,10 @@ own evidence.
 
 The isolated email box is now 75% of the resolved page width on desktop and centred; phone remains
 full-width, and contextual application surfaces do not inherit the email-specific width.
+The same shared surface owns resize handles: either side adjusts total width at twice the pointer
+delta while CSS auto-margins keep its centre fixed, and the bottom adjusts only an optional minimum
+height. Width/height preferences stay local presentation state, have keyboard/reset paths, and never
+enter the document or its provenance.
 
 ---
 

@@ -1,4 +1,10 @@
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import {
+  surfaceMinHeight,
+  surfaceWidthLimits,
+  symmetricSurfaceWidth,
+  type ApplicationSurfaceResizeEdge,
+} from './applicationSurfaceResize'
 
 /**
  * The shared frame for a focused Inkwave tool. Email owns the fields inside it; future music and
@@ -12,7 +18,15 @@ interface ApplicationSurfaceProps {
   ariaLabel?: string
   mode?: ApplicationSurfaceMode
   nightable?: boolean
+  resizable?: boolean
   children: ReactNode
+}
+
+const WIDTH_STEP_PX = 12
+const HEIGHT_STEP_PX = 16
+
+function storedSizeKey(app: string, mode: ApplicationSurfaceMode, axis: 'width' | 'height'): string {
+  return `inkwave:applicationSurface:${app}:${mode}:${axis}`
 }
 
 export function ApplicationSurface({
@@ -21,10 +35,144 @@ export function ApplicationSurface({
   ariaLabel,
   mode = 'isolated',
   nightable = false,
+  resizable = false,
   children,
 }: ApplicationSurfaceProps) {
+  const surfaceRef = useRef<HTMLElement>(null)
+  const removeDragListenersRef = useRef<(() => void) | null>(null)
+
+  const persistWidth = useCallback((width: number) => {
+    const parentWidth = surfaceRef.current?.parentElement?.getBoundingClientRect().width ?? 0
+    if (parentWidth <= 0) return
+    const percent = Math.round((width / parentWidth) * 1000) / 10
+    surfaceRef.current!.style.width = `${percent}%`
+    try { localStorage.setItem(storedSizeKey(app, mode, 'width'), String(percent)) } catch { /* private mode */ }
+  }, [app, mode])
+
+  const persistHeight = useCallback((height: number) => {
+    if (!surfaceRef.current) return
+    surfaceRef.current.style.minHeight = `${Math.round(height)}px`
+    try { localStorage.setItem(storedSizeKey(app, mode, 'height'), String(Math.round(height))) } catch { /* private mode */ }
+  }, [app, mode])
+
+  const resetAxis = useCallback((axis: 'width' | 'height') => {
+    if (!surfaceRef.current) return
+    if (axis === 'width') surfaceRef.current.style.removeProperty('width')
+    else surfaceRef.current.style.removeProperty('min-height')
+    try { localStorage.removeItem(storedSizeKey(app, mode, axis)) } catch { /* private mode */ }
+  }, [app, mode])
+
+  useEffect(() => {
+    if (!resizable || !surfaceRef.current) return
+    try {
+      const width = Number(localStorage.getItem(storedSizeKey(app, mode, 'width')))
+      const height = Number(localStorage.getItem(storedSizeKey(app, mode, 'height')))
+      if (Number.isFinite(width) && width >= 45 && width <= 100) surfaceRef.current.style.width = `${width}%`
+      if (Number.isFinite(height) && height >= 240) surfaceRef.current.style.minHeight = `${height}px`
+    } catch { /* private mode */ }
+  }, [app, mode, resizable])
+
+  useEffect(() => () => removeDragListenersRef.current?.(), [])
+
+  const beginHorizontalResize = (event: PointerEvent<HTMLDivElement>, edge: ApplicationSurfaceResizeEdge) => {
+    const surface = surfaceRef.current
+    const parent = surface?.parentElement
+    if (!surface || !parent) return
+    event.preventDefault()
+    removeDragListenersRef.current?.()
+    const startX = event.clientX
+    const startWidth = surface.getBoundingClientRect().width
+    const limits = surfaceWidthLimits(parent.getBoundingClientRect().width)
+    let currentWidth = startWidth
+    const move = (moveEvent: globalThis.PointerEvent) => {
+      currentWidth = symmetricSurfaceWidth({
+        startWidth,
+        pointerDelta: moveEvent.clientX - startX,
+        edge,
+        minWidth: limits.min,
+        maxWidth: limits.max,
+      })
+      surface.style.width = `${currentWidth}px`
+    }
+    const remove = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      removeDragListenersRef.current = null
+    }
+    const end = () => { remove(); persistWidth(currentWidth) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    removeDragListenersRef.current = remove
+  }
+
+  const beginVerticalResize = (event: PointerEvent<HTMLDivElement>) => {
+    const surface = surfaceRef.current
+    if (!surface) return
+    event.preventDefault()
+    removeDragListenersRef.current?.()
+    const startY = event.clientY
+    const startHeight = surface.getBoundingClientRect().height
+    const maxHeight = Math.max(startHeight, window.innerHeight * 2)
+    let currentHeight = startHeight
+    const move = (moveEvent: globalThis.PointerEvent) => {
+      currentHeight = surfaceMinHeight({
+        startHeight,
+        pointerDelta: moveEvent.clientY - startY,
+        minHeight: 240,
+        maxHeight,
+      })
+      surface.style.minHeight = `${currentHeight}px`
+    }
+    const remove = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      removeDragListenersRef.current = null
+    }
+    const end = () => { remove(); persistHeight(currentHeight) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+    removeDragListenersRef.current = remove
+  }
+
+  const resizeWidthByKey = (event: KeyboardEvent<HTMLDivElement>, edge: ApplicationSurfaceResizeEdge) => {
+    if (event.key === 'Enter' || event.key === 'Home') { event.preventDefault(); resetAxis('width'); return }
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    const surface = surfaceRef.current
+    const parent = surface?.parentElement
+    if (!surface || !parent) return
+    event.preventDefault()
+    const limits = surfaceWidthLimits(parent.getBoundingClientRect().width)
+    const pointerDelta = event.key === 'ArrowRight' ? WIDTH_STEP_PX : -WIDTH_STEP_PX
+    persistWidth(symmetricSurfaceWidth({
+      startWidth: surface.getBoundingClientRect().width,
+      pointerDelta,
+      edge,
+      minWidth: limits.min,
+      maxWidth: limits.max,
+    }))
+  }
+
+  const resizeHeightByKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === 'Home') { event.preventDefault(); resetAxis('height'); return }
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+    const surface = surfaceRef.current
+    if (!surface) return
+    event.preventDefault()
+    persistHeight(surfaceMinHeight({
+      startHeight: surface.getBoundingClientRect().height,
+      pointerDelta: event.key === 'ArrowDown' ? HEIGHT_STEP_PX : -HEIGHT_STEP_PX,
+      minHeight: 240,
+      maxHeight: Math.max(surface.getBoundingClientRect().height, window.innerHeight * 2),
+    }))
+  }
+
   return (
     <section
+      ref={surfaceRef}
       className={`iw-application-surface iw-application-surface--${mode}${nightable ? ' iw-nightable' : ''}`}
       data-iw-application={app}
       data-iw-surface-mode={mode}
@@ -32,6 +180,43 @@ export function ApplicationSurface({
     >
       <div className="iw-application-surface__label">{label}</div>
       {children}
+      {resizable && (
+        <>
+          <div
+            className="iw-application-surface__resize iw-application-surface__resize--left"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={`Resize ${app} symmetrically from the left edge`}
+            title="Drag to resize symmetrically · double-click to reset"
+            tabIndex={0}
+            onPointerDown={(event) => beginHorizontalResize(event, 'left')}
+            onKeyDown={(event) => resizeWidthByKey(event, 'left')}
+            onDoubleClick={() => resetAxis('width')}
+          />
+          <div
+            className="iw-application-surface__resize iw-application-surface__resize--right"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={`Resize ${app} symmetrically from the right edge`}
+            title="Drag to resize symmetrically · double-click to reset"
+            tabIndex={0}
+            onPointerDown={(event) => beginHorizontalResize(event, 'right')}
+            onKeyDown={(event) => resizeWidthByKey(event, 'right')}
+            onDoubleClick={() => resetAxis('width')}
+          />
+          <div
+            className="iw-application-surface__resize iw-application-surface__resize--bottom"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label={`Resize ${app} height from the bottom edge`}
+            title="Drag to resize height · double-click to reset"
+            tabIndex={0}
+            onPointerDown={beginVerticalResize}
+            onKeyDown={resizeHeightByKey}
+            onDoubleClick={() => resetAxis('height')}
+          />
+        </>
+      )}
     </section>
   )
 }

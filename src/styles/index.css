@@ -1137,6 +1137,7 @@
   }
   .iw-application-surface {
     --iw-application-inset: 1.5rem;
+    position: relative;
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -1176,6 +1177,68 @@
     padding: 0.8rem var(--iw-application-inset) 1.25rem;
     border-top: 1px solid var(--iw-application-hair, rgba(92, 45, 138, 0.18));
   }
+  .iw-application-surface__resize {
+    position: absolute;
+    z-index: 20;
+    touch-action: none;
+    user-select: none;
+    outline: none;
+  }
+  .iw-application-surface__resize::after {
+    content: '';
+    position: absolute;
+    border-radius: 999px;
+    background: var(--iw-application-edge, #cbb8f2);
+    opacity: 0.32;
+    transition: opacity 120ms ease, transform 120ms ease;
+  }
+  .iw-application-surface__resize:hover::after,
+  .iw-application-surface__resize:focus-visible::after {
+    opacity: 0.9;
+    transform: scale(1.12);
+  }
+  .iw-application-surface__resize--left,
+  .iw-application-surface__resize--right {
+    top: 20%;
+    bottom: 20%;
+    width: 18px;
+    cursor: ew-resize;
+  }
+  .iw-application-surface__resize--left { left: -9px; }
+  .iw-application-surface__resize--right { right: -9px; }
+  .iw-application-surface__resize--left::after,
+  .iw-application-surface__resize--right::after {
+    top: 50%;
+    left: 8px;
+    width: 2px;
+    height: 42px;
+    transform: translateY(-50%);
+  }
+  .iw-application-surface__resize--left:hover::after,
+  .iw-application-surface__resize--left:focus-visible::after,
+  .iw-application-surface__resize--right:hover::after,
+  .iw-application-surface__resize--right:focus-visible::after {
+    transform: translateY(-50%) scale(1.12);
+  }
+  .iw-application-surface__resize--bottom {
+    bottom: -9px;
+    left: 50%;
+    width: 72px;
+    height: 18px;
+    cursor: ns-resize;
+    transform: translateX(-50%);
+  }
+  .iw-application-surface__resize--bottom::after {
+    top: 8px;
+    left: 50%;
+    width: 42px;
+    height: 2px;
+    transform: translateX(-50%);
+  }
+  .iw-application-surface__resize--bottom:hover::after,
+  .iw-application-surface__resize--bottom:focus-visible::after {
+    transform: translateX(-50%) scale(1.12);
+  }
   .inkwave-editor-surface.is-phone .iw-application-surface {
     --iw-application-inset: 1.25rem;
     border-left: 0;
@@ -1185,6 +1248,10 @@
   }
   .inkwave-editor-surface.is-phone [data-iw-application="email"].iw-application-surface--isolated {
     width: 100%;
+  }
+  .inkwave-editor-surface.is-phone .iw-application-surface__resize--left,
+  .inkwave-editor-surface.is-phone .iw-application-surface__resize--right {
+    display: none;
   }
   /* Tiptap editor content styles */
   /* ProseMirror is the contenteditable div — tiptap-editor is a class
