@@ -91,8 +91,8 @@ describe('fit-to-width cap (never a partial page)', () => {
     expect(getMagnify()).toBe(2)
   })
 
-  it('exports a sane water margin', () => {
-    expect(WATER_MARGIN_PX).toBeGreaterThan(0)
+  it('keeps the shared fit boundary at 12px of water on either side', () => {
+    expect(WATER_MARGIN_PX).toBe(12)
   })
 })
 

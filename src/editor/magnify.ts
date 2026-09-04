@@ -30,7 +30,7 @@ const KEY = 'inkwave:magnify'
 export const MIN_MAGNIFY = 0.02  // practical floor only (degenerate-maths guard) — zoom-out is
                                  // otherwise unlimited: a tiny page floating in water is valid
 export const MAX_MAGNIFY = 2.5
-export const WATER_MARGIN_PX = 24 // minimum water visible either side of a fit-capped page
+export const WATER_MARGIN_PX = 12 // minimum water visible either side of every fit-capped surface
 
 /** Shared fixed-layout fit ratio used by document paper and isolated application surfaces. */
 export function fitScaleForWidth(availablePx: number, contentWidthPx: number): number {

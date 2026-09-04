@@ -576,13 +576,13 @@ itself is the writing surface.
   proportionally adjusted pixel value on another screen resolution. It is not a percentage of the
   browser window or paper. Browsers do not expose trustworthy physical diagonal/PPI, so logical
   `screen.width` is the explicit screen-size proxy. The box remains centred, is safety-capped to the
-  available window with 24px water on each side, and is full-width on phone. It grows to its content
+  available window with 12px water on each side, and is full-width on phone. It grows to its content
   height and must not manufacture an empty page-height
   tail after a short message. Its header, body, record/send controls, status, and concise provenance
   disclosure form one continuous box.
 - The ordinary document-page width does not constrain application width. At normal window sizes the
   application keeps its calibrated pixel width and chosen CSS type sizes. Once the editor window is
-  too narrow to show that complete width plus 24px of water on each side, the whole isolated surface
+  too narrow to show that complete width plus 12px of water on each side, the whole isolated surface
   follows the main editor's continuous fit-to-width behaviour: fixed internal layout, centred
   transform shrink, and a size-compensated wrapper. Widening the window restores it to scale 1.
   Phone remains a native full-width layout rather than a transformed desktop surface.
@@ -938,7 +938,7 @@ multi-target fault injection proves that one unreadable destination cannot damag
 
 - An email renders as one centred screen-calibrated pixel-width box on desktop—900px at a 1728px
   logical display width—and full-width on phone. A narrower desktop window continuously shrinks the
-  complete fixed-layout box, with the same 24px-per-side water boundary as the main editor. It grows
+  complete fixed-layout box, with the same 12px-per-side water boundary as the main editor. It grows
   with its content, with its body inside it, no forced blank page-height tail, and no second paper
   visibly behind it.
 - Pulling either side expands/contracts the opposite side equally and preserves the box's horizontal

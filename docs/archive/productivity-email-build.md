@@ -62,7 +62,7 @@ The isolated email box now uses `900px × screen.width ÷ 1728` as its desktop d
 reference 1728-logical-pixel 16-inch display and a proportionally adjusted absolute pixel width on
 other screen resolutions. Browser APIs expose no trustworthy physical diagonal/PPI, so logical
 `screen.width` is the documented screen-size proxy; browser-window width is not the sizing input.
-A 24px-per-side fit boundary lets narrower desktop windows shrink the whole fixed-layout surface
+A 12px-per-side fit boundary lets narrower desktop windows shrink the whole fixed-layout surface
 continuously, matching the main editor's too-small-window behaviour. Phone remains a native
 full-width layout, and contextual application surfaces do not inherit the email-specific width.
 The same shared surface owns resize handles: either side adjusts total width at twice the pointer
@@ -73,7 +73,7 @@ stay local presentation state, have keyboard/reset paths, and never
 enter the document or its provenance.
 
 Application presentation remains separate from the document paper's magnify state, but its shared
-isolated-surface wrapper reuses the same fit ratio and 24px water boundary. Below the natural width it
+isolated-surface wrapper reuses the same fit ratio and 12px water boundary. Below the natural width it
 transform-shrinks the fixed layout and size-compensates its wrapper; at scale 1 there is no transform.
 Document presentation keeps the existing fixed-paper transform unchanged.
 The calibration and centred fit/resize wrapper are shared `ApplicationSurface` behaviour. A future

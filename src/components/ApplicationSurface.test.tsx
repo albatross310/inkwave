@@ -81,7 +81,7 @@ describe('ApplicationSurface', () => {
     const container = fitBox.parentElement!
     Object.defineProperty(surface, 'offsetWidth', { configurable: true, value: 900 })
     Object.defineProperty(surface, 'offsetHeight', { configurable: true, value: 600 })
-    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 648 })
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 624 })
 
     fireEvent.resize(window)
 
@@ -90,7 +90,7 @@ describe('ApplicationSurface', () => {
     expect(fitBox.style.width).toBe('600px')
     expect(fitBox.style.height).toBe('400px')
 
-    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 948 })
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 924 })
     fireEvent.resize(window)
 
     expect(surface.style.getPropertyValue('--iw-application-fit-scale')).toBe('1')
