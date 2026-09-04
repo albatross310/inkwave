@@ -45,7 +45,6 @@ import { getCitationStyle } from '../../citations/citationsBus'
 import { notePerf, probePerf } from '../perflog'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
-export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
 export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chunk weight)
 
 // ── Decision 6: ARITHMETIC canonical measure (flag `inkwave:arithLayout`, default OFF) ──────────
