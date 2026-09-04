@@ -687,3 +687,156 @@ the modules under test (`vi.resetModules()` first) — `feat/email-compose`'s `r
 this for the same reason, and its comment about `_snapCache` is the other half of the same discipline.
 `testOpfsShim` also gained `text()`: `storage/opfs`'s readJson reads TEXT where snapshots read
 arrayBuffer, and its absence surfaced only as an empty ledger.
+
+---
+
+# The source-file narrative (moved out of `src/` 2026-09-04)
+
+Peter: *"the core is the bottleneck on future AI understanding of my code."* The rules stayed beside
+the code as one- and two-line imperatives (`docs/RULES.md` form); everything below is the reasoning
+they point at, verbatim with its numbers. Nothing was deleted on either side.
+
+---
+
+## `productivity/types.ts` — the schema contract (§A3.2)
+
+<a id="types-doc-label"></a>
+### `doc_label` — tier 1, and the suppression control that does not exist
+
+User-visible title. OPTIONAL and suppressible per-doc — omitted entirely when suppressed.
+
+⚠ THE SUPPRESSION IS NOT REACHABLE BY A WRITER (probed 2026-07-17). `isLabelSuppressed` IS wired
+into the capture path (capture.ts closeDraft), so the mechanism works — but `setLabelSuppressed`
+has ZERO non-test callers: no UI anywhere turns it on. §A3.2 promises "suppressible per-doc" and
+the writer currently has no way to exercise it, so in practice every title travels.
+
+THIS IS TIER 1 (always included) WHILE `note`/`place` ARE TIER 2, and a title is writer-authored
+prose too — compile.ts's own tier-2 rationale ("tiers 1 and 3 alone would let the writer's own
+prose ride out inside 'metadata'") applies to it verbatim. The deliberate distinction: a label is
+the IDENTIFIER of the thing being measured, not an extra disclosure about it. Drop a note and you
+lose a diary line; drop the label and §B1's primary goal — "2h10m writing, of which 40m on email"
+— cannot be read at all, because every row becomes `doc-a1b2f3`. It is also the one prose field
+already on screen at the moment of consent: §A7.3's tick-box lists documents BY LABEL so the
+writer can choose which to include.
+
+That reasoning covers the ordinary case, NOT the sharp one: a title can be far more revealing
+than a note ("Chapter 3 — my mother's illness"). Which is precisely why §A3.2 asks for
+per-doc suppression — and why the missing control is a real gap, not a nicety. RAISED WITH PETER
+2026-07-17; the placement of a consent control is his call, not an agent's guess.
+
+<a id="types-entered"></a>
+### `entered: 'timer' | 'post-hoc'` — why it is a flag and not a fourth provenance
+
+HOW THE TIME GOT HERE — measured by the timer, or told to us afterwards (Peter, 2026-07-17:
+"we can also add a manual add for if you forget to use the timer. But then it's flagged post-hoc").
+
+AN EXPLICIT UNION, WRITTEN ON EVERY ROW — never `entered?: 'post-hoc'` with absence meaning
+timer. Absence-as-classification is the exact trap `doc_type` just escaped: it defaulted to
+'essay', so every unclassified session was FILED AS ESSAY WRITING whether it was or not. A field
+whose commonest value is carried by silence cannot be read as a claim, and this one has to be.
+
+WHY THIS IS NOT A FOURTH `provenance` TAG, AND THE REASONING IS LOAD-BEARING (§A6.1's three tags
+are `measured` / `estimated` / `judged`): **`estimated` means a deterministic rule WE ran that
+anyone can recompute.** A post-hoc block is **testimony** — uncheckable, not recomputable. Different
+epistemics, so it must not borrow that tag. It is a FLAG ON THE ROW, not a provenance: the row is
+still measured-SHAPED (a duration, a category, a day); what differs is the SOURCE OF THE TIME.
+
+⚠ IT MUST NEVER MERGE INTO THE MEASURED BARS (§A6.1). The report has to be able to say
+"3h40m measured, plus 45m you added from memory". Silently totalling them is the lie. What
+ENFORCES it: `aggregate.ts` sums the measured fields from TIMER ROWS ONLY and carries post-hoc
+time in its own `posthoc_minutes` column — a different column, so conflation is unrepresentable
+rather than merely discouraged.
+
+IT IS A REPAIR TOOL, NOT AN AUDIT (§A5's register: "a friend letting you correct the record, not
+a supervisor auditing your timesheet"). Neither nag it nor scold its use.
+
+LEGACY ROWS: rows written before this field existed carry no `entered`. They predate the manual
+add entirely, so every one of them was timer-entered — that is a fact about history, not a
+default. `isPostHoc()` (aggregate.ts) is the ONE place that reads it, and it asks the positive
+question ("did this row SAY post-hoc?") so no other code can accidentally re-derive a default.
+
+<a id="types-no-deny-list"></a>
+### What actually keeps `note`/`place` out of an export (§A7.3) — and the deny-list that did nothing
+
+THE ALLOW-LIST IN `report/compile.ts`, and nothing else. Every field that leaves is NAMED there
+(`sessionRows()` lists its 12 columns literally); nothing iterates a row and emits what it finds.
+So a prose field the ledger gains tomorrow cannot leak by default — it is simply not emitted
+until someone adds it there, which forces them to choose a consent tier. The writer's opt-in
+(`includeNotes`, default false) gates the one section that may carry prose.
+
+A DENY-LIST USED TO SIT HERE — `LEDGER_PRIVATE_FIELDS = ['note','place']`, `stripPrivateFields()`,
+`PublicSessionRow` — described as "the DEFAULT payload shape". It was REMOVED on 2026-07-17
+because it was never the default, or anything else: it had ZERO non-test callers on every branch
+including master, and `/privacy`'s own header cited it as the enforcing mechanism. The privacy
+property held the whole time (the allow-list is real), so this was not a leak — it was worse in a
+quieter way: **editing `LEDGER_PRIVATE_FIELDS` to protect a new field would have done nothing at
+all, silently**, while reading like the guard that mattered. Two rules for one question, only one
+live, and the docs pointed at the dead one.
+
+DO NOT REINTRODUCE A DENY-LIST HERE. compile.ts's own banner has the argument: a deny-list fails
+the opposite way, and that failure is silent. If a future path must export rows, name its columns
+there. `report/compile.test.ts` pins the allow-list property directly — including that an
+unforeseen prose field cannot ride out even with tier 2 ON.
+
+<a id="types-attestation-days"></a>
+### `LedgerAttestation` — why days are independent and not chained to each other
+
+A design decision a failing test forced, and the right one: a cross-day prevHash chain means ANY
+late append invalidates every later day's blockHash — and late appends are the NORMAL case here,
+because §A9 says the ledger syncs through the writer's own cloud and two devices append
+concurrently. Yesterday's row arriving from a phone would burn the Bitcoin anchor on every day
+after it, forcing a re-stamp of the whole month. So each day's block hashes only its own rows
+(bound to its month + day, so a block cannot be replayed elsewhere) and is independently
+OTS-anchorable.
+
+This is exactly how the existing spine already works — snapshots are NOT chained to one another;
+each snapshot's bundleHash is independently OTS-anchored, and the hash CHAIN lives inside a
+signing session (receipts). Ordering evidence comes from Bitcoin's own timestamps, which is
+stronger than a self-asserted prevHash anyway.
+
+<a id="types-reflection"></a>
+### `Reflection` — why it is its own object and not a field on a row
+
+The writer's reflection on a STRETCH of work — "what did I actually do?" (Peter, 2026-07-17).
+
+WHY THIS IS ITS OWN OBJECT AND NOT A FIELD ON A ROW. A reflection is not a property of one
+session: it is about a SPAN across many rows, and the writer thinks in CATEGORIES ("an hour on
+the essay, forty minutes reading"), not in session ids they have never seen. `note?` on the row
+asked the wrong question — it made them annotate an accounting artefact.
+
+IT IS ALSO WHAT RESCUES `misc`. Nothing sets a type on an ordinary document, so most rows are an
+honest unknown; this is where the writer NAMES them, after the fact, from memory, while it is
+fresh. The chart is the recall prompt — the measured stretch is shown, and they say what it was.
+
+§A5: ALWAYS SKIPPABLE, never re-prompted, and no reflection is a failure. The bar for every word
+of copy around it: would he fill this in on a bad Tuesday?
+
+<a id="types-sessions-empty"></a>
+### `WindowAggregate.sessions` — `[]` at weekly/monthly
+
+Session rows are supplied for the DAILY window, whose judged rows are per-session.
+
+CONTRACT (decided by prod-ledger, 2026-07-17, answering the note-digest question): at
+WEEKLY/MONTHLY this is `[]` and opted-in notes travel as `note_digest` instead. Two reasons,
+and the first is the serious one:
+
+- §A6.4. Shipping full session rows at monthly puts a SECOND copy of every measured number
+  in the payload alongside the day rollups. The rule that measured numbers never round-trip
+  through the model exists because it silently tidies them — and two copies is precisely how
+  a narrative ends up contradicting the bars. One representation of measurement, always.
+- §A6/§A7. "Compact rollups, not raw logs" is what keeps a monthly payload bounded. The note
+  TEXT dominates tokens either way, so the digest costs the writer's own words and nothing
+  more — it just stops the schema from dragging 150 rows of measurement along with them.
+
+NB "where do I work best" must be computed CLIENT-SIDE as a measured by-place rollup, not
+inferred by the model from raw rows — same §A6.4 rule.
+
+<a id="types-posthoc-minutes"></a>
+### `DayAggregate.posthoc_minutes` — a separate column IS the enforcement
+
+Minutes the writer ADDED FROM MEMORY (`entered: 'post-hoc'`) — testimony, not measurement.
+
+A SEPARATE COLUMN, and that is the whole enforcement (§A6.1). Every other number on this
+aggregate comes from rows the timer watched; this one comes from the writer telling us
+afterwards. They are never summed here, and a consumer that wants a grand total has to write the
+addition itself — at which point it is a choice someone made, not a lie the schema told for them.

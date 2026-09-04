@@ -34,24 +34,11 @@ export interface SessionRow {
   /**
    * User-visible title. OPTIONAL and suppressible per-doc — omitted entirely when suppressed.
    *
-   * ⚠ THE SUPPRESSION IS NOT REACHABLE BY A WRITER (probed 2026-07-17). `isLabelSuppressed` IS wired
-   * into the capture path (capture.ts closeDraft), so the mechanism works — but `setLabelSuppressed`
-   * has ZERO non-test callers: no UI anywhere turns it on. §A3.2 promises "suppressible per-doc" and
-   * the writer currently has no way to exercise it, so in practice every title travels.
-   *
-   * THIS IS TIER 1 (always included) WHILE `note`/`place` ARE TIER 2, and a title is writer-authored
-   * prose too — compile.ts's own tier-2 rationale ("tiers 1 and 3 alone would let the writer's own
-   * prose ride out inside 'metadata'") applies to it verbatim. The deliberate distinction: a label is
-   * the IDENTIFIER of the thing being measured, not an extra disclosure about it. Drop a note and you
-   * lose a diary line; drop the label and §B1's primary goal — "2h10m writing, of which 40m on email"
-   * — cannot be read at all, because every row becomes `doc-a1b2f3`. It is also the one prose field
-   * already on screen at the moment of consent: §A7.3's tick-box lists documents BY LABEL so the
-   * writer can choose which to include.
-   *
-   * That reasoning covers the ordinary case, NOT the sharp one: a title can be far more revealing
-   * than a note ("Chapter 3 — my mother's illness"). Which is precisely why §A3.2 asks for
-   * per-doc suppression — and why the missing control is a real gap, not a nicety. RAISED WITH PETER
-   * 2026-07-17; the placement of a consent control is his call, not an agent's guess.
+   * ⚠ TIER 1 (always sent) because a label IDENTIFIES the thing measured: without it §B1's "2h10m
+   * writing, of which 40m on email" is unreadable, since every row reads `doc-a1b2f3`. But
+   * `setLabelSuppressed` has NO non-test caller, so in practice every title travels — a real §A3.2
+   * gap (a title can be sharper than a note), raised with Peter; the control's placement is his call.
+   * → docs/archive/productivity-email-build.md#types-doc-label
    */
   doc_label?: string
   /** ISO-8601 with local offset. */
@@ -77,40 +64,23 @@ export interface SessionRow {
   doc_type: DocType
 
   /**
-   * HOW THE TIME GOT HERE — measured by the timer, or told to us afterwards (Peter, 2026-07-17:
-   * "we can also add a manual add for if you forget to use the timer. But then it's flagged post-hoc").
+   * HOW THE TIME GOT HERE — measured by the timer, or told to us afterwards.
    *
-   * AN EXPLICIT UNION, WRITTEN ON EVERY ROW — never `entered?: 'post-hoc'` with absence meaning
-   * timer. Absence-as-classification is the exact trap `doc_type` just escaped: it defaulted to
-   * 'essay', so every unclassified session was FILED AS ESSAY WRITING whether it was or not. A field
-   * whose commonest value is carried by silence cannot be read as a claim, and this one has to be.
-   *
-   * WHY THIS IS NOT A FOURTH `provenance` TAG, AND THE REASONING IS LOAD-BEARING (§A6.1's three tags
-   * are `measured` / `estimated` / `judged`): **`estimated` means a deterministic rule WE ran that
-   * anyone can recompute.** A post-hoc block is **testimony** — uncheckable, not recomputable. Different
-   * epistemics, so it must not borrow that tag. It is a FLAG ON THE ROW, not a provenance: the row is
-   * still measured-SHAPED (a duration, a category, a day); what differs is the SOURCE OF THE TIME.
-   *
-   * ⚠ IT MUST NEVER MERGE INTO THE MEASURED BARS (§A6.1). The report has to be able to say
-   * "3h40m measured, plus 45m you added from memory". Silently totalling them is the lie. What
-   * ENFORCES it: `aggregate.ts` sums the measured fields from TIMER ROWS ONLY and carries post-hoc
-   * time in its own `posthoc_minutes` column — a different column, so conflation is unrepresentable
-   * rather than merely discouraged.
-   *
-   * IT IS A REPAIR TOOL, NOT AN AUDIT (§A5's register: "a friend letting you correct the record, not
-   * a supervisor auditing your timesheet"). Neither nag it nor scold its use.
-   *
-   * LEGACY ROWS: rows written before this field existed carry no `entered`. They predate the manual
-   * add entirely, so every one of them was timer-entered — that is a fact about history, not a
-   * default. `isPostHoc()` (aggregate.ts) is the ONE place that reads it, and it asks the positive
-   * question ("did this row SAY post-hoc?") so no other code can accidentally re-derive a default.
+   * ⚠ EXPLICIT ON EVERY ROW — never absence-means-timer (R8; `doc_type`'s silent 'essay' default
+   * filed every unclassified session as essay writing). A post-hoc block is TESTIMONY, not
+   * `estimated` (which means a rule anyone can recompute), so it is a FLAG on a measured-shaped
+   * row and NOT a fourth provenance — and it must never merge into the measured bars: `aggregate.ts`
+   * sums TIMER ROWS ONLY and carries post-hoc time in its own `posthoc_minutes` column. Read it ONLY
+   * through `isPostHoc()`, which asks the positive question, so nothing re-derives a default for the
+   * legacy rows that predate the field. A repair tool, not an audit: never nag it, never scold it.
+   * → docs/archive/productivity-email-build.md#types-entered
    */
   entered: 'timer' | 'post-hoc'
 
-  // ─── User-authored fields (Peter, 2026-07-17) — see LEDGER_PRIVATE_FIELDS ───
-  // These two are categorically different from every field above: they are text the WRITER chose to
-  // type, not telemetry derived from their editing. They are always optional, always omitted when
-  // empty, and NEVER flow to an AI without a separate, explicit opt-in.
+  // ─── User-authored fields — gated by the allow-list above ───
+  // Categorically different from every field above: text the WRITER chose to type, not telemetry
+  // derived from their editing. Always optional, always omitted when empty, and NEVER flow to an AI
+  // without a separate, explicit opt-in.
 
   /**
    * The writer's diary note for the session — "what I did", written at session end (§A5's reward
@@ -134,27 +104,12 @@ export interface SessionRow {
   place?: string
 }
 
-// ─── WHAT ACTUALLY KEEPS `note`/`place` OUT OF AN EXPORT (§A7.3) ─────────────────────────────────
-//
-// THE ALLOW-LIST IN `report/compile.ts`, and nothing else. Every field that leaves is NAMED there
-// (`sessionRows()` lists its 12 columns literally); nothing iterates a row and emits what it finds.
-// So a prose field the ledger gains tomorrow cannot leak by default — it is simply not emitted
-// until someone adds it there, which forces them to choose a consent tier. The writer's opt-in
-// (`includeNotes`, default false) gates the one section that may carry prose.
-//
-// A DENY-LIST USED TO SIT HERE — `LEDGER_PRIVATE_FIELDS = ['note','place']`, `stripPrivateFields()`,
-// `PublicSessionRow` — described as "the DEFAULT payload shape". It was REMOVED on 2026-07-17
-// because it was never the default, or anything else: it had ZERO non-test callers on every branch
-// including master, and `/privacy`'s own header cited it as the enforcing mechanism. The privacy
-// property held the whole time (the allow-list is real), so this was not a leak — it was worse in a
-// quieter way: **editing `LEDGER_PRIVATE_FIELDS` to protect a new field would have done nothing at
-// all, silently**, while reading like the guard that mattered. Two rules for one question, only one
-// live, and the docs pointed at the dead one.
-//
-// DO NOT REINTRODUCE A DENY-LIST HERE. compile.ts's own banner has the argument: a deny-list fails
-// the opposite way, and that failure is silent. If a future path must export rows, name its columns
-// there. `report/compile.test.ts` pins the allow-list property directly — including that an
-// unforeseen prose field cannot ride out even with tier 2 ON.
+// ─── WHAT KEEPS `note`/`place` OUT OF AN EXPORT (§A7.3) ──────────────────────
+// ⚠ THE ALLOW-LIST IN `report/compile.ts`, AND NOTHING ELSE — every field that leaves is NAMED
+// there, so a prose field the ledger gains tomorrow is simply not emitted until someone adds it and
+// picks a consent tier. DO NOT REINTRODUCE A DENY-LIST HERE: the last one had zero live callers
+// while `/privacy` cited it as the enforcing mechanism (R4), and it fails the opposite way, silently.
+// → docs/archive/productivity-email-build.md#types-no-deny-list
 
 // ─── Provenance attestation (§A3.1) ──────────────────────────────────────────
 // The ledger doubles as a signed provenance ledger: rows hash into a chain so the ledger is
@@ -166,18 +121,11 @@ import type { OtsProofState } from '../types/document'
 /**
  * One day's attestation block.
  *
- * WHY DAYS ARE INDEPENDENT AND NOT CHAINED TO EACH OTHER (a design decision a failing test forced,
- * and the right one): a cross-day prevHash chain means ANY late append invalidates every later
- * day's blockHash — and late appends are the NORMAL case here, because §A9 says the ledger syncs
- * through the writer's own cloud and two devices append concurrently. Yesterday's row arriving from
- * a phone would burn the Bitcoin anchor on every day after it, forcing a re-stamp of the whole
- * month. So each day's block hashes only its own rows (bound to its month + day, so a block cannot
- * be replayed elsewhere) and is independently OTS-anchorable.
- *
- * This is exactly how the existing spine already works — snapshots are NOT chained to one another;
- * each snapshot's bundleHash is independently OTS-anchored, and the hash CHAIN lives inside a
- * signing session (receipts). Ordering evidence comes from Bitcoin's own timestamps, which is
- * stronger than a self-asserted prevHash anyway.
+ * ⚠ DAYS ARE INDEPENDENT, NEVER CHAINED TO EACH OTHER. Late appends are the NORMAL case (§A9: two
+ * devices sync through the writer's own cloud), and a cross-day prevHash would burn the Bitcoin
+ * anchor on every later day. Each block hashes only its own rows, bound to its month + day so it
+ * cannot be replayed elsewhere — exactly how snapshots already work.
+ * → docs/archive/productivity-email-build.md#types-attestation-days
  */
 export interface LedgerAttestation {
   v: 1
@@ -202,19 +150,13 @@ export interface LedgerAttestation {
  * inherits that invariant deliberately.
  */
 /**
- * The writer's reflection on a STRETCH of work — "what did I actually do?" (Peter, 2026-07-17).
+ * The writer's reflection on a STRETCH of work — "what did I actually do?"
  *
- * WHY THIS IS ITS OWN OBJECT AND NOT A FIELD ON A ROW. A reflection is not a property of one
- * session: it is about a SPAN across many rows, and the writer thinks in CATEGORIES ("an hour on
- * the essay, forty minutes reading"), not in session ids they have never seen. `note?` on the row
- * asked the wrong question — it made them annotate an accounting artefact.
- *
- * IT IS ALSO WHAT RESCUES `misc`. Nothing sets a type on an ordinary document, so most rows are an
- * honest unknown; this is where the writer NAMES them, after the fact, from memory, while it is
- * fresh. The chart is the recall prompt — the measured stretch is shown, and they say what it was.
- *
- * §A5: ALWAYS SKIPPABLE, never re-prompted, and no reflection is a failure. The bar for every word
- * of copy around it: would he fill this in on a bad Tuesday?
+ * ⚠ ITS OWN OBJECT, NOT A FIELD ON A ROW: a reflection spans many rows, and the writer thinks in
+ * CATEGORIES, not in session ids they have never seen. It is also what rescues `misc` — the
+ * measured stretch is the recall prompt and they NAME it, after the fact. §A5: always skippable,
+ * never re-prompted, and no reflection is a failure.
+ * → docs/archive/productivity-email-build.md#types-reflection
  */
 export interface Reflection {
   reflection_id: string
@@ -275,11 +217,9 @@ export interface DayAggregate {
 
   /**
    * Minutes the writer ADDED FROM MEMORY (`entered: 'post-hoc'`) — testimony, not measurement.
-   *
-   * A SEPARATE COLUMN, and that is the whole enforcement (§A6.1). Every other number on this
-   * aggregate comes from rows the timer watched; this one comes from the writer telling us
-   * afterwards. They are never summed here, and a consumer that wants a grand total has to write the
-   * addition itself — at which point it is a choice someone made, not a lie the schema told for them.
+   * ⚠ A SEPARATE COLUMN IS THE ENFORCEMENT (§A6.1): never summed with the measured fields, so a
+   * grand total is a choice a caller writes, not a lie the schema told for them.
+   * → docs/archive/productivity-email-build.md#types-posthoc-minutes
    */
   posthoc_minutes: number
   /** How many blocks he added from memory. Never added to `session_count`. */
@@ -307,20 +247,13 @@ export interface WindowAggregate {
   to: string
   days: DayAggregate[]
   /**
-   * Session rows — supplied for the DAILY window, whose judged rows are per-session.
+   * Session rows — supplied for the DAILY window only, whose judged rows are per-session.
    *
-   * CONTRACT (decided by prod-ledger, 2026-07-17, answering the note-digest question): at
-   * WEEKLY/MONTHLY this is `[]` and opted-in notes travel as `note_digest` instead. Two reasons,
-   * and the first is the serious one:
-   *   • §A6.4. Shipping full session rows at monthly puts a SECOND copy of every measured number
-   *     in the payload alongside the day rollups. The rule that measured numbers never round-trip
-   *     through the model exists because it silently tidies them — and two copies is precisely how
-   *     a narrative ends up contradicting the bars. One representation of measurement, always.
-   *   • §A6/§A7. "Compact rollups, not raw logs" is what keeps a monthly payload bounded. The note
-   *     TEXT dominates tokens either way, so the digest costs the writer's own words and nothing
-   *     more — it just stops the schema from dragging 150 rows of measurement along with them.
-   * NB "where do I work best" must be computed CLIENT-SIDE as a measured by-place rollup, not
-   * inferred by the model from raw rows — same §A6.4 rule.
+   * ⚠ `[]` AT WEEKLY/MONTHLY; opted-in notes travel as `note_digest` instead. Rows there would put a
+   * SECOND copy of every measured number beside the day rollups (§A6.4), which is how a narrative
+   * ends up contradicting the bars — ONE representation of measurement, always. "Where do I work
+   * best" is a CLIENT-SIDE by-place rollup, never inferred by the model from raw rows.
+   * → docs/archive/productivity-email-build.md#types-sessions-empty
    */
   sessions: SessionRow[]
   /**
