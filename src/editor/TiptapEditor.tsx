@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useZoomScale } from './useZoomScale'
 import { TOOLBAR_BOTTOM_PX } from '../components/sidePill'
@@ -43,6 +43,8 @@ import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, stampSnap
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
+import type { ApplicationSurfaceMode } from '../components/ApplicationSurface'
+import { readApplicationSurfaceMode, writeApplicationSurfaceMode } from '../components/applicationSurfaceMode'
 import { emailEnabled } from '../email/flag'
 import { titleForDocument } from './docTitle'
 import { SessionRunner } from '../provenance/session'
@@ -87,6 +89,8 @@ import { musicEnabled } from '../music/flag'
 import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
 import { WorkSummaryAutoOpen } from '../components/WorkSummaryAutoOpen'
 import { PageMenu } from '../components/PageMenu'
+import { gappedPagesEnabled } from './pageView'
+import { setPaginationGappedMode } from './extensions/PaginationExtension'
 import { getLineHeight } from './lineHeight'
 import { notePerf, perflogEnabled } from './perflog'
 import { CiteAutocomplete } from '../components/CiteAutocomplete'
@@ -1045,7 +1049,11 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const compliance = useComplianceProvider()
-  const isolatedEmail = emailEnabled() && doc.docType === 'email'
+  const emailDocument = emailEnabled() && doc.docType === 'email'
+  const [emailSurfaceMode, setEmailSurfaceMode] = useState<ApplicationSurfaceMode>(() =>
+    emailDocument ? readApplicationSurfaceMode('email', doc.id) : 'isolated',
+  )
+  const isolatedEmail = emailDocument && emailSurfaceMode === 'isolated'
 
   const editorRef = useRef<ReturnType<typeof useEditor>>(null)
 
@@ -1358,6 +1366,13 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
   useEffect(() => {
     editorRef.current = editor
   }, [editor])
+
+  // Presentation switches in place. Recreating Tiptap would violate the one-editor-per-load
+  // invariant and risk losing the latest unsaved transaction merely to change page chrome.
+  useLayoutEffect(() => {
+    if (!editor || editor.isDestroyed || !emailDocument) return
+    setPaginationGappedMode(editor.view.dom, emailSurfaceMode === 'contextual' && gappedPagesEnabled())
+  }, [editor, emailDocument, emailSurfaceMode])
 
   // ── Productivity ledger: bind the doc + close sessions at real boundaries (§A4) ──
   // Binding takes the document's word baseline ONCE per open (an O(doc) count, off the keystroke
@@ -3118,10 +3133,15 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
           revealed={settled}
           covered={isTouch ? !waveRest : !settled}
         >
-          {isolatedEmail ? (
+          {emailDocument ? (
             <EmailComposePanel
               doc={doc}
               getCurrentDoc={ensureDocFresh}
+              surfaceMode={emailSurfaceMode}
+              onSurfaceModeChange={(mode) => {
+                writeApplicationSurfaceMode('email', doc.id, mode)
+                setEmailSurfaceMode(mode)
+              }}
               onDocChange={(updated) => {
                 // A header edit is a document edit, and NOTHING else saves it: scheduleSave is
                 // driven by the editor's own update handler, which a header field never fires. Left

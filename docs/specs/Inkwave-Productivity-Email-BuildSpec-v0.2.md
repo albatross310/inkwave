@@ -905,11 +905,16 @@ interface StudioWorkspaceArchiveV2 {
 
 ### D10. Phased build order
 
-**Implementation status (2026-09-04):** W1 is implemented on `feat/gmail-send`: live email drafts
+**Implementation status (2026-09-05):** W1 is implemented on `feat/gmail-send`: live email drafts
 and historical email snapshots use the same reusable application-surface primitive, the message body
 lives inside the box, application presentation suppresses visual page gaps without forking the editor,
 and the detailed sending/provenance explanation is collapsed behind a concise visible statement.
-W2–W7 remain specification only.
+W2's first seam is also implemented: an explicit Focus/Studio switch moves the same live editor and
+email subdoc between isolated application chrome and contextual document paper, without recreating
+the EditorView. The choice is local presentation state scoped to the email document and historical
+snapshots follow it; it never enters document content or provenance. Multi-subdoc contextual pages,
+annotations, duplicate-as-new, selection/preflight, and batch results remain specification only, as
+do W3–W7.
 
 1. **W1 — Isolated surface:** make the default email one centred screen-calibrated pixel-width box
    (900px at a 1728px logical screen width) on desktop and full-width on phone, ending after its content;

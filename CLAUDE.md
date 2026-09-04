@@ -437,6 +437,13 @@ or the tone.
 - **An email is an ORDINARY document** (`docType: 'email'` + an `email` header block; the BODY is
   `contentJson`). It gets history, hashing and session capture because it is a document. The email
   layer sets `docType` and nothing else; the ledger owns resolution.
+- **Email presentation is local view state, never document state.** The W2 Focus/Studio switch moves
+  the SAME `EditorContent` between an isolated `ApplicationSurface` and contextual document paper.
+  It must not recreate the EditorView merely to change chrome: `setPaginationGappedMode` changes
+  full page gaps ↔ zero-size markers in place, while the stable fit-box wrapper preserves the child
+  subtree. The per-email choice lives only under `inkwave:applicationSurface:email:mode:<docId>`;
+  it is absent from snapshots, export bundles and provenance hashes. Historical email snapshots read
+  that local choice for presentation only. Spec: Productivity & Email v0.5, §D2.
 - **TYPING COST IS THE DESIGN.** Capture rides the existing `onTransaction` stream and reuses
   `countSteps`: ~0.30µs/keystroke, flat from 200 to 40k words. Every O(doc) number is computed at
   session CLOSE — a session boundary IS an inactivity gap, so the word count at the previous close

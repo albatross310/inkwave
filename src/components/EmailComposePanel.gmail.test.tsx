@@ -2,6 +2,7 @@
 // The visible Gmail action must preserve the order the product promises:
 // Google permission → durable local record → provider transmission.
 
+import { useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { InkwaveDocument } from '../types/document'
@@ -74,6 +75,34 @@ describe('EmailComposePanel Gmail integration', () => {
     expect(surface.contains(screen.getByTestId('message-editor'))).toBe(true)
     expect(screen.getByLabelText('Message body').contains(screen.getByTestId('message-editor'))).toBe(true)
     expect(screen.getByText(/Recording proves this exact draft existed by this time/)).toBeTruthy()
+  })
+
+  it('switches the same message editor between focus and contextual studio surfaces', () => {
+    function Harness() {
+      const [mode, setMode] = useState<'isolated' | 'contextual'>('isolated')
+      return (
+        <EmailComposePanel
+          doc={doc}
+          getCurrentDoc={() => doc}
+          onDocChange={() => {}}
+          surfaceMode={mode}
+          onSurfaceModeChange={setMode}
+        >
+          <div data-testid="message-editor">Editable body</div>
+        </EmailComposePanel>
+      )
+    }
+
+    render(<Harness />)
+    const surface = screen.getByRole('region', { name: 'Email draft' })
+    const body = screen.getByTestId('message-editor')
+    expect(surface.getAttribute('data-iw-surface-mode')).toBe('isolated')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Studio' }))
+
+    expect(surface.getAttribute('data-iw-surface-mode')).toBe('contextual')
+    expect(surface.contains(body)).toBe(true)
+    expect(screen.getByRole('button', { name: 'Studio' }).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('authorises, records, and only then sends', async () => {

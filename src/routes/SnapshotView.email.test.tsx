@@ -51,6 +51,21 @@ describe('/snapshot email rendering', () => {
     expect(screen.getByText('Ordinary body')).toBeTruthy()
   })
 
+  it('can place the same frozen email inside a contextual writing surface', () => {
+    render(
+      <EmailSnapshotSurface
+        snapshot={snapshot({ to: ['ada@example.com'], cc: [], bcc: [], subject: 'Studio note' })}
+        surfaceMode="contextual"
+      >
+        <p>Historical body</p>
+      </EmailSnapshotSurface>,
+    )
+
+    const surface = screen.getByRole('region', { name: 'Email recorded in this snapshot' })
+    expect(surface.getAttribute('data-iw-surface-mode')).toBe('contextual')
+    expect(screen.getByLabelText('Recorded message body').contains(screen.getByText('Historical body'))).toBe(true)
+  })
+
   it('omits empty optional recipient rows without hiding an empty required field', () => {
     render(<EmailSnapshotSurface snapshot={snapshot({ to: [], cc: [], bcc: [], subject: '' })}><p>Body</p></EmailSnapshotSurface>)
     expect(screen.queryByText('Cc')).toBeNull()

@@ -31,6 +31,9 @@ import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { RichDiffView } from '../components/RichDiffView'
 import { EmailSnapshotSurface } from '../components/EmailSnapshotSurface'
+import { readApplicationSurfaceMode } from '../components/applicationSurfaceMode'
+import type { ApplicationSurfaceMode } from '../components/ApplicationSurface'
+import type { SurfacePresentation } from '../editor/surfacePresentation'
 import { textRenderEnabled } from '../editor/textRenderFlag'
 import { createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
 import { snapThumbsDebug, snapThumbsEnabled } from '../editor/snapThumbs'
@@ -68,6 +71,14 @@ const DANGER_BG = 'var(--iw-snap-danger-bg, rgba(185,28,28,0.07))'
 const DANGER_EDGE = 'var(--iw-snap-danger-edge, rgba(185,28,28,0.25))'
 const ADD_FG = 'var(--iw-snap-add-fg, #166534)'
 const ADD_BG = 'var(--iw-snap-add-bg, rgba(22,163,74,0.16))'
+
+function emailSnapshotMode(snapshot: Pick<Snapshot, 'documentId' | 'email'>): ApplicationSurfaceMode {
+  return snapshot.email ? readApplicationSurfaceMode('email', snapshot.documentId) : 'isolated'
+}
+
+function snapshotPresentation(snapshot: Pick<Snapshot, 'documentId' | 'email'>): SurfacePresentation {
+  return snapshot.email && emailSnapshotMode(snapshot) === 'isolated' ? 'application' : 'document'
+}
 const DEL_FG = 'var(--iw-snap-del-fg, #b91c1c)'
 const DEL_BG = 'var(--iw-snap-del-bg, rgba(185,28,28,0.07))'
 const RULE = 'var(--iw-snap-rule, rgba(48, 36, 56, 0.32))'
@@ -267,8 +278,9 @@ function FullDiffView({
   // Header provenance is frozen independently from the body and folded into emailHash/bundleHash.
   // Render the SNAPSHOT copy here, outside the ProseMirror body, so moving through history cannot
   // accidentally show the live document's current recipient or subject beside an older body.
+  const surfaceMode = emailSnapshotMode(snapshot)
   const wrapSnapshot = (body: ReactNode) => (
-    <EmailSnapshotSurface snapshot={snapshot}>{body}</EmailSnapshotSurface>
+    <EmailSnapshotSurface snapshot={snapshot} surfaceMode={surfaceMode}>{body}</EmailSnapshotSurface>
   )
   if (!ops) {
     return (
@@ -790,7 +802,7 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
       pagRef.current = paginateStaticDoc({
         scroller: L,
         cacheKey: `${snap.id}|${ops ? 'diff' : 'doc'}`,
-        presentation: snap.email ? 'application' : 'document',
+        presentation: snapshotPresentation(snap),
         // Repaints (pane resize, zoom) publish geometry only while this layer drives the view.
         onRepaint: (pages) => { if (!disposed && activeRef.current) hooks.onGeo([...pages]) },
       })
@@ -861,7 +873,7 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
       >
         {/* The layer key (snap.id) gives each snapshot a private subtree, so the static paginator's
             DOM surgery (gap insertion splits text nodes) can never desync React's reconciliation. */}
-        <Scroll phone={isPhone} presentation={snap.email ? 'application' : 'document'}><div><FullDiffView ops={ops} snapshot={snap} onOpClick={ops ? hooks.onOpClick : undefined} onHoverOp={hooks.onHoverOp} /></div></Scroll>
+        <Scroll phone={isPhone} presentation={snapshotPresentation(snap)}><div><FullDiffView ops={ops} snapshot={snap} onOpClick={ops ? hooks.onOpClick : undefined} onHoverOp={hooks.onHoverOp} /></div></Scroll>
       </div>
     </div>
   )

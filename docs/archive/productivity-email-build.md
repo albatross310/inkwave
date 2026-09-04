@@ -80,6 +80,16 @@ The calibration and centred fit/resize wrapper are shared `ApplicationSurface` b
 tool can provide a different reference surface/display width profile without copying email code;
 contextual surfaces continue to bypass isolated fitting.
 
+**W2 first seam (2026-09-05).** Email now exposes a Focus/Studio presentation switch. It moves the
+same `EditorContent` between the isolated application frame and contextual document paper without
+recreating Tiptap, forking autosave, or changing the email document. Pagination changes its
+decoration face in place (continuous zero-size markers ↔ document page gaps), while keeping the same
+canonical break model. The selected mode is local per-email presentation state—not document or
+provenance state—and recorded snapshots read the same choice. `ApplicationSurfaceModeSwitch`, the
+stable fit-box wrapper, and the local presentation store are reusable by later application tools.
+Multi-email contextual workspaces, journal annotations, duplicate-as-new, and batch sending remain
+the next W2 slices.
+
 ---
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT ON since 2026-07-18)

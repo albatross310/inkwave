@@ -15,7 +15,7 @@ import { handoffSender, fits, type HandoffSenderId } from '../email/sender'
 import { authoriseGmailSend, gmailConfigured, gmailSender, preloadGmail } from '../email/gmail'
 import { titleForEmail } from '../email/newEmail'
 import * as copy from '../email/copy'
-import { ApplicationSurface, type ApplicationSurfaceMode } from './ApplicationSurface'
+import { ApplicationSurface, ApplicationSurfaceModeSwitch, type ApplicationSurfaceMode } from './ApplicationSurface'
 
 interface Props {
   doc: InkwaveDocument
@@ -25,6 +25,7 @@ interface Props {
   onDocChange: (updated: InkwaveDocument) => void
   /** Presentation only. The same email subdoc/data path serves both modes. */
   surfaceMode?: ApplicationSurfaceMode
+  onSurfaceModeChange?: (mode: ApplicationSurfaceMode) => void
   children?: ReactNode
 }
 
@@ -39,6 +40,7 @@ export function EmailComposePanel({
   getCurrentDoc,
   onDocChange,
   surfaceMode = 'isolated',
+  onSurfaceModeChange,
   children,
 }: Props) {
   const headers = doc.email
@@ -163,7 +165,15 @@ export function EmailComposePanel({
   return (
     <ApplicationSurface
       app="email"
-      label="Email draft"
+      label={(
+        <div className="iw-application-surface__title-row">
+          <span>Email draft</span>
+          {onSurfaceModeChange && (
+            <ApplicationSurfaceModeSwitch mode={surfaceMode} onChange={onSurfaceModeChange} />
+          )}
+        </div>
+      )}
+      ariaLabel="Email draft"
       mode={surfaceMode}
       nightable
       resizable={surfaceMode === 'isolated'}

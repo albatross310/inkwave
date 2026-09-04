@@ -45,6 +45,14 @@ import { getCitationStyle } from '../../citations/citationsBus'
 import { notePerf, probePerf } from '../perflog'
 
 const KEY = new PluginKey<DecorationSet>('pagination')
+const GAPPED_MODE_EVENT = 'inkwave:pagination-gapped-mode'
+
+/** Switch page-gap presentation without rebuilding the EditorView. The document and break model
+ * stay untouched; only the decoration face changes between full gaps and zero-size markers. */
+export function setPaginationGappedMode(editorDom: HTMLElement, gapped: boolean): void {
+  editorDom.dispatchEvent(new CustomEvent(GAPPED_MODE_EVENT, { detail: { gapped } }))
+}
+
 export const MARGIN_TOP = 72 // px parchment margin at the top of every page (incl. page 1)
 export { MARGIN_BOTTOM } // moved to pageSettings — see note there (shell-chunk weight)
 
@@ -927,7 +935,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
   addOptions() { return { enabled: false, gapped: false } },
   addProseMirrorPlugins() {
     const enabled = this.options.enabled
-    const gapped = this.options.gapped
+    let gapped = this.options.gapped
     return [
       new Plugin<DecorationSet>({
         key: KEY,
@@ -2172,6 +2180,27 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // page settings/paper change): the same label then renders at a different width under the
           // same key. So the boxes die exactly where the line cache does.
           const clearLineCache = () => { lineCache = new WeakMap(); incState = null; clearCiteBoxes() }
+          const gappedModeCb = (event: Event) => {
+            const next = (event as CustomEvent<{ gapped?: unknown }>).detail?.gapped
+            if (typeof next !== 'boolean' || next === gapped || destroyed) return
+            gapped = next
+            if (paintRaf) { cancelAnimationFrame(paintRaf); paintRaf = 0 }
+            layer?.remove()
+            layer = null
+            if (sheet) {
+              sheet.classList.remove('inkwave-gapped')
+              sheet.style.paddingTop = ''
+              sheet.style.minHeight = ''
+            }
+            lastInputSig = ''
+            lastLayoutSig = ''
+            lastSet = DecorationSet.empty
+            view.dispatch(view.state.tr.setMeta(KEY, DecorationSet.empty).setMeta('addToHistory', false))
+            clearLineCache()
+            clearStepCache()
+            forceRecompute()
+          }
+          view.dom.addEventListener(GAPPED_MODE_EVENT, gappedModeCb)
           const fontCb = () => { if (!destroyed) { clearLineCache(); clearStepCache(); forceRecompute() } }
           if (typeof document !== 'undefined' && document.fonts) {
             document.fonts.ready.then(fontCb).catch(() => {})
@@ -2273,6 +2302,7 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               window.removeEventListener('inkwave:zoom-step', onZoomStep)
               window.removeEventListener('inkwave:arith-exit', onArithExit)
               window.removeEventListener('inkwave:editor-revealed', onEarlyWarm)
+              view.dom.removeEventListener(GAPPED_MODE_EVENT, gappedModeCb)
               PRE_ACT_EVS.forEach((ev) => window.removeEventListener(ev, onPreActivity, { capture: true } as EventListenerOptions))
               PRE_CHOREO_EVS.forEach((ev) => window.removeEventListener(ev, onPreChoreo))
               if (preTimer) clearTimeout(preTimer)

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { ApplicationSurface } from './ApplicationSurface'
+import { ApplicationSurface, ApplicationSurfaceModeSwitch } from './ApplicationSurface'
 
 const css = readFileSync(resolve(__dirname, '../styles/index.css'), 'utf8')
 
@@ -34,6 +34,16 @@ describe('ApplicationSurface', () => {
     const surface = screen.getByRole('region', { name: 'Music work' })
     expect(surface.getAttribute('data-iw-surface-mode')).toBe('contextual')
     expect(surface.classList.contains('iw-application-surface--contextual')).toBe(true)
+  })
+
+  it('offers one reusable accessible switch for focused and contextual application layouts', () => {
+    let selected = ''
+    render(<ApplicationSurfaceModeSwitch mode="isolated" onChange={(mode) => { selected = mode }} />)
+
+    expect(screen.getByRole('button', { name: 'Focus' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Studio' }).getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'Studio' }))
+    expect(selected).toBe('contextual')
   })
 
   it('does not inherit document-page margins as an application-body indent', () => {

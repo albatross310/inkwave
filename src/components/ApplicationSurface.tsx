@@ -17,6 +17,39 @@ import {
  */
 export type ApplicationSurfaceMode = 'isolated' | 'contextual'
 
+export function ApplicationSurfaceModeSwitch({
+  mode,
+  onChange,
+  isolatedLabel = 'Focus',
+  contextualLabel = 'Studio',
+}: {
+  mode: ApplicationSurfaceMode
+  onChange: (mode: ApplicationSurfaceMode) => void
+  isolatedLabel?: string
+  contextualLabel?: string
+}) {
+  return (
+    <div className="iw-application-mode-switch" role="group" aria-label="Application layout">
+      <button
+        type="button"
+        aria-pressed={mode === 'isolated'}
+        title="Show only this application"
+        onClick={() => onChange('isolated')}
+      >
+        {isolatedLabel}
+      </button>
+      <button
+        type="button"
+        aria-pressed={mode === 'contextual'}
+        title="Place this application on a writing page"
+        onClick={() => onChange('contextual')}
+      >
+        {contextualLabel}
+      </button>
+    </div>
+  )
+}
+
 interface ApplicationSurfaceProps {
   app: string
   label: ReactNode
@@ -59,6 +92,15 @@ export function ApplicationSurface({
     const container = fitBox?.parentElement
     if (!surface || !fitBox || !container) return
 
+    if (mode !== 'isolated') {
+      fitScaleRef.current = 1
+      fitBox.style.removeProperty('width')
+      fitBox.style.removeProperty('height')
+      surface.style.removeProperty('--iw-application-fit-scale')
+      surface.classList.remove('iw-application-surface--fit-capped')
+      return
+    }
+
     if (surface.closest('.inkwave-editor-surface.is-phone')) {
       fitScaleRef.current = 1
       fitBox.style.removeProperty('width')
@@ -81,7 +123,7 @@ export function ApplicationSurface({
     fitBox.style.height = `${surface.offsetHeight * scale}px`
     surface.style.setProperty('--iw-application-fit-scale', String(scale))
     surface.classList.toggle('iw-application-surface--fit-capped', scale < 1)
-  }, [profileScreenWidthPx, profileSurfaceWidthPx])
+  }, [mode, profileScreenWidthPx, profileSurfaceWidthPx])
 
   const persistWidth = useCallback((width: number) => {
     if (!surfaceRef.current) return
@@ -309,9 +351,11 @@ export function ApplicationSurface({
       )}
     </section>
   )
-  if (mode !== 'isolated') return surface
   return (
-    <div ref={fitBoxRef} className="iw-application-fit-box">
+    <div
+      ref={fitBoxRef}
+      className={`iw-application-fit-box${mode === 'contextual' ? ' iw-application-fit-box--contextual' : ''}`}
+    >
       {surface}
     </div>
   )

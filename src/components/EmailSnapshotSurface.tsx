@@ -4,7 +4,7 @@
 
 import type { ReactNode } from 'react'
 import type { Snapshot } from '../types/document'
-import { ApplicationSurface } from './ApplicationSurface'
+import { ApplicationSurface, type ApplicationSurfaceMode } from './ApplicationSurface'
 
 const TEXT = 'var(--iw-snap-text, #3a3a3a)'
 const MUTED = 'var(--iw-snap-muted, #6f6a7d)'
@@ -20,9 +20,11 @@ function HeaderRow({ label, value }: { label: string; value: string }) {
 
 export function EmailSnapshotSurface({
   snapshot,
+  surfaceMode = 'isolated',
   children,
 }: {
   snapshot: Pick<Snapshot, 'email'>
+  surfaceMode?: ApplicationSurfaceMode
   children: ReactNode
 }) {
   const headers = snapshot.email
@@ -35,7 +37,8 @@ export function EmailSnapshotSurface({
       app="email"
       label="Recorded email"
       ariaLabel="Email recorded in this snapshot"
-      resizable
+      mode={surfaceMode}
+      resizable={surfaceMode === 'isolated'}
     >
       <dl className="iw-email-snapshot-headers" style={{ margin: 0 }}>
         <HeaderRow label="To" value={to || '(no recipient)'} />
