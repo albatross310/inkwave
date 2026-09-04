@@ -46,11 +46,11 @@
 // (the --wave-x inheritance firebreak — see index.css).
 
 // ─── Colour knobs (one const each, per Peter's spec) ─────────────────────────────────────────
-export const SPARK_COLOR = '#f7f2e8' // parchment-white sparkle strokes/satellites (day)
-export const SPARK_CORE = '#fffdf8' // bright paper-white sparkle centre dot (day)
+export const SPARK_COLOR = '#f3edcf' // shared warm-ivory water mark (day)
+export const SPARK_CORE = '#f3edcf' // same hue; opacity/geometry, not colour drift, forms the core
 export const SPARK_COLOR_NIGHT = '#ffe14d' // night sparkles stay yellow (no objection recorded)
 export const SPARK_CORE_NIGHT = '#fffbe0'
-export const DASH_COLOR = '#b7c9c8' // muted blue-grey — matches the day wave strokes
+export const DASH_COLOR = '#f3edcf' // shared warm-ivory water mark (day)
 export const DASH_COLOR_NIGHT = '#9aa3af' // grey family — matches the night wave art
 
 // ─── Tuning ───────────────────────────────────────────────────────────────────────────────────
