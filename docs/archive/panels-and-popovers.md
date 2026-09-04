@@ -586,3 +586,62 @@ Peter: "yes anchor text boxes at nearest text." A note dropped at page coordinat
 in a reflowed column (the coordinates describe a layout that is no longer being drawn), so the
 note is attached to the paragraph it was nearest and travels with it. Paragraph-level placement,
 which he accepted; the alternative is a note that floats in the margin of nothing.
+
+---
+
+## `scas/controller.ts` — the seam between the live editor and the pure engine
+
+<a id="scas-windowed-scan"></a>
+### The windowed scan, and why it is safe by construction
+
+`scanCommitted` collects the document's *committed* words. A word is committed unless it is the one
+under the cursor still being typed (no trailing boundary yet) — matching the renderer's definition,
+so a word nudge fires exactly when the word turns red.
+
+`window` (phone input priority, 2026-07-10): scan only the paragraphs intersecting the given
+range instead of the whole document. The full scan is O(doc) (~3ms/12k words in Node, tens of ms
+on a phone CPU) and ran on EVERY 250ms typing pause; a caret/edit window is ~500× cheaper.
+SAFE BY CONSTRUCTION for passes 1–2: words can only newly commit (caret leaves them) or newly
+substitute (doc changes there) INSIDE the tick's edit+caret window, and verdicts for text outside
+it are frozen state (never re-derived from S_v — the no-retroactive-reflag invariant). The
+DELETION pass needs whole-document presence, which is what the presence index supplies — a window
+is never allowed to hide a removal.
+
+<a id="scas-scan-cache"></a>
+### The per-paragraph scan cache
+
+(2026-07-11 typing-lag ablation.) `ScannedWord` is position-free and — for a paragraph NOT
+containing the cursor — a pure function of the paragraph node (persistent PM structure: same
+reference ⇔ identical text+marks), so its word list can be reused across ticks. The FULL scan stays
+semantically full (the deletion pass still sees whole-document word presence — the hard invariant);
+it is just assembled from cached per-paragraph arrays, so a desktop tick (or a phone deletion tick)
+costs O(changed paragraphs), not O(doc). The cursor's paragraph is never cached (the
+uncommitted-word test depends on cursorPos).
+
+<a id="scas-presence-index"></a>
+### The whole-document lemma-presence index
+
+(2026-07-11, round-4 "deleting lags in waves".) The deletion pass needs whole-doc WORD PRESENCE,
+not a full rescan: the controller keeps two multisets — every word's lemma, and every slot-marked
+word's ORIGINAL lemma — updated per tick by a top-level block diff against the previous doc
+(persistent PM structures: identical reference ⇔ identical content, so only ADDED/REMOVED block
+identities contribute). A deletion tick then answers "is this nudged lemma still present anywhere"
+in O(changed blocks) and the scan itself can stay WINDOWED. Per-block contributions are
+position-free and cached by node identity; the word definition matches `scanCommitted` exactly
+(paragraph descendants, `[a-zA-Z]{2,}`).
+
+The phantom-snapshot guard holds because the index is GLOBAL BY CONSTRUCTION: a removal anywhere
+decrements it whether or not the window saw it.
+
+<a id="scas-set-views"></a>
+### The set views are built once per pass
+
+Fresh word nudges: a committed in-S lemma (not immune/locked) becomes an outstanding nudge, stamped
+at the moment it FIRST turns purple (`kickTimes` — the slot's true "first-written" time, persisted
+with the state so it survives reload, read later via `firstNudgeAt`).
+
+Set views are built ONCE per pass: `classifyCommit`'s array scans (`locked.includes` +
+`satisfied.find`) made this loop O(words × session-state) on every keystroke. The inline checks are
+`classifyCommit`'s exact decision order — locked → skip (loop 2 only acts on 'in-S'),
+immune-this-version → skip, in-S → kick, else pass. `locked`/`satisfied` cannot change inside this
+loop (`recordKick` touches only `liveKicks`/`kickTimes`), so the views hold.
