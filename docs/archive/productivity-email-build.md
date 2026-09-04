@@ -25,8 +25,8 @@ Four things here are worth reading before changing anything in `src/productivity
 
 ## Email application surface — W1 (2026-09-04, `feat/gmail-send`)
 
-Part D's first build slice is live. New email documents now replace the parchment with one A4/Letter-
-sized application box containing the frozen-or-editable headers, actions/status, the real Tiptap body,
+Part D's first build slice is live. New email documents now replace the parchment with one page-width,
+content-height application box containing the frozen-or-editable headers, actions/status, the real Tiptap body,
 and provenance/send disclosure. Snapshot email bodies use the same frame, so an historical message is
 one recorded-email object rather than a header card followed by apparently unrelated prose.
 
@@ -42,10 +42,12 @@ paper top padding, and equal 794px surface/paper widths plus equal 1123px height
 237 test files, 3,055 tests passed (2 skipped), typecheck, and production build. W2 contextual studio,
 multi-message batches, subdoc sequencing, overview, containers, and sync fan-out remain spec only.
 
-Peter's first W1 visual pass found the message inset still inherited his document-page margin and the
-body flex/min-height left most of the page looking like an empty input. Application surfaces now own a
+Peter's first W1 visual passes found the message inset still inherited his document-page margin and the
+body/page min-heights merely moved the large blank region from inside the body to below its disclosure.
+Application surfaces now own a
 fixed compact inset instead of reading `--iw-page-side-margin`; the body has a modest content-sized
-typing floor and the disclosure follows it. A browser check with a deliberately exaggerated 196px
+typing floor, the disclosure follows it, and the box itself ends after the disclosure rather than
+manufacturing a blank page-height tail. A browser check with a deliberately exaggerated 196px
 document margin measured the message at 25px from the application edge, proving the settings are no
 longer coupled.
 
@@ -596,7 +598,7 @@ draft sync (`gmail.compose`) are designed as a separate, explicit restricted-sco
 Nothing in this build requests read/compose/modify access; current Gmail remains `gmail.send` only.
 
 **Dual email surfaces and multi-message sending are SPEC ONLY (v0.5, §D2).** New email work will
-default to an isolated page-sized email surface. The present writing-page arrangement survives as a
+default to an isolated page-width, content-height email surface. The present writing-page arrangement survives as a
 purposeful contextual studio: one or more complete message boxes (body inside each box) can sit among
 journal prose and annotations, support recipient variants, and send as a reviewed batch. Every box
 remains its own email subdoc; surrounding notes are excluded from sent bytes by structure. Batch

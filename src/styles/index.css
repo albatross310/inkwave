@@ -1140,15 +1140,12 @@
     display: flex;
     flex-direction: column;
     width: 100%;
-    min-height: var(--iw-page-height, calc(100dvh - 2.5rem));
+    min-height: 0;
     background: var(--iw-application-bg, #ffffff);
     color: var(--iw-application-fg, #292524);
     border: 1px solid var(--iw-application-edge, #cbb8f2);
     border-radius: 16px;
     box-shadow: 0 8px 32px var(--iw-application-shadow, rgba(80, 50, 10, 0.18));
-  }
-  .iw-application-surface--contextual {
-    min-height: 0;
   }
   .iw-application-surface__label {
     padding: 1.5rem var(--iw-application-inset) 0.8rem;
@@ -1177,7 +1174,6 @@
   }
   .inkwave-editor-surface.is-phone .iw-application-surface {
     --iw-application-inset: 1.25rem;
-    min-height: 100dvh;
     border-left: 0;
     border-right: 0;
     border-radius: 0;

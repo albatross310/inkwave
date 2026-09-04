@@ -294,10 +294,10 @@ message becomes an Inkwave subdoc only through a deliberate action: open a Gmail
 start a reply/forward, or save a received/sent message into a workspace. Merely browsing Inbox must
 not manufacture local documents, snapshots, ledger sessions, or sync memberships.
 
-The page-sized email surface (§D2) is shared by local drafts and connected Gmail drafts. Received and
-sent mail use the same visual language in read-only mode, with sender/date/provider state replacing
-compose controls. Inbox/Drafts/Sent navigation must integrate with overview mode without turning
-every remote row into a mounted editor.
+The page-width, content-height email surface (§D2) is shared by local drafts and connected Gmail
+drafts. Received and sent mail use the same visual language in read-only mode, with
+sender/date/provider state replacing compose controls. Inbox/Drafts/Sent navigation must integrate
+with overview mode without turning every remote row into a mounted editor.
 
 #### B3.3 Fetch, cache, and rendering boundaries
 
@@ -533,7 +533,7 @@ The distinction between membership and copying is load-bearing: adding one subdo
 does not create two unrelated drafts. Both memberships name the same stable `subdoc_id`, and editing
 it schedules both containers to receive the new revision.
 
-### D2. Full-page email surface
+### D2. Isolated email surface
 
 Email has two deliberate presentations over the same underlying email subdocs. The presentation is
 not inferred from message count, title, recipient, or content; the writer can switch it explicitly.
@@ -542,9 +542,10 @@ not inferred from message count, title, recipient, or content; the writer can sw
 
 An email must no longer look like a small panel placed on top of an unrelated paper page. New email
 work opens in **isolated mode** by default: when the active subdoc has `doc_type: email`, the email
-itself is the page-sized writing surface.
+itself is the writing surface.
 
-- The surface uses the same resolved page dimensions as an ordinary page, but its header, body,
+- The surface uses the same resolved page width as an ordinary page and grows to its content height;
+  it must not manufacture an empty page-height tail after a short message. Its header, body,
   record/send controls, status, and concise provenance disclosure form one continuous box.
 - The editable body begins immediately beneath the email header/actions inside that box. There is no
   second paper surface visibly continuing behind or beneath it.
@@ -555,7 +556,7 @@ itself is the page-sized writing surface.
 - The long-form provenance explanation is available from an inline disclosure/help control. The
   surface always retains a short, visible statement of the honesty boundary: recording proves the
   draft existed by the shown time; it does not prove delivery or reading.
-- The full-page layout must work before Gmail is configured. Record and provider-handoff remain
+- The isolated layout must work before Gmail is configured. Record and provider-handoff remain
   available; direct Gmail send appears only when configured.
 
 Isolated mode is the shortest path from writing to sending. It is also the shared default pattern
@@ -591,8 +592,9 @@ more complete email boxes inside a larger writing page and keep thinking materia
   faithful static previews until selected, preserving the one-live-editor/write-owner rule.
 
 This isolated/contextual pair is the reusable Inkwave application pattern: focused tools default to
-their own page-sized surface, while studio mode composes several tool objects with ordinary writing.
-Future music and other Inkwave tools should reuse the pattern rather than inventing separate shells.
+their own page-width, content-height surface, while studio mode composes several tool objects with
+ordinary writing. Future music and other Inkwave tools should reuse the pattern rather than inventing
+separate shells.
 
 #### D2.3 Batch send contract
 
@@ -857,8 +859,8 @@ lives inside the box, application presentation suppresses visual page gaps witho
 and the detailed sending/provenance explanation is collapsed behind a concise visible statement.
 W2–W7 remain specification only.
 
-1. **W1 — Isolated surface:** make the default email one page-sized box; consolidate header, editor
-   body, actions, status, and concise disclosures. No archive change.
+1. **W1 — Isolated surface:** make the default email one page-width box that ends after its content;
+   consolidate header, editor body, actions, status, and concise disclosures. No archive change.
 2. **W2 — Contextual studio:** retain the writing page as an explicit alternate presentation; place
    complete email subdocs with their bodies inside boxes, distinguish never-sent journal material,
    support duplicate-as-new, and add selection/preflight/per-item batch outcomes.
@@ -881,7 +883,8 @@ multi-target fault injection proves that one unreadable destination cannot damag
 
 #### Surface and navigation
 
-- An email renders as one page-sized box with its body inside it and no second paper visibly behind it.
+- An email renders as one page-width box that grows with its content, with its body inside it, no
+  forced blank page-height tail, and no second paper visibly behind it.
 - New email work defaults to isolated mode; switching to contextual studio mode preserves the same
   email identity, bytes, history, memberships, and send state.
 - Contextual studio mode keeps every message body inside its email box and allows clearly separate
