@@ -617,8 +617,9 @@ measure the artifact per block, not the coincidence.
 Muted indigo→teal gradient, two 140px SVG wave tiles drifting at 72px/s, a precomputed pool of
 glitters and wave-marks, and an S-curve slow-down at reveal. The day palette is deliberately more
 serious than the former saturated cyan: `--iw-water-gradient` is the single background source
-(`#40506f` → `#3f827e`), wave marks are blue-grey, and glints are muted brass. Keep every day-water
-consumer on the shared token; do not reintroduce per-surface gradient copies. **The load animation is precomputed and
+(`#1c1724` → reflective indigo `#34344f` → `#3f827e`), with blue-grey wave marks and muted-brass
+glints. Keep every day-water consumer on the shared token; do not reintroduce per-surface gradient
+copies. **The load animation is precomputed and
 playback is COMPOSITOR-ONLY — no per-frame JS, so main-thread starvation cannot touch it.** Exactly
 two control events cross from the app into it: START (implicit, the prerendered `.iw-wave-anim`
 class) and SETTLE (`inkwave:reveal-imminent`).

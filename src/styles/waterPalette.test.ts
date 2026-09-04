@@ -11,7 +11,7 @@ describe('day water palette', () => {
   it('has one shared muted indigo-to-teal background definition', () => {
     expect(css.match(/--iw-water-gradient:/g)).toHaveLength(1)
     expect(css).toContain('--iw-water-base: #3f827e')
-    expect(css).toContain('--iw-water-gradient: linear-gradient(98.5deg, #40506f 0%, #3f827e 100%)')
+    expect(css).toContain('--iw-water-gradient: linear-gradient(98.5deg, #1c1724 0%, #34344f 36%, #3f827e 100%)')
     expect(css).not.toMatch(/#00b4d8|#00bfa8|%2300b4d8|%2300bfa8/i)
   })
 
