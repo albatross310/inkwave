@@ -17,4 +17,15 @@ describe('footer chrome outlines', () => {
     expect(read('src/components/ReceiptPanel.tsx')).toContain('iw-nightable iw-toolbar-outline')
     expect(read('src/components/SyncStatus.tsx')).toContain('iw-nightable iw-toolbar-outline')
   })
+
+  it('gives the reconnect message a centred two-line state without an alert glyph', () => {
+    const editor = read('src/editor/TiptapEditor.tsx')
+    const sync = read('src/components/SyncStatus.tsx')
+    expect(editor).toContain('label="Reconnect to keep saving"')
+    expect(editor).not.toContain('label="⚠ Reconnect to keep saving"')
+    expect(editor).toMatch(/label="Reconnect to keep saving"\s+multiline/)
+    expect(sync).toContain('SIDE_PILL_TALL_H')
+    expect(sync).toContain("multiline ? 'justify-center text-center whitespace-normal'")
+    expect(sync).toContain('sidePillBottom(zoom, triggerHeight)')
+  })
 })

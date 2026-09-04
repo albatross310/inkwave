@@ -3213,7 +3213,8 @@ export function TiptapEditor({ doc, onDocChange }: TiptapEditorProps) {
             if (needsReconnect) {
               return (
                 <SyncStatus compact={isTouch}
-                  label="⚠ Reconnect to keep saving"
+                  label="Reconnect to keep saving"
+                  multiline
                   synced={false}
                   path={fileName}
                   tooltip={fileName ? `Click to re-allow saving to ${fileName}` : 'Click to re-allow saving'}

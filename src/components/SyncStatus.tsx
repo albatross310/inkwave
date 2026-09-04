@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useZoomScale } from '../editor/useZoomScale'
-import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
+import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
 // it never grows leftward into the text). The pill text is decided by the caller so it reads clearly
@@ -20,7 +20,7 @@ function relativeTime(t: number): string {
 }
 
 export function SyncStatus({
-  label, synced, path, displayName, lastSync, tooltip, webUrl, onShowInFolder, onChangeFolder, onClick, compact,
+  label, synced, path, displayName, lastSync, tooltip, webUrl, onShowInFolder, onChangeFolder, onClick, compact, multiline,
   open: externalOpen, onOpenChange, hideTrigger,
 }: {
   label: ReactNode
@@ -34,6 +34,7 @@ export function SyncStatus({
   onChangeFolder?: () => void
   onClick?: () => void // pill action when not synced (connect / sync now)
   compact?: boolean // mobile: a small cloud circle instead of the text pill
+  multiline?: boolean // exceptional long status: wrap to two lines in a taller, still-centred pill
   open?: boolean    // controlled mode (toolbar trigger)
   onOpenChange?: (v: boolean) => void
   hideTrigger?: boolean // suppress the fixed-position trigger (it's in the toolbar instead)
@@ -57,6 +58,7 @@ export function SyncStatus({
   const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
 
   const zoom = useZoomScale()
+  const triggerHeight = multiline && !compact && !pdfOpen ? SIDE_PILL_TALL_H : SIDE_PILL_H
 
   useEffect(() => {
     const id = setInterval(() => tick((n) => n + 1), 5000)
@@ -81,7 +83,7 @@ export function SyncStatus({
         // `sidePillBottom()` so their MIDLINES land on the toolbar's; see components/sidePill.ts.
         bottom: hideTrigger
           ? 'calc(env(safe-area-inset-bottom) + 80px + var(--iw-pdf-room-bottom, 0px))'
-          : sidePillBottom(zoom),
+          : sidePillBottom(zoom, triggerHeight),
         padding: hideTrigger ? '0 1rem' : '0 10px',
         transform: `scale(${zoom * 1.12})`, // ×1.25 to match the 25%-bigger toolbar pill
         transformOrigin: 'bottom right',
@@ -173,38 +175,20 @@ export function SyncStatus({
             // max-w 5.6rem → 7rem: the label is one size bigger now (see fontSize below) and shed its
             // "a", and it must fit on ONE line — a second line would break the shared height the two
             // side pills now hold.
-            : 'cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors flex items-center justify-end text-right leading-tight whitespace-nowrap px-2.5 py-1 max-w-[6rem] max-lg:px-2 max-lg:max-w-[6rem]'}`}
+            : `cursor-pointer rounded-full bg-white hover:bg-stone-50 transition-colors flex items-center leading-tight px-2.5 py-1 max-w-[6rem] max-lg:px-2 max-lg:max-w-[6rem] ${multiline ? 'justify-center text-center whitespace-normal' : 'justify-end text-right whitespace-nowrap'}`}`}
           style={{
             // PURPLE, matching the snaps pill opposite (Peter, 2026-08-20). Both now read from the
             // same `--iw-pill-fg` token, so the pair stays matched through a night-mode switch instead
-            // of one being a hard-coded amber. NB this drops the amber "needs attention" tint the
-            // unsynced state used to carry — the ⚠ glyph in those labels is what signals it now.
+            // of one being a hard-coded amber. Reconnect is stated in words; it needs no alert glyph.
             color: 'var(--iw-pill-fg, #302438)',
-            // Purple outline (Peter, 2026-08-20) matching the footer toolbar pill and the snaps pill
-            // on the opposite side — the same token, so night mode remaps all three together rather
-            // than leaving this one a hard-coded day colour.
+            // The shared hardcoded grey outline is applied by iw-toolbar-outline.
             border: '1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.75))',
             // ⚠ 2026-08-20 (Peter: "align at horizontal axis, move lower") — narrowing the pill above
-            // makes longer labels ("Reconnect to keep saving") wrap to 2 lines while short ones
-            // ("Save to a folder") stay on 1, so this button's own height VARIES by label — a fixed
-            // `bottom` offset alone can only truly center ONE of those states against the toolbar, not
-            // both (a taller 2-line box sitting on the same bottom edge as a shorter 1-line box has a
-            // HIGHER centre, purely from its own extra height — that's what "still higher" was, not
-            // the bottom offset itself, which already matches the toolbar's). Fixed at the root instead
-            // of chasing another magic offset: pin this button's own (pre-transform) height to the
-            // toolbar pill's LIVE height via --iw-toolbar-h (TiptapEditor.tsx; already includes the
-            // ×1.12 desktop scale, so divide it back out before this button applies that SAME scale
-            // itself, or it would double-apply) and centre the label vertically inside that fixed
-            // height — so 1-line and 2-line states both render at the toolbar's own height and their
-            // centres align by construction, not by a tuned constant.
-            // ONE SHARED HEIGHT with the snaps pill on the other side (Peter, 2026-08-20: "make the
-            // left and right pill the same height, ie make the right one a lot lower"). This used to
-            // be `min-height: var(--iw-toolbar-h)` — matching the TOOLBAR's height, which measured 56px
-            // against the snaps pill's 30.8px, i.e. nearly double. A fixed height (not min-height) is
-            // what makes "the same" enforceable: the label wraps to two lines and would otherwise size
-            // the box itself. See components/sidePill.ts for why 30px clears the wrapped text.
+            // Reconnect is the one deliberate tall state: it gets a fixed two-line height rather than
+            // overflowing a forced one-line box. sidePillBottom receives that same height, so the taller
+            // pill remains centred on the toolbar instead of merely sharing its bottom edge.
             ...({
-              height: SIDE_PILL_H,
+              height: triggerHeight,
               // ONE SIZE SHARED WITH THE SNAPS PILL (Peter: "make it same font size as on the left and
               // shrink the left pill text if you have to"). 12px is the meeting point — this pill came
               // UP from the 10px it was shrunk to, the snaps pill comes DOWN from 14px (text-sm), and
