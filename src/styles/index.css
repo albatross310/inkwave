@@ -345,10 +345,9 @@
      var()-dependent keyframes can't composite; d is device-pixel-snapped at coast-clock
      resolve). The drift item must stay FIRST and name-identical so the running animation is
      preserved across the class swap (name-matched — verified Chromium/Firefox/WebKit). The
-     twinkle fields brake with the SAME injected keyframes (see the twinkle block), so every
+     mark fields brake with the SAME injected keyframes (see the mark-scene block), so every
      layer decelerates in lockstep. Engines without animation-composition never enter coast
-     (Scroll.tsx stops cleanly instead). --wave-coast-T drives the coast-length fades (sparks,
-     blink→rest cross-fade): 2.5s desktop, 2s phone. */
+     (Scroll.tsx stops cleanly instead). */
   .inkwave-editor-surface:not(.is-phone).iw-wave-coast::before {
     animation: iw-wave-drift-l 1.944s linear infinite,
                iw-wave-coast-l 10.5s linear 1 forwards; /* D = T 2.5s + 8s hold */
@@ -422,9 +421,6 @@
     inset: 0;
     overflow: hidden;
     z-index: 0;
-  }
-  .inkwave-editor-surface.is-phone.iw-wave-coast {
-    --wave-coast-T: 2s; /* drives the coast-length fades (sparks, blink→rest cross-fade) */
   }
   .inkwave-editor-surface.is-phone.iw-wave-anim::before,
   .inkwave-editor-surface.is-phone.iw-wave-coast::before {
@@ -557,20 +553,11 @@
     visibility: hidden;
   }
 
-  /* ─── STOCHASTIC TWINKLES — the PRECOMPUTED pool (see the waveTwinkle.ts header) ────────────
-     Sparks (glitters) + dashes (wave marks) as discrete divs, populated post-hydration from the
-     precalculated pool (positions never-twice sampled, canvas-rastered art, whole-load blink
-     schedules). They cannot live on the wave ::before/::after — animating opacity there would
-     dim the wave LINES too. Scroll.tsx renders a stable EMPTY container (in the prerender too,
-     so hydration matches). Structure per set (.iw-twk-sparks / .iw-twk-dashes): two
-     .iw-twk-field layers (a-rows / b-rows), each holding a .iw-twk-blink wrapper (the
-     precomputed envelope-track instances) and a .iw-twk-rest wrapper (the static resting
-     texture). During the LOAD everything is compositor-only: instance WAAPI tracks blink and
-     ride their crests; the fields carry NO transform. At SETTLE (.iw-wave-coast) the fields
-     brake with the SAME injected keyframes the tiles composite (lockstep deceleration), the
-     blink layer fades out and the rest layer fades in over the coast — the twinkling calms
-     exactly as the water slows. At REST the fields take literal sway transforms from
-     swayFields() and scroll-velocity-driven blinks take over (waveTwinkle.ts). */
+  /* ─── DETERMINISTIC WATER MARKS ─────────────────────────────────────────────────────────────
+     One checked-in scene table owns every coordinate and time window. It mounts synchronously,
+     before the atomic water gate opens. Two fields—one per wave direction—carry ALL marks using
+     the exact same drift + additive coast animations as the wave tiles. Each mark animates opacity
+     only; no wrapper opacity, second/rest population, runtime RNG, raster decode or server feed. */
   /* The live editor's water while the OPAQUE loading shell still covers it (Scroll's `covered`):
      the two wave copies are never pixel-identical mid-boot — the editor's fixed pseudos anchor to
      its still-shifting flow box, so the double-paint smears/dims every line (measured: peak 223
@@ -597,7 +584,6 @@
     z-index: 1;
   }
 
-  @keyframes iw-spark-fade { from { opacity: 1; } to { opacity: 0; } }
   .iw-wave-twinkles,
   .iw-twk-set {
     position: fixed;
@@ -605,91 +591,79 @@
     z-index: -1;
     pointer-events: none;
   }
-  /* The set CLIPS its translated fields (they carry ±PAD offscreen coverage), and at rest it
+  /* The fixed scene is wider than target viewports and clips its translated fields. At rest it
      insets away from the PDF panel exactly like the wave ::before does. */
   .iw-twk-set { overflow: hidden; }
   .inkwave-editor-surface.iw-fill:not(.is-phone):not(.iw-wave-anim):not(.iw-wave-coast) .iw-twk-set {
     right: var(--iw-pdf-room, 0px);
     bottom: var(--iw-pdf-room-bottom, 0px);
   }
-  .inkwave-editor-surface.iw-wave-coast .iw-twk-sparks {
-    animation: iw-spark-fade var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
-    animation-play-state: paused; /* forward-anchored — fades run in lockstep with the brake */
-    will-change: opacity;
-  }
   .iw-twk-field {
     position: absolute;
-    inset: 0;
+    top: 0;
+    bottom: auto;
     will-change: transform;
-    transform: translateZ(0); /* pre-promoted — raster exists before the drift's first frame */
-    transition: opacity 0.5s ease; /* the deferred-creation entry fade (see waveTwinkle) */
+    transform: translateZ(0);
   }
-  /* The fields' brake — the SAME injected #iw-coast-kf keyframes the tiles composite, started by
-     the same class recalc: every twinkle layer decelerates in exact lockstep with the water,
-     main-thread-free (the fields carry no drift of their own — instance tracks bake it in). */
+  .inkwave-editor-surface.iw-wave-anim .iw-twk-field.iw-twk-fa {
+    animation: iw-wave-drift-l 1.944s linear infinite;
+  }
+  .inkwave-editor-surface.iw-wave-anim .iw-twk-field.iw-twk-fb {
+    animation: iw-wave-drift-r 1.944s linear infinite;
+  }
+  /* Same two-animation stack as the wave pseudos: the existing drift remains first and the shared
+     zero-origin brake is additive. Scroll.tsx starts every name-matched brake on one future clock. */
   .inkwave-editor-surface.iw-wave-coast .iw-twk-field.iw-twk-fa {
-    animation: iw-wave-coast-l 10.5s linear 1 forwards;
-    animation-play-state: paused; /* forward-anchored with the tiles — see the tile coast block */
+    animation: iw-wave-drift-l 1.944s linear infinite,
+               iw-wave-coast-l 10.5s linear 1 forwards;
+    animation-composition: replace, add;
+    animation-play-state: running, paused;
   }
   .inkwave-editor-surface.iw-wave-coast .iw-twk-field.iw-twk-fb {
-    animation: iw-wave-coast-r 10.5s linear 1 forwards;
-    animation-play-state: paused;
+    animation: iw-wave-drift-r 1.944s linear infinite,
+               iw-wave-coast-r 10.5s linear 1 forwards;
+    animation-composition: replace, add;
+    animation-play-state: running, paused;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast .iw-twk-field.iw-twk-fa {
-    animation: iw-wave-coast-l 10s linear 1 forwards;
-    animation-play-state: paused;
+    animation: iw-wave-drift-l 1.944s linear infinite,
+               iw-wave-coast-l 10s linear 1 forwards;
+    animation-composition: replace, add;
+    animation-play-state: running, paused;
   }
   .inkwave-editor-surface.is-phone.iw-wave-coast .iw-twk-field.iw-twk-fb {
-    animation: iw-wave-coast-r 10s linear 1 forwards;
-    animation-play-state: paused;
+    animation: iw-wave-drift-r 1.944s linear infinite,
+               iw-wave-coast-r 10s linear 1 forwards;
+    animation-composition: replace, add;
+    animation-play-state: running, paused;
   }
-  /* The blink → rest cross-fade over the coast (S-curve, coast-length). Base states: blink
-     visible, rest visible (it IS the resting texture once the wave classes drop); during the
-     drift the rest layer is hidden; through the coast the two cross-fade. */
-  .iw-twk-blink,
-  .iw-twk-rest {
+  .iw-scene-mark {
     position: absolute;
-    inset: 0;
-    /* Entry/exit fades: mark tracks created on VISIBLE water (open-doc loads, re-entries) land
-       whenever the starved main thread drains — an instant en-masse appearance measured as a
-       +18-25px pattern step on the screencast (Peter's live "backward tick"). The wrappers fade
-       through any such transition instead (waveTwinkle sets inline opacity around deferred
-       creation; the anim-class rest-layer hide transitions too). The coast cross-fade is an
-       ANIMATION — it overrides this transition, unaffected. */
-    transition: opacity 0.5s ease;
+    display: block;
+    padding: 0;
+    margin: 0;
+    color: #f3edcf;
+    pointer-events: none;
   }
-  /* Only the six populated blink wrappers move now (three per overlapping load surface). Promote
-     those shared fields explicitly; individual specks animate opacity only and must not each earn
-     a transform layer. This is the Safari raster-wobble boundary. */
-  .inkwave-editor-surface.iw-wave-anim .iw-twk-blink,
-  .inkwave-editor-surface.iw-wave-coast .iw-twk-blink { will-change: transform; }
-  @keyframes iw-twk-fade-out { from { opacity: 1; } to { opacity: 0; } }
-  @keyframes iw-twk-fade-in { from { opacity: 0; } to { opacity: 1; } }
-  .inkwave-editor-surface.iw-wave-anim .iw-twk-rest { opacity: 0; }
-  .inkwave-editor-surface.iw-wave-coast .iw-twk-blink {
-    animation: iw-twk-fade-out var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
-    animation-play-state: paused; /* forward-anchored */
-    will-change: opacity;
+  :root[data-theme="night"] .iw-scene-mark { color: #9aa3af; }
+  .iw-scene-dash {
+    height: 2px;
+    border-radius: 999px;
+    background: currentColor;
+    transform-origin: center;
   }
-  .inkwave-editor-surface.iw-wave-coast .iw-twk-rest {
-    animation: iw-twk-fade-in var(--wave-coast-T, 2.5s) cubic-bezier(0.4, 0, 0.2, 1) 1 forwards;
-    animation-play-state: paused; /* forward-anchored */
-    will-change: opacity;
-  }
-  .iw-twk-i {
+  .iw-scene-spark::before,
+  .iw-scene-spark::after {
+    content: '';
     position: absolute;
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
-    background-image: var(--twk-day);
+    left: 50%;
+    top: 50%;
+    border-radius: 999px;
+    background: currentColor;
+    transform: translate(-50%, -50%);
   }
-  :root[data-theme="night"] .iw-twk-i { background-image: var(--twk-night, var(--twk-day)); }
-  /* Dashes at rest: no animation — opacity IS the static state (the ~50% lit subset has
-     --twk-static: 1, reassigned per zoom reseed). The transition eases every blink→static
-     handoff (coast end, scroll stop) from the mid-blink value — never a freeze, never a pop. */
-  .iw-twk-dash-i {
-    opacity: var(--twk-static, 0);
-    transition: opacity 0.35s ease;
-  }
+  .iw-scene-spark::before { width: 2px; height: 100%; }
+  .iw-scene-spark::after { width: 100%; height: 2px; }
 
   /* Gapped-pages mode (pagination extension) = discrete sheets, like Word. The SHEET element itself
      goes fully transparent, so the real fixed water-and-waves background shows through everywhere; the
@@ -2567,10 +2541,16 @@ html.iw-no-swipe-nav { overscroll-behavior-x: contain; }
 :root:not(.iw-water-ready) .inkwave-editor-surface::before,
 :root:not(.iw-water-ready) .inkwave-editor-surface::after,
 :root:not(.iw-water-ready) .iw-wave-twinkles {
-  /* The twinkle container is gated with the pseudos: the OLD gate covered only ::before/::after,
-     so the sparkle layer painted yellow flecks on the neutral parchment before the water arrived —
-     the refresh flash (2026-07-09 regression). EVERY water element hides until ready now. */
-  display: none;
+  /* Keep every water layer paint-hidden, but do not remove it from animation layout. The wave
+     pseudos and deterministic fields are held paused at currentTime 0 below, then one root-class
+     change reveals and releases all of them. `display:none` made WebKit instantiate the child
+     fields a frame after the pseudos on reload (measured 8–50px phase skew). */
+  visibility: hidden;
+}
+:root:not(.iw-water-ready) .inkwave-editor-surface::before,
+:root:not(.iw-water-ready) .inkwave-editor-surface::after,
+:root:not(.iw-water-ready) .iw-twk-field {
+  animation-play-state: paused !important;
 }
 :root[data-theme="night"]:not(.iw-water-ready),
 :root[data-theme="night"]:not(.iw-water-ready) body,

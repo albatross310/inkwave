@@ -2,8 +2,8 @@
 // Round 2 of Peter's iPhone bug (2026-07-17). The wave video may not touch the DOM before React
 // hydrates (see waveVideo.ts's ⛔ header), so it waits behind a barrier. The barrier's FIRST cut
 // waited on `inkwave:twinkles-ready` — post-hydration, but NOT guaranteed to arrive: the twinkle
-// pool announces only if BOTH its sets generate, while the water gate opens anyway on its own
-// 1500ms timeout. On a load where the pool never announced, the video hung FOREVER with the water
+// old runtime pool announced only if BOTH its sets generated, while the water gate opened anyway
+// on its own timeout. On a load where the pool never announced, the video hung FOREVER with the water
 // gate wide open — `reason` frozen at 'waiting for hydration…', clip/fetch never even set.
 //
 // THE BUG CLASS THIS GUARDS (named in CLAUDE.md): waiting on a one-shot async signal that (a) may
@@ -34,7 +34,7 @@ const CASES = {
   A_normal: () => {},
   // The beacon has ALREADY fired by the time waveVideo subscribes.
   B_alreadyHydrated: () => { window.__iwHydrated = true },
-  // The twinkle pool never announces: suppress both the flag and the event. The water gate still
+  // Model the historical missing mark-ready signal: suppress both the flag and the event. The water gate still
   // opens on its own 1500ms timeout, which is exactly what made the old hang so confusing —
   // `water-gate OPEN` looked like everything was fine.
   C_twinklesNeverAnnounce: () => {

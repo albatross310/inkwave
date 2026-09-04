@@ -8,7 +8,7 @@ import { presentedPaperWidth, usesTransformMagnify, type SurfacePresentation } f
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
 import { isWaterAtX, createZoomLatch } from './zoomZone'
 import { probePerf, notePerf } from './perflog'
-import { syncTwinkles, reportSway, swayFields } from './waveTwinkle'
+import { syncTwinkles, setScrollScene, swayFields } from './waveTwinkle'
 
 // Re-exported so the callers that want BOTH this and <Scroll> are unchanged. It lives in its own
 // leaf module because fourteen of its seventeen importers want nothing else from this file — see
@@ -1229,7 +1229,6 @@ export function Scroll({
     const target: HTMLElement | Window = el
     let raf = 0
     let lastTop = el.scrollTop
-    let lastTs = performance.now()
     // FULLSCREEN PDF SWAY (Peter, 2026-07-10): while the PDF viewer floats over the water it
     // dispatches its absolute scrollTop ('inkwave:pdf-sway'); folded into the SAME base+top
     // formula as a second scroll source, so the waves at the pane's sides sway with PDF scrolling
@@ -1251,18 +1250,16 @@ export function Scroll({
       // re-rasters the overdraw layers on it). The coast's finish() writes the handoff value.
       if (waveModeRef.current !== 'off') return
       const top = el.scrollTop
-      const now = performance.now()
       // Zoom-driven scroll (gesture / settle / clamp): hold --wave-x exactly still by absorbing
       // the delta into the base. Rebased (not skipped), so sway resumes with no jump.
       if (performance.now() < zoomHoldUntilRef.current) {
         waveBaseRef.current -= (top - lastTop) * WAVE_SWAY
       } else if (top !== lastTop) {
-        // GENUINE scroll (zoom-hold deltas excluded): the accent dashes' twinkle rate tracks the
-        // water's motion — feed the scroll velocity to the twinkle driver (waveTwinkle.ts).
-        reportSway(Math.abs(top - lastTop) / Math.max(8, now - lastTs) * 1000)
+        // GENUINE scroll (zoom-hold deltas excluded): the fixed speck loop is a pure function of
+        // absolute scrollTop. No velocity clock means zoom cannot leave it running or re-phase it.
+        setScrollScene(el, top + pdfTop)
       }
       lastTop = top
-      lastTs = now
       writeWave()
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
@@ -1271,9 +1268,7 @@ export function Scroll({
       const prev = pdfTop
       pdfTop = top
       if (waveModeRef.current !== 'off') return // drift/coast own the wave position
-      const now = performance.now()
-      if (top !== prev) reportSway(Math.abs(top - prev) / Math.max(8, now - lastTs) * 1000) // dashes twinkle too
-      lastTs = now
+      if (top !== prev) setScrollScene(el, el.scrollTop + top)
       writeWave()
     }
     apply()
@@ -1338,10 +1333,9 @@ export function Scroll({
     armLoadWatchdog()
     // SIBLING CLOCK ADOPT — the REFERENCE is the first-mounted surface, and it is NEVER rewritten
     // (2026-07-18 desync fix). The reference is whatever surface mounted first (the loading shell);
-    // waveTwinkle.findDrift resolves the SAME surface (first host), so trackT0 — the marks' clock —
-    // is read from a startTime nothing here touches. Every LATER surface (the covered editor) adopts
-    // the reference; that keeps both waves in phase AND keeps the marks on every surface's crest,
-    // because a mark clocked to the reference rides an adopter whose wave now equals the reference.
+    // The deterministic scene fields use the SAME animation names as the wave pseudos, so the loop
+    // below adopts all four together. Every LATER surface (the covered editor) therefore equals the
+    // reference before its first visible frame—wave and marks share one spatial clock.
     //
     // WHY THE OLD `sibling != null` GATE FAILED (measured, markskew.prove.mjs + diag-trace): the
     // covered editor routinely mounts ~150-250ms BEFORE the shell's drift commits its startTime — so
@@ -1509,15 +1503,14 @@ export function Scroll({
     // drift pose AT t_a analytically from the drift animation's own startTime (presentation-
     // exact for a long-running compositor animation), snap the rest pose to a device pixel,
     // inject the final keyframes, and start every coast animation (tiles + twinkle-field brakes
-    // + the layer fades, both surfaces — all name-matched in the subtree) at exactly t_a. The
+    // across both surfaces—all name-matched in the subtree—at exactly t_a. The
     // brake then begins at zero value/velocity at a future compositor time: continuous BY
     // CONSTRUCTION however starved the main thread was, and every copy shares one clock.
     const coastAnims = () => {
       try {
         return el.getAnimations({ subtree: true }).filter((a) => {
           const n = (a as CSSAnimation).animationName ?? ''
-          return n === 'iw-wave-coast-l' || n === 'iw-wave-coast-r' || n === 'iw-spark-fade'
-            || n === 'iw-twk-fade-out' || n === 'iw-twk-fade-in'
+          return n === 'iw-wave-coast-l' || n === 'iw-wave-coast-r'
         })
       } catch { return [] }
     }
@@ -1588,15 +1581,10 @@ export function Scroll({
     return () => { clearTimeout(t); el.removeEventListener('scroll', show); el.removeEventListener('pointermove', onMove) }
   }, [fill, phone, waveMode])
 
-  // Stochastic twinkles (sparkles + accent dashes — see waveTwinkle.ts). The container div is in
-  // the JSX (and the prerender) EMPTY; the random instances are populated here, CLIENT-ONLY after
-  // hydration, so the server HTML and the first client render always match (no mismatch, and no
-  // flash: each instance mounts only after its art decodes). Live-editor surfaces only (fill):
-  // sparkles run while the load drift/coast does; the dashes decorate ALL stages on desktop
-  // (drift, coast, resting sway — static between scrolls) but exist only during the load on phone
-  // (no waves at rest there). useLAYOUTeffect deliberately: the mode handoffs (coast start, rest
-  // transform) must land in the SAME pre-paint flush as the wave class swap — a passive effect
-  // ran after paint, leaving one visible frame where the dashes stood still against moving waves.
+  // Deterministic water marks (see waveTwinkle.ts + waveSceneData.ts). The complete checked-in scene
+  // mounts synchronously into this stable host before the atomic gate opens; no art decode, runtime
+  // RNG, or server feed exists. Intro objects have one finite opacity window. The overlapping desktop
+  // scroll population is driven later by absolute scrollTop; phone has no marks once water rests.
   const twinkleRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const host = twinkleRef.current
@@ -1605,9 +1593,8 @@ export function Scroll({
     // all: waterMode is GLOBAL, and this surface's early drop to 'off' (settleToCoast) would
     // clobber the shell's live coast for every host. The shell owns the water until wave-rest.
     if (phone && covered) return
-    // No clock/travel plumbing: the fields' brake is the SAME injected CSS keyframes the tiles
-    // composite (one writer), and the pool's playback clock is aligned once per load inside
-    // waveTwinkle (alignTracks).
+    // The two fields use the SAME named drift/brake CSS animations as the tiles. Scroll's sibling
+    // adoption and forward coast anchor therefore include them automatically.
     syncTwinkles(host, {
       sparks: waveMode !== 'off',
       dashes: !phone || waveMode !== 'off',
@@ -1627,11 +1614,8 @@ export function Scroll({
         // wave S-decay — doc, text and pills fade in together underneath, over coasting waves.
         ...(fadingOut ? { opacity: 0, transition: `opacity ${phone ? 0.8 : 1}s cubic-bezier(0.4, 0, 0.2, 1)`, pointerEvents: 'none' as const } : null),
       } as React.CSSProperties}>
-      {/* Twinkle host — sparkles + accent dashes live in here as generated layers, NOT on the wave
-          ::before/::after (fading/blinking those would dim the wave lines too). Rendered EMPTY
-          (deterministic — identical in the prerender), populated post-hydration by the effect
-          above with the precomputed pool; every fleck rides its crest by construction (see the
-          waveTwinkle.ts header). Pure visual layer. */}
+      {/* Stable host for the complete checked-in mark scene. It is populated synchronously in the
+          layout effect above and remains a pure visual layer. */}
       <div ref={twinkleRef} className="iw-wave-twinkles" aria-hidden="true" />
       {/* Parchment column. Desktop: a floating page (max-width + shadow + background gap). Phone:
           fills the screen edge-to-edge, no shadow. Hybrid (desktop live editor): the paper sits in

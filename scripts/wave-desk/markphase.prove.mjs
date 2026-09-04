@@ -3,13 +3,9 @@
 // and chrome they often appear out of sync with the waves anyway." CLAUDE.md carries the same
 // thing as an unfixed residual: "white lines briefly lagging their wave".
 //
-// THE SEAM, EXACTLY. Two systems, two clocks:
-//   • waves = CSS background drift (iw-wave-drift-l/r), 140px per 1944ms = 72px/s;
-//   • marks = one WAAPI transform per populated blink field, carrying fixed-position objects at
-//     that same velocity, so every mark rides its crest ONLY IF the field clock agrees with the tile's.
-// waveTwinkle.alignTracks() reconciles the shared fields ONCE per load:
-//     trackT0 = drift.startTime - LOOP_MS * floor(random * CYCLE_LOOPS)
-// so the invariant is a CONGRUENCE: every track.startTime ≡ drift.startTime (mod 1944ms).
+// THE SEAM, EXACTLY. The wave pseudos and the two deterministic mark fields each use the SAME
+// named CSS drift (iw-wave-drift-l/r), 140px per 1944ms = 72px/s. A mark rides its crest only if
+// its field's startTime equals the corresponding pseudo's startTime modulo the tile period.
 // Any deviation is literally visible lag: skew_ms * 0.072 = px off the crest.
 //
 // WHY CLOCKS AND NOT PIXELS: the claim under test is a statement ABOUT the clocks, and the clocks
@@ -58,31 +54,38 @@ await ctx.addInitScript(({ spike, perturb, LOOP_MS }) => {
     while (performance.now() < end) { /* solid spin */ }
   }, { once: true })
 
-  // Congruence sampler. Reads the SAME quantities alignTracks() writes.
+  // Congruence sampler. Reads the CSS clocks that directly own wave and field transforms.
   const norm = (x) => { const m = ((x % LOOP_MS) + LOOP_MS) % LOOP_MS; return m > LOOP_MS / 2 ? m - LOOP_MS : m }
   w.__iwSample = (tag) => {
     const surfaces = [...document.querySelectorAll('.inkwave-editor-surface')]
     const drifts = []
-    for (const s of surfaces) {
-      let a
-      try { a = s.getAnimations({ subtree: true }).find((x) => x.animationName === 'iw-wave-drift-l') } catch { /* */ }
-      if (a && typeof a.startTime === 'number')
-        drifts.push({ cls: s.className, startTime: a.startTime, playState: a.playState })
-    }
-    // Spatial mark tracks = the shared transform on each `.iw-twk-blink` wrapper. Child sprite
-    // tracks are opacity-only and cannot say whether a mark rides its wave.
     const marks = []
-    for (const el of document.querySelectorAll('.iw-twk-blink, .iw-twk-blink > *')) {
-      for (const a of el.getAnimations()) {
-        if (a.animationName) continue // CSS animation, not a script track
-        const frames = a.effect?.getKeyframes?.() || []
-        if (!frames.some((f) => typeof f.transform === 'string')) continue
-        if (typeof a.startTime === 'number') marks.push(a.startTime)
+    for (const s of surfaces) {
+      let animations = []
+      try { animations = s.getAnimations({ subtree: true }) } catch { /* */ }
+      const tile = {}
+      for (const group of ['a', 'b']) {
+        const name = group === 'a' ? 'iw-wave-drift-l' : 'iw-wave-drift-r'
+        const animation = animations.find((a) => {
+          const target = a.effect?.target
+          return a.animationName === name
+            && !(target instanceof Element && target.matches('.iw-twk-field'))
+        })
+        if (typeof animation?.startTime === 'number') tile[group] = animation
+      }
+      if (tile.a) drifts.push({ cls: s.className, startTime: tile.a.startTime, playState: tile.a.playState })
+      for (const field of s.querySelectorAll('.iw-twk-field')) {
+        const group = field.classList.contains('iw-twk-fa') ? 'a' : 'b'
+        const name = group === 'a' ? 'iw-wave-drift-l' : 'iw-wave-drift-r'
+        const animation = field.getAnimations().find((a) => a.animationName === name)
+        const wave = tile[group]
+        if (typeof animation?.startTime === 'number' && typeof wave?.startTime === 'number')
+          marks.push({ field: animation.startTime, wave: wave.startTime })
       }
     }
     if (!drifts.length) return
     const ref = drifts[0].startTime
-    const skews = marks.map((st) => norm(st - ref))
+    const skews = marks.map(({ field, wave }) => norm(field - wave))
     const absPx = skews.map((s) => Math.abs(s) * (140 / LOOP_MS))
     w.__iwPhase.samples.push({
       tag, t: Math.round(performance.now()),
@@ -96,11 +99,10 @@ await ctx.addInitScript(({ spike, perturb, LOOP_MS }) => {
       markOver1px: absPx.filter((p) => p > 1).length,
     })
   }
-  // Perturb one track by a known amount — the fire test.
+  // Perturb one shared field clock by a known amount — the fire test.
   if (perturb) window.addEventListener('inkwave:reveal-imminent', () => {
-    const el = document.querySelector('.iw-twk-blink')
-    const a = el && el.getAnimations().find((x) => !x.animationName
-      && (x.effect?.getKeyframes?.() || []).some((f) => typeof f.transform === 'string'))
+    const el = document.querySelector('.iw-twk-field.iw-twk-fa')
+    const a = el && el.getAnimations().find((x) => x.animationName === 'iw-wave-drift-l')
     if (a && typeof a.startTime === 'number') { a.startTime = a.startTime - perturb; w.__iwPhase.perturbed = true }
   }, { once: true })
 }, { spike, perturb, LOOP_MS })

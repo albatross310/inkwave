@@ -1,69 +1,83 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { monisticTransformTrack, pendingTwinkleMountDecision } from './waveTwinkle'
+import {
+  WAVE_INTRO_MS,
+  WAVE_SCENE,
+  WAVE_SCENE_WIDTH,
+  WAVE_SCROLL_PERIOD_PX,
+  type WaveIntroMark,
+  type WaveScrollMark,
+} from './waveSceneData'
+import { scrollMarkOpacity } from './waveTwinkle'
 
-const live = {
-  requested: true,
-  tokenMatches: true,
-  alreadyMounted: false,
-  connected: true,
-  sameDefinitions: true,
-} as const
+const all = [...WAVE_SCENE.intro, ...WAVE_SCENE.scroll]
 
-describe('late twinkle mount at the coast-to-rest boundary', () => {
-  it('discards a sparkle set whose decode finishes after rest stopped requesting it', () => {
-    expect(pendingTwinkleMountDecision({ ...live, requested: false, mode: 'off' })).toBe('discard')
+function ringDistance(a: number, b: number): number {
+  const d = Math.abs(a - b)
+  return Math.min(d, WAVE_SCENE_WIDTH - d)
+}
+
+function tangentAngle(x: number): number {
+  const phase = ((x % 140) + 140) % 140
+  const second = phase >= 70
+  const t = (second ? phase - 70 : phase) / 70
+  const slope = second ? (36 - 72 * t) / 70 : (-36 + 72 * t) / 70
+  return Number((Math.atan(slope) * 180 / Math.PI).toFixed(2))
+}
+
+describe('the checked-in water scene', () => {
+  it('is a complete fixed structure with no runtime random or server-fed coordinates', () => {
+    expect(WAVE_SCENE.intro).toHaveLength(120)
+    expect(WAVE_SCENE.scroll).toHaveLength(72)
+    expect(new Set(all.map((mark) => mark.id)).size).toBe(all.length)
+    const source = readFileSync(resolve(__dirname, 'waveTwinkle.ts'), 'utf8')
+    expect(source).not.toContain('Math.random')
+    expect(source).not.toContain('fetch(')
+    expect(source).not.toContain('WebSocket')
+    expect(source).toContain("from './waveSceneData'")
   })
 
-  it('attaches a still-requested desktop dash set statically after rest', () => {
-    expect(pendingTwinkleMountDecision({ ...live, mode: 'off' })).toBe('attach-static')
+  it('keeps every generated object at least 180px from its band neighbours', () => {
+    for (let row = 0; row < 12; row++) {
+      for (const group of ['a', 'b'] as const) {
+        const band = all.filter((mark) => mark.row === row && mark.group === group)
+        for (let i = 0; i < band.length; i++) {
+          for (let j = i + 1; j < band.length; j++)
+            expect(ringDistance(band[i].x, band[j].x), `${group}/${row}: ${band[i].id} vs ${band[j].id}`).toBeGreaterThanOrEqual(180)
+        }
+      }
+    }
   })
 
-  it('keeps compositor playback only while load or coast still owns the water', () => {
-    expect(pendingTwinkleMountDecision({ ...live, mode: 'anim' })).toBe('attach-animated')
-    expect(pendingTwinkleMountDecision({ ...live, mode: 'coast' })).toBe('attach-animated')
+  it('stores every dash at the exact tangent angle of its wave', () => {
+    const dashes: Array<WaveIntroMark | WaveScrollMark> = all
+      .filter((mark) => !('kind' in mark) || mark.kind === 'dash')
+    for (const mark of dashes) expect(mark.angle, mark.id).toBe(tangentAngle(mark.x))
   })
 
-  it('discards every other stale continuation independently of the current mode', () => {
-    for (const stale of [
-      { tokenMatches: false },
-      { alreadyMounted: true },
-      { connected: false },
-      { sameDefinitions: false },
-    ]) {
-      expect(pendingTwinkleMountDecision({ ...live, ...stale, mode: 'anim' })).toBe('discard')
+  it('gives every intro object exactly one finite appearance window', () => {
+    for (const mark of WAVE_SCENE.intro) {
+      expect(mark.startMs, mark.id).toBeGreaterThanOrEqual(0)
+      expect(mark.endMs, mark.id).toBeGreaterThan(mark.startMs)
+      expect(mark.endMs, mark.id).toBeLessThanOrEqual(WAVE_INTRO_MS)
     }
   })
 })
 
-describe('monistic load marks', () => {
-  it('uses one straight, tile-exact drift instead of moving an object between blink slots', () => {
-    expect(monisticTransformTrack('a')).toEqual([
-      { offset: 0, transform: 'translate3d(0px, 0px, 0)' },
-      { offset: 1, transform: 'translate3d(-1680.00px, 0px, 0)' },
-    ])
-    expect(monisticTransformTrack('b')[1]).toEqual({
-      offset: 1,
-      transform: 'translate3d(1680.00px, 0px, 0)',
-    })
+describe('the absolute scroll loop', () => {
+  const mark = WAVE_SCENE.scroll[0]
+
+  it('repeats at one fixed 2240px period in either direction', () => {
+    expect(WAVE_SCROLL_PERIOD_PX).toBe(2240)
+    for (const top of [-4567, -20, 0, 137, 2240, 8912]) {
+      expect(scrollMarkOpacity(mark, top + WAVE_SCROLL_PERIOD_PX)).toBeCloseTo(scrollMarkOpacity(mark, top), 10)
+    }
   })
 
-  it('contains no per-envelope slot or rest-time respawn mechanism', () => {
-    const source = readFileSync(resolve(__dirname, 'waveTwinkle.ts'), 'utf8')
-    expect(source).not.toContain('memPickLight')
-    expect(source).not.toContain('respawnDashes')
-    expect(source).not.toMatch(/slots\??:/)
-    expect(source).toContain('trackAnims.set(el, [ao])')
-    expect(source).toContain('blinkDrift.set(wrap, a)')
-    expect(source).not.toContain('trackAnims.set(el, [ao, at])')
-    expect(source).toContain('void a.ready.then(apply)')
-  })
-
-  it('does not regenerate specks when editor zoom settles', () => {
-    const source = readFileSync(resolve(__dirname, 'waveTwinkle.ts'), 'utf8')
-    expect(source).not.toContain("addEventListener('inkwave:zoom-settled'")
-    expect(source).not.toContain('function regenDashes')
-    expect(source).toContain("addEventListener('resize'")
+  it('depends on absolute scrollTop only—not time, velocity, viewport or zoom', () => {
+    expect(scrollMarkOpacity(mark, mark.phasePx)).toBe(mark.opacity)
+    expect(scrollMarkOpacity(mark, mark.phasePx + WAVE_SCROLL_PERIOD_PX / 2)).toBe(0)
+    expect(scrollMarkOpacity(mark, mark.phasePx)).toBe(scrollMarkOpacity(mark, mark.phasePx))
   })
 })

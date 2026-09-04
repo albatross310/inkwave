@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "generate:wave-scene": "node scripts/generate-wave-scene.mjs",
     "dev": "react-router dev",
     "build": "react-router build",
     "typecheck": "react-router typegen && tsc -b",
@@ -84,6 +85,7 @@
     "prove:composited": "node scripts/wave-desk/composited.prove.mjs",
     "prove:markphase": "node scripts/wave-desk/markphase.prove.mjs",
     "prove:reloadgate": "node scripts/wave-desk/reloadgate.prove.mjs",
+    "prove:scrollscene": "node scripts/wave-desk/scrollscene.prove.mjs",
     "prove:barrier": "node scripts/wave-video/barrier.prove.mjs",
     "prove:loopgate": "node scripts/wave-video/loopgate.prove.mjs",
     "prove:markskew": "node scripts/wave-video/markskew.prove.mjs",

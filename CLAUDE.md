@@ -614,7 +614,7 @@ measure the artifact per block, not the coincidence.
 
 ## Wave / water system (REBUILT 2026-07-11 — Peter's strip-down)
 
-Muted indigo→teal gradient, two 140px SVG wave tiles drifting at 72px/s, a precomputed pool of
+Muted indigo→teal gradient, two 140px SVG wave tiles drifting at 72px/s, one immutable scene of
 glitters and wave-marks, and an S-curve slow-down at reveal. The day palette is deliberately more
 serious than the former saturated cyan: `--iw-water-gradient` is the single background source,
 angled at CSS `165deg` (75° downward declension from the left-to-right horizontal),
@@ -634,23 +634,29 @@ take longer than 1.5s to hydrate and mount the twinkle field; the former 1.5s es
 painted gradient/waves first and late specks second. The only fallback is now a loud 30s failure
 backstop, and `window.__iwWaterGate.reason` records `complete`, `no-surface`, or `timeout` for probes.
 
-Each twinkle/mark owns one permanent wave-relative position for its lifetime. Reappearance changes
-opacity only: never relocate, re-jitter or glide an invisible object between envelopes. Individual
-objects have opacity tracks only; one shared transform on each populated blink field carries the
-whole group in a straight drift across a whole-number-of-tiles cycle, and every opacity track is dark
-at the cycle seam. This keeps the mark monistic, makes a return incapable of landing on a different
-wave phase, and removes both the old per-envelope relocation work and duplicate per-object transforms.
-Shared field start times are sticky across `Animation.ready`: WebKit can replace a start time written
-while play-pending on warm refreshes, so `pinToTrackClock()` writes immediately and re-asserts after
-ready. Only the shared blink wrappers get `will-change: transform`; individual marks are opacity-only.
-Editor zoom must not regenerate the speck/dash pool: its wave-space geometry is zoom-independent,
-and changing it at `inkwave:zoom-settled` made stationary marks visibly teleport after zoom. Only a
-genuine viewport resize may rebuild the pool to restore offscreen coverage.
+The marks are one immutable, checked-in scene (`waveSceneData.ts`), generated offline by the fixed-seed
+`scripts/generate-wave-scene.mjs`. Runtime randomness, canvas rasterisation, asynchronous art decode,
+server-fed instructions, respawn and duplicate blink/rest populations are forbidden. The generator
+enforces ≥180px horizontal separation per wave band; every dash stores the exact local wave tangent.
+The browser mounts the whole table synchronously before the atomic gate opens.
 
-Twinkle art decodes asynchronously. A sparkle/dash set whose decode completes after coast→rest must
-re-check the host's latest request before attaching: stopped sparkles are discarded, while desktop
-dashes that remain requested attach with every infinite load track cancelled. Pending detached
-animations are not reachable through the mounted-host maps, so `enterRest()` alone cannot stop them.
+Intro objects have exactly one finite opacity window and never reappear. Every object owns opacity
+only; the two group fields own all spatial motion and use the SAME named CSS drift + additive coast
+animations as the two wave tiles. Sibling start-time adoption and the forward coast anchor therefore
+include waves and fields together. Never add a parent/field opacity transition: initial reveal is
+atomic, but every later appearance/disappearance is independent.
+
+The pre-gate CSS keeps all spatial animations paint-hidden and paused at currentTime 0 rather than
+`display:none`. `waveTwinkle.alignFieldClocks` binds each field once to its matching pseudo and
+reasserts after both pending CSS animations resolve; this closes WebKit's provisional-startTime
+rewrite without any per-frame correction. Do not remove either the paused-at-zero gate or the
+resolved-clock reassertion.
+
+The overlapping rest population is a pure spatial loop: `scrollTop mod 2240px`. That fixed period is
+deliberately independent of time, velocity, viewport, page geometry and editor zoom. Scroll.tsx calls
+`setScrollScene` only for genuine user/PDF scroll; zoom-held correction scrolls do not reach it.
+Returning to the same absolute scrollTop must reproduce the same state. Resize clips the fixed 2800px
+×1680px scene; it must not regenerate it.
 
 **The rebuild's rounds, the wave-video ladder, and the refuted desync hypothesis are in
 `docs/archive/wave-system-rounds.md`. EVERY RULE BELOW WAS A LIVE BUG** — none is preference.
@@ -663,8 +669,10 @@ animations are not reachable through the mounted-host maps, so `enterRest()` alo
   fails two ways — it never fires, or it already fired before you subscribed — and a bare
   `addEventListener` loses to both, silently and forever. Check the state and subscribe in ONE
   synchronous block (`__iwHydrated`, `libraryReady()`). Do NOT paper over it with a timeout.
-- **Correctness of a feature must not depend on another feature succeeding.** The video keyed its
-  barrier on the twinkle pool's event and hung forever on loads where the pool never announced.
+- **Correctness of a feature must not depend on another feature succeeding.** Historically the
+  video keyed its barrier on the runtime particle pool's event and hung forever when that pool
+  never announced. The current fixed mark scene still exposes the event for the atomic water gate,
+  but unrelated systems must continue to use the guaranteed hydration beacon.
 - **A `reason`/status field that only some code paths write is a field that LIES.** Discriminate a
   hang from a stall by which fields are POPULATED, not by the status string.
 - **Sentinel values must not be able to masquerade as measurements.** `last = -1` made the first

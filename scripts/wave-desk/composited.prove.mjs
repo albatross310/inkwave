@@ -16,9 +16,9 @@
 // freezes dead.
 //
 // THREE THINGS THIS PROBE LEARNED THE HARD WAY (each was a live false-green in an earlier version):
-//   1. THE TWINKLES MUST GO. The pool's ~200 WAAPI sprite tracks are independently composited and
-//      keep the screen changing while the water sits frozen — v1 scored a fully sabotaged build
-//      GREEN because it diffed the whole viewport and saw twinkles moving.
+//   1. THE MARKS MUST GO. Their independent opacity tracks keep the screen changing while the
+//      water sits frozen — v1 scored a fully sabotaged build GREEN because it diffed the whole
+//      viewport and saw marks changing.
 //   2. THE SABOTAGE MUST BE ASSERTED. v1 injected it in an addInitScript that never landed, so it
 //      silently tested the healthy build against itself and passed. The computed animation-name is
 //      now checked and the probe ABORTS rather than print a number.
@@ -71,7 +71,7 @@ await ctx.addInitScript(({ sabotage, STARVE_MS }) => {
           transform: none !important; will-change: auto !important; contain: none !important; }`
       document.head.appendChild(s)
     }
-    // Detach the twinkle pool — note 1.
+    // Detach the deterministic mark scene — note 1.
     w.__iwProbe.twkRemoved = [...document.querySelectorAll('.iw-wave-twinkles')].map((h) => (h.remove(), 1)).length
     // WAIT FOR THE WATER GATE. twinkles-ready can precede .iw-water-ready, and until that class
     // lands every wave layer is display:none — which creates NO CSS animations at all. Reading

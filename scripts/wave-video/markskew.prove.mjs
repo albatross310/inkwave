@@ -5,25 +5,9 @@
 // is behind `?waveVideo` and DEFAULT OFF, and it cannot be the cause: Peter sees this with the flag
 // off, and the video bakes marks and waves into ONE clip where they cannot desync by construction.
 //
-// THE HYPOTHESIS UNDER TEST, and why it is NOT "WAAPI and CSS run on different clocks": they do not.
-// A CSS animation from `getAnimations()` and a WAAPI animation from `element.animate()` BOTH hang
-// off `document.timeline`, and `startTime` is ONE coordinate system for both. So `alignTracks`
-// (trackT0 = drift.startTime, mod the 1944ms tile loop) is arithmetically sound and a clock
-// DIFFERENCE is not available as an explanation. What IS available is a RESOLUTION RACE:
-//
-//   waveTwinkle.alignTracks  does  drift.ready.then(apply)   → READS  drift.startTime
-//   Scroll.tsx sibling-adopt does  a.ready.then(re-assert)   → WRITES drift.startTime
-//
-// Both hang off the same `ready` promise and their ORDER IS UNSPECIFIED. If `apply` wins, trackT0 is
-// stamped from a startTime the drift is about to ABANDON, and every mark is clocked to a phase the
-// wave no longer has. That is a race — the shape of Peter's "OFTEN" — and it is consistent with the
-// jitter lane's measured 43-60px of mark-vs-wave skew on 4 of 5 clean loads.
-//
-// WHAT IS MEASURED: the congruence the whole design rests on (waveTwinkle.ts: "trackT0 ≡ the tile
-// drift animation's startTime (mod 1944ms) — that congruence is ALL the wave-space maths needs").
-// Since the monistic-object simplification, position lives on the `.iw-twk-blink` wrapper's ONE
-// shared transform; child `.iw-twk-i` animations are opacity-only and are deliberately ignored.
-// skew = (trackStartTime − driftStartTime) mod 1944 → the distance to the nearest crest. Zero ⇒ the
+// WHAT IS MEASURED: the deterministic rebuild removes per-object spatial tracks entirely. The two
+// mark fields and the two wave pseudos use the same named CSS drifts, and individual marks animate
+// opacity only. skew = (fieldStartTime − matchingWaveStartTime) mod 1944 → distance to the nearest crest. Zero ⇒ the
 // mark rides its wave. Non-zero ⇒ it is off by skew × 72px/s, which is what "out of sync" LOOKS like.
 //
 // THE INSTRUMENT PROVES ITSELF FIRST (this lane's own probe history is the argument — the tile-scale
@@ -82,27 +66,29 @@ function sampler() {
       }
       for (const a of surf.getAnimations({ subtree: true })) {
         const n = a.animationName || ''
-        if (n === 'iw-wave-drift-l' || n === 'iw-wave-drift-r')
+        const target = a.effect?.target
+        if ((n === 'iw-wave-drift-l' || n === 'iw-wave-drift-r')
+          && !(target instanceof Element && target.matches('.iw-twk-field')))
           rec.drifts[n] = typeof a.startTime === 'number' ? a.startTime : null
       }
       out.surfaces.push(rec)
       const host = surf.querySelector('.iw-wave-twinkles')
       if (!host) continue
-      for (const el of host.querySelectorAll('.iw-twk-blink, .iw-twk-blink > *')) {
+      for (const el of host.querySelectorAll('.iw-twk-field')) {
         for (const a of el.getAnimations()) {
-          // A mark track is a WAAPI animation with NO animationName — that is what separates the
-          // script-made field transform from the coast's named CSS fades on the same subtree.
-          if (a.animationName) continue
+          const group = el.classList.contains('iw-twk-fa') ? 'a' : 'b'
+          const expected = group === 'a' ? 'iw-wave-drift-l' : 'iw-wave-drift-r'
+          if (a.animationName !== expected) continue
           const frames = a.effect?.getKeyframes?.() || []
           const transformFrames = frames.filter((f) => typeof f.transform === 'string')
-          if (!transformFrames.length) continue // child opacity clock is not spatial phase
+          if (!transformFrames.length) continue
           if (typeof a.startTime !== 'number') continue
           // `si` is LOAD-BEARING: a mark is drawn over ITS OWN surface's wave, so that is the only
           // wave it can be in or out of sync with. The previous cut compared every track to
           // surfaces[0]'s drift and reported 13.2px of "mark skew" that was really the CROSS-SURFACE
           // difference — it recorded fill/covered per track and then ignored them. The house disease,
           // in the instrument.
-          out.tracks.push({ st: a.startTime, si, fill: rec.fill, covered: rec.covered, transformFrames: transformFrames.length })
+          out.tracks.push({ st: a.startTime, si, group, fill: rec.fill, covered: rec.covered, transformFrames: transformFrames.length })
         }
       }
     }
@@ -121,8 +107,8 @@ function sampler() {
         return Math.min(d, LOOP - d)
       }
       const ownWorst = Math.max(0, ...out.tracks
-        .filter((t) => typeof out.surfaces[t.si]?.drifts['iw-wave-drift-l'] === 'number')
-        .map((t) => phase(t.st, out.surfaces[t.si].drifts['iw-wave-drift-l'])))
+        .filter((t) => typeof out.surfaces[t.si]?.drifts[t.group === 'a' ? 'iw-wave-drift-l' : 'iw-wave-drift-r'] === 'number')
+        .map((t) => phase(t.st, out.surfaces[t.si].drifts[t.group === 'a' ? 'iw-wave-drift-l' : 'iw-wave-drift-r'])))
       const driftLs = out.surfaces.map((s) => s.drifts['iw-wave-drift-l']).filter((x) => typeof x === 'number')
       const crossWorst = driftLs.length ? Math.max(...driftLs.map((st) => phase(st, driftLs[0]))) : 0
       out.phaseScore = Math.max(ownWorst, crossWorst)
@@ -162,18 +148,20 @@ function summarise(r) {
 
   // THE CLAIM UNDER TEST: each mark rides the wave IT IS DRAWN OVER. So every track is scored
   // against ITS OWN surface's drift-l, never against a global reference.
-  const own = r.tracks.filter((t) => driftLs[t.si] != null)
+  const own = r.tracks.filter((t) => (t.group === 'a' ? driftLs[t.si] : driftRs[t.si]) != null)
   const px = own.map((t) => {
-    const d = mod(t.st - driftLs[t.si], LOOP_MS)
+    const wave = t.group === 'a' ? driftLs[t.si] : driftRs[t.si]
+    const d = mod(t.st - wave, LOOP_MS)
     return (Math.min(d, LOOP_MS - d) / 1000) * PX_PER_S
   })
   const sorted = [...px].sort((a, b) => a - b)
 
-  // A SEPARATE, DIFFERENT CLAIM: the two drifting surfaces are supposed to be phase-identical
-  // (Scroll.tsx's sibling adopt — "pixel-identical copies"). That is the doubled-lines invariant,
-  // not the mark-sync one, and conflating them is what the first cut did.
-  const ref = present[0]
-  const cross = present.map((d) => {
+  // A SEPARATE, DIFFERENT CLAIM: simultaneously paintable drifting surfaces must be phase-identical.
+  // Covered editor surfaces are visibility:hidden until rest; a pending clock on one cannot create
+  // the doubled-lines artifact and is allowed to settle before it ever becomes paintable.
+  const paintable = r.surfaces.flatMap((s, i) => !s.covered && driftLs[i] != null ? [driftLs[i]] : [])
+  const ref = paintable[0]
+  const cross = paintable.map((d) => {
     const x = mod(d - ref, LOOP_MS)
     return +(Math.min(x, LOOP_MS - x)).toFixed(1)
   })
@@ -190,7 +178,7 @@ function summarise(r) {
       return +(Math.min(x, LOOP_MS - x)).toFixed(1)
     }),
     crossSurfaceMs: cross,
-    crossMaxPx: +((Math.max(...cross) / 1000) * PX_PER_S).toFixed(2),
+    crossMaxPx: +(((cross.length ? Math.max(...cross) : 0) / 1000) * PX_PER_S).toFixed(2),
     p50px: +sorted[Math.floor(sorted.length / 2)].toFixed(2),
     maxpx: +sorted[sorted.length - 1].toFixed(2),
     maxTransformFrames: Math.max(...own.map((t) => t.transformFrames)),

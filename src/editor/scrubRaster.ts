@@ -267,7 +267,7 @@ async function prepareClone(clone: HTMLElement): Promise<void> {
   // document would decode every one (the pool's raster art). They're WAAPI-driven ephemera the
   // bitmap doesn't need (the wave lines are CSS pseudos and survive); the live view hides them
   // on hidden layers anyway.
-  clone.querySelectorAll('script, iframe, video, audio, .iw-scrub-overlay, .iw-wave-twinkles, .iw-twk-field, .iw-twk-rest').forEach((n) => n.remove())
+  clone.querySelectorAll('script, iframe, video, audio, .iw-scrub-overlay, .iw-wave-twinkles, .iw-twk-field').forEach((n) => n.remove())
   // Canvases lose their pixels on cloneNode — bake them to data URIs (best-effort; tainted → drop).
   // (The snapshot panes have none today; belt-and-braces for future content.)
   clone.querySelectorAll('canvas').forEach((c) => {

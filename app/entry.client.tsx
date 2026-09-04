@@ -64,9 +64,9 @@ applyTheme()
 // so. It renders NO host node, so it cannot itself perturb the hydration it reports on.
 //
 // STATE **AND** EVENT, deliberately (2026-07-17, the second round of Peter's iPhone bug). The
-// video's barrier first keyed on `inkwave:twinkles-ready`, which was post-hydration but is NOT
-// guaranteed to arrive: the twinkle pool announces only once BOTH its sets generate, while the
-// the old water gate could open on a timeout even when the pool never announced, leaving the
+// video's barrier first keyed on `inkwave:twinkles-ready`, which was post-hydration but was NOT
+// guaranteed to arrive: the old runtime particle pool announced only after BOTH sets generated,
+// while the old water gate could open on a timeout even when the pool never announced, leaving the
 // barrier waiting for a signal that was never coming, forever (PROBED). A signal you
 // wait on must be one that ALWAYS fires, and it must be ASKABLE ("has it already happened?") so a
 // late subscriber can never wait for a past event. React always commits, so this always fires.
@@ -144,17 +144,17 @@ function armWaveVideoWait(): void {
 // and appears in ONE paint. TWO conditions open the gate (2026-07-10, Peter: "glimmers and short
 // lines … need to start atomically even if it takes longer"):
 //   1. every wave-tile data-URI has decoded;
-//   2. the twinkle field has generated + decoded + MOUNTED (hidden — the not-ready CSS keeps
-//      .iw-wave-twinkles display:none) — waveTwinkle.ts announces via 'inkwave:twinkles-ready'
+//   2. the complete checked-in mark scene has mounted synchronously (paint-hidden and paused at
+//      currentTime 0 by the not-ready CSS) — waveTwinkle.ts announces 'inkwave:twinkles-ready'
 //      (+ the __iwTwinklesReady flag for the fired-before-we-listened race).
 // Until both, day mode holds pure white; then colour, waves and twinkles land in the
 // same style recalc. The old single-condition gate let the twinkle layers mount LATER, mid-drift —
 // on Firefox that late mount re-rastered the wave layers (a blank flash at a consistent moment)
 // and the field popped in non-atomically. Only the loud 30s failure backstop opens an incomplete
 // gate; healthy loads wait for both conditions. On gate-open we dispatch
-// 'inkwave:water-ready': THAT style recalc creates the wave pseudos' CSS drift animations, and
-// waveTwinkle aligns its precomputed pool's playback clock to the drift's literal startTime in
-// the same first-visible frame (alignTracks — once per load).
+// 'inkwave:water-ready': THAT style recalc creates the wave pseudos and deterministic mark fields'
+// identical named CSS drift animations in the same first-visible frame. Individual marks own
+// opacity only, so there is no second spatial clock to align after reveal.
 // REFRESH: the old localStorage pre-stamp (root.tsx head script) opened the gate pre-paint on
 // warm clients — which would let the water paint long before the twinkles mount. Removed: every
 // load gates identically now (the tiles are data URIs, so "warm" never made decoding faster

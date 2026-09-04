@@ -253,22 +253,14 @@ function dpiRatio(r: Rung, dpr: number): number { return r.dsf / dpr }
 
 let started = false
 
-// THE HYDRATION BARRIER (see the ⛔ note in the header). `inkwave:twinkles-ready` is the app's
-// existing post-hydration signal: waveTwinkle announces it once the pool is mounted from a LAYOUT
-// EFFECT, which React can only run after the hydration commit. Deliberately NOT `.iw-water-ready`
-// — that gate has a 1500ms timeout path (entry.client) that can open it BEFORE hydration on a slow
-// device (an iPhone 8 is exactly that device), which would put us right back in the mismatch.
-// `__iwTwinklesReady` covers the fired-before-we-listened race, as it does for the gate itself.
-// If the twinkles never announce, this never resolves and the video simply never runs — the CSS
-// water is the intended fallback at every step, and entry.client only ever `void`s us.
 // ASK, THEN SUBSCRIBE — and only ever wait on a signal that ALWAYS arrives. `inkwave:hydrated`
 // (entry.client's beacon) fires from a post-commit effect on every load, and `__iwHydrated` makes
 // it askable, so a caller that arrives late can never wait for an event already in the past. The
 // check and the subscribe are one synchronous block — nothing can slip between them.
 //
-// This first keyed on `inkwave:twinkles-ready`. That was post-hydration, but it is NOT guaranteed:
-// the pool announces only if BOTH its sets generate, while the water gate opens regardless on its
-// own 1500ms timeout — so a load whose pool never announced hung the video FOREVER with the water
+// This first keyed on `inkwave:twinkles-ready`. That was post-hydration, but the old runtime pool's
+// signal was NOT guaranteed: it announced only if BOTH its sets generated, while the water gate
+// opened on its own timeout — so a load whose pool never announced hung the video FOREVER with the water
 // gate wide open (PROBED 2026-07-17: reason stuck at 'waiting for hydration…', clip/fetch never
 // even set). Correctness of the video must not depend on the twinkles succeeding.
 function hydrated(): Promise<void> {

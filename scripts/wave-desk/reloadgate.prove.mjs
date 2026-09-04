@@ -33,29 +33,51 @@ await context.addInitScript(() => {
       const surfaces = [...document.querySelectorAll('.inkwave-editor-surface.iw-wave-anim')]
       const records = []
       for (const surface of surfaces) {
-        const drift = surface.getAnimations({ subtree: true })
-          .find((a) => a.animationName === 'iw-wave-drift-l' && !(a.effect?.target instanceof Element
-            && a.effect.target.closest?.('.iw-wave-twinkles')))
-        const wrappers = [...surface.querySelectorAll('.iw-twk-blink')]
-        const fields = wrappers.flatMap((el) => el.getAnimations()
-          .filter((a) => !a.animationName && (a.effect?.getKeyframes?.() || [])
-            .some((f) => typeof f.transform === 'string')))
+        const allAnimations = surface.getAnimations({ subtree: true })
+        const tileDrifts = Object.fromEntries(['l', 'r'].map((direction) => {
+          const name = `iw-wave-drift-${direction}`
+          const animation = allAnimations.find((a) => {
+            const target = a.effect?.target
+            return a.animationName === name
+              && !(target instanceof Element && target.matches('.iw-twk-field'))
+          })
+          return [direction, animation]
+        }))
+        const fields = [...surface.querySelectorAll('.iw-twk-field')].flatMap((el) => {
+          const direction = el.classList.contains('iw-twk-fa') ? 'l' : 'r'
+          const animation = el.getAnimations().find((a) => a.animationName === `iw-wave-drift-${direction}`)
+          return animation ? [{ direction, animation }] : []
+        })
+        const marks = [...surface.querySelectorAll('.iw-scene-mark')]
         const phase = (a, b) => {
           const d = ((a - b) % 1944 + 1944) % 1944
           return Math.min(d, 1944 - d)
         }
-        const skew = typeof drift?.startTime === 'number'
-          ? fields.filter((a) => typeof a.startTime === 'number').map((a) => phase(a.startTime, drift.startTime))
-          : []
+        const skew = fields.flatMap(({ direction, animation }) => {
+          const wave = tileDrifts[direction]
+          return typeof animation.startTime === 'number' && typeof wave?.startTime === 'number'
+            ? [phase(animation.startTime, wave.startTime)]
+            : []
+        })
         records.push({
           covered: surface.classList.contains('iw-wave-covered'),
+          mode: surface.classList.contains('iw-wave-coast') ? 'coast' : 'anim',
           gradient: getComputedStyle(surface).backgroundImage !== 'none',
-          waves: surface.getAnimations({ subtree: true }).filter((a) => /^iw-wave-drift-[lr]$/.test(a.animationName || '')).length,
+          waves: allAnimations.filter((a) => {
+            const target = a.effect?.target
+            return /^iw-wave-drift-[lr]$/.test(a.animationName || '')
+              && !(target instanceof Element && target.matches('.iw-twk-field'))
+          }).length,
           fields: fields.length,
+          marks: marks.length,
           maxSkewMs: skew.length ? Math.max(...skew) : null,
-          twinklesVisible: wrappers.some((el) => {
+          clocks: {
+            waves: Object.fromEntries(Object.entries(tileDrifts).map(([k, a]) => [k, a?.startTime ?? null])),
+            fields: Object.fromEntries(fields.map(({ direction, animation }) => [direction, animation.startTime ?? null])),
+          },
+          twinklesVisible: marks.some((el) => {
             const cs = getComputedStyle(el)
-            return cs.display !== 'none' && cs.visibility === 'visible'
+            return cs.display !== 'none' && cs.visibility === 'visible' && Number(cs.opacity) > 0
           }),
         })
       }
@@ -91,20 +113,28 @@ for (let load = 1; load <= LOADS; load++) {
   await page.waitForTimeout(250)
   const result = await page.evaluate(() => ({ gate: window.__iwWaterGate, audit: window.__iwReloadGateAudit }))
   const event = Object.fromEntries(result.audit.events.map((e) => [e.name, e.t]))
-  const first = result.audit.samples.find((s) => s.records.some((r) => !r.covered && r.waves >= 2 && r.fields > 0))
+  const first = result.audit.samples.find((s) => s.records.some((r) => !r.covered && r.waves >= 2 && r.fields === 2 && r.marks === 192))
   const records = (first?.records ?? []).filter((r) => !r.covered)
   const worstMs = Math.max(0, ...result.audit.samples.flatMap((s) => s.records)
+    .filter((r) => !r.covered)
     .map((r) => r.maxSkewMs ?? 0))
   const atomic = result.gate.reason === 'complete'
     && event['twinkles-ready'] <= event['water-ready']
     && records.length > 0
-    && records.every((r) => r.gradient && r.twinklesVisible && r.waves >= 2 && r.fields > 0)
+    && records.every((r) => r.gradient && r.twinklesVisible && r.waves >= 2 && r.fields === 2 && r.marks === 192)
   const aligned = worstMs <= 1
   console.log(`load ${load} ${load === 1 ? 'navigate' : 'reload'}: gate=${result.gate.reason}`
     + ` twinkles=${Math.round(event['twinkles-ready'] ?? -1)}ms water=${Math.round(event['water-ready'] ?? -1)}ms`
     + ` firstCompleteFrame=${first?.frame ?? 'none'} fields=${records.reduce((n, r) => n + r.fields, 0)}`
     + ` worstSkew=${(worstMs * 140 / 1944).toFixed(2)}px`
     + ` ${atomic && aligned ? '✓' : '✗'}`)
+  if (!aligned) {
+    const worst = result.audit.samples.flatMap((sample) => sample.records
+      .filter((record) => !record.covered)
+      .map((record) => ({ frame: sample.frame, record })))
+      .sort((a, b) => (b.record.maxSkewMs ?? 0) - (a.record.maxSkewMs ?? 0))[0]
+    console.log('  worst clocks:', worst)
+  }
   if (!atomic || !aligned) failed = true
 }
 
