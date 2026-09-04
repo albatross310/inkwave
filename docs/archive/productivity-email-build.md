@@ -51,6 +51,13 @@ manufacturing a blank page-height tail. A browser check with a deliberately exag
 document margin measured the message at 25px from the application edge, proving the settings are no
 longer coupled.
 
+The spec now also carries an explicit Phase-3 copy migration gate (§B4.5): the current “draft existed”
+disclosure changes only for an individual message whose raw sent MIME, Gmail message metadata, DKIM
+signature/key, and versioned evidence bundle have been successfully verified and OTS-anchored. Gmail's
+`internalDate` and the Bitcoin no-later-than anchor remain separately labelled; an API success alone
+does not become permanent public proof, and delivery/read/Bcc remain outside the claim without their
+own evidence.
+
 ---
 
 ## Productivity AI report — the free paste-back path (P1c, 2026-07-17, `?prodReport` DEFAULT ON since 2026-07-18)

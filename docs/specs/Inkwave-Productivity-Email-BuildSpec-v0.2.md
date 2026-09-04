@@ -410,6 +410,33 @@ Result: a permanent, portable, self-service proof that *the provider cryptograph
 
 **Honesty boundary (Phase 3):** even here, the claim is "signed/transmitted by the provider," not "delivered to / read by the recipient." Don't overclaim delivery.
 
+#### B4.5 In-product copy migration when sent-message proof ships
+
+The current email disclosure deliberately says that the Bitcoin record proves only that the draft
+existed by a given time and does not prove sending. **Update that disclosure when—and only when—the
+individual message has a successfully verified Phase-3 sent-message bundle.** This is an explicit
+product task in the DKIM/Gmail timestamp integration, not optional copy polish.
+
+- After Gmail accepts the send, fetch the immutable Gmail message ID, `internalDate`, and full raw
+  sent MIME; preserve the provider response and the exact bytes returned by `messages.get`.
+- Validate the DKIM signature over the body and every header actually named by its `h=` list, archive
+  the corresponding public key, then hash and OTS-anchor a versioned sent-message bundle containing
+  those facts. Record which fields are DKIM-covered rather than assuming that every header is signed.
+- Gmail's `internalDate` is provider metadata and useful evidence of provider acceptance time, but it
+  is not by itself a publicly verifiable signed timestamp. Bitcoin independently proves that the
+  complete evidence bundle existed **no later than** its anchor time. A future provider-signed receipt
+  may tighten the time claim further.
+- Once both DKIM verification and the Bitcoin anchor succeed, replace the current draft-only wording
+  for that message with copy equivalent to: **“The provider's signature verifies the captured body
+  and signed headers as the message it transmitted; the Bitcoin timestamp makes this evidence
+  permanently independently verifiable.”** Show the Gmail acceptance timestamp and Bitcoin anchor
+  time separately; never collapse them into one supposedly exact time.
+- If sent-copy fetch, DKIM validation, key archival, or OTS anchoring fails or remains pending, retain
+  the present draft-provenance wording. A successful API send alone must never unlock the stronger
+  claim.
+- Even the upgraded copy must not claim recipient delivery, inbox placement, opening/reading, or an
+  envelope recipient such as Bcc unless separate verifiable evidence covers that fact.
+
 ### B5. Privacy and permissions (email)
 
 - **Minimal scope:** send-only (`gmail.send` / Graph `Mail.Send`); never request inbox-read for the send/provenance features.
