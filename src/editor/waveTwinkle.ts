@@ -491,7 +491,26 @@ interface SetNodes {
   rest: Record<Group, HTMLElement> // static texture (fades in over the coast; WAAPI drift-clocked)
   els: HTMLElement[]
 }
-interface HostState { sparks?: SetNodes; dashes?: SetNodes; tok: { sparks: number; dashes: number } }
+interface HostState {
+  sparks?: SetNodes
+  dashes?: SetNodes
+  tok: { sparks: number; dashes: number }
+  want: { sparks: boolean; dashes: boolean }
+  phone: boolean
+}
+
+export function pendingTwinkleMountDecision(state: {
+  requested: boolean
+  tokenMatches: boolean
+  alreadyMounted: boolean
+  connected: boolean
+  sameDefinitions: boolean
+  mode: Mode
+}): 'discard' | 'attach-static' | 'attach-animated' {
+  if (!state.requested || !state.tokenMatches || state.alreadyMounted || !state.connected || !state.sameDefinitions)
+    return 'discard'
+  return state.mode === 'off' ? 'attach-static' : 'attach-animated'
+}
 
 let defs: { sparks: Inst[]; dashes: Inst[] } | null = null
 let stripW = 0
@@ -1042,11 +1061,23 @@ function mountSet(host: HTMLElement, h: HostState, kind: 'sparks' | 'dashes'): v
 
   }
   void decodeAll(list).then(() => {
-    const stale = h.tok[kind] !== token || h[kind] || !host.isConnected || !defs
-      || (kind === 'sparks' ? defs.sparks : defs.dashes) !== list // regenerated while decoding — the newer mount wins
-    if (stale) {
+    const decision = pendingTwinkleMountDecision({
+      requested: h.want[kind],
+      tokenMatches: h.tok[kind] === token,
+      alreadyMounted: Boolean(h[kind]),
+      connected: host.isConnected,
+      sameDefinitions: Boolean(defs) && (kind === 'sparks' ? defs!.sparks : defs!.dashes) === list,
+      mode: waterMode,
+    })
+    if (decision === 'discard') {
       for (const el of nodes.els) { trackAnims.get(el)?.forEach((a) => a.cancel()); trackAnims.delete(el) }
       return
+    }
+    // Decode can finish AFTER coast→rest. Those load animations live on detached elements, so
+    // enterRest cannot see them through h.sparks/h.dashes. Never attach a late desktop dash set
+    // with its infinite load tracks still running; it must arrive as the static resting texture.
+    if (decision === 'attach-static') {
+      for (const el of nodes.els) { trackAnims.get(el)?.forEach((a) => a.cancel()); trackAnims.delete(el) }
     }
     host.appendChild(nodes.set)
     h[kind] = nodes
@@ -1198,6 +1229,11 @@ function enterRest(): void {
   // this same recalc; total pose = the tiles' handed-off --wave-x, identical by construction),
   // and put the fields on literal sway transforms at that exact value.
   for (const [hostEl, h] of hosts) {
+    // Rest has no sparkles anywhere and no marks on phone. Record that before an asynchronous
+    // decode can finish: a pending set is not yet in h.sparks/h.dashes, so cancellation below
+    // cannot discover it. Its decode continuation reads these wishes and discards it instead.
+    h.want.sparks = false
+    if (h.phone) h.want.dashes = false
     const surface = hostEl.parentElement
     const waveX = surface ? parseFloat(surface.style.getPropertyValue('--wave-x')) || 0 : 0
     lastWaveX = waveX
@@ -1240,7 +1276,13 @@ export function syncTwinkles(
   }
   pruneHosts()
   let h = hosts.get(host)
-  if (!h) { h = { tok: { sparks: 0, dashes: 0 } }; hosts.set(host, h) }
+  if (!h) {
+    h = { tok: { sparks: 0, dashes: 0 }, want: { sparks: false, dashes: false }, phone: want.phone }
+    hosts.set(host, h)
+  }
+  h.want.sparks = want.sparks
+  h.want.dashes = want.dashes
+  h.phone = want.phone
 
   // Global mode transition (every surface flips in the same event dispatch).
   const prev = waterMode

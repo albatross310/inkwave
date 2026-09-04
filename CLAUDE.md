@@ -627,6 +627,11 @@ playback is COMPOSITOR-ONLY — no per-frame JS, so main-thread starvation canno
 two control events cross from the app into it: START (implicit, the prerendered `.iw-wave-anim`
 class) and SETTLE (`inkwave:reveal-imminent`).
 
+Twinkle art decodes asynchronously. A sparkle/dash set whose decode completes after coast→rest must
+re-check the host's latest request before attaching: stopped sparkles are discarded, while desktop
+dashes that remain requested attach with every infinite load track cancelled. Pending detached
+animations are not reachable through the mounted-host maps, so `enterRest()` alone cannot stop them.
+
 **The rebuild's rounds, the wave-video ladder, and the refuted desync hypothesis are in
 `docs/archive/wave-system-rounds.md`. EVERY RULE BELOW WAS A LIVE BUG** — none is preference.
 
