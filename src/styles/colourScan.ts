@@ -1,33 +1,21 @@
 // The colour-literal scanner — the instrument behind the palette gate (`colourScan.test.ts`).
 //
-// ─── WHY THIS EXISTS ─────────────────────────────────────────────────────────────────────────────
-// CLAUDE.md's THEMING section makes a promise: "Adding a new scheme later = one more
-// `:root[data-theme=…]` block; components don't change." Measured against master (2026-08-30) that
-// promise is false, and the number says how false: 892 colour literals sit in production TS/TSX with
-// no token anywhere near them — 127 of them `#5c2d8a`, the app's own ink, which HAS a token. A
-// literal in a component is invisible to every `:root` block ever written, so each one is a surface
-// that a new palette cannot reach and that only a human eye reports. Peter has been reporting them
-// one at a time for a week.
+// ⚠ IT IS A RATCHET. Every file carries the count it had when the gate landed; the gate fails when
+// a file EXCEEDS its cap, and a file the baseline has never heard of is capped at ZERO. Removing
+// literals can never fail, so a migration can only make it greener. It exists because the theming
+// promise ("components don't change") was measurably false — 892 bare literals in production
+// TS/TSX, 127 of them the app's own ink, each one a surface no `:root` block can ever reach.
 //
-// Nothing stopped the drift, so this is the thing that stops it: a RATCHET. Every file carries the
-// count it had when the gate landed; the gate fails when a file EXCEEDS its cap, and a file the
-// baseline has never heard of is capped at ZERO. Removing literals never fails, so the migration —
-// and the three colour lanes in flight while this was written — can only make the gate greener.
+// ⚠ BARE `background: '#fff'` is COUNTED — it cannot theme, and it is the defect. A `var(--tok,
+// #hex)` FALLBACK is NOT counted: it is the sanctioned intermediate form a lane writes on the way
+// from bare to tokenised, so capping it would fail the gate on the fix. It is REPORTED instead,
+// because a live fallback means the palette has a hole.
 //
-// ─── WHAT IS AND IS NOT A VIOLATION ──────────────────────────────────────────────────────────────
-// BARE  `background: '#fff'`            — counted. It cannot theme. This is the defect.
-// FALLBACK  `var(--iw-ink, #5c2d8a)`    — NOT counted. It is CLAUDE.md rule 2, the sanctioned
-//           intermediate form, and it is the shape a lane fixing a night bug writes on its way from
-//           bare to tokenised. Capping it would fail the gate on the fix. It is REPORTED instead
-//           (`scanTree().fallback`) because it is not the destination either: a fallback only ever
-//           applies when the token is undefined, so a live one means the palette has a hole.
-//
-// COMMENTS ARE STRIPPED BEFORE SCANNING, deliberately and not as a nicety. This repo's comments must
-// name the colours they forbid in order to forbid them — this file's own header names `#5c2d8a`, and
-// index.css explains `--iw-on-ink` by quoting the white-on-#cbb8f2 bug it fixes. CLAUDE.md records
-// three separate lanes in one round whose guards fired on their own documentation, and the tempting
-// fix each time was to delete the sentence. A guard that cannot survive its own explanation gets
-// disabled.
+// ⚠ COMMENTS ARE STRIPPED BEFORE SCANNING, and that is load-bearing, not a nicety: this repo's
+// comments must NAME the colours they forbid in order to forbid them — this header names `#5c2d8a`
+// — and three lanes in one round shipped guards that fired on their own documentation, where the
+// tempting fix each time was to delete the sentence.
+// → docs/archive/panels-and-popovers.md#colourscan-why
 
 /** One file's colour census. */
 export interface ColourCensus {
@@ -38,10 +26,9 @@ export interface ColourCensus {
 }
 
 /**
- * Hex, rgb()/rgba(), hsl()/hsla(). Deliberately NOT matching named CSS colours (`white`, `black`):
- * `black` is also an English word and a font weight, and over-collecting prose is how a guard earns
- * the reputation that gets it deleted. Named colours are rare here and the migration catches them by
- * eye.
+ * Hex, rgb()/rgba(), hsl()/hsla(). ⚠ Deliberately NOT named CSS colours: `black` is also an English
+ * word and a font weight, and over-collecting prose is how a guard earns the reputation that gets
+ * it deleted. Named colours are rare here and the migration catches them by eye.
  */
 const COLOUR_RE = /#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b|\b(?:rgba?|hsla?)\(\s*[\d.%\s,/]+\)/g
 
@@ -55,10 +42,9 @@ const VAR_FALLBACK_RE = /var\(\s*--[a-z0-9-]+\s*,\s*([^()]*(?:\([^()]*\)[^()]*)*
 /**
  * Strip `//` and block comments without destroying string contents.
  *
- * A plain `.replace(/\/\/.*$/gm, '')` truncates any line holding a URL in a string literal, and a
- * naive block-comment strip eats a regex or a template. So this is a small state machine over
- * code/string/line-comment/block-comment. It is not a parser and does not need to be: the only
- * question it has to answer correctly is "is this hex inside a comment".
+ * ⚠ A STATE MACHINE, NOT A REGEX: `.replace(/\/\/.*$/gm, '')` truncates any line holding a URL in
+ * a string literal, and a naive block strip eats a regex or a template. It is not a parser and does
+ * not need to be — the only question it must answer correctly is "is this hex inside a comment".
  */
 export function stripComments(src: string): string {
   let out = ''
@@ -114,16 +100,12 @@ export function scanSource(src: string): ColourCensus {
 /** Directories never worth walking. */
 export const SKIP_DIR = new Set(['node_modules', 'dist', 'build', '__snapshots__'])
 
-// ─── THE TOKEN CONTRACT ──────────────────────────────────────────────────────────────────────────
-// Everything above counts literals. This half checks the OTHER failure, and it is the quieter one: a
-// `var(--iw-x, #fallback)` that reads a token nobody ever declared is INDISTINGUISHABLE at a glance
-// from one that works — it renders the fallback, in every theme, forever, with no error. The reader
-// lane found `--iw-panel-bg` that way (declared nowhere, read by two live surfaces); this sweep also
-// found `--iw-score-gap` and `--iw-gap-rule` in src/music/ScorePage.tsx.
-//
-// It is DERIVED FROM SOURCE both sides — the tokens components actually read, against the tokens
-// index.css actually declares — rather than a hand-written list, which is the drift that
-// `contrastWalkerContract.test.ts` exists to stop one directory over.
+// ─── THE TOKEN CONTRACT ──────────────────────────────────────────────────────
+// ⚠ AN UNDECLARED TOKEN IS THE QUIETER FAILURE: `var(--iw-x, #hex)` reading a token nobody declared
+// is indistinguishable at a glance from one that works — it renders the fallback, in every theme,
+// forever, with no error (`--iw-panel-bg`, `--iw-score-gap`, `--iw-gap-rule` were all found this
+// way). ⚠ DERIVED FROM SOURCE ON BOTH SIDES — what components read vs what index.css declares —
+// never a hand-written list. → docs/archive/panels-and-popovers.md#colourscan-token-contract
 
 /** One `var(--token, fallback)` call site. */
 export interface VarUse { token: string; fallback: string | null }
@@ -167,16 +149,11 @@ export function sameColour(a: string, b: string): boolean {
 /**
  * One colour, one spelling — so the drift check reports real disagreements and not typography.
  *
- * ⚠ TWO BUGS IN THIS ONE FUNCTION, both of which MANUFACTURED FINDINGS, and both caught only by
- * reading the list it produced rather than by trusting its count:
- *   1. The first cut stripped trailing alpha zeros with a regex that could never fire, so
- *      `rgba(…,0.10)` was reported as drift from `rgba(…,0.1)` — 2 of its 14 "findings" were the
- *      instrument's own.
- *   2. The fix then ran the numeric normaliser over HEX too: `#000000` is all digits, so it became
- *      `Number('000000')` = `#0`, and `--iw-page-num` was reported as drift from itself. A
- *      normaliser that changes what it is comparing is worse than none.
- * Hence the two branches are kept apart: hex is expanded and lowercased and NEVER arithmetic; only
- * the components inside rgb()/hsl() are compared as numbers.
+ * ⚠ THE TWO BRANCHES MUST STAY APART: hex is expanded and lowercased and NEVER arithmetic; only the
+ * components inside rgb()/hsl() are compared as numbers. Running the numeric normaliser over hex
+ * turned `#000000` into `Number('000000')` = `#0`, so a token was reported as drifting from itself
+ * — a normaliser that changes what it is comparing is worse than none. Both of this function's bugs
+ * MANUFACTURED findings. → docs/archive/panels-and-popovers.md#colourscan-normalise
  */
 export function normaliseColour(s: string): string {
   const t = s.trim().toLowerCase().replace(/\s+/g, '')
@@ -192,13 +169,11 @@ export function normaliseColour(s: string): string {
 /**
  * Is this fallback a COLOUR?
  *
- * The dangling check has to separate colour tokens from the layout ones (`--iw-toolbar-h`,
- * `--iw-kb-offset`, `--iw-tap-x`, `--iw-align`…), which are set imperatively from JS and are
- * correctly absent from the stylesheet. Doing that with a hand-written list of layout names is the
- * drift `contrastWalkerContract.test.ts` exists to stop, so it is derived instead: a token is a
- * colour token when a call site passes it a colour. `transparent` and `currentColor` count — they
- * are values of a colour property, and a token whose only fallback is `transparent` is still a
- * colour a palette may want to re-point.
+ * ⚠ DERIVED, NEVER A HAND-WRITTEN LIST of layout token names (`--iw-toolbar-h`, `--iw-tap-x`…):
+ * a token is a colour token when a call site passes it a colour. That is the drift
+ * `contrastWalkerContract.test.ts` exists to stop one directory over. `transparent` and
+ * `currentColor` count — a token whose only fallback is `transparent` is still a colour a palette
+ * may want to re-point.
  */
 export function isColourValue(v: string): boolean {
   const t = v.trim().toLowerCase()
@@ -209,16 +184,12 @@ export function isColourValue(v: string): boolean {
 /**
  * Custom properties this repo WRITES AT RUNTIME, from source.
  *
- * Two spellings, because one alone is a false instrument: `el.style.setProperty('--iw-x', …)` and
- * React's inline-style key form `{ ['--iw-x' as string]: '6px' }`. Scanning only for `setProperty`
- * finds 13 properties and MISSES `--iw-tap-x`, `--iw-row-slots` and `--iw-wave-x` — which is exactly
- * enough of a gap to make a "these are all runtime channels" exemption quietly wrong.
- *
- * This is corroboration, NOT the line the dangling check draws. The line is "is it a COLOUR token",
- * derived from the fallbacks call sites pass — a runtime-written property is fine, and an undeclared
- * COLOUR token is the bug (`--iw-panel-bg`, `--iw-score-gap`, `--iw-gap-rule`). Several of these must
- * stay imperative for measured reasons: CLAUDE.md records that declaring `--iw-wave-x` as an
- * inheriting custom property invalidated the whole page subtree, p50 417ms → 50ms.
+ * ⚠ BOTH SPELLINGS, because one alone is a false instrument: `setProperty('--iw-x', …)` and React's
+ * inline-style key form. `setProperty` alone finds 13 and MISSES `--iw-tap-x`, `--iw-row-slots` and
+ * `--iw-wave-x` — enough of a gap to make a "these are all runtime channels" exemption quietly
+ * wrong. ⚠ CORROBORATION ONLY: the dangling check's line is "is it a COLOUR token". Some of these
+ * must stay imperative — declaring `--iw-wave-x` invalidated the whole page subtree (p50 417→50ms).
+ * → docs/archive/panels-and-popovers.md#colourscan-runtime-written
  */
 export function runtimeWritten(src: string): Set<string> {
   const clean = stripComments(src)

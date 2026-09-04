@@ -311,3 +311,102 @@ shell only) is a direct CSS function of the editor, and the editor reveals under
 jump. `key={doc.id}` → switching documents in place cleanly remounts the editor (sessions,
 snapshots, sync reconnect all re-run for the new doc). No Suspense here — the shell on top provides
 the loading visuals, and the editor must mount in a default-lane render.
+
+---
+
+## `styles/colourScan.ts` — the palette ratchet
+
+<a id="colourscan-why"></a>
+### Why a ratchet, and the number that justified it
+
+CLAUDE.md's THEMING section makes a promise: "Adding a new scheme later = one more
+`:root[data-theme=…]` block; components don't change." Measured against master (2026-08-30) that
+promise is false, and the number says how false: 892 colour literals sit in production TS/TSX with
+no token anywhere near them — 127 of them `#5c2d8a`, the app's own ink, which HAS a token. A
+literal in a component is invisible to every `:root` block ever written, so each one is a surface
+that a new palette cannot reach and that only a human eye reports. Peter had been reporting them
+one at a time for a week.
+
+Nothing stopped the drift, so this is the thing that stops it: a RATCHET. Every file carries the
+count it had when the gate landed; the gate fails when a file EXCEEDS its cap, and a file the
+baseline has never heard of is capped at ZERO. Removing literals never fails, so the migration —
+and the three colour lanes in flight while this was written — can only make the gate greener.
+
+WHAT IS AND IS NOT A VIOLATION:
+
+- BARE `background: '#fff'` — counted. It cannot theme. This is the defect.
+- FALLBACK `var(--iw-ink, #5c2d8a)` — NOT counted. It is CLAUDE.md rule 2, the sanctioned
+  intermediate form, and it is the shape a lane fixing a night bug writes on its way from
+  bare to tokenised. Capping it would fail the gate on the fix. It is REPORTED instead
+  (`scanTree().fallback`) because it is not the destination either: a fallback only ever
+  applies when the token is undefined, so a live one means the palette has a hole.
+
+COMMENTS ARE STRIPPED BEFORE SCANNING, deliberately and not as a nicety. This repo's comments must
+name the colours they forbid in order to forbid them — this file's own header names `#5c2d8a`, and
+index.css explains `--iw-on-ink` by quoting the white-on-#cbb8f2 bug it fixes. CLAUDE.md records
+three separate lanes in one round whose guards fired on their own documentation, and the tempting
+fix each time was to delete the sentence. A guard that cannot survive its own explanation gets
+disabled.
+
+`COLOUR_RE` deliberately does NOT match named CSS colours (`white`, `black`): `black` is also an
+English word and a font weight, and over-collecting prose is how a guard earns the reputation that
+gets it deleted. Named colours are rare here and the migration catches them by eye.
+
+<a id="colourscan-strip-comments"></a>
+### `stripComments` is a state machine, not a regex
+
+A plain `.replace(/\/\/.*$/gm, '')` truncates any line holding a URL in a string literal, and a
+naive block-comment strip eats a regex or a template. So this is a small state machine over
+code/string/line-comment/block-comment. It is not a parser and does not need to be: the only
+question it has to answer correctly is "is this hex inside a comment".
+
+<a id="colourscan-token-contract"></a>
+### The token contract — the quieter failure
+
+Everything above counts literals. This half checks the OTHER failure, and it is the quieter one: a
+`var(--iw-x, #fallback)` that reads a token nobody ever declared is INDISTINGUISHABLE at a glance
+from one that works — it renders the fallback, in every theme, forever, with no error. The reader
+lane found `--iw-panel-bg` that way (declared nowhere, read by two live surfaces); this sweep also
+found `--iw-score-gap` and `--iw-gap-rule` in src/music/ScorePage.tsx.
+
+It is DERIVED FROM SOURCE on both sides — the tokens components actually read, against the tokens
+index.css actually declares — rather than a hand-written list, which is the drift that
+`contrastWalkerContract.test.ts` exists to stop one directory over.
+
+The dangling check has to separate colour tokens from the layout ones (`--iw-toolbar-h`,
+`--iw-kb-offset`, `--iw-tap-x`, `--iw-align`…), which are set imperatively from JS and are
+correctly absent from the stylesheet. Doing that with a hand-written list of layout names is that
+same drift, so it is derived instead: a token is a colour token when a call site passes it a
+colour. `transparent` and `currentColor` count — they are values of a colour property, and a token
+whose only fallback is `transparent` is still a colour a palette may want to re-point.
+
+<a id="colourscan-normalise"></a>
+### `normaliseColour` — two bugs that MANUFACTURED findings
+
+Both were caught only by reading the list it produced rather than by trusting its count:
+
+1. The first cut stripped trailing alpha zeros with a regex that could never fire, so
+   `rgba(…,0.10)` was reported as drift from `rgba(…,0.1)` — 2 of its 14 "findings" were the
+   instrument's own.
+2. The fix then ran the numeric normaliser over HEX too: `#000000` is all digits, so it became
+   `Number('000000')` = `#0`, and `--iw-page-num` was reported as drift from itself. A
+   normaliser that changes what it is comparing is worse than none.
+
+Hence the two branches are kept apart: hex is expanded and lowercased and NEVER arithmetic; only
+the components inside rgb()/hsl() are compared as numbers. `sameColour` exists for the same reason
+in the other direction: `#fff` and `#ffffff` are the same paint, and a guard that called them a
+mismatch would force a cosmetic rewrite of every call site to say nothing.
+
+<a id="colourscan-runtime-written"></a>
+### `runtimeWritten` — two spellings, because one alone is a false instrument
+
+`el.style.setProperty('--iw-x', …)` and React's inline-style key form
+`{ ['--iw-x' as string]: '6px' }`. Scanning only for `setProperty` finds 13 properties and MISSES
+`--iw-tap-x`, `--iw-row-slots` and `--iw-wave-x` — which is exactly enough of a gap to make a
+"these are all runtime channels" exemption quietly wrong.
+
+This is corroboration, NOT the line the dangling check draws. The line is "is it a COLOUR token",
+derived from the fallbacks call sites pass — a runtime-written property is fine, and an undeclared
+COLOUR token is the bug (`--iw-panel-bg`, `--iw-score-gap`, `--iw-gap-rule`). Several of these must
+stay imperative for measured reasons: CLAUDE.md records that declaring `--iw-wave-x` as an
+inheriting custom property invalidated the whole page subtree, p50 417ms → 50ms.
