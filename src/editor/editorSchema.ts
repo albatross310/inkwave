@@ -1,17 +1,10 @@
-// THE SCHEMA, OUTSIDE THE EDITOR (2026-07-17 — the /snapshot blocker).
+// THE SCHEMA, OUTSIDE THE EDITOR. /edit has `editor.state.doc`; /snapshot has no editor, so a
+// version's `contentJson` needs something to be parsed against.
 //
-// `buildBreakTable`/`buildRenderModel` take a real ProseMirror `Node`. On /edit that Node is
-// `editor.state.doc` and its schema came from the editor's constructor. On /snapshot there IS no
-// editor (`useEditor` is absent from SnapshotView), so a version's `contentJson` — plain JSON in the
-// .studio file — had nothing to be parsed against. That, and only that, is why the plaintext page
-// renderer could not go live: every one of its numbers was measured against the live editor's doc.
-//
-// The schema is derived from THE SAME list the editor is built from (`buildEditorExtensions`), so
-// "the model matches what the editor paginates" holds by construction rather than by vigilance.
-// It is still PROVED from outside — `schemaIdentity.prove.mjs` compares this schema's spec against
-// the LIVE editor's `editor.schema` in a real page, on a document carrying citations, math and a
-// reference list (the NodeView-bearing nodes are exactly the ones that could differ; a document of
-// bare paragraphs would prove nothing — CLAUDE.md's "trace PASSING results").
+// ⚠ DERIVE IT FROM `buildEditorExtensions` — the SAME list the editor is built from — so "the model
+// matches what the editor paginates" holds by construction, not by vigilance (R2). Proved from
+// OUTSIDE by `schemaIdentity.prove.mjs`, against the live editor, on a NodeView-bearing document.
+// → docs/archive/pagination-rounds.md#schema-outside-editor
 
 import { getSchema } from '@tiptap/core'
 import { Node as PMNode, type Schema } from '@tiptap/pm/model'
@@ -31,14 +24,11 @@ export function getEditorSchema(): Schema {
 }
 
 /**
- * Parse a snapshot version's `contentJson` into a real PM Node — the seam `TextRenderStore.get`'s
- * `docOf: () => PMNode | null` has always been shaped for ("supplies the version's PM doc (parsed
- * from its contentJson)") and that nothing could satisfy until now.
+ * Parse a snapshot version's `contentJson` into a real PM Node.
  *
- * Returns null on malformed content rather than throwing: a version that cannot be parsed must MISS
- * (the caller rebuilds/skips), never take down the snapshot route. The null is COUNTED by the
- * caller, never swallowed — an unparseable version that silently reads as "no pages" is precisely
- * the house disease.
+ * ⚠ Return null on malformed content rather than throwing, and the caller must COUNT it: an
+ * unparseable version must MISS, never take down the route nor read as "no pages" (R1).
+ * → docs/archive/pagination-rounds.md#schema-outside-editor
  */
 export function nodeFromContentJson(json: unknown): PMNode | null {
   if (!json || typeof json !== 'object') return null
@@ -49,29 +39,14 @@ export function nodeFromContentJson(json: unknown): PMNode | null {
   }
 }
 
-// ─── BLOCK-LEVEL PARSE CACHE (2026-07-17) ─────────────────────────────────────────────────────
-// PARSE IS THE FLOOR. With the block LAYOUT cache landed (3.5-4x, byte-identical), /snapshot's
-// wired cost for Peter's 116 versions is ~3.6s: ~2.6s of build and ~1.06s of PARSE. A build cache
-// cannot touch parse, and parse ALONE already exceeds Peter's "<1s and we can just load it when the
-// snapshots screen loads up". So the same lever has to reach one level down.
-//
-// THE SAME THEOREM, ONE LEVEL DOWN. 98.7% of top-level blocks are byte-identical between adjacent
-// versions (measured, not assumed — that is the layout cache's reuse rate on the same corpus). A PM
-// Node is IMMUTABLE and PERSISTENT: structure sharing across documents is what ProseMirror does
-// natively on every transaction, and a node's doc position comes from the WALK (`doc.forEach((node,
-// offset))`), never from the node. So an unchanged block's parsed Node can be reused verbatim in the
-// next version's doc, and then its layout hits the block cache too — skipping BOTH costs.
-//
-// KEYED ON CONTENT, NEVER ON A DIFF — the same reasoning as the layout cache: a wrong diff silently
-// reuses the wrong node (right words, wrong page, reports success); a content hash cannot. Two
-// independent 32-bit FNV-1a streams ⇒ an effective 64-bit key, because a collision is the only way
-// this can under-invalidate and under-invalidation is the direction that paints wrong words.
-//
-// IT LIVES HERE, BESIDE `nodeFromContentJson`, DELIBERATELY. A second parse path in another module
-// is precisely the wound found THREE times today — staticPagination's stale orphan rule,
-// textRender's duplicate `runOf`, and textRender's paragraph branch carrying its own copy of the
-// layout+emit loop (which made a block cache reuse 99% of the 40% that didn't matter). One rule,
-// one seam. Pass no cache and this file behaves byte-identically to before.
+// ─── BLOCK-LEVEL PARSE CACHE ──────────────────────────────────────────────────────────────────
+// ⚠ KEY IT ON CONTENT, NEVER ON A DIFF. A wrong diff silently reuses the wrong node — right words,
+// wrong page, reports success; a content hash cannot. Two 32-bit FNV-1a streams ⇒ a 64-bit key,
+// because a collision is the only way this can UNDER-invalidate, the direction that paints wrong
+// words (R8).
+// ⚠ IT LIVES HERE, BESIDE `nodeFromContentJson` — one parse seam, never a second one in another
+// module (R2). Pass no cache and this file behaves byte-identically to before.
+// → docs/archive/pagination-rounds.md#parse-cache
 export interface ParseCacheStats { hits: number; misses: number; entries: number; evicted: number }
 export interface ParseCache { map: Map<string, PMNode>; stats: ParseCacheStats; max: number }
 
@@ -136,21 +111,11 @@ export function _resetEditorSchema(): void { _schema = null }
 /**
  * A Schema reduced to a comparable, schema-INSTANCE-INDEPENDENT description.
  *
- * WHY THIS IS HERE AND NOT COPIED INTO EACH CHECK. Two callers compare schemas — the in-browser
- * `schemaIdentity.prove.mjs` (against the live editor) and the gate-kept `editorSchema.test.ts`
- * (against a real Editor in jsdom). Two copies of "what makes two schemas the same" is precisely how
- * one of them quietly starts certifying a fiction, which is the same argument that keeps ONE
- * extension list. So there is one description, used by both.
- *
- * ⚠ AND WHY IT EXISTS AT ALL: `Node.eq` CANNOT be used across schemas. PM's `hasMarkup` compares
- * `this.type == type` — REFERENCE equality on NodeType — so two Schema instances always compare
- * unequal whatever their content. An eq-based check reported `false` for an UNTOUCHED document: a
- * check structurally incapable of passing, which would have condemned a correct schema. Comparison
- * across schemas must be STRUCTURAL (type names, attr names + defaults, content/marks expressions).
- *
- * Not a hand-picked subset of "fields we think matter" — that is how a check certifies its own blind
- * spot. It carries everything PM uses to define a type, plus the atom/inline flags the paginator's
- * correctness depends on.
+ * ⚠ COMPARE STRUCTURALLY — never `Node.eq`. PM's `hasMarkup` compares NodeType by REFERENCE, so two
+ * Schema instances compare unequal whatever their content: a check incapable of passing (R6).
+ * ⚠ Carry everything PM uses to define a type, plus the atom/inline flags pagination depends on — a
+ * hand-picked subset certifies its own blind spot. ONE description; both callers use it (R2).
+ * → docs/archive/pagination-rounds.md#schema-outside-editor
  */
 export function schemaSpec(s: Schema): string {
   const nodes: Record<string, unknown> = {}
