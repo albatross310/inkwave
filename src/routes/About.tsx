@@ -4,8 +4,8 @@
 import { Link } from 'react-router'
 import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
-const INK = '#5c2d8a'
-const LIGHT = '#9b5ccc'
+const INK = '#35283e'
+const LIGHT = '#484965'
 
 function AppIcon({ size }: { size: number }) {
   return (
@@ -24,7 +24,7 @@ export function About() {
       <div className="mx-auto max-w-2xl px-6 sm:px-10 py-12 sm:py-16" style={{ background: PAGE_PARCHMENT, borderRadius: PAGE_CARD_RADIUS, boxShadow: PAGE_CARD_SHADOW }}>
         <Link to="/" onClick={() => { try { window.close() } catch { /* not a script-opened tab */ } }}
           className="inline-flex items-center rounded-full px-3.5 py-1 text-sm no-underline transition-colors hover:bg-[#f3eefb]"
-          style={{ border: '1px solid rgba(92,45,138,0.3)', color: '#6d5a86', background: '#fff' }}>← Back to writing</Link>
+          style={{ border: '1px solid rgba(53, 40, 62, 0.3)', color: '#6d5a86', background: '#fff' }}>← Back to writing</Link>
 
         {/* Hero — app icon to the left of the wordmark */}
         <header className="mt-8 flex items-center gap-6">
@@ -114,7 +114,7 @@ export function About() {
 
         </div>
 
-        <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: 'rgba(92,45,138,0.14)' }}>
+        <footer className="mt-14 border-t pt-6 flex items-center justify-between text-sm" style={{ borderColor: 'rgba(53, 40, 62, 0.14)' }}>
           <Link to="/" className="inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors hover:bg-[#f3eefb]" style={{ border: `1px solid ${LIGHT}`, color: INK, background: '#fff' }}>Start writing</Link>
           <div className="flex gap-2.5">
             <Link to="/privacy" className="inline-flex items-center rounded-full px-3.5 py-1.5 no-underline font-medium transition-colors hover:brightness-110" style={{ background: INK, color: '#fff' }}>Privacy</Link>

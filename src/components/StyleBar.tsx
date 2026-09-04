@@ -10,7 +10,7 @@ import { useLongPress } from './useLongPress'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 const BASE_SIZE = 18       // editor root px (matches .ProseMirror { font-size: 1.125rem })
 const PT_TO_PX = 96 / 72  // 1pt = 1.3333px at 96 DPI
 
@@ -100,7 +100,7 @@ const HIGHLIGHT_COLORS = [
 // Text colours — a small tasteful set fitting the calm identity (deep, ink-like tones).
 const TEXT_COLORS: Array<{ label: string; color: string | null }> = [
   { label: 'Default', color: null },
-  { label: 'Ink',     color: '#5c2d8a' },
+  { label: 'Ink',     color: '#35283e' },
   { label: 'Black',   color: '#1a1a1a' },
   { label: 'Blue',    color: '#1e3a8a' },
   { label: 'Red',     color: '#991b1b' },
@@ -429,7 +429,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   // keeps them true circles — without it a tight row squeezes them oval.
   const circleSize = phone ? 'w-[38px] h-[38px] flex-shrink-0' : 'w-8 h-8'
   const pill = (open: boolean, hl = false): string =>
-    `flex items-center justify-center ${circleSize} rounded-full border transition-colors ${open || hl ? 'border-[#5c2d8a] text-[#5c2d8a]' : 'border-stone-200 text-stone-500 hover:border-stone-400'}`
+    `flex items-center justify-center ${circleSize} rounded-full border transition-colors ${open || hl ? 'border-[#35283e] text-[#35283e]' : 'border-stone-200 text-stone-500 hover:border-stone-400'}`
 
   const fontClass = `flex items-center justify-center ${phone ? 'h-[38px]' : 'h-8'} px-1.5 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-left whitespace-nowrap text-xs min-w-[2.5rem]`
   const sizeClass = `flex items-center justify-center ${phone ? 'h-[38px]' : 'h-8'} px-2 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors cursor-pointer text-xs tabular-nums min-w-[2.5rem]`
@@ -549,7 +549,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         onClick={e => { e.stopPropagation(); colorPress.onClick() }}
         className={pill(colorOpen)}
         style={{ textAlign: 'center', fontSize: '0.82rem', fontWeight: 600,
-          color: lastTxtColor ?? 'var(--iw-ink, #5c2d8a)' }}
+          color: lastTxtColor ?? 'var(--iw-ink, #35283e)' }}
         title="Text colour (hold for palette)">
         T
       </button>

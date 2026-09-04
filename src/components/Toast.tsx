@@ -7,8 +7,8 @@ import { CITATION_TOAST_EVENT } from '../citations/citationToast'
 // A floating panel, so it takes the shared chrome surface via `iw-nightable` (which supplies the
 // dolphin-grey fill and light text with `!important`, overriding the inline day values below). The
 // ✦ must therefore resolve --iw-ink — that token is LIGHT purple inside night chrome, and the day
-// literal #5c2d8a on #454e59 measures 1.5:1, the exact bug --iw-on-ink was introduced for.
-const INK = 'var(--iw-ink, #5c2d8a)'
+// literal #35283e on #454e59 measures 1.5:1, the exact bug --iw-on-ink was introduced for.
+const INK = 'var(--iw-ink, #35283e)'
 
 export function Toast() {
   const [msg, setMsg] = useState<string | null>(null)

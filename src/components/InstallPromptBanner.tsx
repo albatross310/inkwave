@@ -8,7 +8,7 @@ const FIRST_VISIT_KEY = 'inkwave:first-visit'
 const DISMISSED_KEY   = 'inkwave:install-nudge-dismissed'
 const DELAY_MS        = 10 * 60 * 1000  // 10 minutes
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 function isAlreadyInstalled() {
   return window.matchMedia('(display-mode: standalone)').matches

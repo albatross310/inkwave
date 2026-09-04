@@ -10,7 +10,7 @@ interface LimitSelectorProps {
   onChange: (next: number | 'infinite') => void
 }
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 const OPTIONS: Array<{ label: string; value: number | 'infinite' }> = [
   { label: '500',  value: 500 },
@@ -66,8 +66,8 @@ export function LimitSelector({ value, onChange }: LimitSelectorProps) {
               type="button"
               onClick={() => { onChange(o.value); setOpen(false) }}
               className={[
-                'w-full text-left px-3 py-1 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors',
-                o.value === value ? 'text-[#5c2d8a]' : '',
+                'w-full text-left px-3 py-1 hover:bg-stone-100 hover:text-[#35283e] transition-colors',
+                o.value === value ? 'text-[#35283e]' : '',
               ].join(' ')}
             >
               {o.label}

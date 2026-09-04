@@ -13,7 +13,7 @@ import {
 } from '../editor/review/reviewState'
 import { resolveSuggestions, reviewerColor } from '../editor/extensions/TrackChanges'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 // Small stroke eye (open / struck-through) for the visibility toggles — inherits currentColor.
 function Eye({ off, size = 15 }: { off?: boolean; size?: number }) {
@@ -256,7 +256,7 @@ export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }
 
       {/* Suggest (track changes) toggle — icon only when expanded */}
       <button type="button" onClick={() => setSuggestOn(!suggest)}
-        className={`flex items-center justify-center ${iconBtn} rounded-full border text-base transition-colors ${suggest ? 'text-white bg-[#5c2d8a] border-[#5c2d8a]' : 'text-stone-600 border-stone-200 hover:bg-stone-50'}`}
+        className={`flex items-center justify-center ${iconBtn} rounded-full border text-base transition-colors ${suggest ? 'text-white bg-[#35283e] border-[#35283e]' : 'text-stone-600 border-stone-200 hover:bg-stone-50'}`}
         title={`Live suggestion mode${suggest ? ' — on' : ''} (record edits as tracked changes)`}>
         ✎
       </button>
@@ -264,7 +264,7 @@ export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }
       {/* Comment on selection — icon only, pushed to the right edge of the bar */}
       <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={addComment}
         disabled={!hasSelection}
-        className={`ml-auto flex items-center justify-center ${iconBtn} rounded-full border text-lg ${hasSelection ? 'text-[#5c2d8a] border-[#5c2d8a]/40 hover:bg-stone-50' : 'text-stone-300 border-stone-200 cursor-default'}`}
+        className={`ml-auto flex items-center justify-center ${iconBtn} rounded-full border text-lg ${hasSelection ? 'text-[#35283e] border-[#35283e]/40 hover:bg-stone-50' : 'text-stone-300 border-stone-200 cursor-default'}`}
         title={hasSelection ? 'Comment on the selected text' : 'Select text first, then comment'}>
         ＋
       </button>

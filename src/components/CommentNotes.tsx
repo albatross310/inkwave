@@ -9,7 +9,7 @@ import type { Editor } from '@tiptap/react'
 import { activeSet, onReviewChanged, isSetVisible } from '../editor/review/reviewState'
 import { subscribe as subscribeMagnify } from '../editor/magnify'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 interface CommentInfo { id: string; body: string; from: number; to: number }
 

@@ -47,7 +47,7 @@ export function ReflectionJournal({ reflections }: { reflections: Reflection[] }
             <ul className="space-y-1.5">
               {r.notes.map((n, i) => (
                 <li key={i} className="flex gap-2">
-                  <span className="shrink-0" style={{ fontSize: TYPE.meta, color: 'var(--iw-light, #9b5ccc)' }}>
+                  <span className="shrink-0" style={{ fontSize: TYPE.meta, color: 'var(--iw-light, #484965)' }}>
                     {CATEGORY_LABEL[n.doc_type]}
                   </span>
                   <span className="leading-relaxed" style={{ fontSize: TYPE.body, color: 'var(--iw-pill-fg, #78716c)' }}>

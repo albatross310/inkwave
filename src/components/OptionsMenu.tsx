@@ -26,7 +26,7 @@ import { inkwaveFileName } from '../provenance/bundle'
 import { switchTabToDocument, tabDocId } from '../storage/tabDoc'
 import { OpfsInspector } from './OpfsInspector'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 // Shared gap between a footer button and the panel it opens (same across all footer panels).
 const PANEL_GAP = 14
 
@@ -308,7 +308,7 @@ export function OptionsMenu({
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
         onClick={() => setMenuOpen(o => !o)}
-        className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-stone-400 hover:text-[#5c2d8a] transition-colors"
+        className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-stone-400 hover:text-[#35283e] transition-colors"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" />
@@ -328,7 +328,7 @@ export function OptionsMenu({
               {items.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className="w-full text-left pl-3 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                  className="w-full text-left pl-3 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#35283e] transition-colors"
                 >
                   {it.label}
                 </button>
@@ -340,7 +340,7 @@ export function OptionsMenu({
               {fileItems.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className="w-full text-left pl-3 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#5c2d8a] transition-colors"
+                  className="w-full text-left pl-3 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#35283e] transition-colors"
                 >
                   {it.label}
                 </button>
@@ -362,14 +362,14 @@ export function OptionsMenu({
           {modal === 'recent' && <RecentPanel />}
           {modal === 'noprov' && (
             <div className="iw-nightable iw-no-print fixed z-[70] bg-white shadow-md rounded-xl border px-5 py-4 font-serif text-stone-600"
-              style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#5c2d8a44' }}>
+              style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#35283e44' }}>
               No snaps or provenance info yet recorded.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>
           )}
           {modal === 'provunread' && (
             <div className="iw-nightable iw-no-print fixed z-[70] bg-white shadow-md rounded-xl border px-5 py-4 font-serif text-stone-600"
-              style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#5c2d8a44' }}>
+              style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#35283e44' }}>
               Couldn't read this document's history just now — it hasn't been lost. Try again in a moment.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>
@@ -611,7 +611,7 @@ function Modal({ title, onClose, children, anchorStyle }: { title: string; onClo
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-serif" style={{ color: INK }}>{title}</h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-[#5c2d8a] text-2xl leading-none">×</button>
+          <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-[#35283e] text-2xl leading-none">×</button>
         </div>
         {children}
       </div>

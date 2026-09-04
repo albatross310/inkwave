@@ -18,7 +18,7 @@ import { aiSummariesEnabled, setAiSummaries, urlLookupEnabled, setUrlLookup, aiC
 import { AiConsentDialog } from './AiConsentDialog'
 import { LimitSelector } from './LimitSelector'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 // Shared gap between a footer button and the panel it opens (keep the same across all footer panels).
 const PANEL_GAP = 14
 
@@ -78,7 +78,7 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={toggle}
-        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
         title="Settings"
       >
         <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current">
@@ -226,7 +226,7 @@ function Row({ label, checked, onChange }: { label: string; checked: boolean; on
       <span>{label}</span>
       <span
         className="w-8 h-4 rounded-full flex items-center transition-colors relative"
-        style={{ background: checked ? 'var(--iw-toggle-on, #5c2d8a)' : 'var(--iw-toggle-off, #d1d5db)' }}
+        style={{ background: checked ? 'var(--iw-toggle-on, #35283e)' : 'var(--iw-toggle-off, #d1d5db)' }}
       >
         <span
           className="absolute w-3 h-3 bg-white rounded-full shadow-sm transition-transform"

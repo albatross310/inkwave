@@ -28,7 +28,7 @@ import {
 import type { CSLItem, IwCitationMeta } from '../../types/document'
 import type { RefMode } from '../../citations/resolve'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 const MODE_LABEL: Record<RefMode, string> = {
   cited: 'auto — cited in this document',
@@ -72,7 +72,7 @@ function NotePanel({ value, onChange, onDelete }: { value: string; onChange: (v:
         style={{
           width: '100%', resize: 'vertical', boxSizing: 'border-box',
           fontFamily: 'inherit', fontSize: '0.9em', lineHeight: 1.5, color: 'inherit',
-          background: 'rgba(92,45,138,0.03)', border: `1px solid ${INK}22`, borderRadius: 6,
+          background: 'rgba(53, 40, 62, 0.03)', border: `1px solid ${INK}22`, borderRadius: 6,
           padding: '0.4em 1.6em 0.4em 0.55em', outline: 'none',
         }}
       />
@@ -297,7 +297,7 @@ export function ReferenceListNodeView({ node, editor, selected }: NodeViewProps)
           18px base, not the h2's 20.7px). Without a class the harvest could only select the h2,
           whose margin is 0 — reading the row's spacing as zero. Keep the class. */}
       <div className="iw-bib-header" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.6em' }}>
-        <h2 style={{ fontSize: '1.15em', fontWeight: 600, color: 'var(--iw-doc-accent, #5c2d8a)', margin: 0 }}>References</h2>
+        <h2 style={{ fontSize: '1.15em', fontWeight: 600, color: 'var(--iw-doc-accent, #35283e)', margin: 0 }}>References</h2>
         <span className="iw-bib-mode" style={{ fontSize: '0.7em', color: 'var(--iw-doc-muted, #6b5b7a)', fontStyle: 'italic' }}>{MODE_LABEL[mode]}</span>
       </div>
       {count === 0 ? (

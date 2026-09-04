@@ -10,8 +10,8 @@
 import { useMemo, useRef, useState } from 'react'
 import type { Analytics } from './analytics'
 
-const INK = '#5c2d8a'
-const LIGHT = '#9b5ccc'
+const INK = '#35283e'
+const LIGHT = '#484965'
 const ADD = '#2f8f4e'
 const DEL = '#b3402f'
 

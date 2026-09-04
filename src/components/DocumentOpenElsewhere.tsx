@@ -51,7 +51,7 @@ export function DocumentOpenElsewhere({ title, onSwitch, onOpenCopy, onTakeOver 
       style={{ zIndex: 100, padding: 24 }}
     >
       <div style={{ maxWidth: 460 }}>
-        <h1 style={{ color: 'var(--iw-ink, #5c2d8a)', fontSize: 20, fontWeight: 600, marginBottom: 10 }}>
+        <h1 style={{ color: 'var(--iw-ink, #35283e)', fontSize: 20, fontWeight: 600, marginBottom: 10 }}>
           “{title}” is open in another window
         </h1>
         <p style={{ color: 'var(--iw-pill-fg, #78716c)', fontSize: 16, lineHeight: 1.55, marginBottom: 18 }}>
@@ -61,7 +61,7 @@ export function DocumentOpenElsewhere({ title, onSwitch, onOpenCopy, onTakeOver 
         </p>
 
         {error && (
-          <p style={{ color: 'var(--iw-ink, #5c2d8a)', fontSize: 13, lineHeight: 1.5, marginBottom: 14,
+          <p style={{ color: 'var(--iw-ink, #35283e)', fontSize: 13, lineHeight: 1.5, marginBottom: 14,
             border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 8, padding: '8px 12px' }}>
             That didn’t work: {error}. Nothing was changed — try another option.
           </p>
@@ -108,12 +108,12 @@ function ActionButton({ label, hint, onClick, disabled, primary }: {
         minHeight: 44,
         padding: '10px 14px',
         border: primary ? 'none' : '1px solid var(--iw-nightable-border, #e7e5e4)',
-        background: primary ? 'var(--iw-ink, #5c2d8a)' : 'transparent',
+        background: primary ? 'var(--iw-ink, #35283e)' : 'transparent',
       }}
     >
       <span style={{
         display: 'block', fontSize: 16, fontWeight: 600,
-        color: primary ? 'var(--iw-on-ink, #fff)' : 'var(--iw-ink, #5c2d8a)',
+        color: primary ? 'var(--iw-on-ink, #fff)' : 'var(--iw-ink, #35283e)',
       }}>
         {label}
       </span>
@@ -141,7 +141,7 @@ export function SurrenderedBanner({ onReload }: { onReload: () => void }) {
     <div
       className="iw-nightable iw-no-print fixed top-0 left-0 right-0 flex items-center justify-center gap-3"
       style={{
-        zIndex: 90, padding: '10px 16px', background: 'var(--iw-ink, #5c2d8a)',
+        zIndex: 90, padding: '10px 16px', background: 'var(--iw-ink, #35283e)',
         color: 'var(--iw-on-ink, #fff)', fontSize: 14,
       }}
       role="status"

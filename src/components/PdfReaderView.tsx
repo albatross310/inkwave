@@ -34,10 +34,10 @@ import { FONTS } from './StyleBar'
 // This whole view is reader PAPER (it is a reading column, not chrome), so every colour in it comes
 // from the reader token family — the same one the source reader uses, because two reading columns
 // themed by two rules is how they drift. See index.css's reader block for the night palette.
-const INKP = 'var(--iw-reader-accent, #5c2d8a)'
+const INKP = 'var(--iw-reader-accent, #35283e)'
 const CTL = 'var(--iw-reader-ctl, #fff)'
 const EDGE = 'var(--iw-reader-edge, #d6cfe0)'
-const HAIR = 'var(--iw-reader-hair, rgba(92,45,138,0.13))'
+const HAIR = 'var(--iw-reader-hair, rgba(53, 40, 62, 0.13))'
 const MUTED = 'var(--iw-reader-muted, #6b645f)'
 // Ink laid ON a mark's own fill. A highlight or note card is an opaque PALE patch in both themes,
 // so its text is dark in both — day is byte-unchanged, night stops it turning to pale-on-pale.

@@ -47,27 +47,27 @@ import { isTouchDevice } from '../editor/isTouchDevice'
 import { tabDocId } from '../storage/tabDoc'
 import { OPEN_PDF_EVENT, openPdf } from '../citations/pdfViewer'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 // ── TWO SURFACES, TWO PALETTES, AND EVERY COLOUR HERE BELONGS TO EXACTLY ONE OF THEM ────────────
 // This panel is not one surface. Its HEADER is chrome (the dolphin-grey `.iw-nightable` panel);
 // its ARTICLE, its MARKUP BAR and every control face in that bar are reader PAPER, which now has
 // its own night (index.css, the reader token block). Getting a control's surface wrong is not a
 // near-miss — it produced BOTH of Peter's 2026-08-30 complaints at once, in opposite directions:
-// a literal `#5c2d8a` left on the night HEADER measured 1.13:1 (invisible), and chrome tokens
+// a literal `#35283e` left on the night HEADER measured 1.13:1 (invisible), and chrome tokens
 // leaking onto the near-white markup BAR washed its labels out to ~1.2:1.
 // So: ask which surface the control sits on FIRST, then take that surface's token.
-const INKC = 'var(--iw-ink, #5c2d8a)'                     // purple inside a floating chrome bubble
-const CHROME_FG = 'var(--iw-reader-chrome-fg, #5c2d8a)'   // the header strip's own ink
+const INKC = 'var(--iw-ink, #35283e)'                     // purple inside a floating chrome bubble
+const CHROME_FG = 'var(--iw-reader-chrome-fg, #35283e)'   // the header strip's own ink
 const CHROME_DIM = 'var(--iw-reader-chrome-dim, #d6d3d1)' // …and its disabled glyphs
-const INKP = 'var(--iw-reader-accent, #5c2d8a)'           // purple ON reader paper / the markup bar
+const INKP = 'var(--iw-reader-accent, #35283e)'           // purple ON reader paper / the markup bar
 const CTL = 'var(--iw-reader-ctl, #fff)'                  // a control FACE on a reader surface
 const EDGE = 'var(--iw-reader-edge, #d6cfe0)'             // …its border
 // The filled "open it in a tab" action, declared ONCE. It appeared as an inline literal in each of
 // the four dead-end cards, which is four chances for one of them to drift — and a fifth card
 // (Inkwave-in-Inkwave, 2026-08-30) would have made five.
-const OPEN_TAB_FILL = `linear-gradient(135deg, #7a4fb0, ${INK})`
-const HAIR = 'var(--iw-reader-hair, rgba(92,45,138,0.13))'// hairline rules/dividers on paper
-const TINT = 'var(--iw-reader-tint, rgba(92,45,138,0.08))'// the lit-tool fill
+const OPEN_TAB_FILL = `linear-gradient(135deg, #484965, ${INK})`
+const HAIR = 'var(--iw-reader-hair, rgba(53, 40, 62, 0.13))'// hairline rules/dividers on paper
+const TINT = 'var(--iw-reader-tint, rgba(53, 40, 62, 0.08))'// the lit-tool fill
 // Ink laid ON a mark's own fill. A highlight/note/box is an opaque PALE patch in both themes, so
 // its text is dark in both — stated here rather than inherited from a page that now inverts.
 const ON_MARK = 'var(--iw-reader-on-mark, #2c2a28)'
@@ -979,7 +979,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     if (extState !== 'absent' || !extOffer) return null
     return (
       <div style={{ maxWidth: 470, width: '100%', textAlign: 'left', borderRadius: 10,
-        border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: `${INK}0a`,
+        border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.28))', background: `${INK}0a`,
         padding: '10px 12px', fontSize: '12.5px', lineHeight: 1.55, ['--iw-tap-x' as string]: '8px' }}>
         <div className="flex items-start gap-2">
           <span style={{ flex: 1 }}>
@@ -1004,7 +1004,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
         {!extHow ? (
           <button type="button" onClick={() => setExtHow(true)} data-iw-ext-how
             className="rounded-full px-3 py-1.5 iw-tap"
-            style={{ marginTop: 8, border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '12px', background: 'transparent', cursor: 'pointer' }}>
+            style={{ marginTop: 8, border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.33))', color: CHROME_FG, fontSize: '12px', background: 'transparent', cursor: 'pointer' }}>
             How to install it
           </button>
         ) : (
@@ -1387,7 +1387,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             per side, so neighbours never contend. See the rule's header in index.css. */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-stone-200"
           style={{ fontSize: '13px', ['--iw-tap-x' as string]: '8px' }}>
-          {/* ⚠ THE ENABLED ARROW WAS THE LITERAL #5c2d8a ON THE NIGHT HEADER — 1.13:1, invisible,
+          {/* ⚠ THE ENABLED ARROW WAS THE LITERAL #35283e ON THE NIGHT HEADER — 1.13:1, invisible,
               and no gate ever saw it: with a one-entry history BOTH arrows are disabled, and a
               disabled control is exempt from contrast auditing by WCAG 1.4.3. It only appears once
               the reader has actually navigated, which a probe has to do on purpose. */}
@@ -1439,7 +1439,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
             spellCheck={false}
             className="iw-nightable"
             style={{ flex: 1, minWidth: 80, height: isPhone ? TOUCH_FIELD_H : 22, fontSize: '11px', padding: '0 7px', borderRadius: 999,
-              border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: 'transparent',
+              border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.28))', background: 'transparent',
               color: 'inherit', outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
           {/* FOUR SYMMETRIC BUTTONS (Peter, 2026-08-28: "this could be reduced down to a button.
               Four symmetric buttons"). "open in a tab ↗" was a wide underlined link sitting among
@@ -1661,7 +1661,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 </div>
                 <div className="flex gap-2">
                   <button type="button" onClick={onClose}
-                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: framed ? CHROME_FG : INKP, fontSize: '13px' }}>
+                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.33))', color: framed ? CHROME_FG : INKP, fontSize: '13px' }}>
                     Close this panel
                   </button>
                   <a href={here} target="_blank" rel="noreferrer noopener" className="rounded-full px-3 py-1.5 text-white"
@@ -1759,12 +1759,12 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 <div className="flex gap-2 flex-wrap justify-center">
                   {extState === 'blocked' && (
                     <button type="button" onClick={askForFetchPermission}
-                      className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
+                      className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.33))', color: CHROME_FG, fontSize: '13px' }}>
                       Use my own connection
                     </button>
                   )}
                   <button type="button" onClick={() => go(`https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(queryOf(here))}`)}
-                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
+                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.33))', color: CHROME_FG, fontSize: '13px' }}>
                     Search Wikipedia here
                   </button>
                   <a href={`https://duckduckgo.com/?q=${encodeURIComponent(queryOf(here))}`} target="_blank" rel="noreferrer noopener"
@@ -1781,7 +1781,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 <div className="px-8" style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>{extensionOffer()}</div>
                 {!likelyRefusesFraming(here) && (
                   <button type="button" onClick={() => setFramed(true)}
-                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
+                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.33))', color: CHROME_FG, fontSize: '13px' }}>
                     Try showing the live page instead
                   </button>
                 )}
@@ -1812,7 +1812,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 {extensionOffer()}
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setFramed(false)}
-                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.33))', color: CHROME_FG, fontSize: '13px' }}>
+                    className="rounded-full px-3 py-1.5" style={{ border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.33))', color: CHROME_FG, fontSize: '13px' }}>
                     Read it here instead
                   </button>
                   <a href={here} target="_blank" rel="noreferrer noopener" className="rounded-full px-3 py-1.5 text-white"
@@ -1963,7 +1963,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
           <div ref={composerBoxRef} className="iw-nightable fixed z-[402] flex items-center gap-1.5 bg-white rounded-full shadow-lg px-2 py-1.5"
             style={{ left: composer.x, top: Math.max(8, composer.y - 46), transform: 'translateX(-50%)',
               maxWidth: 'calc(100vw - 16px)',
-              border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', fontSize: '12px', ['--iw-tap-x' as string]: '6px' }}>
+              border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.28))', fontSize: '12px', ['--iw-tap-x' as string]: '6px' }}>
             {TEXT_COLORS.map((c) => (
               <button key={c} type="button" title="Ink" className="iw-tap"
                 onMouseDown={(e) => e.preventDefault()}
@@ -1981,7 +1981,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
               }}
               className="iw-nightable"
               style={{ width: 190, height: isPhone ? TOUCH_FIELD_H : 22, fontSize: '12px', padding: '0 8px', borderRadius: 999,
-                border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', background: 'transparent',
+                border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.28))', background: 'transparent',
                 color: readerInk(textColor), fontWeight: 600, outline: 'none', fontFamily: 'system-ui, sans-serif' }} />
             <button type="button" title="Write it in" onMouseDown={(e) => e.preventDefault()} onClick={commitComposer}
               className="rounded-full px-2 py-0.5 iw-tap" style={{ color: INKC, background: 'transparent', border: 'none', cursor: 'pointer' }}>↵</button>
@@ -1995,7 +1995,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
         {sel && !framed && (onCite || onQuote) && (
           <div ref={selBoxRef} className="iw-nightable fixed z-[401] flex items-center gap-1 bg-white rounded-full shadow-lg px-1.5 py-1"
             style={{ left: sel.x, top: Math.max(8, sel.y - 42), transform: 'translateX(-50%)',
-              maxWidth: 'calc(100vw - 16px)', border: '1px solid var(--iw-nightable-border, rgba(92,45,138,0.28))', fontSize: '12px', ['--iw-tap-x' as string]: '4px' }}
+              maxWidth: 'calc(100vw - 16px)', border: '1px solid var(--iw-nightable-border, rgba(53, 40, 62, 0.28))', fontSize: '12px', ['--iw-tap-x' as string]: '4px' }}
             onMouseDown={(e) => e.preventDefault()}>
             {/* THE SAME COLOURED DOTS AS THE PDF (Peter: "highlighting text without any mode on
                 should put up the coloured dots and link to citation panel"). One gesture, one
@@ -2006,7 +2006,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
                 onClick={() => { setMarkColor(c); markColorRef.current = c; markSelection('highlight') }}
                 style={{ width: 18, height: 18, borderRadius: '50%', background: c, border: '1px solid rgba(0,0,0,0.15)', cursor: 'pointer', flexShrink: 0 }} />
             ))}
-            <span style={{ width: 1, height: 16, background: 'var(--iw-nightable-border, rgba(92,45,138,0.28))', margin: '0 2px' }} />
+            <span style={{ width: 1, height: 16, background: 'var(--iw-nightable-border, rgba(53, 40, 62, 0.28))', margin: '0 2px' }} />
             {onQuote && (
               <button type="button" onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { onQuote(sel.text); setSel(null); flash('Saved as the cited sentence') }}
@@ -2251,7 +2251,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
 
         {toast && (
           <div style={{ position: 'absolute', left: '50%', bottom: 54, transform: 'translateX(-50%)', zIndex: 402,
-            background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', fontSize: '12px', padding: '6px 12px', borderRadius: 999,
+            background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)', fontSize: '12px', padding: '6px 12px', borderRadius: 999,
             boxShadow: '0 3px 12px rgba(0,0,0,0.25)', pointerEvents: 'none', whiteSpace: 'nowrap' }}>{toast}</div>
         )}
 

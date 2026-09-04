@@ -61,7 +61,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             loads. This runs before first paint; the CSP middleware nonces every inline script.
             (The warm-client iw-water-ready pre-stamp that used to live here is GONE, 2026-07-10:
             the atomic-water gate now also waits for the twinkle field to mount, so pre-opening it
-            painted waves without twinkles. Every load holds the neutral parchment until the whole
+            painted waves without twinkles. Every load holds pure white until the whole
             water — tiles + twinkles — can land in one paint. See entry.client.tsx.) */}
         <script dangerouslySetInnerHTML={{ __html:
           `try{document.documentElement.dataset.theme=localStorage.getItem('inkwave:theme')==='night'?'night':'day'}catch(e){}`,
@@ -70,7 +70,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* viewport-fit=cover: extend under the iOS notch/home-indicator so env(safe-area-inset-*)
             is non-zero and the footer toolbar can pad itself clear of them (landscape phones). */}
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
-        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#3f827e" />
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#427b82" />
         <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141313" />
         <meta name="google-site-verification" content="h79VCdHP57BlmRzPhYg_vgOKBj1iMfKkq4J1gpAIvR4" />
         <meta name="robots" content="index, follow" />

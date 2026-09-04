@@ -8,7 +8,7 @@ import { parseDefinition, setSymbol, getSymbols, applyCustomSymbols } from './ma
 import { loadMathLive } from './mathLiveLoader'
 import { pendingMathEdit } from './mathActivation'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 const MATHLIVE_MACROS: Record<string, string> = {
   '\\imaginaryI':    'i',
@@ -143,8 +143,8 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
         // left:-1px + translateY(-50% - 1px) zero out the constant residual offsets measured
         // between MathLive's .ML__base and KaTeX's glyph box (ML sits ~1px right / ~1px low).
         'position:absolute;top:50%;left:-1px;transform:translateY(calc(-50% - 1px));',
-        '--caret-color:#5c2d8a;',
-        '--selection-background-color:rgba(155,92,204,0.25);',
+        '--caret-color:#35283e;',
+        '--selection-background-color:rgba(72, 73, 101, 0.25);',
       ].join('')
 
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -334,8 +334,8 @@ export function MathInlineView({ node, updateAttributes, selected, editor, getPo
           verticalAlign: 'baseline', cursor: 'text',
           fontSize: '0.826em',
           transition: 'background 0.1s, border-color 0.1s',
-          background: active ? 'rgba(155,92,204,0.08)' : selected ? 'rgba(155,92,204,0.10)' : 'rgba(155,92,204,0.04)',
-          border: `1px solid ${active ? INK + '66' : 'rgba(155,92,204,0.22)'}`,
+          background: active ? 'rgba(72, 73, 101, 0.08)' : selected ? 'rgba(72, 73, 101, 0.10)' : 'rgba(72, 73, 101, 0.04)',
+          border: `1px solid ${active ? INK + '66' : 'rgba(72, 73, 101, 0.22)'}`,
         }}
       >
         {/* KaTeX — always in layout via visibility:hidden so the box doesn't shift when MathLive mounts.

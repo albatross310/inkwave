@@ -87,7 +87,7 @@ function render(verdict: 'PASS' | 'FAIL' | 'RUNNING', lines: Line[], foot: strin
     el.id = 'iw-btdebug'
     document.body.appendChild(el)
   }
-  const colour = verdict === 'PASS' ? '#15803d' : verdict === 'FAIL' ? '#b91c1c' : '#5c2d8a'
+  const colour = verdict === 'PASS' ? '#15803d' : verdict === 'FAIL' ? '#b91c1c' : '#35283e'
   el.setAttribute('style', [
     'position:fixed', 'inset:0', 'z-index:2147483647', 'background:#fff', 'color:#1c1917',
     'font:16px/1.45 -apple-system,system-ui,sans-serif', 'padding:16px', 'overflow:auto',

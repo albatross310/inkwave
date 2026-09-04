@@ -13,7 +13,7 @@ const MATH_ITEMS = [
   { label: 'Block math',   hint: 'Alt+⇧+=',  action: (e: Editor) => e.commands.insertMathBlock()  },
 ] as const
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 // MathLive inline shortcuts reference — type sequence then space to expand
 // [sequence, rendered symbol or name, description]
@@ -135,7 +135,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
       onClick={onClick}
       title={hint ? `${label}  ·  ${hint}` : label}
       style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '6px 10px', borderRadius: '5px', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
-      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(155,92,204,0.08)')}
+      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(72, 73, 101, 0.08)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
       <span style={{ fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif', fontSize: '15px', color: '#57534e' }}>{label}</span>
@@ -149,7 +149,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
         type="button"
         onClick={() => (open ? setOpen(false) : openMenu())}
         onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
-        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#5c2d8a]' : 'text-stone-400 hover:text-[#5c2d8a]'}`}
+        className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#35283e]' : 'text-stone-400 hover:text-[#35283e]'}`}
         title="Insert math"
       >
         <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none" style={{ fontFamily: 'serif' }}>Σ</span>
@@ -168,7 +168,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
           {view === 'menu' && (
             <>
               {MATH_ITEMS.map(item => btn(item.label, item.hint, () => { setOpen(false); if (editor) item.action(editor) }))}
-              <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
+              <div style={{ height: '1px', background: 'rgba(72, 73, 101, 0.12)', margin: '4px 6px' }} />
               {/* Block alignment — the label lives in each button's hover toast (title), not a header */}
               <div style={{ padding: '2px 8px 4px' }}>
                 <div style={{ display: 'flex', gap: '4px' }}>
@@ -186,13 +186,13 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
                           editor?.chain().updateAttributes('mathBlock', { align: o.value }).run()
                           setOpen(false)
                         }}
-                        style={{ fontSize: '0.72rem', padding: '2px 8px', border: `1px solid ${active ? INK : 'rgba(155,92,204,0.22)'}`, borderRadius: '4px', background: active ? 'rgba(155,92,204,0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
+                        style={{ fontSize: '0.72rem', padding: '2px 8px', border: `1px solid ${active ? INK : 'rgba(72, 73, 101, 0.22)'}`, borderRadius: '4px', background: active ? 'rgba(72, 73, 101, 0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
                       >{o.label}</button>
                     )
                   })}
                 </div>
               </div>
-              <div style={{ height: '1px', background: 'rgba(155,92,204,0.12)', margin: '4px 6px' }} />
+              <div style={{ height: '1px', background: 'rgba(72, 73, 101, 0.12)', margin: '4px 6px' }} />
               {btn('Shortcuts', '', () => setView('info'))}
             </>
           )}
@@ -269,7 +269,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
                       type="button"
                       title={p.latex}
                       onClick={() => { saveSymbol(p.key, p.latex); reload() }}
-                      style={{ fontSize: '0.72rem', padding: '2px 7px', border: `1px solid ${symbols.some(s => s.key === p.key) ? INK : 'rgba(155,92,204,0.2)'}`, borderRadius: '4px', background: symbols.some(s => s.key === p.key) ? 'rgba(155,92,204,0.10)' : 'transparent', color: symbols.some(s => s.key === p.key) ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
+                      style={{ fontSize: '0.72rem', padding: '2px 7px', border: `1px solid ${symbols.some(s => s.key === p.key) ? INK : 'rgba(72, 73, 101, 0.2)'}`, borderRadius: '4px', background: symbols.some(s => s.key === p.key) ? 'rgba(72, 73, 101, 0.10)' : 'transparent', color: symbols.some(s => s.key === p.key) ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
                     >{p.key}</button>
                   ))}
                 </div>

@@ -53,7 +53,7 @@ export function UnsyncedNotice({
       role="status"       // polite: announced, but it does not steal focus from the sentence
       aria-live="polite"
     >
-      <div style={{ color: 'var(--iw-ink, #5c2d8a)', fontWeight: 600, marginBottom: 4 }}>
+      <div style={{ color: 'var(--iw-ink, #35283e)', fontWeight: 600, marginBottom: 4 }}>
         Only on this device
       </div>
       <div style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
@@ -76,7 +76,7 @@ export function UnsyncedNotice({
             className="rounded px-2.5 py-1"
             style={{
               color: 'var(--iw-newbtn-fg, #fff)',
-              background: 'var(--iw-ink, #5c2d8a)',
+              background: 'var(--iw-ink, #35283e)',
               fontSize: 12,
               fontWeight: 600,
             }}

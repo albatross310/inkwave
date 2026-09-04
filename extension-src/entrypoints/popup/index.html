@@ -5,35 +5,35 @@
   <style>
     * { box-sizing: border-box; margin: 0; }
     body { width: 300px; font-family: Georgia, serif; color: #3a3a3a; background: #fbf5ec; }
-    .h { padding: 10px 12px; border-bottom: 1px solid #e7e0d4; font-size: 13px; color: #5c2d8a; }
+    .h { padding: 10px 12px; border-bottom: 1px solid #e7e0d4; font-size: 13px; color: #35283e; }
     .b { padding: 12px; }
-    button#cap { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: #5c2d8a; color: #fff; font-size: 13px; cursor: pointer; font-family: inherit; }
+    button#cap { width: 100%; padding: 9px; border: 0; border-radius: 8px; background: #35283e; color: #fff; font-size: 13px; cursor: pointer; font-family: inherit; }
     button#cap:disabled { opacity: .5; }
     .s { margin-top: 10px; font-size: 12px; min-height: 16px; }
     .ok { color: #15803d; } .err { color: #b91c1c; }
     .hint { margin-top: 8px; font-size: 11px; color: #8a8378; }
     /* "Already in library" banner */
-    #already { display: none; margin-top: 10px; padding: 7px 10px; border-radius: 8px; background: rgba(92,45,138,0.08); border: 1px solid rgba(92,45,138,0.2); }
+    #already { display: none; margin-top: 10px; padding: 7px 10px; border-radius: 8px; background: rgba(53, 40, 62, 0.08); border: 1px solid rgba(53, 40, 62, 0.2); }
     #already .al-row { display: flex; align-items: center; justify-content: space-between; }
-    #already .al-label { font-size: 11px; color: #5c2d8a; }
-    #already .al-type { font-size: 10px; color: #9b5ccc; }
-    #showPanel { background: none; border: 1px solid rgba(92,45,138,0.4); border-radius: 6px; color: #5c2d8a; font-size: 10px; padding: 2px 8px; cursor: pointer; font-family: inherit; flex-shrink: 0; }
-    #showPanel:hover { background: rgba(92,45,138,0.08); }
+    #already .al-label { font-size: 11px; color: #35283e; }
+    #already .al-type { font-size: 10px; color: #484965; }
+    #showPanel { background: none; border: 1px solid rgba(53, 40, 62, 0.4); border-radius: 6px; color: #35283e; font-size: 10px; padding: 2px 8px; cursor: pointer; font-family: inherit; flex-shrink: 0; }
+    #showPanel:hover { background: rgba(53, 40, 62, 0.08); }
     #already .al-missing { margin-top: 5px; font-size: 10px; color: #92400e; background: #fef3c7; padding: 4px 7px; border-radius: 5px; }
     /* Page-fetching grant */
-    #fetchRow { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border-radius: 8px; background: rgba(92,45,138,0.06); border: 1px solid rgba(92,45,138,0.16); }
-    .fr-label { font-size: 11px; color: #5c2d8a; }
+    #fetchRow { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 10px; border-radius: 8px; background: rgba(53, 40, 62, 0.06); border: 1px solid rgba(53, 40, 62, 0.16); }
+    .fr-label { font-size: 11px; color: #35283e; }
     .fr-state { font-size: 10px; color: #8a8378; margin-top: 2px; }
     .fr-state.on { color: #15803d; }
-    #grantFetch { background: none; border: 1px solid rgba(92,45,138,0.4); border-radius: 6px; color: #5c2d8a; font-size: 10px; padding: 3px 9px; cursor: pointer; font-family: inherit; flex-shrink: 0; }
-    #grantFetch:hover { background: rgba(92,45,138,0.08); }
+    #grantFetch { background: none; border: 1px solid rgba(53, 40, 62, 0.4); border-radius: 6px; color: #35283e; font-size: 10px; padding: 3px 9px; cursor: pointer; font-family: inherit; flex-shrink: 0; }
+    #grantFetch:hover { background: rgba(53, 40, 62, 0.08); }
     #grantFetch[hidden] { display: none; }
     /* Fields panel */
     #fields { display: none; margin-top: 12px; border-top: 1px solid #e7e0d4; padding-top: 10px; }
     #fields h3 { font-size: 11px; font-weight: normal; color: #8a8378; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
     .field { display: flex; flex-direction: column; gap: 2px; padding: 5px 6px; border-radius: 6px; cursor: default; transition: background .15s; }
-    .field:hover, .field:focus { background: rgba(92,45,138,.08); outline: none; }
-    .field-label { font-size: 10px; color: #9b5ccc; text-transform: uppercase; letter-spacing: .05em; }
+    .field:hover, .field:focus { background: rgba(53, 40, 62,.08); outline: none; }
+    .field-label { font-size: 10px; color: #484965; text-transform: uppercase; letter-spacing: .05em; }
     .field-value { font-size: 12px; color: #3a3a3a; }
     .field-badge { font-size: 9px; color: #8a8378; margin-top: 1px; }
     .badge-crossref { color: #166534; }

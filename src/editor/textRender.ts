@@ -803,7 +803,7 @@ export type HighlightKind = 'scas' | 'add' | 'remove'
 export interface HighlightRange { from: number; to: number; kind: HighlightKind }
 
 const HIGHLIGHT_FILL: Record<HighlightKind, string> = {
-  scas: 'rgba(155, 92, 204, 0.28)',   // --iw-light purple, SCAS kicked word
+  scas: 'rgba(72, 73, 101, 0.28)',   // --iw-light purple, SCAS kicked word
   add: 'rgba(21, 128, 61, 0.22)',     // diff add
   remove: 'rgba(190, 24, 93, 0.22)',  // diff remove
 }
@@ -912,13 +912,13 @@ export function paintPage(
     // ── Placeholder box: labelled, never a fake render ──
     if (block.kind === 'placeholder' && block.type !== 'paragraph') {
       ctx.save()
-      ctx.strokeStyle = 'rgba(92,45,138,0.45)'
+      ctx.strokeStyle = 'rgba(53, 40, 62, 0.45)'
       ctx.setLineDash([4, 3])
       ctx.lineWidth = 1
       ctx.strokeRect(geom.sideMarginPx + 0.5, y + 0.5, geom.contentWidthPx - 1, block.height - 1)
       ctx.setLineDash([])
       if (mode === 'text') {
-        ctx.fillStyle = 'rgba(92,45,138,0.7)'
+        ctx.fillStyle = 'rgba(53, 40, 62, 0.7)'
         ctx.font = `italic 400 ${Math.min(14, geom.basePx)}px ${DEFAULT_STACK}`
         ctx.fillText(`[${block.label ?? block.type}${block.estimated ? ' — height estimated' : ''}]`,
           geom.sideMarginPx + 8, y + Math.min(block.height - 6, 18))
@@ -981,7 +981,7 @@ export function paintPage(
       // invented. Rendering its label would mean re-deriving CSL output the NodeView owns.
       if (seg.atom) {
         if (seg.w <= 0) continue
-        ctx.fillStyle = seg.atom === 'citation' ? 'rgba(92,45,138,0.55)' : 'rgba(92,45,138,0.30)'
+        ctx.fillStyle = seg.atom === 'citation' ? 'rgba(53, 40, 62, 0.55)' : 'rgba(53, 40, 62, 0.30)'
         const chipH = Math.max(1, line.height * 0.44)
         ctx.fillRect(originX + seg.x + 1, y + (line.height - chipH) / 2, Math.max(1, seg.w - 2), chipH)
         continue
@@ -1072,7 +1072,7 @@ export function paintMapStrip(
       if (block.kind === 'placeholder' && block.type !== 'paragraph') {
         // A figure/equation reads at map scale as a BLOCK of ink — that's information the strip
         // must carry, so draw its footprint rather than nothing.
-        ctx.fillStyle = 'rgba(92,45,138,0.18)'
+        ctx.fillStyle = 'rgba(53, 40, 62, 0.18)'
         ctx.fillRect(geom.sideMarginPx, y, geom.contentWidthPx, block.height)
         continue
       }

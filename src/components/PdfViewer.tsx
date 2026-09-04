@@ -43,15 +43,15 @@ import { pdfZoomFactor } from './zoomGesture'
 import { pageFromTops } from './pdfScrollPage'
 import type { IwCitationMeta } from '../types/document'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 // ─── THE BOTTOM TOOLBAR IS A READER BAR, NOT THE PAGE (2026-08-30) ───────────────────────────────
 // This file's chrome did not theme AT ALL, in either direction: at night the toolbar stayed #faf8fc
-// with #fff control faces and a #5c2d8a glyph on each — a strip of daylight welded under a dark app,
+// with #fff control faces and a #35283e glyph on each — a strip of daylight welded under a dark app,
 // directly below a reader header that HAD been migrated. One panel, two themes.
 //
 // It joins the reader family rather than growing a palette, and the reason is that its day values
-// already ARE that family's: bar #faf8fc, face #fff, outline #d6cfe0, glyph #5c2d8a, byte for byte.
+// already ARE that family's: bar #faf8fc, face #fff, outline #d6cfe0, glyph #35283e, byte for byte.
 // PdfReaderView's header is the same bar in the same panel — the ¶ toggle only swaps what is
 // between them. So the day rendering is unchanged BY CONSTRUCTION, not by measurement.
 //
@@ -64,7 +64,7 @@ const INK = '#5c2d8a'
 const BAR = 'var(--iw-reader-bar, #faf8fc)'
 const CTL = 'var(--iw-reader-ctl, #fff)'
 const EDGE = 'var(--iw-reader-edge, #d6cfe0)'
-const BAR_INK = 'var(--iw-reader-accent, #5c2d8a)'
+const BAR_INK = 'var(--iw-reader-accent, #35283e)'
 const BAR_MUTED = 'var(--iw-reader-muted, #6b645f)'
 const GALLERY = 'var(--iw-reader-gallery, #e9e7e3)'
 // Ink ON a mark's own fill — a sticky note's text, and the ▮/T button that wears that note's colour.
@@ -84,7 +84,7 @@ const ON_MARK = 'var(--iw-reader-on-mark, #2c2a28)'
  * both "a hairline" — is real accumulated drift, and it is REPORTED rather than consolidated here:
  * collapsing them is a visible day change and belongs to a decision, not to a tokenising pass.
  */
-const tint = (a: number) => `rgb(var(--iw-reader-accent-rgb, 92 45 138) / ${a})`
+const tint = (a: number) => `rgb(var(--iw-reader-accent-rgb, 53 40 62) / ${a})`
 const HAIR = tint(0.133)      // was `${INK}22` — the bar's top rule, its divider pips, a track
 const HAIR_SOFT = tint(0.094) // was `${INK}18` — the context strip's top rule
 const LIT = tint(0.122)       // was `${INK}1f` — a toggle that is ON
@@ -2334,7 +2334,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button type="button" onClick={() => void runOutput(output.what, output.scale)}
-                        style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), background: 'var(--iw-ink, #5c2d8a)', color: 'var(--iw-on-ink, #fff)', textAlign: 'center' }}>
+                        style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), background: 'var(--iw-ink, #35283e)', color: 'var(--iw-on-ink, #fff)', textAlign: 'center' }}>
                         {output.what === 'export' ? 'Export anyway' : 'Print anyway'}
                       </button>
                       <button type="button" onClick={() => { setOutput({ phase: 'idle' }); setMoreOpen(false) }}
@@ -2349,7 +2349,7 @@ export function PdfViewer({ data, citekey, initialPage, initialQuote, instanceId
                       <strong>{output.done}</strong> of <strong>{output.total}</strong>
                     </div>
                     <div aria-hidden="true" style={{ height: 4, borderRadius: 2, background: `${HAIR}`, overflow: 'hidden', marginBottom: 8 }}>
-                      <div style={{ height: '100%', width: `${output.total ? (100 * output.done) / output.total : 0}%`, background: 'var(--iw-ink, #5c2d8a)', transition: 'width 120ms linear' }} />
+                      <div style={{ height: '100%', width: `${output.total ? (100 * output.done) / output.total : 0}%`, background: 'var(--iw-ink, #35283e)', transition: 'width 120ms linear' }} />
                     </div>
                     <button type="button" onClick={() => { cancelOutputRef.current = true }}
                       style={{ ...(isTouch ? MORE_ITEM_TOUCH : MORE_ITEM), textAlign: 'center' }}>Cancel</button>

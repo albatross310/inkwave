@@ -623,7 +623,7 @@ export function paginateStaticDoc(opts: {
       logo.style.cssText = 'width:22px;height:22px;opacity:0.75;flex-shrink:0;display:block'
       f.appendChild(logo)
       const num = document.createElement('span')
-      num.style.cssText = 'font-family:"EB Garamond",Georgia,serif;color:#9b5ccc;font-size:0.9rem;line-height:1;display:block'
+      num.style.cssText = 'font-family:"EB Garamond",Georgia,serif;color:#484965;font-size:0.9rem;line-height:1;display:block'
       f.appendChild(num)
       d.appendChild(f)
       layer.appendChild(d)

@@ -9,7 +9,7 @@ import { bibProvider } from '../citations/bibProvider'
 import { maybeShowCitationToast } from '../citations/citationToast'
 import type { CSLItem } from '../types/document'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 const MAX_RESULTS = 10
 
 interface Props {

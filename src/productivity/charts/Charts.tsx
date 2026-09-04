@@ -259,8 +259,8 @@ export function PhaseMixBar({ drafting, editing, unclear, total }: { drafting: n
   if (total === 0) return null
   const W = 640, H = 26
   const seg = [
-    { n: drafting, label: 'drafting', fill: 'var(--iw-light, #9b5ccc)', op: 0.85 },
-    { n: editing, label: 'editing', fill: 'var(--iw-light, #9b5ccc)', op: 0.42 },
+    { n: drafting, label: 'drafting', fill: 'var(--iw-light, #484965)', op: 0.85 },
+    { n: editing, label: 'editing', fill: 'var(--iw-light, #484965)', op: 0.42 },
     { n: unclear, label: 'unclear', fill: 'var(--iw-pill-fg, #78716c)', op: 0.22 },
   ]
   let cursor = 0
@@ -275,9 +275,9 @@ export function PhaseMixBar({ drafting, editing, unclear, total }: { drafting: n
         return (
           <g key={s.label}>
             <rect x={x} y="0" width={Math.max(0, w - 1)} height={H} rx="2" fill={s.fill} fillOpacity={s.op}
-              stroke="var(--iw-light, #9b5ccc)" strokeOpacity="0.5" strokeDasharray="3 2" strokeWidth="1" />
+              stroke="var(--iw-light, #484965)" strokeOpacity="0.5" strokeDasharray="3 2" strokeWidth="1" />
             {w > 58 && (
-              <text x={x + w / 2} y={17} textAnchor="middle" fontSize="10" fill="var(--iw-ink, #5c2d8a)">
+              <text x={x + w / 2} y={17} textAnchor="middle" fontSize="10" fill="var(--iw-ink, #35283e)">
                 {s.label} {Math.round((s.n / total) * 100)}%
               </text>
             )}

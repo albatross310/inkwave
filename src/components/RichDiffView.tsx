@@ -131,7 +131,7 @@ function citationInline(node: Node, path: number[], ctx: Ctx, key: string): Reac
   if (!keys.length) return null
   const items = keys.map((k) => bibProvider.get(k)).filter((x): x is CSLItem => !!x)
   const label = items.length ? simpleInText(items) : `(${keys.join('; ')})`
-  return <span key={key} style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{splitLeaf(label, path, ctx, key)}</span>
+  return <span key={key} style={{ color: 'var(--iw-cite-color, #35283e)' }}>{splitLeaf(label, path, ctx, key)}</span>
 }
 
 function inline(nodes: Node[] | undefined, base: number[], ctx: Ctx): ReactNode {

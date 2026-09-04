@@ -28,7 +28,7 @@ import { simpleInText } from '../citations/format'
 import { ITEM_TYPE_LABELS as TYPE_LABELS, REQUIRED_BY_TYPE, FIELD_LABELS as CSL_FIELD_LABELS_MAP } from '../citations/requiredFields'
 import type { CSLItem, FieldSource, IwCitationMeta } from '../types/document'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 interface Props {
   editor: Editor
@@ -368,7 +368,7 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
             <label className="flex flex-col gap-1 flex-1">
               <span className="text-[11px] uppercase tracking-wide text-stone-500">Source type</span>
               <select value={type} onChange={e => setType(e.target.value)}
-                className="text-sm border border-stone-200 rounded px-2 py-2 bg-white focus:outline-none focus:border-[#5c2d8a]">
+                className="text-sm border border-stone-200 rounded px-2 py-2 bg-white focus:outline-none focus:border-[#35283e]">
                 {Object.entries(TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </label>
@@ -404,13 +404,13 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
                     value={val}
                     onChange={set(f.key)}
                     placeholder={f.placeholder}
-                    className={`flex-1 text-sm border rounded px-2 py-2 focus:outline-none ${missing ? 'border-red-200 focus:border-red-400' : 'border-stone-200 focus:border-[#5c2d8a]'}`}
+                    className={`flex-1 text-sm border rounded px-2 py-2 focus:outline-none ${missing ? 'border-red-200 focus:border-red-400' : 'border-stone-200 focus:border-[#35283e]'}`}
                   />
                   {fetchable && (
                     <button type="button" onClick={() => void fetchFields(f.key as 'DOI' | 'URL')}
                       disabled={!val.trim() || !!fetching}
                       title={f.key === 'DOI' ? 'Fetch the fields from this DOI (Crossref)' : 'Scrape the fields from this URL — uses Claude Sonnet'}
-                      className="flex-shrink-0 w-9 h-9 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] disabled:opacity-40 flex items-center justify-center text-base">
+                      className="flex-shrink-0 w-9 h-9 rounded border border-stone-200 text-stone-500 hover:border-[#35283e] hover:text-[#35283e] disabled:opacity-40 flex items-center justify-center text-base">
                       {fetching === f.key ? '…' : (f.key === 'DOI' ? '⤓' : '✦')}
                     </button>
                   )}
@@ -842,12 +842,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             <div className="flex gap-2 flex-shrink-0 ml-3 items-center">
               <a href="https://chromewebstore.google.com/detail/inkwave-citation-capture/TODO"
                 target="_blank" rel="noopener noreferrer"
-                className="text-xs text-stone-500 hover:text-[#5c2d8a] underline underline-offset-2">
+                className="text-xs text-stone-500 hover:text-[#35283e] underline underline-offset-2">
                 Chrome
               </a>
               <a href="https://addons.mozilla.org/en-US/firefox/addon/inkwave-citation-capture/"
                 target="_blank" rel="noopener noreferrer"
-                className="text-xs text-stone-500 hover:text-[#5c2d8a] underline underline-offset-2">
+                className="text-xs text-stone-500 hover:text-[#35283e] underline underline-offset-2">
                 Firefox
               </a>
               <button type="button" onClick={dismissExt} title="Dismiss"
@@ -864,18 +864,18 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && captureable) { e.preventDefault(); void doCapture() } }}
               placeholder="Paste a DOI, arXiv, URL, or search… (Ctrl+F)"
-              className="flex-1 text-sm border border-stone-200 rounded px-3 py-2 focus:outline-none focus:border-[#5c2d8a]"
+              className="flex-1 text-sm border border-stone-200 rounded px-3 py-2 focus:outline-none focus:border-[#35283e]"
             />
             <button
               type="button" disabled={!captureable || busy} onClick={() => void doCapture()}
               className="text-sm px-3.5 py-1.5 rounded disabled:opacity-40"
-              style={{ background: 'var(--iw-addbtn-bg, #5c2d8a)', color: 'var(--iw-addbtn-fg, #fff)', border: '1px solid var(--iw-addbtn-border, transparent)' }}
+              style={{ background: 'var(--iw-addbtn-bg, #35283e)', color: 'var(--iw-addbtn-fg, #fff)', border: '1px solid var(--iw-addbtn-border, transparent)' }}
             >
               {busy ? '…' : 'Add'}
             </button>
             {/* Close — big ×, next to Add (the old titled header bar is gone). */}
             <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
-              className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-500 hover:text-[#5c2d8a] hover:border-stone-300 text-base leading-none flex items-center justify-center">{fullscreen ? '🗗' : '⛶'}</button>
+              className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-500 hover:text-[#35283e] hover:border-stone-300 text-base leading-none flex items-center justify-center">{fullscreen ? '🗗' : '⛶'}</button>
             <button type="button" onClick={onClose} title="Close (Esc)"
               className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-500 hover:text-stone-600 hover:border-stone-300 text-2xl leading-none flex items-center justify-center">×</button>
           </div>
@@ -896,7 +896,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                 key={m} type="button" onClick={() => setMode(m)}
                 className="h-8 text-[13px] w-14 justify-center rounded border flex items-center"
                 style={refMode === m
-                  ? { background: `${INK}12`, borderColor: 'var(--iw-cite-color, #5c2d8a)', color: 'var(--iw-cite-color, #5c2d8a)' }
+                  ? { background: `${INK}12`, borderColor: 'var(--iw-cite-color, #35283e)', color: 'var(--iw-cite-color, #35283e)' }
                   : { borderColor: 'var(--iw-nightable-border, #e7e5e4)', color: 'var(--iw-pill-fg, #78716c)' }}
               >
                 {m === 'cited' ? 'Auto' : m === 'all' ? 'All' : 'Man'}
@@ -917,14 +917,14 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             </select>
             <button type="button" onClick={toggleSortDir}
               title={sortDir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
-              className="h-8 w-8 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a]">
+              className="h-8 w-8 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#35283e] hover:text-[#35283e]">
               {sortDir === 'asc' ? '↑' : '↓'}
             </button>
             {/* Re-verify all — with a CUSTOM styled tooltip (bigger, deep royal blue). */}
             <div className="relative flex-shrink-0" onMouseEnter={() => setRecheckTip(true)} onMouseLeave={() => setRecheckTip(false)}>
               <button type="button" onClick={() => void recheckAll()} disabled={recheckingAll}
-                className="h-8 w-8 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#5c2d8a0d]"
-                style={{ color: 'var(--iw-pill-fg, #5c2d8a)' }}>
+                className="h-8 w-8 flex items-center justify-center rounded border border-stone-300 disabled:opacity-50 hover:bg-[#35283e0d]"
+                style={{ color: 'var(--iw-pill-fg, #35283e)' }}>
                 {recheckingAll ? '…' : '↻'}
               </button>
               {recheckTip && (
@@ -963,7 +963,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                   rerender()
                 })()}
                 className="underline"
-                style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
+                style={{ color: 'var(--iw-cite-color, #35283e)' }}
                 title="Your library used to be shared across every document. Copy those sources into this one.">
                 Import {legacyCount} source{legacyCount === 1 ? '' : 's'} from your old shared library
               </button>
@@ -975,7 +975,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           {!helpDismissed && (
             <div className={`flex items-start gap-2 mb-2 ${fullscreen ? 'col-span-2' : ''}`}>
               <div className="text-[11px] text-stone-500">
-                type <kbd className="font-mono border border-stone-200 rounded px-0.5" style={{ background: 'var(--iw-chip-bg, #f5f5f4)' }}>@</kbd> in the editor to insert · <span className="text-[#5c2d8a]">📎</span> embed a PDF, then <span className="text-[#5c2d8a]">📄</span> next to an in-text citation opens it at the cited page.
+                type <kbd className="font-mono border border-stone-200 rounded px-0.5" style={{ background: 'var(--iw-chip-bg, #f5f5f4)' }}>@</kbd> in the editor to insert · <span className="text-[#35283e]">📎</span> embed a PDF, then <span className="text-[#35283e]">📄</span> next to an in-text citation opens it at the cited page.
               </div>
               <button type="button" onClick={dismissHelp} title="Hide these tips"
                 className="ml-auto text-stone-500 hover:text-stone-600 text-base leading-none flex-shrink-0">×</button>
@@ -1005,7 +1005,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                           button) falls through to the row's click → the ref editor (Peter, 2026-07-10). */}
                       <button type="button" title="Click to rename"
                         className="text-[13px] font-medium truncate hover:underline"
-                        style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}
+                        style={{ color: 'var(--iw-cite-color, #35283e)' }}
                         onClick={e => { e.stopPropagation(); void renameCitation(item) }}>{item.id}</button>
                       {/* Verified sources → a compact ✓ box (tooltip on hover); others keep their label. */}
                       {itemSource(item) === 'crossref'
@@ -1028,7 +1028,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         <>
                           <button type="button"
                             title={`Open embedded PDF (${iw.pdfName})`}
-                            className="text-[11px] px-2 py-0.5 rounded border border-[#5c2d8a55] text-[#5c2d8a] hover:border-[#5c2d8a] hover:bg-[#5c2d8a0d] whitespace-nowrap"
+                            className="text-[11px] px-2 py-0.5 rounded border border-[#35283e55] text-[#35283e] hover:border-[#35283e] hover:bg-[#35283e0d] whitespace-nowrap"
                             onClick={e => { e.stopPropagation(); openPdf({ citekey: item.id, page: 1, label: item.id }) }}
                           >📄 PDF</button>
                           <label title='"Publicly available" — this source can be stripped on export (it stays fetchable from its open URL)'
@@ -1044,7 +1044,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                       ) : (
                         <button type="button"
                           title="Embed a PDF file for this source"
-                          className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] whitespace-nowrap"
+                          className="text-[11px] px-2 py-0.5 rounded border border-stone-200 text-stone-500 hover:border-[#35283e] hover:text-[#35283e] whitespace-nowrap"
                           onClick={e => { e.stopPropagation(); attachPdf(item) }}
                         >📎 PDF</button>
                       )
@@ -1056,11 +1056,11 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                    {/* Second row: cite + visit source */}
                    <div className="flex items-center justify-end gap-1">
                     <button type="button" onClick={e => { e.stopPropagation(); cite(item) }} title="Cite inline in the document at the cursor"
-                      className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-[15px] leading-none">@</button>
+                      className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#35283e] hover:text-[#35283e] text-[15px] leading-none">@</button>
                     {!!(item.URL || (item as { _iw?: IwCitationMeta })._iw?.sourceUrl) && (
                       <button type="button"
                         title="Open source page (shows verification panel if extension installed)"
-                        className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] text-[13px]"
+                        className="w-7 h-7 flex items-center justify-center rounded border border-stone-200 text-stone-500 hover:border-[#35283e] hover:text-[#35283e] text-[13px]"
                         onClick={e => { e.stopPropagation(); visitSource(item) }}
                       >↗</button>
                     )}
@@ -1091,7 +1091,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                         {changelog.length > 0 && (
                           <button type="button" onClick={e => { e.stopPropagation(); toggleExpand(item.id) }}
                             title="Show the correction history (old → new) for this citation"
-                            className="text-[12px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#5c2d8a] hover:text-[#5c2d8a] flex-shrink-0">
+                            className="text-[12px] px-1 rounded border border-stone-200 text-stone-500 hover:border-[#35283e] hover:text-[#35283e] flex-shrink-0">
                             {open ? '▾' : '▸'} history ({changelog.length})
                           </button>
                         )}
@@ -1103,10 +1103,10 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
                               <span className="font-medium text-stone-600 flex-shrink-0">{(CSL_FIELD_LABELS_MAP as Record<string, string>)[c.field] ?? c.field}</span>
                               <span className="text-stone-500 line-through truncate max-w-[80px]">{fmtVal(c.field, c.old)}</span>
                               <span className="text-stone-300 flex-shrink-0">→</span>
-                              <span className="truncate max-w-[80px]" style={{ color: 'var(--iw-cite-color, #5c2d8a)' }}>{fmtVal(c.field, c.new)}</span>
+                              <span className="truncate max-w-[80px]" style={{ color: 'var(--iw-cite-color, #35283e)' }}>{fmtVal(c.field, c.new)}</span>
                               <span className="text-[11px] text-stone-300 flex-shrink-0">{c.source}</span>
                               <button type="button" onClick={() => void revert(item, i)}
-                                className="text-[11px] text-stone-500 hover:text-[#5c2d8a] ml-auto flex-shrink-0">revert</button>
+                                className="text-[11px] text-stone-500 hover:text-[#35283e] ml-auto flex-shrink-0">revert</button>
                             </div>
                           ))}
                         </div>

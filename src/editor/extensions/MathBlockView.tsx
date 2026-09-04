@@ -8,7 +8,7 @@ import { parseDefinition, setSymbol, getSymbols, applyCustomSymbols } from './ma
 import { loadMathLive } from './mathLiveLoader'
 import { pendingMathEdit } from './mathActivation'
 
-const INK = '#5c2d8a'
+const INK = '#35283e'
 
 type Align = 'aligned' | 'center' | 'left'
 
@@ -192,8 +192,8 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
         // internally; without this the formula appears ~17% smaller than the KaTeX render).
         'display:inline-block;width:max-content;background:transparent;border:none;',
         'outline:none;font-size:1.21em;font-family:KaTeX_Math,KaTeX_Main,inherit;',
-        '--caret-color:#5c2d8a;',
-        '--selection-background-color:rgba(155,92,204,0.25);',
+        '--caret-color:#35283e;',
+        '--selection-background-color:rgba(72, 73, 101, 0.25);',
       ].join('')
 
       mf.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -452,7 +452,7 @@ export function MathBlockView({ node, updateAttributes, selected, editor, getPos
           // Only show border/background when active or selected
           border: `1px solid ${active || selected ? `${INK}55` : 'transparent'}`,
           borderRadius: '6px',
-          background: active || selected ? 'rgba(155,92,204,0.03)' : 'transparent',
+          background: active || selected ? 'rgba(72, 73, 101, 0.03)' : 'transparent',
           transition: 'border-color 0.12s, background 0.12s',
         }}
       >
