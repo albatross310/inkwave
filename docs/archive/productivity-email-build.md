@@ -1499,3 +1499,93 @@ writer's OWN standard back at them, and a goal we paraphrased is no longer their
 supplied); the model is handed the VERDICT, never the raw dates to compare. "Did I hit my
 deadline" is exactly the claim an LLM must not silently re-derive. The due date rides along as
 context (it is the writer's own datum), but the met/missed judgement is Inkwave's.
+
+---
+
+## `productivity/capture.ts` — the impure orchestration (§A4)
+
+<a id="capture-typing-cost"></a>
+### Typing cost is the design
+
+HOW IT HOOKS THE EDIT STREAM: it does NOT add instrumentation. `record()` is called from the
+editor's existing `onTransaction` — the same stream the provenance spine already listens to — and
+derives its counts from `countSteps` (provenance/cadence.ts), which is the repo's existing
+steps→counts primitive. Counts only; never characters, never content.
+
+TYPING PERFORMANCE IS SACRED (CLAUDE.md). The per-keystroke path here is:
+`countSteps(steps)` → compare two numbers → increment three fields. That is it. Specifically it
+does NOT:
+
+- walk the document (words_start is carried from the previous close's baseline)
+- touch localStorage (the flag is cached; label suppression is cached)
+- allocate a timer per keystroke (idle is found by ONE low-frequency interval, not a
+  clearTimeout/setTimeout churn per input)
+- touch the disk or React state
+
+Every O(doc) number is computed at session CLOSE, off the input path.
+
+THE BASELINE (why words_start is free): a session boundary IS an inactivity gap (or an explicit
+Pomodoro start/stop, or a doc switch). The document cannot change while nobody is editing it, so
+the word count measured at the previous close IS the word count at the next open. Carrying it
+forward is exact, not an approximation — and it costs O(1) on the keystroke that opens a session.
+
+<a id="capture-word-diff"></a>
+### `wordDiffStats` — two measured failures, not theory
+
+(1) `diffWords` tokenises as [word][trailing-whitespace] so that re-joining reproduces the
+original exactly — right for the diff VIEW it was built for, wrong as a measurement: appending
+to a paragraph makes the old last token ("three\n") differ from the new one ("three "), so a
+2-word addition measured 3 added + 1 deleted. Collapsing whitespace and giving BOTH sides a
+trailing space makes the shared prefix match, so only real changes are counted.
+
+(2) `diffStats` counts `\S+` runs while `countWords` (which produces words_start/words_end) counts
+`[\p{L}\p{N}]+` runs. Left alone, punctuation tokens would make `words_added - words_deleted`
+disagree with `net_words` in the same row — two numbers on one graph contradicting each other.
+Reducing both sides to countWords' OWN word notion before diffing keeps the row coherent.
+
+Exported so the arithmetic is unit-testable on its own.
+
+<a id="capture-default-doc-type"></a>
+### `DEFAULT_DOC_TYPE = 'misc'` — an honesty fix, not a rename
+
+It defaulted to 'essay', so every unclassified session was FILED AS ESSAY WRITING whether it was
+or not: a guess dressed as a measurement, in the one field §A6.1 says must be measured. `misc`
+says the true thing — they were working; we don't know at what. See DocType's note for why `misc`
+and `other` are different words.
+
+The refusal that produced it STANDS: nothing distinguishes a note from an essay, and a rule based
+on length or title would be invention. A type is SET, never guessed — by the email layer's
+explicit `docType: 'email'`, by the PDF surface's reading/annotating, or by the writer's own
+reflection. A window that is mostly `misc` is a finding about OUR instrumentation, never a failing
+of the writer's.
+
+<a id="capture-pomodoro-boundary"></a>
+### A running Pomodoro suppresses the inactivity close — and IS the claim of work
+
+**A RUNNING POMODORO SUPPRESSES THE INACTIVITY CLOSE** (Peter, 2026-07-17). §A4 names the
+Pomodoro as a boundary source in its own right, and the two rules would otherwise fight: silence
+means "gone" only when nobody has claimed the time. Reading a printed article for 25 minutes
+produces ZERO events, so the 5-minute rule would kill the session at minute five and throw the
+other twenty away. While a block runs, the BLOCK is the boundary — nothing else closes it.
+
+PETER, 2026-07-17: "even if you read physical articles you still use the pomodoro timer."
+Starting the timer IS the writer saying *count this*. So `pomodoroStart` OPENS a session
+immediately rather than waiting for a keystroke — otherwise 25 minutes of reading a printed
+article produces no events, no session, and NO ROW, and the report calls it a thin day. That is
+the tracker being wrong about him. The block is measured; only its TYPE is unknown (⇒ `misc`), and
+the end-of-stretch reflection is where he names it ("reading Leibniz, printed").
+
+WHEN DID IT END, AND HOW MUCH OF IT WAS WORK? A typing session ends at its LAST EDIT — otherwise
+every session banks the idle time it took to notice, and `active_minutes` is the sum of capped
+inter-edit gaps (see sessionLogic). A POMODORO block is different in kind: the timer running is
+the claim, so the block ends when the block ends and ALL of it is active. Without this a 25-minute
+silent reading block reports `active_minutes: 0` — it has no inter-edit gaps to sum — which is the
+same lie as not recording it at all.
+
+<a id="capture-sync-import"></a>
+### The ledger sync is dynamically imported
+
+The sync + provider adapters must not ride the editor's load path just because capture.ts does.
+Chunking is not laziness (a lane shipped 16KB gzip onto every writer's load while claiming zero
+cost) — an `import()` behind a runtime boundary is. Fire-and-forget: a sync failure must never
+surface as a broken close.
