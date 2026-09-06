@@ -643,6 +643,38 @@
       "requires_peter_decision": false
     },
     {
+      "id": "R13c",
+      "title": "Batch the OTS sweep: one write per K snapshots, not one per snapshot",
+      "stage": 3,
+      "priority": 20,
+      "risk": "high",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/provenance/snapshots.ts"
+      ],
+      "objective": "drainUnstamped (snapshots.ts:527-535) calls patchSnapshot -> writeSnapshotsFile PER SNAPSHOT. The decompress+merge is paid once (the stale-cache guard at :211-223 short-circuits), but each write is a full serialise + compress + write, plus a structured clone of the whole array on the MAIN THREAD (workers/parseClient.ts:107-114 passes an empty transfer list deliberately). Measured at 79 snapshots x 20k words: 8.3 s main-thread clone, 16 s worker, 32 MB written.",
+      "acceptance": [
+        "FIRST measure the p95 real backlog by reading a real archive ots.status distribution - if it is <=3 this is a ~0.3s event, STOP and report that as the falsifier",
+        "Batch to one write per K (~10), NOT one per sweep - today an aborted sweep has persisted every proof so far, and one-per-sweep would lose the whole batch",
+        "The batched write goes through queueSnapshotsWrite unchanged",
+        "It does NOT acquire allowShrink (snapshots.ts:190-196)",
+        "It preserves the union-against-disk guard and the rule that a failed re-read ABANDONS the write",
+        "It stays inside the per-doc _writeChain (:186)",
+        "Note upgradePending guards on if(ots) at :542-544, so a sweep where nothing is confirmable already costs zero writes"
+      ],
+      "tests": [
+        "src/provenance/mergeSnapshots.test.ts",
+        "src/provenance/staleCacheTruncation.test.ts",
+        "src/provenance/noAutoDelete.test.ts"
+      ],
+      "browser_proofs": [
+        "longtask observer around runOtsSweep on a 79-snapshot archive"
+      ],
+      "requires_peter_decision": false
+    },
+    {
       "id": "R16",
       "title": "Shared production/dev API adapter",
       "stage": 3,

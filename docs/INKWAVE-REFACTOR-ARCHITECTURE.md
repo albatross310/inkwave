@@ -501,14 +501,59 @@ verdict state or the data-loss family — prefetch is a display-latency optimisa
 offered is unchanged. **The fix needs only `thesaurus.ts` and `TiptapEditor.tsx`, so it can avoid
 `ThesaurusPopover.tsx` entirely** — which another lane is currently editing.
 
-### 5.7 ⚠ HONEST GAP — hypotheses 7 to 9 were not established
+### 5.7 H7 — OTS sweep rewrites the archive per snapshot ✅ CONFIRMED — **with the hypothesis's shape corrected**
 
-The brief put nine hypotheses; **six were investigated and three were not.** The following remain
+**TRACED (the loop) + MEASURED (the cost).** Not the load-time gating, which CLAUDE.md already records as
+fixed — this is strictly the cost *inside* the sweep. `drainUnstamped` (`snapshots.ts:527–535`) loops
+`stampSnapshot` → `patchSnapshot` (`:503–515`) → `writeSnapshotsFile` **per snapshot**.
+
+**⚠ Correction to the hypothesis: it is NOT a read-decompress-merge-compress-write per snapshot.** The
+stale-cache guard at `:211–223` short-circuits after the first write in a tab (`archiveSizeOnDisk ===
+_lastWrittenSize` ⇒ untouched ⇒ no re-read, no gunzip, no `mergeSnapshots`). The decompress+merge is paid
+**once**. The accurate claim is **one full serialise + compress + write per snapshot**, plus one structured
+clone.
+
+**And the main-thread cost the hypothesis missed:** `gzipJsonOffThread` (`workers/parseClient.ts:107–114`)
+passes an **empty transfer list** — deliberate (`:111`: *"value is still ours (cloned, not transferred)"*) so
+the worker can die and the inline path retry. **The gzip is off-thread; the structured clone of the entire
+snapshot array is not.**
+
+| archive | raw / gz | per write: clone (main) + stringify + gzip (worker) | sweep of N |
+|---|---|---|---|
+| 79 snaps × 20k words | 15.8 MB / 0.40 MB | **105 ms** + 45 ms + 158 ms | **8.3 s main thread**, 16.0 s worker, 32 MB written |
+| 79 snaps × 5k words | 4.4 MB / 0.26 MB | 32 ms + 15 ms + 54 ms | 2.5 s main, 5.4 s worker, 20 MB |
+| 30 snaps × 20k words | 6.0 MB / 0.16 MB | 45 ms + 18 ms + 57 ms | 1.3 s main, 2.3 s worker, 5 MB |
+
+At Peter's 79 snapshots on a 20k-word thesis, opening the ◈ panel with a full backlog costs **~8 s of
+main-thread structured-clone in 79 × ~105 ms chunks**, plus 79 serial round-trips (each up to the 15 s
+`ots.ts:16` timeout on a dead relay).
+
+**Fix:** batch to one read + N in-place patches + **one write per K (≈10), not one per sweep.** Predicted:
+main-thread clone 8.3 s → ~105 ms, bytes 32 MB → 0.4 MB.
+
+**⚠ The falsifier is strong and unsettled — measure it first.** `TiptapEditor.tsx:1382` stamps each new
+snapshot at creation and the sweep is throttled to once per 15 min, so **a normally-online writer never
+accumulates a backlog.** The 79-snapshot drain only follows a long offline stretch or a relay outage.
+**If the p95 backlog is ≤3 this is a ~0.3 s event and not worth the risk.** Settling it means reading a real
+archive's `ots.status` distribution. Secondary falsifier: `upgradePending` guards on `if (ots)` (`:542–544`),
+so a sweep where nothing is confirmable costs **zero** writes — the N-rewrite cost is real for
+`drainUnstamped` and only conditional for `upgradePending`.
+
+**⚠ Invariant risk — this is the data-loss family, and it is the real cost of the package.** Today a sweep
+aborted midway has persisted every proof so far; a single-write version loses the whole batch. Hence
+once-per-K, which keeps ~90% of the win and bounds the loss. Any batched write must go through
+`queueSnapshotsWrite` unchanged, must **not** acquire `allowShrink` (`:190–196`), must preserve the
+union-against-disk guard and the rule that **a failed re-read ABANDONS the write**, and must stay inside the
+per-doc `_writeChain` (`:186`). The fix needs only `snapshots.ts` — which keeps it inside `noAutoDelete`'s
+two-entry allow-list, and avoids `SnapshotView.tsx`, currently edited by another lane.
+
+### 5.8 ⚠ HONEST GAP — hypotheses 8 and 9 were not established
+
+The brief put nine hypotheses; **seven were investigated and two were not.** The following remain
 **STATED-NOT-PROVED** and must be treated as open questions, not findings, by anyone reading this plan:
 
 | # | hypothesis | status |
 |---|---|---|
-| H7 | OTS backlog drain/upgrade performs one full archive rewrite per snapshot (`provenance/ots.ts`, `snapshots.ts`) | **not investigated** — note CLAUDE.md records the *load-time* half of this as already fixed (sweep on ReceiptPanel open, throttled 15 min); the per-snapshot rewrite inside the sweep is the untested part |
 | H8 | Cloud mirrors independently repeat archive/bundle work (`storage/{onedrive,gdrive,folder}.ts`, `archiveWriteback.ts`) | **not investigated** as a *performance* question — §6.1 seam 3 covers its *correctness* seam only |
 | H9 | Verification re-canonicalises and re-decodes the same receipt data (`verify/`, `provenance/{receipts,hash,bundle}.ts`) | **not investigated** |
 
@@ -572,8 +617,9 @@ always different *failure semantics*:
 - **Inline vs block math `Enter`** means "commit" and "new row" respectively. A shared handler behind a mode flag
   makes a mistake there silent data loss.
 - **The client/server JCS duplication is deliberate isolation** — the verifier must not import app code. And
-  CLAUDE.md's "kept in sync BY COMMENT" is **unfair**: `receipts.test.ts` imports the real server core and
-  verifies client-side, so a divergence breaks the signature and fails the test. That is a real guard.
+  `REFACTOR-PERFORMANCE-REPORT.md:15,115`'s "kept in sync *by comment*" is **stale**: `receipts.test.ts`
+  imports the real server core and verifies client-side, so a divergence breaks the signature and fails the
+  test. That is a real guard, and R3 of that June report has landed.
 - **The wave keyframes genuinely cannot be a CSS var** (`waveTwinkle.ts:26–31` — var-dependent keyframes cannot
   composite). KEEP-SEPARATE **plus a pin**, not unify.
 
@@ -897,6 +943,7 @@ Ranked by **value per risk**, not by size. "Conf" is confidence in the finding, 
 | **R12c** | Remove `@testing-library/jest-dom` + `@types/katex`; move `katex`/`@citation-js`/`@clerk-react` off the eager editor graph | med | M | moderate | high | TRACED |
 | **R13** | Memoise `ScasController.lookup()` | med — 8–25 ms popover | S | low | high | MEASURED |
 | **R13b** | Bound the synonym prefetch (negative-cache + LRU + keyed scan) | **med-high** — unbounded offline refetch | M | moderate | high | TRACED |
+| **R13c** | Batch the OTS sweep (one write per K) | med — 8.3 s main thread at 79 snaps | M | **high** | high | MEASURED |
 | **R14** | Typed `inkwave:*` event registry | med | M | low | high | MEASURED |
 | **R15** | Unify 6 duplicated `localStorage` literals | med | S | low | high | MEASURED |
 | **R16** | Shared prod/dev API adapter (5 divergences) | med (security-shaped) | M | moderate | high | TRACED |
@@ -1186,7 +1233,7 @@ see the case.*
 | 14 | Colour tokens do not drift | `colourScan.test.ts` + `colourBaseline.json` | ⚠️ strong ratchet, **but never scans `index.css`** → B5. → **R01** |
 | 15 | Touch targets and tap rows | `touchTargets.test.ts` | ⚠️ two hard-coded files; misses 34 scrims → **R01** |
 | 16 | `CANONICAL_FONT_SIZE` agrees across TS and CSS | `canonicalMeasure.test.ts:32` | ❌ **tautological** — asserts the constant against itself. Change the CSS base font and every canonical break moves, suite green. → **R08** |
-| 17 | Client and server produce identical JCS / hashes / receipts | `provenance/receipts.test.ts` (imports the real server core) | ✅ **stronger than CLAUDE.md claims** — not "kept in sync by comment". Two gaps: `POOL_SIZE === POOL_LEN` unasserted; `scasSetSize` configurable client-side, hardcoded 300 server-side |
+| 17 | Client and server produce identical JCS / hashes / receipts | `provenance/receipts.test.ts` (imports the real server core) | ✅ **stronger than `REFACTOR-PERFORMANCE-REPORT.md:15,115` claims** — that June report says "kept in sync *by comment*"; it is not, and that recommendation has since landed. Two gaps: `POOL_SIZE === POOL_LEN` unasserted; `scasSetSize` configurable client-side, hardcoded 300 server-side |
 
 ---
 

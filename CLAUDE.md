@@ -1219,6 +1219,29 @@ THE ONE FORM THAT WORKS, because a failure short-circuits the chain rather than 
 Nothing between the links. No `echo`, no pipe, no `set -e`. And `&&` short-circuiting was itself
 verified here (`false && echo BAD || echo GOOD`) rather than assumed — which is the whole lesson.
 
+**⚠ AND THE REASON IT KEEPS HAPPENING IS STRUCTURAL: THAT CHAIN IS NOT AN NPM SCRIPT (2026-09-06).**
+There is no `pnpm gate`. The one form that works is retyped by hand every single time, which is
+exactly the surface where all three failures occurred. Four lines close the whole class:
+
+    "gate": "pnpm typecheck && pnpm test --run && pnpm build"
+
+Related, and immediate: **`"test": "vitest"` has no `--run`** — in a TTY that is WATCH MODE, which is
+why an agent's gate can appear to hang, or to "pass" by never terminating.
+
+**What else nothing checks (all MEASURED 2026-09-06):**
+- **No linter is installed at all** — not "no config"; `grep -c eslint pnpm-lock.yaml` → 0. So
+  unreachable code ships: `renderWrap.prove.mjs:145-148` puts its failure diagnostic AFTER
+  `process.exit`, so a red run prints nothing about what diverged.
+- **`api/*.mjs` is typechecked by nothing.** `tsconfig.app.json` resolves 650 files, ZERO under
+  `api/`. `src/audit/apiFunctionsParse.test.ts` already demonstrates that `broken syntax here (((`
+  appended to `api/ots.mjs` — the live Bitcoin-anchoring endpoint — leaves the FULL GATE GREEN. That
+  test honestly closes only the parse half. `middleware.ts` (which carries the CSP) and
+  `react-router.config.ts` are in no tsconfig either, and **`extension-src/` is typechecked by no
+  repo command** while its wire protocol to the app is string-duplicated on both sides.
+- **No CI** — there is no `.github/` at all. Every gate is hand-run.
+- **No bundle budget.** `prodLoadPath.prove.mjs:29` hinges on `/^TiptapEditor-.*\.js$/`, so
+  **renaming `TiptapEditor.tsx` makes it match nothing and PASS.**
+
 **BACKTICKS IN `git commit -m` ARE COMMAND SUBSTITUTION.** A message written inline with
 `-m "… `readJson` …"` runs `readJson` and splices its (empty) output into the message. Use
 `-F <file>` with a heredoc for any message containing code identifiers — several commits this
@@ -1646,11 +1669,22 @@ that keep them fixed:
 - **Word count runs only while the ◈ panel is open — both platforms** (ReceiptPanel is controlled
   everywhere now); desktop was building the full doc string every 300ms of typing for a hidden
   number.
-- **Residual (known, next target):** with SCAS decorations on, the steady-state keystroke cost is
+- **Residual (known):** with SCAS decorations on, the steady-state keystroke cost is
   now dominated by ProseMirror DecorationSet MAPPING/redraw — O(decorated words) per transaction
   (CPU-profiled: forChild/posBeforeChild in the PM chunk). ~2,600 decorated words ⇒ ~22ms real per
   keystroke on a 4×-throttled desktop. The fix is viewport-windowed decoration RENDERING (verdict
-  state stays doc-wide; only visible ranges get Decoration objects) — not attempted this round.
+  state stays doc-wide; only visible ranges get Decoration objects).
+  **⚠ CORRECTED 2026-09-06 — this line used to end "not attempted this round". IT IS BUILT.**
+  `RedHighlightExtension.ts:70-80` (flag `inkwave:scasWindow`, **default OFF**), `:162-165` (the
+  `winRange` plugin state), `:265-308` (the viewport tracker, ±1.5 screens, re-window after ~0.75),
+  `:549` (the filter) — and unit-pinned by `redHighlightWindow.test.ts:109-135`, which proves
+  decorations drop while `flagged` stays doc-wide byte-identical. What is missing is a MEASUREMENT,
+  not code: nobody has run the ablation with the flag ON, and `computeWide()` reads
+  `getBoundingClientRect().bottom` (`:273`) with no `scaleFor`/`unscale` conversion, so at
+  magnify ≠ 1 the window is computed in visual px against this file's own coordinate rule.
+  **A null result is a valid outcome** — `DecorationSet.map()` is far cheaper per item than
+  CREATING decorations, so the ~22ms attribution above may be misallocated. A lane that reasons
+  from the old wording will rebuild something that already exists.
 - **Scroll-frame budget:** desktop scrolling of a long doc showed 300–900ms frames in ALL ablation
   cells (phone was fine) — desktop-only per-scroll-frame work: the `--wave-x` sway write
   (unregistered inherited custom property on the surface → subtree style invalidation) and the
@@ -1813,3 +1847,113 @@ robust answer to "will an outside model understand this" — better than hoping 
 
 **No document content from those exports is reproduced here, and none of it entered the repo.** The
 figures above are byte counts and structure. That boundary is unchanged.
+
+## The refactor architecture study (2026-09-06) — what it corrected, and Peter's rulings
+
+Full study: **`docs/INKWAVE-REFACTOR-ARCHITECTURE.md`** (13 sections, every claim labelled MEASURED /
+TRACED / INFERRED / STATED-NOT-PROVED) and **`docs/INKWAVE-REFACTOR-WORK-PACKAGES.json`** (35 packages,
+Astra selects one at a time). Measured on a clean tree at `3c24c2b`. Read the study before starting any
+package; what follows is only what a lane must not get wrong from memory.
+
+**⚠ THE GUARDS HERE ARE UNUSUALLY GOOD AND UNUSUALLY NARROW — this is the study's transferable finding.**
+It is one level deeper than "a green gate is not a guard": not *the probe never runs*, but **the probe runs
+and cannot see the case**. `breakRuleParity.test.ts` never varies `liveIsCanonical`. `touchTargets.test.ts`
+never leaves two hard-coded files. `colourScan.test.ts` never scans `index.css`, so the stylesheet's own
+`var()` reads are checked by nothing. `dockLayout.test.ts` never checks the upper bound. In each case the
+rule is correctly identified, correctly written down, and asserted in exactly the one configuration where it
+happens to hold. **Widening five existing tests is cheaper than any consolidation on the queue** and turns
+four live findings red (study §6.4). Do that before moving anything.
+
+**⚠ LIVE BUGS FOUND, TWO IN THE DATA-LOSS FAMILY (study §6.0, nine total).**
+- **`music/master.ts:83-93 readIndex` is `citations/library.ts` with the guard removed** — returns `[]` on
+  OPFS-unavailable, on corrupt JSON, and on every fault, then feeds three blind read-modify-**writes**. A
+  transient read fault truncates the score index while the `.musicxml` bytes stay on disk as unreachable
+  orphans, and `replaceMasterContent` reports a read fault to the writer as *"that score isn't on this
+  device"*. **An unknown answered as a known-empty, verbatim.** Adopt `opfs.ts:110-138`'s two-named-function
+  contract; `music/library.ts:114-127`'s regenerable cache correctly keeps the lenient reader.
+- **Canonical breaks already disagree off-canonical:** editor pos **99**, snapshot pane and arithmetic model
+  **127**. `staticPagination` has **no reference-list force-break at all** (`grep -ci reflist` → 24 / 5 / **0**
+  across the three copies), so any `/snapshot` document with a bibliography pages differently from the editor
+  **today**. `breakRuleParity.test.ts` passes `refListPos = -1` everywhere, so it structurally cannot see it.
+- Also live: `listGoogleDriveFiles` returns `[]` on 500 and overwrites the good cached listing;
+  `music/attach.ts:158-160` redefines `inkwave:activeDocumentId` with **inverted** semantics against
+  `tabDoc.ts:17` (two tabs cross excerpts); `folder.ts:82-91 getSaveFileHandle` reads a permission fault as
+  "no linked file" and `writeBundleToFile:193-194` then silently skips the save; `--iw-ui-border` and
+  `--iw-loading-tip-status` are read by `index.css` and **declared nowhere**.
+
+**⚠ MEASURE BEFORE SPLITTING — the payoff is known and it is not line count.** Commit `1c843c2` measured it
+(n=3): test **collect 2.4 s → 0.35 s (~6×)**, and the control row — test RUN time — **unchanged**. So the only
+proven payoff of a split here is test-collection cost, **and only when what moves is PURE ARITHMETIC a guard
+already wants to reach without loading the expensive thing it guards.** The cost is measured too: across five
+recent extractions, production **+156** lines and tests **+587**. The rule: *a split of pure logic costs ~+30%
+production lines and buys a real guard; a split of stateful React costs the same lines and buys nothing
+measurable.* Only three splits in the whole repo survive that test (study §7.3).
+
+**⚠ `TiptapEditor.tsx` DECOMPOSITION BUYS ZERO RE-RENDERS.** All 53 `useState` stay in one component, and
+there is **exactly one `React.memo` in all of `src/`** (`SnapshotView.tsx:745`). Extracting hooks is a
+READABILITY project — sell it as one. The re-render project is a *different* change (move state ownership
+down into children or out into stores) and must be measured first, because `shouldRerenderOnTransaction:
+false` means these are probably a UI-interaction cost, not a typing cost.
+
+**⚠ DO NOT "FIX" THE PARAGRAPH WALKS.** `TiptapEditor.tsx:1303-1309` and `:1354-1355` measure **0.14 ms
+combined at 5,000 paragraphs** (~0.6 ms at 4× throttle) against a 48 ms keystroke budget — the early
+`return false` keeps them out of inline content. An incremental cache adds a position-mapping correctness
+surface to `currentParagraphIndex`, which drives popover word-stepping (`ThesaurusPopover.tsx:418`), for
+~0.1 ms. Risk/reward is inverted.
+
+**⚠ THE COLOUR RATCHET GATES EVERY FILE MOVE.** `colourScan.test.ts:119` — `cap: CAPS[f] ?? 0`, so **an
+unlisted path is capped at ZERO**. `colourBaseline.json` totals 628 across 67 files with `sum === 628`:
+**no headroom anywhere**. Moving one colour literal into a new file turns the gate red, and the escape hatch
+`UPDATE_COLOUR_BASELINE=1 ALLOW_RAISE=1` "records the exact defect the gate exists to prevent" in the gate's
+own words. Every package must state its re-baseline cost.
+
+**⚠ 41 PATH-KEYED GUARDS READ SOURCE FROM DISK** — `src/styles/index.css` alone is pinned by **10**,
+`TiptapEditor.tsx` by 3, `SnapshotView.tsx` by 2. Several assert *exact source text* (`snapshotPalette.test.ts:203`
+plants a mutation on the literal `const CARD = …`; `touchTargets.test.ts:267` asserts the string
+`'function useClampedX'` appears in `SourceBrowser.tsx`). Moving a file means re-pointing **and re-proving**
+its guards in the same commit — and a negative assertion re-pointed badly passes silently on an empty read.
+
+**Startup: one import owns half the landing payload.** `/` is **316.8 KB gz / 903 KB raw across 19 assets**,
+and `Edit.tsx → StorageUnavailable.tsx → OpfsInspector.tsx` drags `provenance/bundle.ts` → `receipts.ts` →
+`scas/pool.ts` → the 318 KB word list, plus `@citation-js/core` and all three cloud adapters, onto every first
+paint — for a screen that renders only when a storage read has FAILED. **⚠ Do not naively `React.lazy` it:**
+`sw.js` is cache-first for `/assets/*` but **caches on demand and never precaches**, so the first offline
+storage failure would render nothing — the white page the data-loss rules exist to prevent. Keep a zero-import
+static fallback that always ships; lazy only the rich inspector behind it.
+
+**Probe reality, corrected.** **148 scripts / 24,690 lines** (REFACTOR-QUEUE §5 says 142 / 23,472).
+**33 cannot run at all** — 16 hardcode a port and boot no server (and `serve.mjs:73-79` documents that this
+reads as a broken APP), 6 point at dead port 5219, the rest use `/root/dev/...` absolute paths. **At least 26
+are rotten** (print `✗`, exit 0), five of them wired to `prove:*` so they cannot go red —
+`wave-desk/markphase.prove.mjs:145` exits 0 unconditionally and **has no threshold in the file at all**.
+**REFACTOR-QUEUE §5's premise does not survive:** of 49 one-shots, **21 are the only guard on a rule no unit
+test can reach**, so the honest clean cut is **1,712 lines across 17 files**, not "the largest reduction in the
+repo". **The work here is repair, not deletion.** Also: `archguard-probe/repro.mjs` escapes every gate because
+`probesRunnable.test.ts:37` filters `.prove.mjs` and it is not named that — while guarding the
+archive-truncation invariant.
+
+### Peter's rulings, 2026-09-06
+
+- **FIX the snapshot pane's missing reference-list break.** *"The page numbers in snapshot mode should be same
+  as editor."* Old `.studio` docs paging differently is explicitly acceptable. The blast-radius check was run
+  and is clean: the only persisted `page` field is PDF highlight rects, citation back-refs read `docPageOf`
+  off live DOM widgets, and `SnapshotView`'s `pageGeo` is display-only state — **nothing persisted or signed
+  carries a document page number.**
+- **DO NOT consolidate the three break rules.** The phone divergence is by design — `liveIsCanonical` is false
+  on `phoneLike()` **because the phone renders at a different font size**. Peter's sharper question: **is it
+  iOS/WebKit-specific rather than phone-specific? Then the CONDITION is wrong, not the rule** (R9 — the wrong
+  axis), and consolidating would cement a bad predicate into one place instead of three. *"I'd rather not
+  change it without finding the bug in testing."* Re-scoped to a diagnostic: compare iOS Safari vs desktop
+  Chrome **at matched font size**, and Android Chrome.
+- **DROP the lite `.studio` export.**
+- **z-index: fix the ties, do not build a ladder.** A full census across BOTH syntaxes (inline `zIndex: N` and
+  Tailwind `z-[N]` — grepping only one is how this got misread) shows a coherent ladder already exists, and the
+  `N` = scrim / `N+1` = content convention is already used correctly by `AiConsentDialog` 130/131,
+  `SettingsMenu` 90/91, `CitationPanel` 90/91·100/101, `GuideMenu` 99/100, `MathMenu` 199/200. **Do not
+  renumber them.** Three sites did not follow it — `PdfViewer.tsx:2070/:2188` (scrims) and `:2418/:2434` (the
+  popovers they must sit behind) are all `zIndex: 20`, surviving on DOM order alone.
+- **Probes: repair + CONSERVATIVE cut only** (the 1,712 lines / 17 files). The 21 DO-NOT-DELETE one-shots stay.
+
+**Two spec files are SPEC ONLY and neither is built** — `Inkwave-AI-Integrity-BuildSpec-v0.1.md` (committed in
+`124be07`; zero implementation hits in `src/`, `app/`, `api/`) and `Inkwave-Agent-Readability-BuildSpec-v0.1.md`
+(still untracked). Committing a spec is not building it; do not read either as a landed feature.
