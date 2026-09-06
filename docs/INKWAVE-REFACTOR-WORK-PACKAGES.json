@@ -15,7 +15,7 @@
   "work_packages": [
     {
       "id": "R00",
-      "title": "Add a pnpm gate script and stop vitest running in watch mode",
+      "title": "Add a pnpm gate script and stop vitest running in watch mode [DONE 2026-09-06 \u2014 proved red on a planted known-negative]",
       "stage": 1,
       "priority": 1,
       "risk": "low",
@@ -548,7 +548,7 @@
       ],
       "objective": "lookup() has no memo; buildLookup allocates three Sets per call. The hot caller is isLockedLemma inside candidates.filter at usePopoverLayout.ts:188 \u2014 a full rebuild per candidate, up to 40. Measured 7.7ms at 800 lemmas, 24.9ms at 2600. FIRST take one browser reading of a real document's locked+liveKicks+satisfied sizes; if they are in the low tens, STOP and report that \u2014 it is the falsifier, not a failure.",
       "acceptance": [
-        "Memo keyed on this.state identity AND this.setSize",
+        "FIRST: read locked.length + liveKicks.length + immune.length from the existing debug accessor at TiptapEditor.tsx:1460 in the console on the real thesis. >=200 confirms the package at ~3ms+; <60 drops it. NOTE the sets DO grow monotonically (engine.ts:192-196 locked never caps; only writer-initiated discharge removes) so 'low tens' is refuted - but they hold LEMMAS not word instances, so quote 3-8 ms, not 25 ms.",
         "Infinite mode still returns an empty lookup after a state-identical transition",
         "Popover-open timing reported before and after"
       ],
@@ -602,9 +602,11 @@
         "Negative-result TTL bounds retry - this is the change that actually bounds the amplification",
         "TTL is reconnect-aware: flush on the `online` event, or the first click after reconnect shows an empty reel",
         "LRU eviction replaces CACHE.clear()",
-        "FALSIFIER 1: prefetchDraining is held for the whole drain, so a new pause only appends - if typing pauses are shorter than the drain the amplification is far smaller than predicted. Measure before building.",
-        "FALSIFIER 2: if real DISTINCT LEMMA counts are in the low hundreds rather than ~2600, the finding shrinks ~8x",
-        "Does not touch ThesaurusPopover.tsx, which another lane is editing"
+        "Does not touch ThesaurusPopover.tsx, which another lane is editing",
+        "SCOPE HONESTLY: this is an OFFLINE / rate-limited / relay-down failure mode, not a steady-state cost. Online, prefetchSynonyms:115 filters on !CACHE.has(key) so a succeeded word can never be re-queued. Sell it as 'a thesis writer on a train', not an everyday win.",
+        "The repeat is WORSE than first described and needs no gap between drains: :124-125 deletes from prefetchQueued BEFORE the awaited fetch at :126, and prefetchSynonyms:115 appends back into the still-running while loop at :123 - so one drain never terminates offline",
+        "The distinct-lemma assumption was BACKWARDS: data-word is the original SURFACE word (RedHighlightExtension.ts:512,525), deduped by lowercase surface form, so the prefetch set is strictly LARGER than the lemma set",
+        "Measurement that closes it: new Set([...document.querySelectorAll('.scas-red')].map(e=>e.dataset.word)).size on the real thesis"
       ],
       "tests": [
         "src/editor/suggestions/thesaurus.test.ts"
@@ -644,25 +646,23 @@
     },
     {
       "id": "R13c",
-      "title": "Batch the OTS sweep: one write per K snapshots, not one per snapshot",
+      "title": "Skip patchSnapshot when the OTS proof is byte-identical (then consider batching)",
       "stage": 3,
       "priority": 20,
-      "risk": "high",
+      "risk": "low",
       "depends_on": [
         "R00"
       ],
       "files": [
         "src/provenance/snapshots.ts"
       ],
-      "objective": "drainUnstamped (snapshots.ts:527-535) calls patchSnapshot -> writeSnapshotsFile PER SNAPSHOT. The decompress+merge is paid once (the stale-cache guard at :211-223 short-circuits), but each write is a full serialise + compress + write, plus a structured clone of the whole array on the MAIN THREAD (workers/parseClient.ts:107-114 passes an empty transfer list deliberately). Measured at 79 snapshots x 20k words: 8.3 s main-thread clone, 16 s worker, 32 MB written.",
+      "objective": "FALSIFIER REFUTED - this is the COMMON path, not a rare outage artefact. api/_ots-core.mjs:54 returns {status:'pending', proofBase64: upgraded} when a proof is still unconfirmed - NON-NULL - so snapshots.ts:542-544's `if (ots) await patchSnapshot(...)` runs for EVERY pending snapshot on EVERY sweep, changed or not, each ending in a full serialise + structured-clone + gzip + OPFS write of the whole archive. Bitcoin confirms over HOURS so pending is the normal steady state; drainUnstamped's backlog really is ~0 (snapshots stamp at creation) but upgradePending's is large. THE CHEAP FIX FIRST: skip patchSnapshot when the returned ots is byte-identical to the stored one - that removes most writes with NONE of the batching risk to the grow-only invariant, because it REDUCES writes rather than merging them.",
       "acceptance": [
-        "FIRST measure the p95 real backlog by reading a real archive ots.status distribution - if it is <=3 this is a ~0.3s event, STOP and report that as the falsifier",
-        "Batch to one write per K (~10), NOT one per sweep - today an aborted sweep has persisted every proof so far, and one-per-sweep would lose the whole batch",
-        "The batched write goes through queueSnapshotsWrite unchanged",
-        "It does NOT acquire allowShrink (snapshots.ts:190-196)",
-        "It preserves the union-against-disk guard and the rule that a failed re-read ABANDONS the write",
-        "It stays inside the per-doc _writeChain (:186)",
-        "Note upgradePending guards on if(ots) at :542-544, so a sweep where nothing is confirmable already costs zero writes"
+        "Do the byte-identical skip FIRST; only consider batching afterwards if it is still worth it",
+        "The skip reduces writes rather than merging them, so it carries none of the grow-only risk",
+        "Measurement that closes it: count ots.status by value across the real archive (listSnapshotMeta(docId) in console, or OpfsInspector which already reads it). Pending >=20 confirms; <=5 drops it.",
+        "If batching is still pursued: one write per K (~10), NOT one per sweep - an aborted sweep today has persisted every proof so far",
+        "Any batched write goes through queueSnapshotsWrite unchanged, does NOT acquire allowShrink, preserves the union-against-disk guard and the failed-re-read-ABANDONS-the-write rule, and stays inside the per-doc _writeChain"
       ],
       "tests": [
         "src/provenance/mergeSnapshots.test.ts",

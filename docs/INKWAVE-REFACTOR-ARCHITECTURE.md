@@ -405,8 +405,23 @@ Sets per call. Two call profiles, and only one matters:
 **`setSize` must be in the key**: `lookup()` returns an empty lookup in infinite mode (`controller.ts:275–278`),
 and missing it would keep painting purple in infinite mode.
 **Rollback:** delete the memo field. No persisted format change, no flag.
-**Falsifier:** if a real thesis's `locked + liveKicks + satisfied` stays in the low tens, this is ≤0.7 ms and
-not worth touching. *That is the load-bearing unknown and it needs one browser reading before the work starts.*
+**Falsifier — SETTLED FROM CODE (TRACED), and it survives.** The sets do not stay small:
+- **`satisfied` prunes itself** — `engine.ts:218–224` `resample` keeps only entries stamped with the new
+  version, and `:182` stamps them with the *old* one, so a rotation drops essentially all. Single digits.
+- **`locked` grows monotonically.** `engine.ts:192–196` appends and never caps; the only removal is
+  `:203–210` `discharge`, requiring the writer to retype the lemma *and* complete a substitution.
+  `engine.ts:215` is explicit: *"Locked lemmas persist across resamples."* **No TTL, no cap, and there cannot
+  be a background prune** — CLAUDE.md forbids background deletion of provenance state.
+- **`liveKicks` grows until the writer resolves each one.** The only bulk prune (`controller.ts:248–253`
+  `clearStaleKicks`) runs solely on a setSize change. Verdicts freeze at commit, so an ignored red word stays
+  a live kick for the life of the document.
+
+**But the units were wrong, and that shrinks the number.** These hold **lemmas**; CLAUDE.md:1651's ~2,600
+counts decorated **word instances**. So read the table at plausible lemma counts: **300 → ~2.9 ms, 800 →
+~7.7 ms per popover open. Quote this as order 3–8 ms, not 25 ms.**
+**The one measurement that closes it** (no code change — the debug accessor already exists at
+`TiptapEditor.tsx:1460`): read `locked.length + liveKicks.length + immune.length` in the console on the real
+thesis. **≥200 confirms; <60 drops the package.**
 
 ### 5.4 H4 — viewport-windowed SCAS decorations ⚠ PARTIALLY TRUE — **and CLAUDE.md is stale**
 
@@ -481,14 +496,28 @@ memory of what it already attempted. **Success is remembered; failure is not.**
 **offline**. Current code predicts ~5,200 per pause-cycle, repeating; a fixed version predicts one pass then
 silence.
 
-**Two real falsifiers, and the first is likely:**
-- `drainPrefetchQueue` holds `prefetchDraining = true` for the whole drain (`:121, :130`), so a new pause during
-  a 4 s drain only *appends* rather than starting a second drain. **The repeat only materialises in the gap
-  between drains** — if typing pauses are shorter than the drain, the amplification is far smaller than the
-  arithmetic above.
-- Real *distinct lemma* counts may be in the low hundreds. CLAUDE.md:1651's ~2,600 figure is about *decorated
-  words*, and `prefetchSynonyms:113–115` lowercases and dedupes — so distinct lemmas are necessarily fewer. At
-  ~300 the whole finding shrinks ~8×.
+**Both falsifiers SETTLED FROM CODE (TRACED) — and both resolved against themselves.**
+
+**The re-entrancy is worse than described, not better.** At `:124–125` the batch is spliced out of
+`prefetchQueue` **and** `prefetchQueued.delete(w)` runs **before** the awaited fetch at `:126`, so during the
+in-flight window those words are in neither structure and — offline — never reach `CACHE`. `prefetchDraining`
+does stay true for the whole loop, so no *second* drain starts. **But that does not stop the repeat, it feeds
+it:** `prefetchSynonyms:115` appends to `prefetchQueue` and the still-running `while (prefetchQueue.length > 0)`
+at `:123` picks it straight back up. The amplification happens *inside one drain*, which then **never
+terminates**. Offline steady state: re-add rate ≈ drain rate, so the loop runs continuously at ~500–600
+words/sec × 2 requests each for as long as the writer keeps typing.
+
+**⚠ But scope it honestly: this is an OFFLINE / rate-limited / relay-down failure mode, not a steady-state
+cost.** Online, `prefetchSynonyms:115` filters on `!CACHE.has(key)`, so a word that has succeeded can never be
+re-queued and only the ~20 in flight can be re-added. **Do not sell this as an everyday win** — sell it as
+"a thesis writer on a train", which is a real case.
+
+**The distinct-lemma falsifier was backwards.** `data-word` is set from `slotOriginal ?? word.toLowerCase()`
+(`RedHighlightExtension.ts:512, 525`) — the **original surface word, not the lemma** — and `prefetchSynonyms`
+dedupes by lowercase surface form. So "work"/"works"/"working" are three entries, and **the prefetch set is
+strictly LARGER than the lemma set**, the opposite of what the falsifier assumed.
+**The one measurement that closes it:** in the console on the real thesis,
+`new Set([...document.querySelectorAll('.scas-red')].map(e => e.dataset.word)).size`.
 
 **Fix shape:** (a) skip the pause-scan when the SCAS tick reported `stateChanged === false` and the red-word
 count is unchanged; (b) **a negative-result TTL — this is the one that actually bounds the amplification**;
@@ -531,13 +560,34 @@ main-thread structured-clone in 79 × ~105 ms chunks**, plus 79 serial round-tri
 **Fix:** batch to one read + N in-place patches + **one write per K (≈10), not one per sweep.** Predicted:
 main-thread clone 8.3 s → ~105 ms, bytes 32 MB → 0.4 MB.
 
-**⚠ The falsifier is strong and unsettled — measure it first.** `TiptapEditor.tsx:1382` stamps each new
-snapshot at creation and the sweep is throttled to once per 15 min, so **a normally-online writer never
-accumulates a backlog.** The 79-snapshot drain only follows a long offline stretch or a relay outage.
-**If the p95 backlog is ≤3 this is a ~0.3 s event and not worth the risk.** Settling it means reading a real
-archive's `ots.status` distribution. Secondary falsifier: `upgradePending` guards on `if (ots)` (`:542–544`),
-so a sweep where nothing is confirmable costs **zero** writes — the N-rewrite cost is real for
-`drainUnstamped` and only conditional for `upgradePending`.
+**⚠ FALSIFIER REFUTED — and this reverses the hedge above. `upgradePending` is the COMMON path, and it
+rewrites the archive per pending snapshot even when nothing changed.**
+
+The `if (ots)` guard at `:542–544` does not fire the way it reads. `api/_ots-core.mjs:54` returns
+`{ status: 'pending', proofBase64: upgraded }` when a proof is *still not confirmed* — **non-null** — and
+`ots.ts:42–43` documents exactly that: *"the (possibly freshened) pending state"*. So `patchSnapshot` runs for
+**every pending snapshot on every sweep**, changed or not, and each one ends in a full
+serialise + structured-clone + gzip + OPFS write of the whole archive.
+
+Bounding the two backlogs separately settles it:
+- **`drainUnstamped`'s backlog really is usually ~0** — new snapshots stamp at creation
+  (`TiptapEditor.tsx:1387`, `:2139`), and a snapshot stays unstamped only if the relay was unreachable then.
+  *The original falsifier was correct about this half.*
+- **`pending` is the NORMAL steady state.** Bitcoin confirms over *hours*, so every snapshot from the last
+  several hours sits pending. On a 79-snapshot thesis a large fraction is pending at any moment, and
+  `runOtsSweep` gates on `unstamped || pending` then runs **both** loops.
+
+**So the expensive loop is the ordinary one**, recurring every 15 minutes of panel use until Bitcoin confirms
+everything — not a one-off outage artefact.
+
+**★ And a cheaper fix falls out of it: skip `patchSnapshot` when the returned `ots` is byte-identical to the
+stored one.** That removes most of the writes with **none** of the batching risk to the grow-only invariant —
+it *reduces* writes rather than merging them. Do this before considering batching.
+
+**What would still falsify the package:** most snapshots reaching `confirmed` quickly, with pending typically
+≤5. **The one measurement that closes it:** count `ots.status` by value across the real archive —
+`listSnapshotMeta(docId)` in the console, or `OpfsInspector` which already reads it. **Pending ≥20 confirms;
+≤5 drops it.**
 
 **⚠ Invariant risk — this is the data-loss family, and it is the real cost of the package.** Today a sweep
 aborted midway has persisted every proof so far; a single-write version loses the whole batch. Hence
@@ -595,18 +645,56 @@ unreadable" and "permission lapsed" remain separate failures. And a shared `merg
 `restoreSnapshotsFromBundle` (`folder.ts:230`, `onedrive.ts:559–562`, `gdrive.ts:452–455`) to be skipped for a
 destination that needed the heal.
 
-### 5.9 ⚠ HONEST GAP — hypothesis 9 was not established
+### 5.9 H9 — verification re-canonicalises the same receipt data ❌ MOSTLY REFUTED — **drop this package**
 
-The brief put nine hypotheses; **eight were investigated and one was not.** The following remain
-**STATED-NOT-PROVED** and must be treated as open questions, not findings, by anyone reading this plan:
+**TRACED + MEASURED.** Three sub-claims, and the important one is already correct.
 
-| # | hypothesis | status |
-|---|---|---|
-| H9 | Verification re-canonicalises and re-decodes the same receipt data (`verify/`, `provenance/{receipts,hash,bundle}.ts`) | **not investigated** |
+**The multi-key path is ALREADY FIXED.** `receipts.ts:118–144` hoists every expensive step *above* the key
+loop: the `lockedSet` hash (`:122`), the encoded `signedCore` (`:126`) and the base64 signature decode
+(`:127`) all run **once per receipt**. The loop body does only `fromHex(k)` (32 bytes) and `ed.verifyAsync`,
+**each attempt inside its own `try/catch`** — so the hard constraint is satisfied by the existing code, and
+`:129–134` records why. There is nothing to win anyway: `signingPublicKeys()` returns **one** key in
+production and two only under `import.meta.env.DEV`.
 
-**None of these has a work package**, and none should be given one until it is measured. Recording the gap is
-the point: an unmeasured hypothesis promoted to a task is exactly how H5 — refuted above at 0.14 ms — got onto
-a list in the first place.
+**The large O(S×R) term is real but is NOT redundant work.** `verify/index.ts:139–146` canonicalises each
+receipt a snapshot embeds — 9,639 copies at 79 snapshots — but `:85–89` states why: a snapshot's `bundleHash`
+anchors whatever receipts it embeds, so an attacker can embed a fabricated array, honestly hash it, and stamp
+that. **Each snapshot's own copy must be proven byte-identical to the signed chain's copy.**
+
+**★ And the fix the June report proposed is inoperative.** `REFACTOR-PERFORMANCE-REPORT.md:94–95` suggests a
+`WeakMap` cache. It would yield **zero hits** — a bundle arrives through `JSON.parse`, so every snapshot's
+`receipts[i]` is a distinct object. Caching by *value* instead would compare a receipt to itself and **destroy
+the check.**
+
+| S / R / words | A `index.ts:91` | **B `receipts.ts:165`** | C `index.ts:142` O(S×R) | D bitmask | E contentJson |
+|---|---|---|---|---|---|
+| **79 / 240 / 20k** | 8 ms | **6 ms** | 165 ms (9,639 copies) | 10 ms | 153 ms |
+| 79 / 80 / 20k | 1 ms | **1 ms** | 82 ms | 2 ms | 181 ms |
+| 30 / 90 / 20k | 2 ms | **2 ms** | 30 ms | 5 ms | 103 ms |
+
+**Removable duplication is column B alone — 1–6 ms out of 141–342 ms.** C and E are load-bearing checks; D is
+already correctly hoisted outside the kicks loop.
+
+**⚠ And the risk is disproportionate to the 1–6 ms.** A `canonicalize` memo sits directly under
+**"A failed VERIFICATION is not a forged snapshot"**: a memo that ever returns a stale string turns a genuine
+receipt into an apparent forgery, and the documented human response to that is to delete provenance. It also
+sits one careless hoist from **"What we SIGN with is not what we ACCEPT"** — the separately-guarded key
+attempts that already satisfy the constraint. **Bad trade. No package.**
+
+**What would falsify the refutation:** real receipts carrying far more `kicks` than the 3/receipt measured
+(`kicks` is the only unbounded field), or R far above 240. **The unmeasured alternative worth someone's time
+is different:** parallelise the Ed25519 verifications at `receipts.ts:150–168` while keeping the
+counter/`prevHash` link checks sequential. Not proposed here — not measured.
+
+### 5.10 All nine hypotheses are now established
+
+**Confirmed:** H1 (word list still shipped), H2 (lazy boundaries), H3 (lookup memo, 3–8 ms), H6 (prefetch —
+offline-only), H7 (OTS sweep — and the falsifier was refuted, making it *worse* than first stated).
+**Partially true:** H4 (windowing is built, needs a measurement not code), H8 (two-deep, and the throttle is
+the better fix). **Refuted:** H5 (paragraph walks, 0.14 ms), H9 (verification, 1–6 ms removable).
+
+**Two of the nine were killed by measurement, and one inherited fix was shown to be inoperative.** That is the
+return on doing this before writing code.
 
 ---
 
@@ -988,9 +1076,9 @@ Ranked by **value per risk**, not by size. "Conf" is confidence in the finding, 
 | **R12** | Chunk-budget gate (and fix `prodLoadPath`'s pass-on-rename regex) | high (keeps R09/R10) | S | low | high | MEASURED |
 | **R12b** | `lazy()` `ScrubDebugOverlay` — statically imported into the live `/snapshot` chunk | med | XS | very low | high | MEASURED |
 | **R12c** | Remove `@testing-library/jest-dom` + `@types/katex`; move `katex`/`@citation-js`/`@clerk-react` off the eager editor graph | med | M | moderate | high | TRACED |
-| **R13** | Memoise `ScasController.lookup()` | med — 8–25 ms popover | S | low | high | MEASURED |
-| **R13b** | Bound the synonym prefetch (negative-cache + LRU + keyed scan) | **med-high** — unbounded offline refetch | M | moderate | high | TRACED |
-| **R13c** | Batch the OTS sweep (one write per K) | med — 8.3 s main thread at 79 snaps | M | **high** | high | MEASURED |
+| **R13** | Memoise `ScasController.lookup()` | med — **3–8 ms** popover (units corrected) | S | low | high | MEASURED |
+| **R13b** | Bound the synonym prefetch | med — **offline-only**, but the loop never terminates | M | moderate | high | TRACED |
+| **R13c** | **Skip `patchSnapshot` when `ots` is byte-identical** (then consider batching) | **high** — the sweep is the COMMON path, recurring | S | **low** | high | MEASURED |
 | **R13d** | Throttle folder + Drive mirrors (OneDrive already is) | med — 333 ms/checkpoint | S | moderate | high | MEASURED |
 | **R14** | Typed `inkwave:*` event registry | med | M | low | high | MEASURED |
 | **R15** | Unify 6 duplicated `localStorage` literals | med | S | low | high | MEASURED |
