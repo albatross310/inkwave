@@ -547,14 +547,61 @@ union-against-disk guard and the rule that **a failed re-read ABANDONS the write
 per-doc `_writeChain` (`:186`). The fix needs only `snapshots.ts` — which keeps it inside `noAutoDelete`'s
 two-entry allow-list, and avoids `SnapshotView.tsx`, currently edited by another lane.
 
-### 5.8 ⚠ HONEST GAP — hypotheses 8 and 9 were not established
+### 5.8 H8 — cloud mirrors repeat archive work ⚠ PARTIALLY TRUE — **and the throttle is the better fix**
 
-The brief put nine hypotheses; **seven were investigated and two were not.** The following remain
+**TRACED + MEASURED.** `mirrorIfActive` (`TiptapEditor.tsx:2268–2294`) fans out to three destinations, each
+building its own file. But **the two clouds are mutually exclusive** (`:2334`, `:2357` —
+*"one cloud destination at a time"*), so the realistic worst case is **folder + one cloud = 2 builds per
+checkpoint, not 3.**
+
+**The PDF half of the hypothesis is already handled, by design rather than by the cache.** `bundle.ts:214`'s
+`_pdfB64Cache` is module-scope and keyed by `{v: pdfVersion(id), name}`, so it *would* work across mirrors —
+but it never has to: only `folder.ts:224` calls `buildExportBundleWithPdfs`. OneDrive and Drive call plain
+`buildExportBundle` because OneDrive ships PDFs as **sidecars** (`onedrive.ts:555`). **There is no cross-mirror
+PDF re-encode to eliminate.**
+
+**What is actually duplicated is one line.** `countWords` and `pmToText` are noise; the whole cost is
+`composeTraceFile`'s single `JSON.stringify(bundle)` over the entire archive (`bundle.ts:308`) — on the main
+thread. The comment at `:305–307` already flags it as *"paid on every mirror/sync write"*, but argues for
+compact-over-pretty, not for building it once.
+
+| archive | composed file | `JSON.stringify` | one mirror | folder + one cloud |
+|---|---|---|---|---|
+| 79 snaps × 20k words | 16.1 MB | **161 ms** | 166 ms | **333 ms / checkpoint** |
+| 30 snaps × 20k words | 6.4 MB | 45 ms | 51 ms | 101 ms |
+| 79 snaps × 5k words | 4.5 MB | 34 ms | 35 ms | 70 ms |
+
+**★ The separable finding, and it is where most of the win is: the throttling is asymmetric.** OneDrive goes
+through `scheduleOneDriveSync` with `ONEDRIVE_MIN_INTERVAL = 20_000` and a trailing flush. **Folder
+(`:2272`) and Drive (`:2284`) fire immediately on every checkpoint** — and checkpoints are paragraph snapshots
+(`:1384`) plus resolved kicks, so a fast writer triggers them several times a minute. **Applying the existing
+trailing throttle to folder and Drive is smaller and lower-risk than sharing the bundle.**
+
+**⚠ The hard limit the hypothesis did not anticipate: the composed file is NOT safely shareable in general.**
+`merged` is destination-specific — `folder.ts:207–217`, `onedrive.ts:534–545` and `gdrive.ts:433–444` each run
+`planWriteback` against **that destination's own** remote archive, gated by a per-destination
+`needsWritebackMerge` key. On the first sync of a session the three `merged` arrays can legitimately differ;
+they converge only after each destination's once-per-session merge. So sharing is correct only *after* the
+merge gate has closed for every active destination — and folder's variant embeds PDFs anyway. **Share
+`buildExportBundle`'s output and re-wrap; never the composed string.**
+
+**Falsifiers:** if Peter uses only one destination the duplication is zero and only the throttle finding
+survives — *I could not determine his actual configuration.* Also falsified if checkpoints are ~1 per 10 min
+rather than several per minute.
+
+**Invariant risk:** the proposal **adds no re-read**, so *"the cloud mirrors do not re-read"* stands untouched.
+`readSnapshotArchive`'s `{kind:'error'}` vs `{kind:'found'}` must stay **per destination** so "archive
+unreadable" and "permission lapsed" remain separate failures. And a shared `merged` must not cause
+`restoreSnapshotsFromBundle` (`folder.ts:230`, `onedrive.ts:559–562`, `gdrive.ts:452–455`) to be skipped for a
+destination that needed the heal.
+
+### 5.9 ⚠ HONEST GAP — hypothesis 9 was not established
+
+The brief put nine hypotheses; **eight were investigated and one was not.** The following remain
 **STATED-NOT-PROVED** and must be treated as open questions, not findings, by anyone reading this plan:
 
 | # | hypothesis | status |
 |---|---|---|
-| H8 | Cloud mirrors independently repeat archive/bundle work (`storage/{onedrive,gdrive,folder}.ts`, `archiveWriteback.ts`) | **not investigated** as a *performance* question — §6.1 seam 3 covers its *correctness* seam only |
 | H9 | Verification re-canonicalises and re-decodes the same receipt data (`verify/`, `provenance/{receipts,hash,bundle}.ts`) | **not investigated** |
 
 **None of these has a work package**, and none should be given one until it is measured. Recording the gap is
@@ -923,7 +970,7 @@ Ranked by **value per risk**, not by size. "Conf" is confidence in the finding, 
 
 | id | opportunity | impact | effort | risk | conf | evidence |
 |---|---|---|---|---|---|---|
-| **R00** | **`pnpm gate` script + `vitest --run`** (§6.5) | **very high** — closes the class that shipped 2 broken commits | **XS** | **very low** | high | MEASURED |
+| ~~**R00**~~ | ~~`pnpm gate` script + `vitest --run`~~ — ✅ **DONE**, proved red on a planted known-negative | **very high** | XS | very low | high | MEASURED |
 | **R01** | Widen five existing guards (§6.4) | **very high** — converts 5 prose findings to red | S | **low** | high | MEASURED |
 | **R01b** | Typecheck `api/*.mjs`, `middleware.ts`, `extension-src/` | **very high** — 0 of 21 API files checked today | S | low | high | MEASURED |
 | **R01c** | Wire `archguard-probe/repro.mjs` into the gate | **very high** — guards the archive-truncation invariant | XS | very low | high | MEASURED |
@@ -944,6 +991,7 @@ Ranked by **value per risk**, not by size. "Conf" is confidence in the finding, 
 | **R13** | Memoise `ScasController.lookup()` | med — 8–25 ms popover | S | low | high | MEASURED |
 | **R13b** | Bound the synonym prefetch (negative-cache + LRU + keyed scan) | **med-high** — unbounded offline refetch | M | moderate | high | TRACED |
 | **R13c** | Batch the OTS sweep (one write per K) | med — 8.3 s main thread at 79 snaps | M | **high** | high | MEASURED |
+| **R13d** | Throttle folder + Drive mirrors (OneDrive already is) | med — 333 ms/checkpoint | S | moderate | high | MEASURED |
 | **R14** | Typed `inkwave:*` event registry | med | M | low | high | MEASURED |
 | **R15** | Unify 6 duplicated `localStorage` literals | med | S | low | high | MEASURED |
 | **R16** | Shared prod/dev API adapter (5 divergences) | med (security-shaped) | M | moderate | high | TRACED |

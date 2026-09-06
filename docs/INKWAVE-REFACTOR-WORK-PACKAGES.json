@@ -700,6 +700,36 @@
       "requires_peter_decision": false
     },
     {
+      "id": "R13d",
+      "title": "Throttle the folder and Drive mirrors the way OneDrive already is",
+      "stage": 3,
+      "priority": 21,
+      "risk": "moderate",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/editor/TiptapEditor.tsx"
+      ],
+      "objective": "OneDrive goes through scheduleOneDriveSync with ONEDRIVE_MIN_INTERVAL = 20_000 and a trailing flush. Folder (TiptapEditor.tsx:2272) and Drive (:2284) fire IMMEDIATELY on every checkpoint, and checkpoints are paragraph snapshots (:1384) plus resolved kicks - several a minute for a fast writer. Each fires composeTraceFile, whose JSON.stringify over the whole archive measures 161 ms on the main thread at 79 snapshots x 20k words. This is the larger and lower-risk half of H8; bundle-sharing is the smaller half and is constrained (see acceptance).",
+      "acceptance": [
+        "Reuse the EXISTING scheduleOneDriveSync trailing-throttle pattern for folder and Drive - do not invent a second one",
+        "FALSIFIER: if Peter uses only ONE destination the duplication is zero and only this throttle matters; and if checkpoints are ~1 per 10 min even 333 ms is invisible. Measure checkpoint frequency first.",
+        "Adds NO re-read - the mirrors must keep taking the array they are handed; oneDriveWriteNow local-read check stays load-bearing",
+        "readSnapshotArchive {kind:error} vs {kind:found} stays PER DESTINATION so archive-unreadable and permission-lapsed remain separate failures",
+        "DO NOT share the composed file across destinations: merged is destination-specific (planWriteback runs against each destination own remote archive under its own needsWritebackMerge key) and folder embeds PDFs. If sharing at all, share buildExportBundle output and re-wrap.",
+        "A shared merged must not cause restoreSnapshotsFromBundle to be skipped for a destination that needed the heal"
+      ],
+      "tests": [
+        "src/storage/cloudWriteback.test.ts",
+        "src/storage/archiveWriteback.test.ts"
+      ],
+      "browser_proofs": [
+        "longtask observer over a 10-minute writing session with folder + Drive both linked"
+      ],
+      "requires_peter_decision": false
+    },
+    {
       "id": "R19",
       "title": "SCAS windowing: fix magnify coordinates, measure, then decide graduation",
       "stage": 4,
