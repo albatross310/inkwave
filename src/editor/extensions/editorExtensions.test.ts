@@ -26,6 +26,7 @@ vi.mock('./CitationNodeView', () => ({ CitationNodeView: () => null }))
 vi.mock('./MathInlineView', () => ({ MathInlineView: () => null }))
 vi.mock('./MathBlockView', () => ({ MathBlockView: () => null }))
 vi.mock('./ReferenceListNodeView', () => ({ ReferenceListNodeView: () => null }))
+vi.mock('./MediaImageView', () => ({ MediaImageView: () => null }))
 
 import { buildEditorExtensions } from './editorExtensions'
 
@@ -91,13 +92,13 @@ describe('buildEditorExtensions — the editor half (F7)', () => {
     expect(() => (red.options.getDoc as () => unknown)()).toThrow()
   })
 
-  it('the extraction is faithful: 27 entries, RedHighlight is the only deps-dependent one', () => {
+  it('the extraction is faithful: 28 entries, RedHighlight is the only deps-dependent one', () => {
     const withDeps = buildEditorExtensions(makeDeps())
     const without = buildEditorExtensions()
 
     // Same shape either way — the ternary must change ONE extension's options, never the list.
     expect(withDeps.length).toBe(without.length)
-    expect(withDeps.length).toBe(27)
+    expect(withDeps.length).toBe(28)
     expect(withDeps.map(e => e.name)).toEqual(without.map(e => e.name))
 
     // Names are unique — a duplicate entry (e.g. a bad merge re-adding one) would make tiptap

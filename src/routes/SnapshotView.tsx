@@ -26,7 +26,7 @@ import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { probePerf } from '../editor/perflog'
 import { stepDetent, newDetent, resetDetent, trimmed, TRACKPAD_DETENT, TOUCH_DETENT } from '../editor/scrubDetent'
-import { isWaterAtX, createZoomLatch } from '../editor/zoomZone'
+import { createZoomLatch, zoomModeForWheel } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { RichDiffView } from '../components/RichDiffView'
@@ -984,10 +984,8 @@ function SplitDiffView({
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    // Zone/latch/cursor parity with the live editor (Peter, 2026-07-10 — zoomZone.ts): the doc
-    // pane's 'water' = cursor x outside its paper's text-column lines (the same x-line rule).
-    // The snapshot has no magnify pipeline — BOTH modes drive diffZoom — but the mode is latched
-    // per gesture (+0.5s cooldown) and drives the zoom cursor, matching the editor's feel.
+    // Modifier/latch/cursor parity with the live editor: Command selects the whole-page cursor;
+    // plain pinch/ctrl-scroll selects text. Snapshot has one scale pipeline, so both drive diffZoom.
     const latch = createZoomLatch(() => containerRef.current)
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
@@ -995,7 +993,7 @@ function SplitDiffView({
       const pane = leftScrollRef.current?.contains(e.target as Node) ? leftScrollRef.current
         : rightScrollRef.current?.contains(e.target as Node) ? rightScrollRef.current : null
       latch.resolve(
-        () => (pane && pane === leftScrollRef.current && isWaterAtX(pane, e.clientX) ? 'water' : 'text'),
+        () => zoomModeForWheel(e, true),
         e.deltaY > 0,
       )
       if (pane) {

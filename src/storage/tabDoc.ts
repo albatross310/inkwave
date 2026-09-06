@@ -5,8 +5,9 @@
 // on reload and orphaned its own work. sessionStorage survives the OneDrive OAuth round-trip, which
 // returns to a bare `/` with any `?doc=` gone; the URL is a reflection, never load-bearing.
 //
-// PRECEDENCE — `?doc=` ?? sessionStorage ?? last-doc hint (new tabs only). An ABSENT `?doc=` means
-// "no opinion", never "no document", so it must never clear the tab's identity.
+// PRECEDENCE — `?doc=` ?? sessionStorage. An ABSENT `?doc=` means "no opinion", never "no
+// document", so it must never clear the tab's identity. Edit.tsx resolves that no-opinion case by
+// walking newest-first for a document no live window currently holds.
 // → docs/archive/storage-and-sync.md#tabdoc-identity
 
 import { flushPendingSave } from './opfs'
@@ -73,6 +74,12 @@ export function tabDocId(): string | null {
   return readSession()
 }
 
+/** Forget this window's document identity before an explicit user-requested deletion/restart. */
+export function clearTabDoc(): void {
+  if (typeof window === 'undefined') return
+  try { sessionStorage.removeItem(TAB_KEY) } catch { /* private mode */ }
+}
+
 /** The last document touched by any tab — ONLY for giving a brand-new tab a starting point. */
 export function lastDocHint(): string | null {
   try { return localStorage.getItem(LAST_KEY) } catch { return null }
@@ -90,11 +97,9 @@ export function resolveTabDocId(): { id: string | null; source: DocIdSource } {
   if (fromUrl) return { id: fromUrl, source: 'url' }
   const fromTab = readSession()
   if (fromTab) return { id: fromTab, source: 'tab' }
-  // ⚠ A NEW TAB OPENS BLANK — never from `lastDocHint()`, which made every new tab an attempt to
-  // reopen the one document another tab already held. Reading the tab's identity and nothing else
-  // IS both behaviours Peter asked for: a hard refresh keeps its document (sessionStorage survives),
-  // a new tab is blank and can collide with nothing.
-  // → docs/archive/storage-and-sync.md#tabdoc-new-tab-blank
+  // A fresh window has no per-tab identity. Do not guess one here: Edit.tsx owns the lock-aware
+  // newest-first walk, which can skip every document already held by N other windows. A hard
+  // refresh still keeps this window's document because sessionStorage survives it.
   return { id: null, source: 'none' }
 }
 

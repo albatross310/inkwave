@@ -61,6 +61,7 @@ import { LineNumbers } from './LineNumbers'
 import { CitationNode } from './CitationNode'
 import { CiteSuggestion } from './CiteSuggestion'
 import { ReferenceListNode } from './ReferenceListNode'
+import { MediaImage } from './MediaImage'
 import { gappedPagesEnabled, paginationEnabled } from '../pageView'
 
 /**
@@ -115,6 +116,9 @@ export function buildEditorExtensions(deps?: EditorExtensionDeps): Extensions {
     LineNumbers,
     CitationNode,
     CiteSuggestion,
+    MediaImage.configure(deps ? {
+      getAddedAt: (assetId: string) => deps.getDoc().media?.find((asset) => asset.id === assetId)?.addedAt ?? null,
+    } : {}),
     ReferenceListNode,
     TaskList,
     TaskItem.configure({ nested: true }),

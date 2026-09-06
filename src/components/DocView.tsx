@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from 'react'
 import type { TiptapJSON, CSLItem } from '../types/document'
 import { bibProvider } from '../citations/bibProvider'
 import { simpleInText } from '../citations/format'
+import { StoredMediaFigureContents, storedMediaFigureStyle, type StoredMediaImageAttrs } from './StoredMediaImage'
 
 // A small, read-only renderer for a TiptapJSON document — used by the snapshot viewer to show an
 // old version exactly as written, with no editor/ProseMirror machinery. Handles the node + mark
@@ -62,6 +63,8 @@ function block(node: Node, key: number): ReactNode {
       return <pre key={key}><code>{inline(kids)}</code></pre>
     case 'paragraph':
       return <p key={key}>{inline(kids)}</p>
+    case 'mediaImage':
+      return <figure key={key} className="iw-media-image" style={storedMediaFigureStyle(node.attrs as unknown as StoredMediaImageAttrs)}><StoredMediaFigureContents attrs={node.attrs as unknown as StoredMediaImageAttrs} /></figure>
     default:
       // Unknown container — render its children if any, else nothing.
       return kids ? <Fragment key={key}>{kids.map((c, i) => block(c, i))}</Fragment> : null

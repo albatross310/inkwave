@@ -41,6 +41,8 @@
     "prove:arithmeticlayout": "node scripts/arithmeticLayout.prove.mjs",
     "prove:cssfloor": "node scripts/cssfloor.prove.mjs",
     "prove:email": "node scripts/email.prove.mjs",
+    "prove:imagepaste": "node scripts/imagepaste.prove.mjs",
+    "prove:scrollzoom": "node scripts/scrollzoom.prove.mjs",
     "prove:fontcertify": "node scripts/fontCertify.prove.mjs",
     "prove:fontstrip": "node scripts/fontStrip.prove.mjs",
     "prove:ledgerui": "node scripts/ledger-ui.prove.mjs",

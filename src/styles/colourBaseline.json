@@ -1,5 +1,5 @@
 {
-  "total": 638,
+  "total": 628,
   "driftingTokens": 7,
   "files": {
     "src/citations/citationNav.ts": 20,
@@ -13,7 +13,6 @@
     "src/components/GoogleDriveFileOpener.tsx": 26,
     "src/components/GoogleDriveFolderPicker.tsx": 30,
     "src/components/GuideMenu.tsx": 4,
-    "src/components/InstallPromptBanner.tsx": 6,
     "src/components/LimitSelector.tsx": 3,
     "src/components/MathMenu.tsx": 27,
     "src/components/MediaMenu.tsx": 3,
@@ -31,7 +30,7 @@
     "src/components/ReceiptPanel.tsx": 3,
     "src/components/ReviewBar.tsx": 14,
     "src/components/SettingsMenu.tsx": 3,
-    "src/components/SourceBrowser.tsx": 28,
+    "src/components/SourceBrowser.tsx": 27,
     "src/components/StyleBar.tsx": 33,
     "src/components/SyncStatus.tsx": 5,
     "src/components/Toast.tsx": 3,
@@ -66,7 +65,7 @@
     "src/routes/Privacy.tsx": 6,
     "src/routes/SnapshotView.tsx": 7,
     "src/routes/Verify.tsx": 13,
-    "src/routes/pageChrome.ts": 11,
+    "src/routes/pageChrome.ts": 8,
     "src/verify/ActivityGraph.tsx": 12,
     "extension-src/entrypoints/content-source.ts": 44,
     "extension-src/utils/textHighlight.ts": 3

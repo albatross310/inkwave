@@ -14,6 +14,9 @@
 //     page changes first.
 //   • Our functions log nothing and store nothing; Vercel keeps standard platform logs.
 //   • The extension's capture history expires after 5 minutes (extension-src/utils/constants.ts).
+//   • AI Integrity is SPEC/DEVELOPER PREVIEW only. If enabled in a future developer build, its
+//     one-minute memory-page observations are explicitly consented, local-only, and raw account
+//     data never reaches our server. This page must change again before any public/cloud mode.
 //   • The productivity ledger (src/productivity/) is OFF by default, stores session METADATA only
 //     (no document text), lives in the writer's own storage, and never reaches our servers. It
 //     collects NO location — there is no navigator.geolocation call anywhere; `place` is a label
@@ -33,7 +36,7 @@ import { Link } from 'react-router'
 import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
 const INK = '#302438'
-const UPDATED = '17 July 2026'
+const UPDATED = '6 September 2026'
 
 const pill = 'inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors hover:brightness-110'
 
@@ -149,6 +152,66 @@ export function Privacy() {
               switched off by default and can be adjusted at any time in Settings. As Inkwave develops we are also
               exploring browser-local AI models for these features, so that this data truly never
               leaves your device.
+            </p>
+          </Section>
+
+          <Section title="AI Integrity (developer preview only)">
+            <p>
+              <strong style={{ color: INK }}>AI Integrity is still under development and is only
+              intended for Inkwave’s developer at this stage.</strong> It is not an active public
+              monitoring service. A developer build must show this warning before it asks for any
+              account or browser permission. AI Integrity itself requires an Inkwave sign-in;
+              ordinary Inkwave writing does not.
+            </p>
+            <p className="mt-3">
+              When deliberately enabled, the planned local browser extension observes only the
+              memory or preference page of each AI account the developer explicitly connects. The
+              developer-preview interval is once per minute while the browser is running and the
+              provider remains signed in. It does not read conversations, browsing history, other
+              tabs, or undisclosed accounts. Missed observations, sign-out, browser shutdown, and
+              permission loss are recorded as gaps rather than guessed away.
+            </p>
+            <p className="mt-3">
+              Exact memory text, screenshots, account identifiers, and the provider login session
+              stay on the developer’s own device. They are not sent to or retained by Inkwave’s
+              servers. Unchanged observations reuse the existing local evidence instead of making
+              another screenshot or copy every minute. Only cryptographic commitments may be sent
+              to OpenTimestamps calendars for Bitcoin timestamping; those commitments do not contain
+              the readable memory text.
+            </p>
+            <p className="mt-3">
+              An AI Integrity-enrolled document may require a short-lived signed monitor-health
+              lease before it can be edited. If monitoring, permission, or the matching Inkwave
+              login is unavailable, that document becomes read-only; reading and exporting remain
+              available. The developer may deliberately continue in a new unprotected document
+              identity and save destination; the original remains at its last certified state and
+              Inkwave permanently records the fork rather than presenting it as continuous. A
+              health service may receive the Inkwave account identifier, monitor-device public key,
+              selected account fingerprints, chain-head hashes, counts, and lease times—never the
+              memory text, screenshots, provider session, or document prose.
+            </p>
+            <p className="mt-3">
+              To connect the always-on Watcher computer to a separate Writer computer, the planned
+              developer service retains a narrow cryptographic activity record: the Inkwave account
+              ID, random AI Integrity document and device identifiers, public keys, signed memory-set
+              and document hashes, chain heads, health/gap states, sequence numbers, lease/checkpoint
+              receipts, and their times. This is server-retained metadata and can reveal when a
+              monitored document changed or monitoring failed. It contains no document title, path,
+              prose, readable memory, screenshot, provider response, or provider login token.
+            </p>
+            <p className="mt-3">
+              If a document changes across a monitoring gap, the service may refuse to certify that
+              checkpoint. Inkwave still preserves already-accepted bytes locally and keeps reading,
+              download, and export available; it does not destroy work because a monitor or network
+              failed. Optional evidence viewing on the Writer uses device-to-device encryption, with
+              the Watcher encrypting before upload so the relay cannot read it.
+            </p>
+            <p className="mt-3">
+              The resulting timeline can show what Inkwave observed on the connected accounts at
+              particular times. It cannot prove that the provider applied a memory to a response,
+              that nothing changed between observations, or that the user had no other AI account,
+              device, or tool. Inkwave will not offer a cloud-hosted account monitor without a new
+              consent design and a corresponding update to this policy.
             </p>
           </Section>
 

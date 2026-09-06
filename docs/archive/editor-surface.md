@@ -1235,22 +1235,19 @@ Per-EVENT profiling: `probePerf` costs one property check unless a harness defin
 scripts/textrender-probe/zoomcost.prove.mjs.
 
 <a id="scroll-zone"></a>
-### Zone geometry, the mode latch, and arming the wheel listener
+### Modifier mode, the gesture latch, and arming the wheel listener
 
-ZONE GEOMETRY v2 (Peter, 2026-07-10) — X-BASED, not point-in-panel: the text column's
-left/right edges (the live .ProseMirror rect — custom margins respected) are two
-imaginary vertical lines. Cursor x OUTSIDE them → WATER zoom (side water, the page's
-own side margins, and the parts of gaps/bottom margins beyond the lines); x INSIDE
-them → font zoom (text, bottom margins, gap regions within the column's x-range).
-y never enters the test. Latched per gesture — see zoomZone.ts.
+MODIFIER MODE (Peter, 2026-09-06): cursor position does not select zoom behaviour.
+A plain trackpad pinch (reported by browsers as ctrl+wheel) performs font reflow;
+Command+scroll/pinch performs whole-page magnify. Unmodified two-finger scrolling remains native
+document scrolling. Diagonal pinch events project a bounded amount of deltaX into the deltaY scale
+magnitude, so an angled approach does not feel dead; deltaY retains the zoom direction and a purely
+horizontal event remains ignored. Latched per gesture — see zoomZone.ts.
 `isIdle()` must be read BEFORE `resolve()` — resolve() itself latches a mode on its first
 call, so that is the only point that can still see "no gesture in progress yet".
 
-MODE LATCH + COOLDOWN (Peter, 2026-07-10): the FIRST zoom event of a gesture picks the
-mode (water = whole-page magnify, text = font reflow) and it stays LOCKED until 0.5s
-after the last zoom event — regardless of cursor movement. (Replaces the old 8px-cursor-
-movement latch: zooming moves the page under a stationary cursor, and a deliberate slow
-notching gesture must never flip modes mid-flight.) The latch also drives the zoom-cursor
+MODE LATCH + COOLDOWN: the FIRST zoom event of a gesture picks the modifier mode and it stays
+LOCKED until 0.3s after the last zoom event. The latch also drives the zoom-cursor
 classes on the surface (zoomZone.ts + the `.iw-zooming-*` rules in index.css).
 
 LATTICE QUANTIZATION: a full mouse-wheel notch (|ΔY| ≥ 100 in Chrome/Firefox) = exactly

@@ -22,6 +22,8 @@ export interface MediaAsset {
   name: string
   /** Bytes, so a UI can say "4.2 MB" without reading the file back. */
   size: number
+  /** SHA-256 of the exact bytes. Optional only for media imported before byte-binding landed. */
+  sha256?: string
   /** Local clock. Ordering only, NEVER authority — the ledger's §A9 rule. */
   addedAt: string
 }

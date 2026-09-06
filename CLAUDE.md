@@ -1744,6 +1744,10 @@ The most-cited authority was the least verifiable artifact.
 
 - `docs/specs/Inkwave-Productivity-Email-BuildSpec-v0.2.md` — the productivity + email layers
 - `docs/specs/Inkwave-Music-Module-BuildSpec-v0.1.md` — the music module
+- `docs/specs/Inkwave-AI-Integrity-BuildSpec-v0.1.md` — declared-account AI memory observations,
+  evidence, hash chains, monitoring gaps, and document/snapshot references (SPEC ONLY)
+- `docs/specs/Inkwave-Agent-Readability-BuildSpec-v0.1.md` — the `/ai` documentation page, the
+  in-file format pointer line, the reference reader, and the lite export (SPEC ONLY)
 
 **§ citations are now checkable. Check them.** And note the versions (`v0.2`, `v0.1`): of 900 citations
 exactly ONE named a version. Cite the version when the anchor is load-bearing, or a spec edit re-points
@@ -1751,3 +1755,61 @@ your comment silently and nothing detects it.
 
 **Peter's prose — thesis, essays, real documents — still NEVER enters the repo, fixtures, logs, or
 screenshots.** That boundary is unchanged and absolute. This was never that.
+
+## What a `.studio` file looks like to an agent that has never heard of Inkwave (2026-09-06)
+
+Evidence, not speculation: an assistant with no knowledge of this repo, the format, or the app was
+handed three real exports cold — a 91-word brainstorm (14 KB), and two proposals (286 KB and
+2,133,530 bytes). What follows is what actually happened, because "machine-readable" and "cheaply
+machine-readable" turned out to be different properties.
+
+**The hybrid header works, and it is the whole reason the cold read succeeded.** `composeTraceFile()`
+(`src/provenance/bundle.ts`) puts the wrapped writing first, then the rule, then `TRACE_DATA_MARKER`,
+then two lines of plain English saying the rest is a record you don't need to read. An outside agent
+opens the file, reads the top, and has the document — with zero format knowledge and no parser. Keep
+this. It is doing more work than anything else in the export path.
+
+**Three things broke, in descending order of cost.**
+
+1. **Size, and nothing else came close.** Agent file-readers cap far below `MAX_TRACE_BYTES`
+   (120 MB, which is the DoS bound, not the agent bound). The reader used here refused anything over
+   256 KB, so two of the three files could not be opened by the normal path at all and had to be
+   sliced at the marker with `awk`. Note the ratio: 2.1 MB of file for ~3,000 characters of writing.
+   A recipient's tooling sees a 2 MB JSON blob, not a proposal.
+
+2. **The blobs are interleaved, so truncation is fatal rather than lossy.** `snapshots[i].ots.proofBase64`
+   and `receipts[i].lockedSet` sit *between* snapshot bodies. An agent that reads the first N bytes of
+   the record gets a torn snapshot, not "the document plus a cut-off record". Truncation should
+   degrade gracefully; right now it doesn't.
+
+3. **`document.contentJson` is TipTap/ProseMirror, and nothing in the file says so.** It was
+   recoverable here only because the reader happened to know that schema. `bundle.text` (key 3, right
+   after `summary`) makes the walk unnecessary — but no line anywhere tells a reader to prefer it.
+
+**The cheap path exists already and is undocumented.** `JSON.stringify` emits in insertion order, so
+the record opens `v`, `summary`, `text`, … — the first couple of KB after the marker contain the
+whole readable document for anything short. `head -c 8000` on the record is a complete read for most
+files. Nobody could know that from the file.
+
+**Asks, ranked by payoff.**
+
+- **A lite export that drops `pdfs`, `proofBase64` and `lockedSet`.** Biggest win by a wide margin,
+  and it needs no format change — it is the same bundle with three keys omitted. For scale: gzipping
+  the 14 KB brainstorm gives 4.2 KB, and `CompressionStream` is already wired in below
+  `composeTraceFile`. Compression helps a human emailing a file; omission is what helps an agent
+  reading one.
+- **One machine-facing line beside the marker** — format name, `v`, the byte offset where the record
+  begins, and "the plain text of this document is the `text` key". Four facts, one line, and every
+  cold read after that is deterministic.
+- **Document `text` as the canonical readable copy** in the bundle comment, so a reader is never
+  tempted to walk `contentJson`.
+
+Specified in `docs/specs/Inkwave-Agent-Readability-BuildSpec-v0.1.md` (2026-09-06).
+
+**A reference reader exists** (a ~130-line Python script: text, metadata, bibliography, snapshot
+timeline, `--diff` between snapshots, gzip-aware, blobs stripped — 2.1 MB down to 3 KB). Not committed;
+ask Peter before adding it under `scripts/` or `docs/`. Shipping one alongside the format is the
+robust answer to "will an outside model understand this" — better than hoping the model knows.
+
+**No document content from those exports is reproduced here, and none of it entered the repo.** The
+figures above are byte counts and structure. That boundary is unchanged.

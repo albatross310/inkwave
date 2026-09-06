@@ -13,7 +13,7 @@ import { v4 as uuidv4 } from 'uuid'
 const tiptapEditorImport = typeof window !== 'undefined' ? import('../editor/TiptapEditor') : null
 import { Scroll, EmptyEditorSurface, isTouchDevice } from '../editor/Scroll'
 import type { InkwaveDocument } from '../types/document'
-import { readDocument, saveDocument, emptyTiptapDoc, flushPendingSave, StorageReadError } from '../storage/opfs'
+import { readDocument, saveDocument, emptyTiptapDoc, flushPendingSave, listOpfsDocuments, StorageReadError } from '../storage/opfs'
 import { listMeta, upsertMeta } from '../storage/indexeddb'
 import { withScasDefaults } from '../scas/defaults'
 import { resolveTabDocId, claimTabDoc, claimDocLock, releaseDocLock, switchTabToDocument, isExplicitDocIntent, isBlankUntitledDocument } from '../storage/tabDoc'
@@ -21,6 +21,8 @@ import { installHolder, requestSwitch, takeOverHere } from '../storage/singleOpe
 import { StorageUnavailable } from '../components/StorageUnavailable'
 import { DocumentOpenElsewhere, SurrenderedBanner } from '../components/DocumentOpenElsewhere'
 import { duplicateEmailAsNew } from '../email/duplicateEmail'
+import { LoadingTip } from '../components/LoadingTip'
+import { currentDocIds } from '../storage/currentDocs'
 
 function newDocument(): InkwaveDocument {
   return withScasDefaults({
@@ -89,6 +91,11 @@ export function Edit() {
   // before the editor copy returns. Desktop swaps ownership atomically. Phone deliberately keeps
   // the shell until wave-rest (the separate ordering guard below).
   const [shellUp, setShellUp] = useState<'up' | 'down'>('up')
+  // The loading tip shares the water's first-paint gate, but has its own END boundary: it vanishes
+  // exactly when the page starts revealing. On phone the opaque water shell deliberately remains
+  // through the coast, so tying the tip to shell unmount would leave it sitting over the page.
+  const [tipUp, setTipUp] = useState(true)
+  const [loadReady, setLoadReady] = useState(false)
   // ⚠ THE SHELL IS PRERENDERED (no window ⇒ phone=false) and React production hydration does NOT
   // correct attribute mismatches, so a phone ran the whole load DESKTOP-classed and switched the
   // wave rule-set under a RUNNING animation at reveal. Correct the class in the first
@@ -103,6 +110,7 @@ export function Edit() {
     let revealedAt = 0 // when the editor's 0.8s paper fade STARTED (phone ordering guard below)
     let restSeen = false
     const onRevealed = () => {
+      setTipUp(false)
       revealedAt = performance.now()
       // ⚠ PHONE: ONE VISIBLE WATER UNTIL REST, and the shell must NOT fade — fading the only water
       // exposed the body parchment through the transparent covered editor MID-COAST (the iOS "goes
@@ -130,23 +138,32 @@ export function Edit() {
     }
     // THE WATCHDOG (the one backstop — Scroll.tsx fires it if SETTLE never arrived): log-and-
     // force. Never fires on a healthy load.
-    const onWatchdog = () => setShellUp('down')
+    const onWatchdog = () => { setTipUp(false); setShellUp('down') }
+    const onReady = () => setLoadReady(true)
     // PER-LOAD RESET (2026-07-11, the OPEN-DOC white-out): these closure vars live for the
     // component's whole life, but they describe ONE load — stale reveal/rest state (or a live
     // timer) from the previous load must never act on the next one's covering shell. Every open
     // starts a fresh choreography.
     const onBegin = () => {
+      setTipUp(true)
+      setLoadReady(false)
       revealedAt = 0
       restSeen = false
       clearTimeout(t2)
     }
     window.addEventListener('inkwave:open-begin', onBegin)
+    window.addEventListener('inkwave:editor-load-ready', onReady)
     window.addEventListener('inkwave:editor-revealed', onRevealed)
     window.addEventListener('inkwave:wave-rest', onRest)
     window.addEventListener('inkwave:load-watchdog', onWatchdog)
+    // ASK as well as subscribe. The editor graph loads independently and HMR/busy commits can
+    // announce readiness before this parent effect is listening; a one-shot event alone would
+    // strand the loading screen forever.
+    if ((window as unknown as { __iwEditorLoadReady?: boolean }).__iwEditorLoadReady) onReady()
     return () => {
       clearTimeout(t2)
       window.removeEventListener('inkwave:open-begin', onBegin)
+      window.removeEventListener('inkwave:editor-load-ready', onReady)
       window.removeEventListener('inkwave:editor-revealed', onRevealed)
       window.removeEventListener('inkwave:wave-rest', onRest)
       window.removeEventListener('inkwave:load-watchdog', onWatchdog)
@@ -171,6 +188,18 @@ export function Edit() {
           claimTabDoc(fresh.id)
           claimedId = null
           setDoc(fresh)
+        }
+        // "New blank" is an explicit new-window intent. `noopener` gives it no session identity,
+        // and this flag tells it not to walk Current docs before minting its blank document.
+        const forceFresh = new URL(window.location.href).searchParams.get('blank') === '1'
+        if (forceFresh) {
+          // Consume the one-shot intent before claimTabDoc reflects the new id. Leaving `blank=1`
+          // in the address would mint another blank on every refresh of this same window.
+          const cleanUrl = new URL(window.location.href)
+          cleanUrl.searchParams.delete('blank')
+          window.history.replaceState(window.history.state, '', cleanUrl.toString())
+          openFresh()
+          return
         }
         // 1. THIS TAB's own document — `?doc=`, else the per-tab sessionStorage identity, else
         //    (brand-new tab only) the last-doc hint. See storage/tabDoc.ts for why the per-tab
@@ -227,45 +256,65 @@ export function Edit() {
           }
         }
 
-        // 2. Fall back to the most recently updated document in IndexedDB that no live tab holds.
-        //
-        // ⚠ NOT FOR A BRAND-NEW TAB — this walk is what made every new tab revert to the same
-        // document (Peter, 2026-08-28: "new tabs to open as blank"). It stays right for what it was
-        // written for: a tab that HAD an identity and found that document gone is RECOVERING, and a
-        // recovery should try. A fresh tab is not recovering from anything.
-        // → docs/archive/panels-and-popovers.md#edit-fresh-tab-blank
-        const freshTab = source === 'none'
+        // 2. Open the most recently updated document that no live window holds. This is one
+        // lock-aware N-window rule, not special cases for the first/second/third launch: listMeta()
+        // is newest-first, a zero-wait claim skips each live holder, and the first available OPFS
+        // document wins. A tab identity/explicit URL was already honoured in step 1, so this walk
+        // is only the sensible default for a genuinely fresh window or recovery from an absent id.
+        // Peter, 2026-09-06: first window resumes recent work; each additional window resumes the
+        // next-most-recent unheld document; only an exhausted list opens blank.
         let sawReadFailure = false
-        for (const meta of freshTab ? [] : await listMeta()) {
+        const metas = await listMeta()
+        // Start the direct OPFS scan while the loading screen is already doing useful work. It
+        // catches documents whose lightweight Recent index was lost and lets a writer explicitly
+        // add such an orphan to Current docs from Storage without it disappearing on next launch.
+        const onDisk = await listOpfsDocuments()
+        if (onDisk.some((entry) => !entry.doc)) sawReadFailure = true
+        onDisk.sort((a, b) => {
+          const at = a.doc?.updatedAt ? Date.parse(a.doc.updatedAt) || a.lastModified : a.lastModified
+          const bt = b.doc?.updatedAt ? Date.parse(b.doc.updatedAt) || b.lastModified : b.lastModified
+          return bt - at
+        })
+        const diskById = new Map(onDisk.filter((entry) => entry.doc).map((entry) => [entry.id, entry.doc!]))
+        const availableIds = [
+          ...onDisk.filter((entry) => entry.doc).map((entry) => entry.id),
+          ...metas.map((meta) => meta.id).filter((id) => !diskById.has(id)),
+        ]
+        for (const id of currentDocIds(availableIds)) {
           if (cancelled) return
-          if (!(await claimDocLock(meta.id))) continue // open in another tab — keep looking
-          claimedId = meta.id
-          if (cancelled) { releaseDocLock(meta.id); claimedId = null; return }
+          // This candidate was not explicitly requested, so do not pay the reload-race grace
+          // period for it: if another window holds it now, immediately consider the next one.
+          if (!(await claimDocLock(id, 0))) continue
+          claimedId = id
+          if (cancelled) { releaseDocLock(id); claimedId = null; return }
           // One unreadable document must not end the search — the NEXT one may be perfectly
           // readable, and opening the writer's real work beats any error screen. But we remember
           // that a read FAILED, because that changes what step 3 is allowed to conclude.
-          const r = await readDocument(meta.id)
-          if (cancelled) { releaseDocLock(meta.id); claimedId = null; return }
+          const diskDoc = diskById.get(id)
+          const r = diskDoc ? { kind: 'found' as const, doc: diskDoc } : await readDocument(id)
+          if (cancelled) { releaseDocLock(id); claimedId = null; return }
           if (r.kind === 'error') {
             sawReadFailure = true
-            console.error('[inkwave] init: could not read an indexed document:', meta.id, r.error)
-            releaseDocLock(meta.id)
+            console.error('[inkwave] init: could not read an indexed document:', id, r.error)
+            releaseDocLock(id)
             claimedId = null
             continue
           }
           if (r.kind === 'found') {
+            // Heal an OPFS orphan's lightweight index while opening it; the document bytes remain
+            // the source of truth and were already read successfully above.
+            await upsertMeta({ id: r.doc.id, title: r.doc.title, updatedAt: r.doc.updatedAt })
             claimTabDoc(r.doc.id)
             claimedId = null // committed
             setDoc(migrateDocument(r.doc))
             return
           }
-          releaseDocLock(meta.id) // indexed but not in OPFS — don't sit on a claim we can't use
+          releaseDocLock(id) // indexed but not in OPFS — don't sit on a claim we can't use
           claimedId = null
         }
 
         // 3. Create a fresh document. REACHABLE ONLY FROM ABSENCE — every step above either opened
-        //    a document or established that there is genuinely nothing there to open — or, for a
-        //    brand-new tab, deliberately declined to look (step 2's note).
+        //    a document or established that every readable document is currently held/absent.
         //    If ANY read failed along the way we do not get to conclude "this writer has nothing":
         //    that inference, drawn from a failure, is the whole 2026-07-15 bug. Fail loudly instead.
         if (sawReadFailure) throw new StorageReadError('documents', new Error('one or more documents could not be read'))
@@ -361,6 +410,7 @@ export function Edit() {
   useEffect(() => {
     const onBegin = () => {
       setShellUp('up') // waves-only for the whole load; fades again at the new doc's reveal
+      ;(window as unknown as { __iwEditorLoadReady?: boolean }).__iwEditorLoadReady = false
       setDoc((d) => { if (d) stashedDocRef.current = d; return null })
     }
     const onFailed = () => setDoc((d) => d ?? stashedDocRef.current)
@@ -437,9 +487,17 @@ export function Edit() {
         />
       )}
       {shellUp !== 'down' && (
-        <Scroll phone={shellPhone} fill revealed={false}>
-          <EmptyEditorSurface />
-        </Scroll>
+        <>
+          <Scroll phone={shellPhone} fill revealed={false} loadingTwinkles={tipUp}>
+            <EmptyEditorSurface />
+          </Scroll>
+          {tipUp && (
+            <LoadingTip
+              ready={loadReady}
+              onContinue={() => window.dispatchEvent(new Event('inkwave:continue-load'))}
+            />
+          )}
+        </>
       )}
       {surrendered && <SurrenderedBanner onReload={() => window.location.reload()} />}
     </>

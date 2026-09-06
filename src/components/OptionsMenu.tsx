@@ -25,13 +25,20 @@ import { getDocSource } from '../storage/docSource'
 import { inkwaveFileName } from '../provenance/bundle'
 import { switchTabToDocument, tabDocId } from '../storage/tabDoc'
 import { OpfsInspector } from './OpfsInspector'
+import {
+  cycleInkwaveWindow,
+  inkwaveWindowCycleDirection,
+  openNewBlankInkwaveWindow,
+  openNewInkwaveWindow,
+} from '../pwa/windows'
+import { recognisedSaveIsLive } from '../storage/docSource'
 
 const INK = '#302438'
 // Shared gap between a footer button and the panel it opens (same across all footer panels).
 const PANEL_GAP = 14
 
-type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export' | 'noprov' | 'provunread'
-const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export', noprov: '', provunread: '' }
+type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export' | 'noprov' | 'provunread' | 'changeunsaved'
+const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export', noprov: '', provunread: '', changeunsaved: 'Current document is not recently saved' }
 
 // Open via the native picker on Chromium (gives a WRITABLE handle so edits flow back to the file);
 // fall back to the plain file input elsewhere (OneDrive still resumes via the preserved id + name).
@@ -167,18 +174,34 @@ export function OptionsMenu({
     if (menuOpen && CLERK_PUBLISHABLE_KEY && !clerkProviderMounted()) void armHeadless()
   }, [menuOpen])
 
-  // Keyboard shortcuts: ⌘/Ctrl+S Save · ⌘/Ctrl+⇧S Save a copy · ⌘/Ctrl+O Open · ⌘/Ctrl+N New ·
-  // ⌘/Ctrl+P Print. (Ctrl+N may be reserved by the browser for a new window and can't always be
-  // intercepted.)
+  function changeToBlankDocument() {
+    const current = tabDocId()
+    if (current && !recognisedSaveIsLive(current)) {
+      setModal('changeunsaved')
+      return
+    }
+    void createDocument('Untitled', emptyTiptapDoc())
+  }
+
+  // Keyboard shortcuts: ⌘/Ctrl+S Save · ⌘/Ctrl+⇧S Save a copy · ⌘/Ctrl+O Open ·
+  // ⌘/Ctrl+N New doc here · ⌘/Ctrl+⇧N New blank window · ⌥Tab/⌃⌥Tab cycle Inkwave windows · ⌘/Ctrl+P Print. Browsers may reserve Ctrl+N
+  // in an ordinary tab; the menu and installed-app shortcut remain available there.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const cycleDirection = inkwaveWindowCycleDirection(e)
+      if (cycleDirection) {
+        e.preventDefault()
+        cycleInkwaveWindow(cycleDirection)
+        return
+      }
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
       const k = e.key.toLowerCase()
       if (k === 'p') { e.preventDefault(); onPrint?.() }
       else if (k === 's' && e.shiftKey) { e.preventDefault(); setModal('savecopy') }
       else if (k === 's') { e.preventDefault(); setModal('save') }
       else if (k === 'o') { e.preventDefault(); setModal('upload') }
-      else if (k === 'n' && !e.shiftKey) { e.preventDefault(); void createDocument('Untitled', emptyTiptapDoc()) }
+      else if (k === 'n' && e.shiftKey) { e.preventDefault(); openNewBlankInkwaveWindow() }
+      else if (k === 'n') { e.preventDefault(); changeToBlankDocument() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -207,7 +230,9 @@ export function OptionsMenu({
   // Two columns (Peter, 2026-07-10): RIGHT = file ops ending with Export; LEFT = the rest, ending
   // with Sign in/Logout (AccountMenuItems renders after the left column).
   const fileItems: Array<{ label: string; run: () => void }> = [
-    { label: 'New', run: () => void createDocument('Untitled', emptyTiptapDoc()) },
+    { label: 'Change doc', run: changeToBlankDocument },
+    { label: 'New doc', run: openNewInkwaveWindow },
+    { label: 'New blank', run: openNewBlankInkwaveWindow },
     // An email is created exactly like any other document (§B2.1) — same path, one extra field.
     // Flag-gated, so the menu is unchanged until `?email=1`.
     ...(emailEnabled() ? [{
@@ -225,7 +250,7 @@ export function OptionsMenu({
   ]
   const items: Array<{ label: string; run: () => void }> = [
     // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1).
-    ...(onWorkReport ? [{ label: 'Work report', run: onWorkReport }] : []),
+    ...(onWorkReport ? [{ label: 'Report', run: onWorkReport }] : []),
     { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
     { label: 'About', run: () => navigate('/about') },
     { label: 'Privacy', run: () => navigate('/privacy') },
@@ -235,7 +260,7 @@ export function OptionsMenu({
     // see, with Open + Download on each. See OpfsInspector.tsx.
     { label: 'Storage', run: () => setInspector(true) },
     {
-      label: 'Provenance',
+      label: 'Snapshots',
       run: () => {
         // Open the snapshot view at the MOST RECENT snapshot of the active doc.
         void (async () => {
@@ -321,9 +346,9 @@ export function OptionsMenu({
           <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable iw-touch-guard iw-no-print z-[60] w-[11.5rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
+          <div role="menu" className="iw-nightable iw-touch-guard iw-no-print z-[60] w-[14.375rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
-            {/* LEFT column: Verify/About/Privacy/Print/Provenance … ending with Sign in/Logout. */}
+            {/* LEFT column: Verify/About/Privacy/Print/Snapshots … ending with Sign in/Logout. */}
             <div className="flex-1 border-r border-stone-100">
               {items.map(it => (
                 <button key={it.label} role="menuitem" type="button"
@@ -360,6 +385,19 @@ export function OptionsMenu({
           {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
           {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onExportEquations={onExportEquations} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
           {modal === 'recent' && <RecentPanel />}
+          {modal === 'changeunsaved' && (
+            <div className="flex flex-col gap-3 text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+              <p>
+                This document has not been saved to a recognised file or cloud destination in the last 20 seconds.
+                Inkwave’s internal recovery backup does not count as a save you can find outside the app.
+              </p>
+              <p>Change doc will open a blank document in this window.</p>
+              <div className="flex justify-end gap-2">
+                <MenuButton onClick={() => setModal(null)}>Stay here</MenuButton>
+                <MenuButton onClick={() => { setModal(null); void createDocument('Untitled', emptyTiptapDoc()) }}>Change doc</MenuButton>
+              </div>
+            </div>
+          )}
           {modal === 'noprov' && (
             <div className="iw-nightable iw-no-print fixed z-[70] bg-white shadow-md rounded-xl border px-5 py-4 font-serif text-stone-600"
               style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#30243844' }}>

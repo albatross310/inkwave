@@ -51,6 +51,9 @@ export function setOneDriveFilename(docId: string, name: string): void {
   const clean = /\.(studio|inkwave|trace\.json|insig\.json)$/i.test(name) ? name : `${name.replace(/\.(json|inkwave|studio)$/i, '')}.studio`
   try { localStorage.setItem(nameKey(docId), clean) } catch { /* private mode */ }
 }
+export function clearOneDriveFile(docId: string): void {
+  try { localStorage.removeItem(nameKey(docId)) } catch { /* private mode */ }
+}
 
 // ⚠ THE FILENAME IS PINNED per-document at the first sync. The slug comes from the title, which is
 // re-derived from the text on every edit — so without pinning, each sync PUTs a different name and

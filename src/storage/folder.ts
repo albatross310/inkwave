@@ -10,6 +10,7 @@ import { parseTraceOffThread } from '../workers/parseClient'
 import { restoreSnapshotsFromBundle, needsWritebackMerge, markWritebackMerged } from '../provenance/snapshots'
 import { planWriteback, archiveSnapshotsOf, type ArchiveRead } from './archiveWriteback'
 import { isNotFound } from './notFound'
+import { setDocSource } from './docSource'
 
 const DB_NAME = 'inkwave-folder'
 const STORE = 'handles'
@@ -226,6 +227,7 @@ export async function writeBundleToFile(doc: InkwaveDocument, snapshots: Snapsho
     await writable.write(gz ?? text)
     await writable.close()
     try { localStorage.setItem(WRITE_AT_KEY(doc.id), String(Date.now())) } catch { /* private mode */ } // heartbeat baseline
+    setDocSource(doc.id, 'local')
     if (merged.length > snapshots.length) await restoreSnapshotsFromBundle(doc.id, merged) // heal OPFS
     return true
   } catch {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { kindOf, extFor, importMedia, MEDIA_LIMIT_BYTES, mb } from './mediaStore'
+import { kindOf, extFor, importMedia, MEDIA_LIMIT_BYTES, mb, sha256Blob } from './mediaStore'
 
 const file = (name: string, type: string, size: number): File => {
   const f = new File([new Uint8Array(0)], name, { type })
@@ -38,6 +38,12 @@ describe('extFor', () => {
   it('falls back rather than producing a bare dot', () => {
     expect(extFor('application/zip')).toBe('.bin')
     expect(extFor('image/')).toBe('.img')
+  })
+})
+
+describe('sha256Blob', () => {
+  it('binds media references to the exact bytes', async () => {
+    expect(await sha256Blob(new Blob(['abc']))).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
   })
 })
 

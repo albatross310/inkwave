@@ -31,6 +31,7 @@ vi.mock('./extensions/CitationNodeView', () => ({ CitationNodeView: () => null }
 vi.mock('./extensions/MathInlineView', () => ({ MathInlineView: () => null }))
 vi.mock('./extensions/MathBlockView', () => ({ MathBlockView: () => null }))
 vi.mock('./extensions/ReferenceListNodeView', () => ({ ReferenceListNodeView: () => null }))
+vi.mock('./extensions/MediaImageView', () => ({ MediaImageView: () => null }))
 
 import { getEditorSchema, nodeFromContentJson, schemaSpec, _resetEditorSchema } from './editorSchema'
 import { buildEditorExtensions } from './extensions/editorExtensions'
@@ -66,6 +67,11 @@ const RICH = {
       ],
     },
     { type: 'mathBlock', attrs: { latex: '\\int_0^1 f(x)\\,dx', align: 'aligned' } },
+    { type: 'mediaImage', attrs: {
+      assetId: 'asset-1', mime: 'image/png', name: 'evidence.png', alt: 'Evidence', sha256: 'abc123',
+      title: 'Claude preferences', source: 'Claude settings', addedAt: '2026-09-06T01:02:03.000Z',
+      captionPosition: 'top', captionFontFamily: 'EB Garamond', widthPct: 62, heightPx: 320, xPct: 14,
+    } },
     {
       type: 'bulletList',
       content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'one' }] }] }],
@@ -86,7 +92,7 @@ describe('getEditorSchema', () => {
     expect(s).toBeInstanceOf(Schema)
     // The NodeView-bearing / app-specific types — the ones a schema built from a DIFFERENT list
     // would lack. (StarterKit's paragraph/text prove nothing; any schema has those.)
-    for (const n of ['citation', 'mathInline', 'mathBlock', 'referenceList', 'taskList', 'taskItem']) {
+    for (const n of ['citation', 'mathInline', 'mathBlock', 'mediaImage', 'referenceList', 'taskList', 'taskItem']) {
       expect(Object.keys(s.nodes), `node type ${n}`).toContain(n)
     }
     for (const m of ['scasSlot', 'comment', 'insertion', 'deletion', 'highlight', 'underline', 'textStyle']) {
@@ -189,6 +195,7 @@ describe('nodeFromContentJson', () => {
       if (n.type.name === 'citation') found.cite = n.attrs
       if (n.type.name === 'mathInline') found.mi = n.attrs.latex
       if (n.type.name === 'mathBlock') found.mb = n.attrs.latex
+      if (n.type.name === 'mediaImage') found.image = n.attrs
       if (n.type.name === 'referenceList') { found.refMode = n.attrs.mode; found.refManual = n.attrs.manualKeys }
       if (n.type.name === 'taskItem') found.task = n.attrs.checked
       return true
@@ -203,6 +210,7 @@ describe('nodeFromContentJson', () => {
     expect(cite.instanceId).toBe('inst-1')
     expect(found.mi).toBe('x^2 + y^2')
     expect(found.mb).toBe('\\int_0^1 f(x)\\,dx')
+    expect(found.image).toEqual(expect.objectContaining({ assetId: 'asset-1', mime: 'image/png', name: 'evidence.png', alt: 'Evidence', sha256: 'abc123' }))
     expect(found.refMode).toBe('cited')
     expect(found.refManual).toEqual(['manual1'])
     expect(found.task).toBe(true)

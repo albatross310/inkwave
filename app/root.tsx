@@ -35,7 +35,9 @@ export const links: LinksFunction = () => [
   { rel: 'icon', href: '/favicon.ico?v=20', sizes: 'any' },
   { rel: 'shortcut icon', href: '/favicon.ico?v=20' },
   { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=20' },
-  { rel: 'manifest', href: '/manifest.webmanifest' },
+  // Version the manifest URL when install metadata/assets change. Chromium and macOS otherwise
+  // keep a previously installed Dock icon even when the bytes behind the old icon URL changed.
+  { rel: 'manifest', href: '/manifest.webmanifest?v=white-bg-1' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
   // which previously raced the external Google fetch and fell back to Georgia. See src/editor/exportPdf.ts.

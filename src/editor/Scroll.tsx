@@ -6,7 +6,7 @@ import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { presentedPaperWidth, usesTransformMagnify, type SurfacePresentation } from './surfacePresentation'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
-import { isWaterAtX, createZoomLatch } from './zoomZone'
+import { createZoomLatch, projectedZoomDelta, zoomModeForWheel } from './zoomZone'
 import { probePerf, notePerf } from './perflog'
 import { syncTwinkles, setScrollScene, swayFields } from './waveTwinkle'
 
@@ -63,6 +63,10 @@ const driftSurfaces = new Set<HTMLElement>() // mounted drifting surfaces — th
 if (typeof window !== 'undefined') {
   // PER-LOAD LIFECYCLE RESET: a new open aborts any in-flight coast — never adopt a stale clock.
   window.addEventListener('inkwave:open-begin', () => { loadCoast = null })
+  // Once the document is ready, a pause belongs to the user-facing Continue gate rather than a
+  // failed load. The coast has its own resolved-clock caps after Continue, so this pre-reveal
+  // watchdog has completed its job and must not force the page through the user's pause.
+  window.addEventListener('inkwave:load-awaiting-continue', disarmLoadWatchdog)
 }
 const timelineNow = (): number => {
   const t = typeof document !== 'undefined' ? (document.timeline?.currentTime as number | null) : null
@@ -152,6 +156,7 @@ export function Scroll({
   revealed = true,
   fadingOut = false,
   covered = false,
+  loadingTwinkles = false,
 }: {
   children: ReactNode
   paperRef?: RefObject<HTMLDivElement>
@@ -170,6 +175,9 @@ export function Scroll({
       keep running + clocked, so the freeze/coast state machine is unaffected, and the copy
       appears exactly at the reveal handoff — geometry settled, clock-identical, seamless. */
   covered?: boolean
+  /** Keep only the sparkle population looping over the stationary loading water. The loading
+      owner drops this at the exact frame the page starts revealing. */
+  loadingTwinkles?: boolean
   /** 0.5s opacity fade-out of the WHOLE surface (the loading shell's atomic cross-fade reveal). */
   fadingOut?: boolean // one-paint load: false hides the whole PARCHMENT (waves only) while fonts/
                      // pagination settle — visibility, not display, so layout + measurement still run.
@@ -363,8 +371,8 @@ export function Scroll({
     // BOTH accumulators are FRACTIONAL and commit WHOLE lattice steps (the remainder carries), so
     // every input quantizes onto the shared zoomStep lattice — which is what makes zoom levels
     // precomputable at all. → docs/archive/editor-surface.md#scroll-anchor
-    let steps = 0 // font-reflow zone
-    let mSteps = 0 // magnify zone (hybrid, cursor over the WATER) — same coalescing, separate zone
+    let steps = 0 // plain pinch/ctrl-scroll: font reflow
+    let mSteps = 0 // Command+scroll/pinch: whole-page magnify
     let raf = 0
     let settle: ReturnType<typeof setTimeout> | undefined
     // Phone is BODY-scroll: the anchor correction must move window.scrollY — the surface itself
@@ -468,8 +476,8 @@ export function Scroll({
       }
       if (anchorEl) anchorTop0 = anchorEl.getBoundingClientRect().top // the gesture's pin position
     }
-    // MAGNIFY frame (hybrid, wheel over the water/gaps): scale the page about the VIEWPORT CENTRE
-    // — the cursor picks the ZONE only, never the anchor. The wrapper box's rect IS the page's
+    // MAGNIFY frame (hybrid, Command+scroll/pinch): scale the page about the VIEWPORT CENTRE.
+    // The wrapper box's rect IS the page's
     // visual bounds, so the content point at the centre is (centre − box.top) into the page and
     // lands at box'.top + offset·(after/before). → docs/archive/editor-surface.md#scroll-anchor
     const applyMagnifyFrame = () => {
@@ -606,10 +614,9 @@ export function Scroll({
         setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
       }, ZOOM_SETTLE_MS)
     }
-    // MODE LATCH + COOLDOWN: the FIRST zoom event of a gesture picks the mode (water = whole-page
-    // magnify, text = font reflow) and it stays LOCKED until 0.5s after the last one, regardless of
-    // cursor movement — zooming moves the page under a stationary cursor, so a slow deliberate
-    // gesture must never flip mid-flight. → docs/archive/editor-surface.md#scroll-zone
+    // MODE LATCH + COOLDOWN: a plain pinch/ctrl-scroll is font reflow; ⌘+scroll/pinch is whole-page
+    // magnify. Cursor position is irrelevant. The first event stays latched for the full gesture.
+    // → docs/archive/editor-surface.md#scroll-zone
     const latch = createZoomLatch(() => surfaceRef.current)
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) {
@@ -635,22 +642,20 @@ export function Scroll({
         return
       }
       e.preventDefault()
-      if (e.deltaY === 0) return
-      // ZONE GEOMETRY is X-BASED, never point-in-panel: the text column's left/right edges are two
-      // imaginary vertical lines, x outside them is WATER zoom and x inside is font zoom. y never
-      // enters the test. ⚠ `isIdle()` must be read BEFORE `resolve()`, which latches a mode on its
-      // first call — this is the only point that can still see "no gesture yet".
+      const zoomDelta = projectedZoomDelta(e.deltaX, e.deltaY)
+      if (zoomDelta === 0) return
+      // ⚠ `isIdle()` must be read BEFORE `resolve()`, which latches a mode on its first call.
       const freshGesture = latch.isIdle()
       const mode = latch.resolve(
-        () => (hybrid && isWaterAtX(el, e.clientX) ? 'water' : 'text'),
-        e.deltaY > 0,
+        () => zoomModeForWheel(e, hybrid),
+        zoomDelta > 0,
       )
       // LATTICE QUANTIZATION: a full wheel notch (|ΔY| ≥ 100) is exactly ±1 step; fine-deltas
       // contribute proportional FRACTIONS that accumulate until a whole step commits, so every
       // input lands on the shared lattice rather than an arbitrary float between points.
       // TRACKPAD_ZOOM_SENSITIVITY scales ONLY the fraction — a discrete notch stays one step.
-      const mag = Math.abs(e.deltaY)
-      const dir = e.deltaY < 0 ? 1 : -1
+      const mag = Math.abs(zoomDelta)
+      const dir = zoomDelta < 0 ? 1 : -1
       let stepDelta = dir * (mag >= 100 ? 1 : Math.min(1, (mag / 100) * TRACKPAD_ZOOM_SENSITIVITY))
       // FIRST-STEP HEAD START, once per gesture and applied AFTER the mode is decided (the mode
       // does not affect which accumulator gets it; `freshGesture` was captured pre-resolve).
@@ -1327,16 +1332,18 @@ export function Scroll({
     if (phone && covered) return
     // The two fields use the SAME named drift/brake CSS animations as the tiles. Scroll's sibling
     // adoption and forward coast anchor therefore include them automatically.
+    const holdingAtRest = loadingTwinkles && waveMode === 'off'
     syncTwinkles(host, {
-      sparks: waveMode !== 'off',
-      dashes: !phone || waveMode !== 'off',
+      sparks: waveMode !== 'off' || holdingAtRest,
+      dashes: waveMode !== 'off' || (!phone && !holdingAtRest),
       mode: waveMode,
       phone,
+      hold: holdingAtRest,
     })
     // covered IS a dep: the phone editor skips sync while covered (above), so the uncover at
     // wave-rest must run one sync — it carries the global twinkle mode to 'off' (the shell
     // unmounts in the same commit, so its own 'off' sync never runs) and parks the driver.
-  }, [fill, phone, waveMode, covered])
+  }, [fill, phone, waveMode, covered, loadingTwinkles])
 
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}`}
@@ -1391,7 +1398,7 @@ export function Scroll({
           // the fade lands at 2.0s, the moment the waves reach rest.
           visibility: revealed ? 'visible' : 'hidden',
           opacity: revealed ? 1 : 0,
-          transition: `opacity ${phone ? 800 : 1000}ms cubic-bezier(0.4, 0, 0.2, 1)`, // 0.8s phone / 1s desktop atomic fade
+          transition: `opacity ${phone ? 560 : 700}ms cubic-bezier(0.4, 0, 0.2, 1)`, // 30% shorter: 0.56s phone / 0.7s desktop
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven

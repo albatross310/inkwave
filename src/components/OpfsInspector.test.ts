@@ -57,8 +57,18 @@ describe('recovery actions', () => {
     expect(CODE).toMatch(/downloadBundle\(bundle, bundleFilename\(row\.doc\)\)/)
   })
 
-  it('offers NO delete action — a destructive control on a recovery surface is the bug', () => {
-    expect(CODE).not.toMatch(/deleteMeta|removeEntry|deleteSnapshot|\bDelete\b/i)
+  it('keeps permanent deletion behind the explicit confirmation plan', () => {
+    expect(CODE).toMatch(/setDeletePlan\(\{ rows: \[r\], all: false \}\)/)
+    expect(CODE).toMatch(/setDeletePlan\(\{ rows, all: true \}\)/)
+    expect(CODE).toMatch(/await deleteStoredDocument\(row\.id\)/)
+    expect(CODE).toMatch(/role="alertdialog"/)
+    expect(CODE).toMatch(/recognisedSaveIsLive/)
+  })
+
+  it('separates Current docs workflow removal from Storage deletion', () => {
+    expect(CODE).toMatch(/Current docs/)
+    expect(CODE).toMatch(/removeCurrentDoc\(id\)/)
+    expect(CODE).toMatch(/Remove only takes a document out of this workflow/)
   })
 })
 

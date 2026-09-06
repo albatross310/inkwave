@@ -50,6 +50,7 @@ type HostState = {
   scroll: ScrollNode[]
   mode: Mode
   phone: boolean
+  holding: boolean
   epoch: number | null
   scrollTop: number
 }
@@ -129,7 +130,7 @@ function prepareHost(host: HTMLElement): HostState {
   void fields.a.offsetWidth
   const state: HostState = {
     host, set, fields, intro, scroll, mode: 'anim', phone: false,
-    epoch: null, scrollTop: host.parentElement?.scrollTop ?? 0,
+    holding: false, epoch: null, scrollTop: host.parentElement?.scrollTop ?? 0,
   }
   hosts.set(host, state)
 
@@ -227,6 +228,7 @@ function alignFieldClocks(state: HostState): void {
 function startIntro(state: HostState, epoch: number): void {
   if (state.epoch === epoch) return
   cancelIntro(state)
+  state.holding = false
   state.epoch = epoch
   for (const item of state.intro) {
     const animation = item.el.animate(introFrames(item.mark), { duration: WAVE_MARK_TIMELINE_MS, fill: 'both' })
@@ -246,6 +248,7 @@ function cancelIntro(state: HostState): void {
     item.animation = undefined
   }
   state.epoch = null
+  state.holding = false
 }
 
 /** Install an animation's resting value before removing the compositor track. Chrome and WebKit
@@ -270,6 +273,31 @@ function settleIntroAtRest(state: HostState, scrollTop: number, showScroll: bool
     item.animation = undefined
   }
   state.epoch = null
+  state.holding = false
+}
+
+/** At stationary loading water, only sparkles repeat. Their checked-in independent time windows
+ * remain intact within each short loop; dash/speck objects stay finished, so the hold cannot create
+ * a second moving wave or make the line population jump back into view. */
+function startRestSparkleHold(state: HostState): void {
+  if (state.holding) return
+  cancelIntro(state)
+  state.holding = true
+  const epoch = timelineNow()
+  state.epoch = epoch
+  for (const item of state.intro) {
+    if (item.mark.kind !== 'spark') {
+      item.el.style.opacity = '0'
+      continue
+    }
+    const animation = item.el.animate(introFrames(item.mark), {
+      duration: WAVE_MARK_TIMELINE_MS,
+      iterations: Infinity,
+    })
+    item.animation = animation
+    stamp(animation, epoch)
+  }
+  for (const item of state.scroll) item.el.style.opacity = '0'
 }
 
 function setFieldRest(field: HTMLElement, group: Group, waveX: number): void {
@@ -298,7 +326,7 @@ function installListeners(): void {
 
 export function syncTwinkles(
   host: HTMLElement,
-  want: { sparks: boolean; dashes: boolean; mode: Mode; phone: boolean },
+  want: { sparks: boolean; dashes: boolean; mode: Mode; phone: boolean; hold?: boolean },
 ): void {
   installListeners()
   pruneHosts()
@@ -326,7 +354,8 @@ export function syncTwinkles(
   // The resting inline opacity must exist BEFORE the fill-mode WAAPI tracks are cancelled. A
   // cancel-first handoff briefly reveals makeMark's original `opacity: 0` on both browser engines,
   // making the whole field disappear and then return at the very end of the slowdown.
-  if (previous !== 'off') settleIntroAtRest(state, restTop, !want.phone && want.dashes)
+  if (want.hold) startRestSparkleHold(state)
+  else if (previous !== 'off' || state.holding) settleIntroAtRest(state, restTop, !want.phone && want.dashes)
   else for (const item of state.intro) item.el.style.opacity = '0'
   const waveX = parseFloat(surface?.style.getPropertyValue('--wave-x') || '') || 0
   for (const group of ['a', 'b'] as const) setFieldRest(state.fields[group], group, waveX)
@@ -351,7 +380,7 @@ export function setScrollScene(surface: HTMLElement, absoluteScrollTop: number):
   const state = host ? hosts.get(host) : undefined
   if (!state) return
   state.scrollTop = absoluteScrollTop
-  if (state.mode !== 'off' || state.phone) return
+  if (state.mode !== 'off' || state.phone || state.holding) return
   for (const item of state.scroll)
     item.el.style.opacity = String(scrollMarkOpacity(item.mark, absoluteScrollTop))
 }

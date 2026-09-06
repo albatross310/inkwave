@@ -144,7 +144,10 @@ const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
 
 /** Forget the doc's Drive file id so the next sync creates a NEW file (used by "Save a copy"). */
 export function clearGoogleDriveFile(docId: string): void {
-  try { localStorage.removeItem(fileKey(docId)) } catch { /* private mode */ }
+  try {
+    localStorage.removeItem(fileKey(docId))
+    localStorage.removeItem(nameKey(docId))
+  } catch { /* private mode */ }
 }
 
 // The CONTAINING folder's URL (so "show in folder" reveals the surrounding files), or the file link

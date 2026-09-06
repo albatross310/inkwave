@@ -19,20 +19,25 @@
 // panel exists to recover. The index is read ONLY to decide which rows get the "not in the index"
 // badge — i.e. it is the thing being CHECKED, never the source of truth.
 //
-// NO DELETE, DELIBERATELY. Every control here either opens or preserves. Someone arrives at this
-// panel confused and frightened about missing work; a destructive button next to a row they cannot
-// identify is how the near-miss becomes the real loss. Deleting is available at the OS/browser
-// level for anyone who truly needs it.
+// DELETION IS EXPLICIT AND SEPARATE. Current docs' Remove changes only the auto-open workflow.
+// Storage's Delete/Delete all permanently remove the local directory only after a second dialog
+// states the scope, lists stale recognised-save heartbeats, and refuses documents held by another
+// window. The recovery-first Open/Download paths remain beside it.
 
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listOpfsDocuments, readDocumentBytes } from '../storage/opfs'
-import { listMeta } from '../storage/indexeddb'
-import { heldDocIds, switchTabToDocument, tabDocId, DOC_LOCK_PREFIX } from '../storage/tabDoc'
+import { deleteStoredDocument, freezeDocWrites, listOpfsDocuments, readDocumentBytes, unfreezeDocWrites } from '../storage/opfs'
+import { deleteMeta, listMeta } from '../storage/indexeddb'
+import { clearTabDoc, heldDocIds, releaseDocLock, switchTabToDocument, tabDocId, DOC_LOCK_PREFIX } from '../storage/tabDoc'
 import { listSnapshotMeta } from '../provenance/snapshots'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, pmToText } from '../provenance/bundle'
 import { readSnapshotArchive } from '../provenance/snapshots'
 import type { InkwaveDocument } from '../types/document'
+import { addCurrentDoc, currentDocIds, removeCurrentDoc, saveCurrentDocOrder } from '../storage/currentDocs'
+import { forgetDocSource, getRecognisedSave, recognisedSaveIsLive } from '../storage/docSource'
+import { forgetSaveFile } from '../storage/folder'
+import { clearGoogleDriveFile } from '../storage/gdrive'
+import { clearOneDriveFile } from '../storage/onedrive'
 
 const INK = '#302438'
 
@@ -106,10 +111,15 @@ function previewOf(doc: InkwaveDocument | null): { preview: string; words: numbe
 }
 
 export function OpfsInspector({ onClose }: { onClose: () => void }) {
+  const [tab, setTab] = useState<'current' | 'storage'>('current')
   const [rows, setRows] = useState<Row[] | null>(null)
+  const [currentIds, setCurrentIds] = useState<string[]>([])
   const [snapCounts, setSnapCounts] = useState<Record<string, number>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [scannedAt, setScannedAt] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const [deletePlan, setDeletePlan] = useState<{ rows: Row[]; all: boolean } | null>(null)
 
   const scan = useCallback(async () => {
     setRows(null)
@@ -139,6 +149,8 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
     // Most recently written first — the lost document is nearly always the one just worked on.
     next.sort((a, b) => b.updatedAt - a.updatedAt)
     setRows(next)
+    setCurrentIds(currentDocIds(next.filter((row) => row.readable).map((row) => row.id)))
+    setScannedAt(Date.now())
 
     // Snapshot counts are a SECOND pass on purpose: each one reads + gunzips a snapshots file, so
     // doing it inline would hold the listing hostage to the slowest document. The rows render
@@ -155,6 +167,18 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
   }, [])
 
   useEffect(() => { void scan() }, [scan])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 2000)
+    const refresh = () => setNow(Date.now())
+    window.addEventListener('storage', refresh)
+    window.addEventListener('inkwave:recognised-save', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('storage', refresh)
+      window.removeEventListener('inkwave:recognised-save', refresh)
+    }
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -210,6 +234,72 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
     } finally { setBusy(null) }
   }
 
+  function moveCurrent(id: string, by: -1 | 1) {
+    setCurrentIds((ids) => {
+      const from = ids.indexOf(id)
+      const to = from + by
+      if (from < 0 || to < 0 || to >= ids.length) return ids
+      const next = ids.slice()
+      ;[next[from], next[to]] = [next[to], next[from]]
+      return saveCurrentDocOrder(next)
+    })
+  }
+
+  function removeFromWorkflow(id: string) {
+    removeCurrentDoc(id)
+    setCurrentIds((ids) => ids.filter((candidate) => candidate !== id))
+  }
+
+  function addToWorkflow(id: string) {
+    addCurrentDoc(id)
+    setCurrentIds((ids) => [id, ...ids.filter((candidate) => candidate !== id)])
+  }
+
+  async function confirmDelete() {
+    if (!deletePlan || deletePlan.rows.some((row) => row.busyElsewhere)) return
+    const thisId = tabDocId()
+    const deletesThisWindow = !!thisId && deletePlan.rows.some((row) => row.id === thisId)
+    setBusy(deletePlan.all ? 'delete-all' : deletePlan.rows[0]?.id ?? 'delete')
+    setError(null)
+    try {
+      // Freeze before deleting this window's own file: an already-scheduled autosave must not
+      // recreate the directory between removeEntry() and the reload.
+      if (deletesThisWindow && thisId) freezeDocWrites(thisId)
+      // Delete this window's own document LAST. If an earlier target fails, the live editor still
+      // has its file and can be safely unfrozen; once its own directory is gone we navigate away
+      // immediately and never give an autosave a chance to recreate it.
+      const ordered = [...deletePlan.rows].sort((a, b) => Number(a.id === thisId) - Number(b.id === thisId))
+      for (const row of ordered) {
+        await deleteStoredDocument(row.id)
+        await deleteMeta(row.id).catch((err) => console.warn('[inkwave] deleted OPFS document but could not clean its index row:', err))
+        await forgetSaveFile(row.id).catch(() => {})
+        clearGoogleDriveFile(row.id)
+        clearOneDriveFile(row.id)
+        forgetDocSource(row.id)
+        removeCurrentDoc(row.id)
+      }
+      setDeletePlan(null)
+      if (deletesThisWindow && thisId) {
+        clearTabDoc()
+        releaseDocLock(thisId)
+        window.location.assign('/')
+        return
+      }
+      await scan()
+    } catch (err) {
+      if (deletesThisWindow && thisId) unfreezeDocWrites(thisId)
+      setError(`Could not delete the selected document${deletePlan.all ? 's' : ''}: ${String((err as Error)?.message ?? err)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const rowById = new Map((rows ?? []).map((row) => [row.id, row]))
+  const currentRows = currentIds.map((id) => rowById.get(id)).filter((row): row is Row => !!row)
+  const visibleRows = tab === 'current' ? currentRows : (rows ?? [])
+  const unsafeDeletes = deletePlan?.rows.filter((row) => !recognisedSaveIsLive(row.id, now)) ?? []
+  const blockedDeletes = deletePlan?.rows.filter((row) => row.busyElsewhere) ?? []
+
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
@@ -219,15 +309,12 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
       <div
         role="dialog" aria-modal="true" aria-label="Documents on this device"
         onMouseDown={e => e.stopPropagation()}
-        className="iw-nightable iw-touch-guard iw-no-print relative bg-white w-[560px] max-w-[94vw] max-h-[86vh] flex flex-col shadow-xl font-serif text-stone-600"
+        className="iw-nightable iw-touch-guard iw-no-print relative bg-white w-[820px] max-w-[96vw] max-h-[86vh] flex flex-col shadow-xl font-serif text-stone-600"
         style={{ border: `1px solid ${INK}bf`, borderRadius: 14 }}
       >
         <div className="flex items-start justify-between px-5 pt-4">
           <div>
             <h2 className="text-lg" style={{ color: 'var(--iw-ink, #302438)' }}>Documents on this device</h2>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
-              Everything Inkwave is storing here, read straight from storage. Nothing is deleted from this panel.
-            </p>
           </div>
           <button type="button" aria-label="Close" onClick={onClose}
             className="text-stone-400 hover:text-[#302438] text-2xl leading-none -mt-1">×</button>
@@ -237,46 +324,62 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
           <p className="mx-5 mt-3 text-xs px-3 py-2" style={{ color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 8 }}>{error}</p>
         )}
 
-        <div className="flex-1 overflow-auto px-5 py-3 flex flex-col gap-2">
-          {rows === null && <p className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>Looking through storage…</p>}
-          {rows?.length === 0 && <p className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>No documents are stored on this device.</p>}
-          {rows?.map(r => (
+        <div className="mx-5 mt-3 flex items-center gap-1" role="tablist" aria-label="Document storage views">
+          <button type="button" role="tab" aria-selected={tab === 'current'} onClick={() => setTab('current')}
+            className="px-3 py-1 text-xs rounded-full"
+            style={{ color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: tab === 'current' ? 'var(--iw-chip-bg, #f5f5f4)' : 'transparent' }}>
+            Current docs
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'storage'} onClick={() => setTab('storage')}
+            className="px-3 py-1 text-xs rounded-full"
+            style={{ color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #e7e5e4)', background: tab === 'storage' ? 'var(--iw-chip-bg, #f5f5f4)' : 'transparent' }}>
+            Storage
+          </button>
+        </div>
+
+        <p className="mx-5 mt-2 text-xs" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+          {tab === 'current'
+            ? 'New Inkwave windows take the first available document in this order. Move them to set the order; Remove only takes a document out of this workflow — it remains in Storage.'
+            : 'Every local recovery copy Inkwave can find. Delete permanently removes that local document and its snapshot history; recognised files and cloud copies are not deleted.'}
+        </p>
+
+        <div className="flex-1 overflow-auto px-5 py-3 flex flex-col gap-1.5">
+          {rows === null && <p className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>Scanning…</p>}
+          {rows && visibleRows.length === 0 && <p className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{tab === 'current' ? 'No documents are in the auto-open workflow.' : 'No documents are stored on this device.'}</p>}
+          {visibleRows.map((r, index) => {
+            const save = getRecognisedSave(r.id)
+            const saveLive = recognisedSaveIsLive(r.id, now)
+            return (
             <div key={r.id} data-testid="opfs-row" data-doc-id={r.id}
-              className="px-3.5 py-2.5 flex flex-col gap-1.5"
+              className="px-3 py-2 flex items-center gap-2 min-w-max"
+              title={r.preview || undefined}
               style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 10 }}
             >
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="truncate" style={{ color: 'var(--iw-ink, #302438)' }}>{r.title}</span>
-                {r.isThisTab && <Badge kind="tab">this tab’s document</Badge>}
-                {r.busyElsewhere && <Badge kind="busy">open in another tab</Badge>}
-                {r.orphaned && <Badge kind="orphan">not in the index</Badge>}
-                {!r.readable && <Badge kind="orphan">unreadable</Badge>}
-              </div>
-
-              {r.preview && (
-                <p className="text-xs leading-snug line-clamp-2" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{r.preview}</p>
-              )}
-
-              <div className="text-[11px] tabular-nums" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+              <span className="truncate max-w-[13rem]" style={{ color: 'var(--iw-ink, #302438)' }}>{r.title}</span>
+              {r.isThisTab && <Badge kind="tab">this window</Badge>}
+              {r.busyElsewhere && <Badge kind="busy">another window</Badge>}
+              {r.orphaned && <Badge kind="orphan">not indexed</Badge>}
+              {!r.readable && <Badge kind="orphan">unreadable</Badge>}
+              <span className="text-[11px] tabular-nums whitespace-nowrap" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
                 last written {fmtWhen(r.updatedAt)} · {r.words.toLocaleString()} words · {fmtBytes(r.size)}
                 {snapCounts[r.id] ? ` · ${snapCounts[r.id]} snapshots` : ''}
-              </div>
-
-              {r.orphaned && !r.busyElsewhere && (
-                <p className="text-[11px] leading-snug" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
-                  This document is on disk but isn’t listed under Recent. Open it to bring it back, or download a copy to keep it safe.
-                </p>
-              )}
-
-              {/* Say WHY Open is unavailable rather than letting the tab reload into a different
-                  document — a silent wrong-document switch is how this panel's own bug started. */}
-              {r.busyElsewhere && (
-                <p className="text-[11px] leading-snug" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
-                  Another tab has this document open, so only one tab can write to it. Switch to that tab to keep working — or download a copy from here.
-                </p>
-              )}
-
-              <div className="flex gap-2 pt-0.5">
+              </span>
+              <span role="switch" aria-checked={saveLive}
+                className="text-[11px] whitespace-nowrap inline-flex items-center gap-1"
+                title={save ? `${save.destination} save ${new Date(save.at).toLocaleString()}` : 'No recognised destination save recorded'}
+                style={{ color: saveLive ? 'var(--iw-verified, #15803d)' : 'var(--iw-pill-fg, #78716c)' }}>
+                <span aria-hidden="true">{saveLive ? '●' : '○'}</span>{saveLive ? 'saved <20s' : 'not saved <20s'}
+              </span>
+              <div className="ml-auto flex gap-1.5 whitespace-nowrap">
+                {tab === 'current' ? (
+                  <>
+                    <RowButton onClick={() => moveCurrent(r.id, -1)} disabled={index === 0} title="Move earlier">↑</RowButton>
+                    <RowButton onClick={() => moveCurrent(r.id, 1)} disabled={index === currentRows.length - 1} title="Move later">↓</RowButton>
+                    <RowButton onClick={() => removeFromWorkflow(r.id)} testid="current-remove">Remove</RowButton>
+                  </>
+                ) : (
+                  <>
+                {!currentIds.includes(r.id) && <RowButton onClick={() => addToWorkflow(r.id)} title="Add to automatic window opening">Add</RowButton>}
                 <RowButton
                   onClick={() => switchTabToDocument(r.id)}
                   disabled={!r.readable || r.busyElsewhere || r.isThisTab}
@@ -298,23 +401,66 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
                 >
                   {busy === r.id ? 'Preparing…' : r.readable ? '⤓ Download' : '⤓ Download raw'}
                 </RowButton>
+                <RowButton
+                  onClick={() => setDeletePlan({ rows: [r], all: false })}
+                  disabled={r.busyElsewhere}
+                  testid="storage-delete"
+                  title={r.busyElsewhere ? 'Close the other window before deleting' : 'Delete this local document and its history'}
+                >
+                  Delete
+                </RowButton>
+                  </>
+                )}
               </div>
             </div>
-          ))}
+          )})}
         </div>
 
         <div className="px-5 pb-4 pt-1 flex items-center justify-between">
           <span className="text-[11px]" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
-            {rows ? `${rows.length} document${rows.length === 1 ? '' : 's'} in storage` : ''}
+            {rows === null ? 'Scanning…' : `Scanned ${scannedAt ? new Date(scannedAt).toLocaleTimeString() : ''} · ${visibleRows.length} document${visibleRows.length === 1 ? '' : 's'}`}
           </span>
-          <button type="button" onClick={() => void scan()}
-            className="text-xs px-2.5 py-1 rounded-full transition-colors"
-            style={{ color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #30243844)' }}
-          >
-            Rescan
-          </button>
+          {tab === 'storage' && rows && rows.length > 0 && (
+            <button type="button" onClick={() => setDeletePlan({ rows, all: true })}
+              className="text-xs px-2.5 py-1 rounded-full transition-colors"
+              style={{ color: 'var(--iw-danger, #b91c1c)', border: '1px solid var(--iw-danger, #b91c1c)' }}>
+              Delete all
+            </button>
+          )}
         </div>
       </div>
+
+      {deletePlan && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" onMouseDown={() => setDeletePlan(null)}>
+          <div className="absolute inset-0 bg-stone-900/30" aria-hidden="true" />
+          <div role="alertdialog" aria-modal="true" aria-label={deletePlan.all ? 'Delete all documents' : 'Delete document'}
+            onMouseDown={(event) => event.stopPropagation()}
+            className="iw-nightable relative bg-white w-[460px] max-w-[94vw] p-5 shadow-xl font-serif text-stone-600"
+            style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 14 }}>
+            <h3 className="text-lg" style={{ color: 'var(--iw-ink, #302438)' }}>{deletePlan.all ? 'Delete all local documents?' : `Delete “${deletePlan.rows[0]?.title}”?`}</h3>
+            <p className="text-xs mt-2" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+              This permanently removes {deletePlan.all ? 'these local documents and their' : 'this local document and its'} snapshot history from Inkwave Storage. Recognised files and cloud copies are not deleted.
+            </p>
+            {unsafeDeletes.length > 0 && (
+              <div className="mt-3 px-3 py-2 text-xs" style={{ color: 'var(--iw-danger, #b91c1c)', border: '1px solid var(--iw-danger, #b91c1c)', borderRadius: 9 }}>
+                <strong>Not saved to a recognised destination in the last 20 seconds:</strong>
+                <ul className="list-disc ml-5 mt-1">{unsafeDeletes.map((row) => <li key={row.id}>{row.title}</li>)}</ul>
+              </div>
+            )}
+            {blockedDeletes.length > 0 && (
+              <p className="mt-3 text-xs" style={{ color: 'var(--iw-danger, #b91c1c)' }}>
+                Close the other Inkwave window{blockedDeletes.length === 1 ? '' : 's'} holding {blockedDeletes.map((row) => row.title).join(', ')} before deleting.
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <RowButton onClick={() => setDeletePlan(null)}>Cancel</RowButton>
+              <RowButton onClick={() => void confirmDelete()} disabled={blockedDeletes.length > 0 || busy === 'delete-all' || busy === deletePlan.rows[0]?.id}>
+                {busy ? 'Deleting…' : deletePlan.all ? 'Delete all' : 'Delete'}
+              </RowButton>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body,
   )

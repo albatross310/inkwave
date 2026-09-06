@@ -50,6 +50,7 @@ import { bibProvider } from '../citations/bibProvider'
 import { simpleInText } from '../citations/format'
 import { buildFlatMap, anchorOps, opsInRange, type AnchoredOp, type FlatSeg } from '../provenance/textMap'
 import type { DiffOp } from '../provenance/diff'
+import { StoredMediaFigureContents, storedMediaFigureStyle, type StoredMediaImageAttrs } from './StoredMediaImage'
 
 type Node = { type?: string; text?: string; marks?: Array<{ type: string }>; attrs?: Record<string, unknown>; content?: Node[] }
 
@@ -169,6 +170,8 @@ function block(node: Node, path: number[], ctx: Ctx): ReactNode {
       return <pre key={key}><code>{body()}</code></pre>
     case 'paragraph':
       return <p key={key}>{body()}</p>
+    case 'mediaImage':
+      return <figure key={key} className="iw-media-image" style={storedMediaFigureStyle(node.attrs as unknown as StoredMediaImageAttrs)}><StoredMediaFigureContents attrs={node.attrs as unknown as StoredMediaImageAttrs} /></figure>
     default:
       return kids ? <Fragment key={key}>{kids.map((c, i) => block(c, [...path, i], ctx))}</Fragment> : null
   }

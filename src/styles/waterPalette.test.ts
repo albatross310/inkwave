@@ -9,10 +9,11 @@ const entry = readFileSync(resolve(repo, 'app/entry.client.tsx'), 'utf8')
 const twinkles = readFileSync(resolve(repo, 'src/editor/waveTwinkle.ts'), 'utf8')
 
 describe('day water palette', () => {
-  it('has one shared muted indigo-to-teal background definition', () => {
-    expect(css.match(/--iw-water-gradient:/g)).toHaveLength(1)
+  it('has one default water palette plus the explicit second-window palette', () => {
+    expect(css.match(/--iw-water-gradient:/g)).toHaveLength(2)
     expect(css).toContain('--iw-water-base: #3b6f75')
     expect(css).toContain('--iw-water-gradient: linear-gradient(165deg, #302438 0%, #41425b 18%, #3b606a 88%, #3b6f75 100%)')
+    expect(css).toMatch(/:root\[data-iw-window-slot="2"\][\s\S]*?--iw-water-base: #403708;[\s\S]*?--iw-water-gradient: linear-gradient\(180deg, #8d3d15 0%, #6b3910 46%, #403708 100%\)/)
     expect(css).not.toMatch(/#00b4d8|#00bfa8|%2300b4d8|%2300bfa8/i)
   })
 

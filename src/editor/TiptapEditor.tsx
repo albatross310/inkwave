@@ -4,6 +4,8 @@ import { useZoomScale } from './useZoomScale'
 import { TOOLBAR_BOTTOM_PX } from '../components/sidePill'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
+import { Fragment as PmFragment, Slice as PmSlice } from '@tiptap/pm/model'
+import { v4 as uuidv4 } from 'uuid'
 import { buildEditorExtensions } from './extensions/editorExtensions'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
@@ -77,6 +79,10 @@ const ProductivityGraphsPanel = lazy(() =>
 import { prodGraphsEnabled, prodReportDemo, prodReportEnabled } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { MediaMenu } from '../components/MediaMenu'
+import type { MediaAsset } from '../media/types'
+import { importMedia } from '../media/mediaStore'
+import { announceMediaReady } from '../media/ready'
+import { clipboardImageFiles, pastedImageName } from './imagePaste'
 import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
 import { CountdownOverlay } from '../components/CountdownOverlay'
 import { MusicBar } from '../components/MusicBar'
@@ -99,10 +105,9 @@ import { setCitationStyle as setCitationStyleBus } from '../citations/citationsB
 import { embedBibliography } from '../citations/resolve'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
-import { InstallPromptBanner } from '../components/InstallPromptBanner'
 import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
 import { GoogleDriveFileOpener } from '../components/GoogleDriveFileOpener'
-import { setDocSource, getDocSource } from '../storage/docSource'
+import { getRecognisedSave, markDocumentDirty, setDocSource, getDocSource, markRecognisedSave, recognisedSaveIsLive } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
 import { getCachedOpen, putCachedOpen, warmCloudOpen, type OpenCacheProvider } from '../storage/openCache'
 import { openPerfStart, openPerfStep, openPerfAbort } from '../storage/openPerf'
@@ -147,6 +152,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // NB `ensureDocFresh` deliberately does NOT use this: it CACHES a lazily-built document and is not
   // a mutation. → docs/archive/editor-surface.md#editor-commit-doc
   const commitDoc = (updated: InkwaveDocument) => {
+    markDocumentDirty(updated.id)
+    setLastFileSave(null)
+    setLastSync(null)
+    setLastGdriveSync(null)
     docRef.current = updated
     onDocChange(updated)
     scheduleSave(updated)
@@ -438,7 +447,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // editor focus, whose blur doesn't fire on iOS when the keyboard is dismissed (which left
   // the toolbar stuck hidden) and whose churn on a control tap made the bar "run away".
   const [keyboardUp, setKeyboardUp] = useState(false)
-  // PWA install prompt — captured here so both OptionsMenu and InstallPromptBanner can use it.
+  // PWA install prompt — captured for OptionsMenu's explicit "Install app…" command. The old
+  // ten-minute install banner is gone; brief tutorial copy now lives in the loading-tip rotation.
   const [installPrompt, setInstallPrompt] = useState<any>(null)
   const [fileOpenError, setFileOpenError] = useState<import('../storage/openError').OpenNotice | null>(null)
   // Open failures happen while the initiating editor is UNMOUNTED (open-begin hides the doc), so
@@ -1023,6 +1033,68 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
 
   const editorRef = useRef<ReturnType<typeof useEditor>>(null)
 
+  function rememberMediaAsset(asset: MediaAsset) {
+    const current = ensureDocFresh()
+    if ((current.media ?? []).some((item) => item.id === asset.id)) return
+    commitDoc({
+      ...current,
+      media: [...(current.media ?? []), asset],
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  function removePendingMediaImage(assetId: string) {
+    const ed = editorRef.current
+    if (!ed || ed.isDestroyed) return
+    let foundPos = -1
+    let foundSize = 0
+    ed.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'mediaImage' && node.attrs.assetId === assetId) {
+        foundPos = pos
+        foundSize = node.nodeSize
+        return false
+      }
+      return true
+    })
+    if (foundPos >= 0) ed.view.dispatch(ed.state.tr.delete(foundPos, foundPos + foundSize))
+  }
+
+  function bindMediaImageBytes(asset: MediaAsset) {
+    const ed = editorRef.current
+    if (!ed || ed.isDestroyed || !asset.sha256) return
+    let foundPos = -1
+    let foundAttrs: Record<string, unknown> = {}
+    ed.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'mediaImage' && node.attrs.assetId === asset.id) {
+        foundPos = pos
+        foundAttrs = { ...node.attrs }
+        return false
+      }
+      return true
+    })
+    if (foundPos >= 0) {
+      ed.view.dispatch(ed.state.tr.setNodeMarkup(foundPos, undefined, { ...foundAttrs, sha256: asset.sha256 }))
+    }
+  }
+
+  async function storePastedImages(pending: Array<{ id: string; file: File; addedAt: string }>) {
+    for (const item of pending) {
+      const result = await importMedia(item.file, item.id, new Date(item.addedAt))
+      if (!result.ok) {
+        removePendingMediaImage(item.id)
+        setFileOpenError({ kind: 'error', message: `Could not paste “${item.file.name}”: ${result.reason}` })
+        continue
+      }
+      rememberMediaAsset(result.asset)
+      bindMediaImageBytes(result.asset)
+      announceMediaReady(item.id)
+      const snapshot = await createManualSnapshot()
+      if (!snapshot.snapshot) {
+        setFileOpenError({ kind: 'error', message: `The image was pasted, but its snapshot could not be created: ${snapshot.reason ?? 'unknown error'}` })
+      }
+    }
+  }
+
   function handleHintChange(
     pos: number | null,
     minWidth?: number | null,
@@ -1070,6 +1142,45 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         'data-placeholder': 'Begin writing…',
         'aria-label': doc.docType === 'email' ? 'Message body editor' : 'Document body editor',
         spellcheck: 'false',
+      },
+      handlePaste: (view, event) => {
+        const images = clipboardImageFiles(event.clipboardData)
+        if (!images.length) return false // ordinary rich/plain-text paste remains ProseMirror's
+        event.preventDefault()
+
+        const activeMarks = view.state.storedMarks ?? view.state.selection.$from.marks()
+        const textStyle = activeMarks.find((mark) => mark.type.name === 'textStyle')
+        const captionFontFamily = typeof textStyle?.attrs.fontFamily === 'string'
+          ? textStyle.attrs.fontFamily
+          : null
+
+        const pending = images.map((source, index) => {
+          const name = pastedImageName(source, index)
+          const file = source.name === name
+            ? source
+            : new File([source], name, { type: source.type, lastModified: source.lastModified })
+          return { id: uuidv4(), file, addedAt: new Date().toISOString() }
+        })
+        const nodes = pending.map(({ id, file, addedAt }) => view.state.schema.nodes.mediaImage.create({
+          assetId: id,
+          mime: file.type,
+          name: file.name,
+          alt: file.name,
+          title: file.name.replace(/\.[^.]+$/, '') || 'Pasted image',
+          source: '',
+          addedAt,
+          captionPosition: 'bottom',
+          captionFontFamily,
+          widthPct: 100,
+          heightPx: null,
+          xPct: 0,
+        }))
+        // Insert synchronously at the paste selection: OPFS can take time, and waiting for it would
+        // let later typing/clicks move the insertion point. NodeViews show an importing placeholder
+        // until `inkwave:media-ready` announces that the shared media store has the bytes.
+        view.dispatch(view.state.tr.replaceSelection(new PmSlice(PmFragment.fromArray(nodes), 0, 0)).scrollIntoView())
+        void storePastedImages(pending)
+        return true
       },
       // Keydown-synchronous typing (`inkwave:kdSync`; desktop ON, touch OFF — ⚠ the virtual
       // keyboard's native path and autocorrect must never be intercepted). A printable key
@@ -1351,6 +1462,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // (empty selection) but stays up when text is selected so it can be formatted.
   useEffect(() => {
     if (!editor) return
+    ;(window as unknown as { __iwEditorLoadReady?: boolean }).__iwEditorLoadReady = false
     const upd = () => {
       setSelectionEmpty(editor.state.selection.empty)
       const n = (editor.state.selection as unknown as { node?: { type: { name: string } } }).node
@@ -1654,10 +1766,15 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return () => { editor.off('selectionUpdate', onChange); editor.off('update', onChange); editor.off('focus', onChange); cancelAnimationFrame(raf) }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reveal gate (see `settled` above): fonts.ready + first pagination measure, capped at 1.2s.
+  // Readiness gate (see `settled` above): fonts.ready + first pagination measure, capped at 1.2s.
+  // Ready starts the water coast and enables the loading-screen invitation; it does NOT reveal the
+  // page. Reveal waits for both the writer's Continue gesture and the atomic wave-rest handoff.
   useEffect(() => {
     if (!editor) return
-    let done = false
+    let readyAnnounced = false
+    let revealStarted = false
+    let continueRequested = false
+    let waterRested = false
     let revealTimer: ReturnType<typeof setTimeout> | undefined
     let revealRaf = 0
     let revealed = false
@@ -1670,25 +1787,35 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       // (which the shell was covering, already phase-synced, coasting and rastered).
       window.dispatchEvent(new Event('inkwave:editor-revealed'))
     }
-    const finish = () => {
-      if (done) return
-      done = true
-      // ⚠ START THE COAST FIRST, on this LIGHT frame: the freeze must not share the reveal commit,
-      // the busiest frame of the load. The compositor keeps drifting while that commit blocks the
-      // main thread, so a same-commit freeze snapshots a stale offset and the waves snap ~7px
-      // BACKWARD. → docs/archive/editor-surface.md#editor-reveal
-      window.dispatchEvent(new Event('inkwave:reveal-imminent'))
-      if (isTouchDevice()) {
-        // PHONE: waves decelerate first, the shell drops at 1.5s, and the page fades in over the
-        // still-coasting waves so the fade completes at 2s — the moment the waves reach rest.
-        revealTimer = setTimeout(reveal, 1200)
-        return
-      }
-      // DESKTOP: the page fade-in starts AT coast start, with two clean frames between the class
-      // swap and the heavy commit, so the compositor-driven coast is already easing when it lands.
+    const beginReveal = () => {
+      if (revealStarted || !readyAnnounced || !continueRequested || !waterRested) return
+      revealStarted = true
+      // Readiness already started the coast, and this path cannot run until wave-rest. Give the
+      // rest handoff two clean frames before the heavy editor reveal so the stationary tile pose +
+      // twinkle hold are painted before the paper begins appearing.
       revealRaf = requestAnimationFrame(() => { revealRaf = requestAnimationFrame(reveal) })
-      // rAF can starve on a wedged/backgrounded main thread and the reveal must still happen.
-      revealTimer = setTimeout(reveal, 1500)
+      revealTimer = setTimeout(reveal, 500)
+    }
+    const onContinue = () => {
+      continueRequested = true
+      beginReveal()
+    }
+    const onWaterRest = () => {
+      waterRested = true
+      beginReveal()
+    }
+    window.addEventListener('inkwave:continue-load', onContinue)
+    window.addEventListener('inkwave:wave-rest', onWaterRest)
+    const markReady = () => {
+      if (readyAnnounced) return
+      readyAnnounced = true
+      // Start the water slowdown as soon as the document is actually ready, independently of when
+      // the writer chooses to continue. Scroll stops on its existing atomic handoff; the loading
+      // shell then holds that still pose and loops sparkles until beginReveal removes it.
+      window.dispatchEvent(new Event('inkwave:reveal-imminent'))
+      ;(window as unknown as { __iwEditorLoadReady?: boolean }).__iwEditorLoadReady = true
+      window.dispatchEvent(new Event('inkwave:editor-load-ready'))
+      if (continueRequested) beginReveal()
     }
     // ── THE DELIBERATE DELAY: show at least one wave-video loop before the document appears.
     // "Warm up the document" needs no code of its own — fonts.ready, the first pagination measure
@@ -1713,7 +1840,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         })
     // The 1200ms safety cap predates the video and would fire straight through a ~2s loop; with the
     // video ON it becomes the loop gate's own backstop plus the old margin, and OFF it is untouched.
-    const cap = setTimeout(finish, waveVideoOn ? 8200 : 1200)
+    const cap = setTimeout(markReady, waveVideoOn ? 8200 : 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
     // Pagination measures in BOTH page modes, so always wait for its first measure — the cap covers
     // any mode where it never fires.
@@ -1725,9 +1852,15 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
             window.addEventListener('inkwave:pagination-ready', on)
           })
     void Promise.all([fontsReady, paginationReady, waveLooped]).then(() =>
-      requestAnimationFrame(() => requestAnimationFrame(finish)), // one clean frame after the last reflow
+      requestAnimationFrame(() => requestAnimationFrame(markReady)), // one clean frame after the last reflow
     )
-    return () => { clearTimeout(cap); if (revealTimer) clearTimeout(revealTimer); if (revealRaf) cancelAnimationFrame(revealRaf) }
+    return () => {
+      clearTimeout(cap)
+      if (revealTimer) clearTimeout(revealTimer)
+      if (revealRaf) cancelAnimationFrame(revealRaf)
+      window.removeEventListener('inkwave:continue-load', onContinue)
+      window.removeEventListener('inkwave:wave-rest', onWaterRest)
+    }
   }, [editor])
 
   // ── iOS break-table store test (`inkwave:btDebug`, default OFF) — the on-device half of the OPFS
@@ -1902,6 +2035,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       scasGreenAnchors: getGreenAnchors(e.state),
     }
     const { doc: updated } = embedBibliography(base)
+    markDocumentDirty(updated.id)
+    setLastFileSave(null)
+    setLastSync(null)
+    setLastGdriveSync(null)
     docRef.current = updated
     return updated
   }
@@ -2104,6 +2241,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     const name = stripPdfs === 'all' ? base.replace(/\.studio$/, '.no-pdfs.studio') : base
     if (gzip) await downloadBundleGz(bundle, name + '.gz')
     else downloadBundle(bundle, name)
+    markRecognisedSave(docRef.current.id, 'download')
   }
 
   // Primary "Save" — works on every browser. Chromium (Chrome/Edge/Brave) mirrors to a granted
@@ -2451,8 +2589,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     }
     const snaps = await snapshotsForAction('the save')
     if (!snaps) return
-    await writeBundleToFile(docRef.current, snaps)
-    setLastFileSave(Date.now())
+    if (await writeBundleToFile(docRef.current, snaps)) setLastFileSave(Date.now())
   }
 
   // "Show in folder" — open a native picker started IN the saved file's folder, so the writer can
@@ -2475,8 +2612,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     setFileName(handle.name)
     const snaps = await snapshotsForAction('the save')
     if (!snaps) return
-    await writeBundleToFile(docRef.current, snaps)
-    setLastFileSave(Date.now())
+    if (await writeBundleToFile(docRef.current, snaps)) setLastFileSave(Date.now())
   }
 
   // Link THIS document's save file (if any) and sync to it immediately — on load and after "Open…".
@@ -2491,7 +2627,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       // ⚠ LOAD-PATH RULE: RE-LINK ONLY — never rebuild and rewrite the bundle here. That write
       // re-read, re-encoded and rewrote a possibly-20MB file before anything had changed, and was
       // most of the ~1.5s open block. The next provenance checkpoint mirrors as usual.
-      setLastFileSave(Date.now())
+      const saved = getRecognisedSave(docRef.current.id)
+      setLastFileSave(saved?.destination === 'local' && recognisedSaveIsLive(docRef.current.id) ? saved.at : null)
       return
     }
     // A linked file exists but we don't currently have write permission → show a clear "reconnect"
@@ -2854,18 +2991,9 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       {id === 'media' && (
         <MediaMenu
           assets={doc.media ?? []}
-          onImported={(asset) => {
-            // The bytes are already in OPFS; this records the REFERENCE on the document. Same
-            // write shape as a header edit (EmailComposePanel): docRef first, then onDocChange,
-            // then scheduleSave — nothing else saves it, because the editor's own update handler
-            // never fires for a change the writer made outside the contenteditable.
-            const updated = {
-              ...docRef.current,
-              media: [...(docRef.current.media ?? []), asset],
-              updatedAt: new Date().toISOString(),
-            }
-            commitDoc(updated)
-          }}
+          // The bytes are already in OPFS; both picker/camera imports and clipboard pastes use this
+          // one reference-commit path so no caller can forget the document save.
+          onImported={rememberMediaAsset}
         />
       )}
       {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => setLedgerOpen(o => !o)} />}
@@ -3470,7 +3598,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 onWorkReport={reportFlag ? () => setReportOpen(true) : undefined}
                 onFileOpenError={reportOpenError}
               />
-              <InstallPromptBanner installPrompt={installPrompt} />
             </div>
             )}
 

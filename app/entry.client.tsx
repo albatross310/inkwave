@@ -1,5 +1,6 @@
 import { startTransition, StrictMode, useEffect, type ReactNode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
+import { installInkwaveWindowCycling, reapplyInkwaveWindowSlot } from '../src/pwa/windows'
 import { HydratedRouter } from 'react-router/dom'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
@@ -8,6 +9,12 @@ console.log(`%c[inkwave] build: ${__BUILD_ID__} · ${__BUILD_COMMIT__}`, 'color:
 // Apply the saved theme (night/day) before hydration so a night-mode reader doesn't flash light.
 import { applyTheme } from '../src/editor/theme'
 applyTheme()
+
+// Every browsing context joins the same-origin window roster before React mounts. This is
+// deliberately independent of document loading: window cycling must still work from a loading,
+// error, snapshot or settings screen, not only while OptionsMenu happens to be mounted.
+const stopWindowCycling = installInkwaveWindowCycling()
+if (import.meta.hot) import.meta.hot.dispose(stopWindowCycling)
 
 // Flags are togglable via URL so they can be flipped ON A PHONE without a console (mirrors the
 // ?auth sticky pattern in auth/config): `?<flag>` sets it sticky ON ('1'), `?<flag>=off` sets it
@@ -72,6 +79,7 @@ applyTheme()
 // late subscriber can never wait for a past event. React always commits, so this always fires.
 function HydrationBeacon(): null {
   useEffect(() => {
+    reapplyInkwaveWindowSlot()
     ;(window as unknown as { __iwHydrated?: boolean }).__iwHydrated = true
     window.dispatchEvent(new Event('inkwave:hydrated'))
   }, [])

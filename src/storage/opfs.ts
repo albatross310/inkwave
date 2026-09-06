@@ -314,6 +314,19 @@ export async function listOpfsDocuments(): Promise<OpfsDocEntry[]> {
   return out
 }
 
+/** Permanently remove one complete local document directory, including its snapshot archive.
+ * Reachable only from Storage's explicit, confirmation-gated Delete actions. */
+export async function deleteStoredDocument(documentId: string): Promise<void> {
+  try {
+    const root = await getRoot()
+    const documents = await root.getDirectoryHandle('documents')
+    await documents.removeEntry(documentId, { recursive: true })
+  } catch (err) {
+    if (isNotFound(err)) return // already gone
+    throw err
+  }
+}
+
 // ─── Debounced autosave ───────────────────────────────────────────────────────
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null

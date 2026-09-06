@@ -1,42 +1,21 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { isWaterAtX, createZoomLatch, ZOOM_LATCH_COOLDOWN_MS } from './zoomZone'
+import { createZoomLatch, projectedZoomDelta, zoomModeForWheel, ZOOM_LATCH_COOLDOWN_MS } from './zoomZone'
 
-// ── isWaterAtX: the x-line rule ───────────────────────────────────────────────
-// jsdom has no layout, so rects are stubbed: the text column (.ProseMirror) spans x 100…500.
-function makeSurface(pmRect: Partial<DOMRect> | null): HTMLElement {
-  const root = document.createElement('div')
-  if (pmRect) {
-    const pm = document.createElement('div')
-    pm.className = 'ProseMirror'
-    pm.getBoundingClientRect = () => ({ left: 100, right: 500, top: 0, bottom: 1000, width: 400, height: 1000, x: 100, y: 0, toJSON: () => ({}) , ...pmRect }) as DOMRect
-    root.appendChild(pm)
-  }
-  return root
-}
-
-describe('isWaterAtX (zone geometry v2 — x-based)', () => {
-  it('x outside the text-column lines is water, regardless of y-band', () => {
-    const root = makeSurface({})
-    expect(isWaterAtX(root, 50)).toBe(true)    // side water / left page margin
-    expect(isWaterAtX(root, 99.5)).toBe(true)  // just outside the left line
-    expect(isWaterAtX(root, 550)).toBe(true)   // right of the right line
+describe('modifier-selected zoom mode', () => {
+  it('plain pinch/ctrl-scroll is text reflow and Command selects whole-page magnify', () => {
+    expect(zoomModeForWheel({ metaKey: false })).toBe('text')
+    expect(zoomModeForWheel({ metaKey: true })).toBe('water')
   })
 
-  it('x inside the lines is page — bottom margins/gaps within the column are font zoom', () => {
-    const root = makeSurface({})
-    expect(isWaterAtX(root, 100)).toBe(false) // on the line = inside
-    expect(isWaterAtX(root, 300)).toBe(false) // over the text column
-    expect(isWaterAtX(root, 500)).toBe(false)
+  it('falls back to text reflow on a surface that cannot whole-page magnify', () => {
+    expect(zoomModeForWheel({ metaKey: true }, false)).toBe('text')
   })
 
-  it('no paper at all → never water (degenerate surface)', () => {
-    expect(isWaterAtX(makeSurface(null), 300)).toBe(false)
-  })
-
-  it('zero-width ProseMirror (mid-mount) falls through without claiming water', () => {
-    const root = makeSurface({ left: 0, right: 0, width: 0 })
-    expect(isWaterAtX(root, 300)).toBe(false) // no .scroll-paper fallback either
+  it('makes diagonal pinch movement responsive without inventing a horizontal zoom direction', () => {
+    expect(projectedZoomDelta(8, -4)).toBeCloseTo(-Math.hypot(4, 8))
+    expect(projectedZoomDelta(100, 4)).toBeCloseTo(Math.hypot(4, 8)) // cross-axis boost is bounded
+    expect(projectedZoomDelta(20, 0)).toBe(0)
   })
 })
 

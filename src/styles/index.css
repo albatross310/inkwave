@@ -6,6 +6,15 @@
   :root {
     --iw-water-base: #3b6f75;
     --iw-water-gradient: linear-gradient(165deg, #302438 0%, #41425b 18%, #3b606a 88%, #3b6f75 100%);
+    --iw-image-outline: #545b9f;
+  }
+
+  /* Window slot 2: the same water system, recoloured rather than duplicated. `windows.ts` assigns
+     stable slots across any number of live app windows; future palettes need only add a variable
+     override here. The direction is intentionally vertical: dark orange above, deep yellow below. */
+  :root[data-iw-window-slot="2"] {
+    --iw-water-base: #403708;
+    --iw-water-gradient: linear-gradient(180deg, #8d3d15 0%, #6b3910 46%, #403708 100%);
   }
 
   html {
@@ -63,6 +72,192 @@
     /* NB: no padding here — the phone panel-room padding lives in the LATER .is-phone rule below
        (its `padding` shorthand would silently kill any longhand set here — it did, 2026-07-10). */
     transition: padding-top 0.18s ease;
+  }
+
+  /* Pasted/imported document images are block atoms. Their bytes stay in the shared OPFS media
+     store; both the editor NodeView and snapshot renderer reuse this presentation. */
+  .iw-media-image {
+    display: flex;
+    width: 100%;
+    min-height: 44px;
+    margin: 1rem 0;
+    position: relative;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    box-sizing: border-box;
+    overflow: visible;
+  }
+  .iw-media-image__img {
+    display: block;
+    width: 100%;
+    max-width: none;
+    height: auto;
+    object-fit: fill;
+    border-radius: 4px;
+  }
+  .iw-media-image__picture {
+    position: relative;
+    width: 100%;
+    cursor: default;
+    touch-action: none;
+    user-select: none;
+    overflow: visible;
+  }
+  .iw-media-image-is-dragging .iw-media-image__picture { cursor: grabbing; }
+  .iw-media-image.ProseMirror-selectednode { outline: none !important; }
+  .iw-media-image.ProseMirror-selectednode:not(.iw-media-image--details-open) .iw-media-image__picture {
+    outline: 2px solid var(--iw-image-outline, #41425b);
+    outline-offset: 3px;
+  }
+  .iw-media-image__status {
+    display: block;
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px dashed var(--iw-ui-border, #aaa5a1);
+    border-radius: 6px;
+    color: var(--iw-pill-fg, #78716c);
+    font: 0.82rem/1.4 ui-sans-serif, system-ui, sans-serif;
+    text-align: center;
+  }
+  .iw-media-image__caption {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: baseline;
+    gap: 0 0.45em;
+    white-space: nowrap;
+    padding: 0.38rem 0.1rem 0.12rem;
+    color: var(--iw-ink, #302438);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    text-align: left;
+  }
+  .iw-media-image__title {
+    cursor: text;
+    font: inherit;
+    font-style: italic;
+  }
+  .iw-media-image__title-input {
+    min-width: 2ch;
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-style: italic;
+  }
+  .iw-media-image__meta {
+    color: var(--iw-doc-muted, #6b5b7a);
+    font-family: inherit;
+    font-size: 0.72em;
+    font-style: normal;
+  }
+  .iw-media-image__source { color: var(--iw-doc-accent, #302438); text-decoration: underline; text-underline-offset: 0.12em; }
+  button.iw-media-image__source {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+  }
+  .iw-media-image__source.is-empty { opacity: 0.62; text-decoration-style: dotted; }
+  .iw-media-image[data-caption-position='top'] .iw-media-image__caption {
+    padding: 0.12rem 0.1rem 0.38rem;
+  }
+  .iw-media-image__resize {
+    position: absolute;
+    z-index: 3;
+    display: block;
+    border: 0;
+    background: transparent;
+    touch-action: none;
+    user-select: none;
+  }
+  .iw-media-image__resize--width {
+    top: 0;
+    right: -8px;
+    width: 16px;
+    height: calc(100% - 10px);
+    cursor: ew-resize;
+  }
+  .iw-media-image__resize--height {
+    bottom: -8px;
+    left: 10px;
+    width: calc(100% - 20px);
+    height: 16px;
+    cursor: ns-resize;
+  }
+  .iw-media-image__resize--both {
+    right: -10px;
+    bottom: -10px;
+    width: 20px;
+    height: 20px;
+    cursor: nwse-resize;
+  }
+  .iw-media-image__resize--both-left {
+    left: -10px;
+    bottom: -10px;
+    width: 20px;
+    height: 20px;
+    cursor: nesw-resize;
+  }
+  .iw-media-image__details {
+    position: fixed;
+    z-index: 10020;
+    display: flex;
+    width: 320px;
+    max-width: calc(100vw - 24px);
+    flex-direction: column;
+    gap: 0.7rem;
+    padding: 14px;
+    border: 1px solid var(--iw-ui-border, #aaa5a1);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 12px 38px rgba(25, 20, 30, 0.2);
+    color: var(--iw-ink, #302438);
+    font: 0.85rem/1.35 ui-sans-serif, system-ui, sans-serif;
+  }
+  .iw-media-image__details label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.22rem;
+  }
+  .iw-media-image__details label > span {
+    color: var(--iw-pill-fg, #78716c);
+    font-size: 0.76rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .iw-media-image__details input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem 0.58rem;
+    border: 1px solid var(--iw-ui-border, #aaa5a1);
+    border-radius: 7px;
+    background: white;
+    color: inherit;
+    font: inherit;
+  }
+  .iw-media-image__details button {
+    align-self: flex-start;
+    padding: 0.48rem 0.72rem;
+    border: 1px solid var(--iw-ui-border, #aaa5a1);
+    border-radius: 999px;
+    background: white;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .iw-media-image__open-source {
+    align-self: flex-start;
+    color: var(--iw-ink, #302438);
+    text-decoration: underline;
+    text-underline-offset: 0.14em;
   }
 
   /* Desktop: the surface IS the scroll container, sized to the EDITOR region (viewport minus the PDF
@@ -1766,7 +1961,7 @@
    Toggled from Settings (src/editor/theme.ts sets <html data-theme="night">). Kept UNLAYERED so it
    overrides the @layer base defaults above. Peter's palette: black background, grey-on-black waves,
    charcoal paper, very-light-blue text, light purple/green highlights. Scopes the WRITING SURFACE. */
-:root[data-theme="night"] { color-scheme: dark; background-color: #0a0b0e; }
+:root[data-theme="night"] { color-scheme: dark; background-color: #0a0b0e; --iw-image-outline: #a9b0f2; }
 :root[data-theme="night"] body { background-color: #0a0b0e; }
 :root[data-theme="night"] .inkwave-editor-surface { background-color: #0a0b0e;   background-image: none; /* night: solid dark surface, no day gradient */
 }
@@ -2568,6 +2763,80 @@ html.iw-no-swipe-nav { overscroll-behavior-x: contain; }
 .iw-chrome-hold > :not(.inkwave-editor-surface) { opacity: 0 !important; }
 .iw-chrome-in > :not(.inkwave-editor-surface) { animation: iw-fade-in 0.8s cubic-bezier(0.4, 0, 0.2, 1) backwards; }
 
+/* ─── Loading tips ─────────────────────────────────────────────────────────────
+   The tip is part of the loading water, not part of the document. It is already mounted while the
+   atomic water gate is closed; the client's pre-paint layout effect chooses one checked-in line,
+   then `.iw-water-ready` reveals the gradient, waves, marks and chosen tip together. Edit.tsx and
+   LoadingVeil remove it at their page-reveal boundary rather than fading it over readable content. */
+.iw-loading-tip {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 320;
+  width: min(28rem, calc(100vw - 24px));
+  height: 80px;
+  display: flex;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  padding: 10px 14px;
+  border: 1px solid rgba(77, 80, 83, 0.28);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 8px 26px rgba(10, 7, 22, 0.2);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--iw-ink, #302438);
+  font: 0.86rem/1.4 ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  user-select: none;
+}
+.iw-loading-tip__text { display: none; }
+.iw-loading-tip__text[data-active] { display: block; flex: 1 1 auto; min-width: 0; }
+.iw-loading-tip__new {
+  flex: 0 0 auto;
+  margin-left: 10px;
+  padding: 5px 9px;
+  border: 1px solid var(--iw-ui-border, #aaa5a1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  color: inherit;
+  font: 600 0.7rem/1 ui-sans-serif, system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.iw-loading-tip__new:hover { background: rgba(255, 255, 255, 0.88); }
+.iw-loading-tip__new:focus-visible { outline: 2px solid var(--iw-ink, #302438); outline-offset: 2px; }
+.iw-loading-tip__countdown {
+  position: absolute;
+  top: calc(100% + 15px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  color: var(--iw-loading-tip-status, rgba(255, 255, 255, 0.9));
+  font: 600 0.8rem/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.015em;
+  text-shadow: 0 1px 5px rgba(10, 7, 22, 0.44);
+}
+@media (max-width: 420px) {
+  .iw-loading-tip { height: 100px; }
+}
+:root[data-theme="night"] .iw-loading-tip {
+  border-color: rgba(223, 227, 233, 0.26);
+  background: rgba(20, 22, 27, 0.76);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
+  color: #dfe3e9;
+}
+:root[data-theme="night"] .iw-loading-tip__new {
+  border-color: rgba(223, 227, 233, 0.3);
+  background: rgba(20, 22, 27, 0.58);
+}
+:root[data-theme="night"] .iw-loading-tip__new:hover { background: rgba(31, 34, 41, 0.88); }
+:root[data-theme="night"] .iw-loading-tip__countdown { color: rgba(223, 227, 233, 0.9); }
+
 /* Golden hover-glow shimmer for aligned diffs (SnapshotView cross-pane hover). */
 @keyframes iw-hover-shimmer {
   0%, 100% { box-shadow: 0 0 6px 1px rgba(212,175,55,0.34); }
@@ -2588,7 +2857,9 @@ html.iw-no-swipe-nav { overscroll-behavior-x: contain; }
 }
 :root:not(.iw-water-ready) .inkwave-editor-surface::before,
 :root:not(.iw-water-ready) .inkwave-editor-surface::after,
-:root:not(.iw-water-ready) .iw-wave-twinkles {
+:root:not(.iw-water-ready) .iw-wave-twinkles,
+:root:not(.iw-water-ready) .iw-loading-tip,
+.iw-loading-tip:not([data-loading-tip]) {
   /* Keep every water layer paint-hidden, but do not remove it from animation layout. The wave
      pseudos and deterministic fields are held paused at currentTime 0 below, then one root-class
      change reveals and releases all of them. `display:none` made WebKit instantiate the child

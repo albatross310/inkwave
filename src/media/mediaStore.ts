@@ -60,9 +60,18 @@ async function mediaDir(create: boolean): Promise<FileSystemDirectoryHandle | nu
 
 /** Store (or replace) the bytes for an asset. Throws if OPFS is unavailable — never silently. */
 export async function saveMedia(asset: MediaAsset, file: Blob): Promise<void> {
+  await saveMediaBytes(asset, new Uint8Array(await file.arrayBuffer()))
+}
+
+async function saveMediaBytes(asset: MediaAsset, bytes: Uint8Array): Promise<void> {
   const dir = await mediaDir(true)
   if (!dir) throw new Error('Storage unavailable — cannot import media on this device.')
-  await writeOpfsFile([DIR, SUB, fileName(asset)], new Uint8Array(await file.arrayBuffer()))
+  await writeOpfsFile([DIR, SUB, fileName(asset)], bytes)
+}
+
+export async function sha256Blob(blob: Blob): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 /** Read the stored bytes, or null if none. */
@@ -109,16 +118,26 @@ export async function importMedia(file: File, id: string, now = new Date()): Pro
   if (file.size > MEDIA_LIMIT_BYTES) {
     return { ok: false, reason: `That file is ${mb(file.size)} — the limit is ${mb(MEDIA_LIMIT_BYTES)}.` }
   }
+  let bytes: Uint8Array
+  let sha256: string
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer())
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+    sha256 = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return { ok: false, reason: 'Could not read that file.' }
+  }
   const asset: MediaAsset = {
     id,
     kind,
     mime: file.type,
     name: file.name,
     size: file.size,
+    sha256,
     addedAt: now.toISOString(),
   }
   try {
-    await saveMedia(asset, file)
+    await saveMediaBytes(asset, bytes)
   } catch (e) {
     // Loud, never silent — the storage rule this repo learned the hard way on 15 July.
     return { ok: false, reason: e instanceof Error ? e.message : 'Could not store that file.' }

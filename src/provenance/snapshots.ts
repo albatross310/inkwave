@@ -1,7 +1,8 @@
 // Snapshot storage (v4 spec §8, M1). A snapshot is a content-addressed, append-only record of the
 // document at a moment: its contentHash, the Bitcoin-anchored bundleHash, and an OTS proof slot
 // (unstamped until M2). Snapshots are taken on a *resolved kick* when the content hash has changed
-// — so ordinary typing and pasted blocks (no kick resolution) never produce one.
+// — so ordinary typing does not produce one. Image paste deliberately enters through the global
+// manual-snapshot funnel after its bytes and SHA-256 binding land.
 //
 // Stored in OPFS alongside the document: documents/<id>/snapshots.json (an array, append-only).
 // The folder-mirror to a writer-granted directory arrives in M4.
