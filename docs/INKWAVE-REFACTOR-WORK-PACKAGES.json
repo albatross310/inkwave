@@ -998,9 +998,9 @@
         "PdfViewer.tsx:2070/:2188 (scrims) and :2418/:2434 (mark popovers) no longer share zIndex 20; apply the existing N/N+1 convention. Same for SourceBrowser.tsx:1396/:2001 and PdfReaderView.tsx:403",
         "Note these sit INSIDE panel roots at position:fixed zIndex:80 - a stacking context - so the tie is local and so is the fix; they never compete with Toast",
         "PdfSidePanel.tsx:373 (9999) escapes via createPortal so it IS global, but it only exists while dragging and a drag-capture surface should be on top - give it a NAME, not a new number",
-        "index.css:242 .iw-media-image__details at 10020 sits above every modal - confirm with Peter whether that is intended",
         "A guard asserts a dismiss scrim never shares a value with what it dismisses",
-        "Toast(300) above VerifyModal(200) is correct and stays"
+        "Toast(300) above VerifyModal(200) is correct and stays",
+        "index.css:242 .iw-media-image__details moves 10020 -> 120, matching MediaMenu (its own feature sibling): above dock panels (80) and side panels (90-101), below the modal band (130) and below Toast (300)"
       ],
       "tests": [
         "src/components/touchTargets.test.ts"

@@ -1197,7 +1197,16 @@ correctly. **Do not renumber any of them.**
 3. **Two genuine outliers.** `PdfSidePanel.tsx:373`'s `9999` **escapes its panel via `createPortal`**, so it is
    truly global — but it exists only while `dragging`, and a drag-capture surface *should* be on top. It needs
    a name, not a new number. `index.css:242`'s `10020` for `.iw-media-image__details` sits above every modal
-   for an image-details popover, which looks like an accident and is the one worth questioning.
+   for an image-details popover, which looks like an accident.
+   **RECOMMENDED VALUE: `120`** (or `120`/`121` if it ever gains a scrim). Rationale: it is the
+   caption/alt-text popover for an inline image (`MediaImageView.tsx:177`), and **`MediaMenu` — its own
+   feature sibling, the media *import* menu — is already `120`.** That band also reads correctly against
+   its neighbours: above the dock panels (80) and side panels (90–101), because you can be editing a
+   caption with the PDF panel open and the popover is what you are actively touching; **below the modal
+   band (130)**, so a dialog covers it; and below `Toast` (300), so a toast stays visible. `10020` today
+   puts an image-caption box above every modal, the loading veil and the drag overlay.
+   **Bonus:** this element's border is `var(--iw-ui-border, #aaa5a1)` — one of the two custom properties
+   declared nowhere (B5), so it renders fallback grey in both themes. Fixing B5 fixes this popover too.
 
 **Already decided, no action:** `Toast` (300) sits above `VerifyModal` (200), so a toast appears over a dialog
 today. That is the right answer and needs no ruling.
