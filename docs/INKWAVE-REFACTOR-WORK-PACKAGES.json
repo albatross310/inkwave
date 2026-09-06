@@ -1,0 +1,987 @@
+{
+  "basis_commit": "3c24c2b",
+  "generated": "2026-09-06",
+  "note": "Measurements taken on a clean tree at 3c24c2b. Other lanes began editing the worktree during the study; packages touching Scroll.tsx, PaginationExtension.ts, ThesaurusPopover.tsx, SnapshotView.tsx, pageChrome.ts, index.css or zoom* must re-check against the tip before starting.",
+  "stages": {
+    "1": "guardrails and deletion",
+    "2": "startup payload and lazy boundaries",
+    "3": "small pure performance and deduplication",
+    "4": "SCAS windowing proof and graduation",
+    "5": "storage and cloud orchestration",
+    "6": "TiptapEditor decomposition",
+    "7": "large secondary component decomposition",
+    "8": "canonical page breaks and snapshot format"
+  },
+  "work_packages": [
+    {
+      "id": "R00",
+      "title": "Add a pnpm gate script and stop vitest running in watch mode",
+      "stage": 1,
+      "priority": 1,
+      "risk": "low",
+      "depends_on": [],
+      "files": [
+        "package.json"
+      ],
+      "objective": "Close the failure class that has shipped two broken commits: the gate chain is retyped by hand every time. Add \"gate\": \"pnpm typecheck && pnpm test --run && pnpm build\" and add --run to the test script.",
+      "acceptance": [
+        "`pnpm gate` exists and exits non-zero when any stage fails",
+        "`pnpm test` terminates in a TTY instead of entering watch mode",
+        "A deliberately broken type is observed to make `pnpm gate` exit non-zero"
+      ],
+      "tests": [],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R01",
+      "title": "Widen five existing guards so they can see the cases they miss",
+      "stage": 1,
+      "priority": 2,
+      "risk": "low",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/editor/breakRuleParity.test.ts",
+        "src/styles/colourScan.ts",
+        "src/styles/colourScan.test.ts",
+        "src/components/touchTargets.test.ts",
+        "src/components/dockLayout.test.ts",
+        "src/provenance/receipts.test.ts",
+        "src/provenance/countWords.test.ts"
+      ],
+      "objective": "Five tests encode the right rule but assert it only in the configuration where it holds. Widen each so it fails against current master. Do not fix the underlying findings in this package.",
+      "acceptance": [
+        "breakRuleParity loops over _setLiveIsCanonicalForTest(true|false) and is observed RED",
+        "colourScan varUses sweep includes src/styles/index.css and is observed RED on --iw-ui-border",
+        "touchTargets walks src/components + src/editor and matches Tailwind scrims; observed RED",
+        "dockLayout asserts an upper bound and single ownership of inkwave:pdfPanelOrientation",
+        "receipts asserts POOL_SIZE === POOL_LEN across the client/server boundary",
+        "EVERY widened test is observed RED before being called done; a widening that passes immediately has failed"
+      ],
+      "tests": [
+        "breakRuleParity.test.ts",
+        "colourScan.test.ts",
+        "touchTargets.test.ts",
+        "dockLayout.test.ts",
+        "receipts.test.ts",
+        "countWords.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R01b",
+      "title": "Typecheck api/*.mjs, middleware.ts and extension-src",
+      "stage": 1,
+      "priority": 3,
+      "risk": "low",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "tsconfig.json",
+        "tsconfig.node.json",
+        "package.json",
+        "extension-src/package.json"
+      ],
+      "objective": "api/*.mjs resolves to 0 files in either tsconfig. apiFunctionsParse.test.ts already shows that broken syntax in the live OTS endpoint leaves the full gate green. Add an api project with checkJs, include middleware.ts and react-router.config.ts, and add a compile script to extension-src.",
+      "acceptance": [
+        "A planted bad import specifier in api/ots.mjs makes the gate exit non-zero",
+        "middleware.ts and react-router.config.ts resolve in a tsconfig project",
+        "pnpm --dir extension-src compile exists and passes"
+      ],
+      "tests": [
+        "src/audit/apiFunctionsParse.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R01c",
+      "title": "Wire archguard-probe/repro.mjs into the gate",
+      "stage": 1,
+      "priority": 4,
+      "risk": "low",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "scripts/archguard-probe/repro.mjs",
+        "src/audit/probesRunnable.test.ts",
+        "package.json"
+      ],
+      "objective": "probesRunnable.test.ts filters name.endsWith('.prove.mjs'); archguard-probe/repro.mjs is not named that and is wired to nothing, while guarding the highest-blast-radius invariant in the repo: a failed snapshots.json read must not truncate a Bitcoin-anchored archive.",
+      "acceptance": [
+        "The probe is reachable from a prove:* script",
+        "probesRunnable.test.ts covers it",
+        "The same loophole is closed for panerect.mjs and scrub-probe/*, or the exemption is stated"
+      ],
+      "tests": [
+        "src/audit/probesRunnable.test.ts"
+      ],
+      "browser_proofs": [
+        "archguard-probe/repro.mjs"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R01d",
+      "title": "Repair the five rotten probes that are wired but cannot go red",
+      "stage": 1,
+      "priority": 5,
+      "risk": "low",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "scripts/wave-desk/markphase.prove.mjs",
+        "scripts/textrender-probe/zoom.prove.mjs",
+        "scripts/textrender-probe/table.prove.mjs",
+        "scripts/textrender-probe/window.prove.mjs",
+        "scripts/textrender-probe/windowcost.prove.mjs"
+      ],
+      "objective": "Each prints a failing verdict and still exits 0. markphase.prove.mjs:145 exits 0 unconditionally and has no threshold at all.",
+      "acceptance": [
+        "Each probe is observed RED against a planted known-negative before being called repaired",
+        "Each has an explicit threshold and a process.exit driven by it"
+      ],
+      "tests": [],
+      "browser_proofs": [
+        "markphase.prove.mjs",
+        "zoom.prove.mjs",
+        "table.prove.mjs",
+        "window.prove.mjs",
+        "windowcost.prove.mjs"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R02",
+      "title": "Fix music/master.ts readIndex \u2014 live data-loss family",
+      "stage": 1,
+      "priority": 6,
+      "risk": "moderate",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/music/master.ts"
+      ],
+      "objective": "readIndex returns [] on OPFS-unavailable, on corrupt JSON and on every fault, then feeds three blind read-modify-writes. It is citations/library.ts with the guard removed. Adopt the strict contract that storage/opfs.ts already establishes with two named functions.",
+      "acceptance": [
+        "A read fault throws rather than returning []",
+        "replaceMasterContent no longer reports a read fault as 'not on this device'",
+        "music/library.ts's regenerable cache keeps the lenient reader \u2014 do NOT unify them"
+      ],
+      "tests": [
+        "src/music/master.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R03",
+      "title": "Fix index.css orphan declaration and two dangling custom properties",
+      "stage": 1,
+      "priority": 7,
+      "risk": "low",
+      "depends_on": [
+        "R01"
+      ],
+      "files": [
+        "src/styles/index.css",
+        "src/styles/colourScan.ts"
+      ],
+      "objective": "index.css:2323 declares --iw-reader-shadow outside any rule block, so browsers drop it and the night reader keeps the day shadow. --iw-ui-border and --iw-loading-tip-status are read but declared nowhere.",
+      "acceptance": [
+        "Every --iw-* declaration parses inside a rule block, proved by a PostCSS guard",
+        "The night reader shadow resolves to the night value",
+        "R01's widened colourScan goes green"
+      ],
+      "tests": [
+        "src/styles/colourScan.test.ts",
+        "src/styles/readerContrast.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R04",
+      "title": "Fix music/attach.ts tab-identity collision",
+      "stage": 1,
+      "priority": 8,
+      "risk": "moderate",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/music/attach.ts"
+      ],
+      "objective": "attach.ts:158-160 is a second definition of inkwave:activeDocumentId with inverted semantics. tabDoc.ts:17 says it is recency metadata, never a boot pointer. With two tabs open the music panel writes an excerpt into whichever document the other tab last claimed.",
+      "acceptance": [
+        "The active document is resolved via tabDocId() at call time, never a cached localStorage read",
+        "A two-tab test proves the excerpt lands in the correct document"
+      ],
+      "tests": [
+        "src/music/attach.test.ts",
+        "src/storage/tabDoc.locks.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R05",
+      "title": "Fix storage/folder.ts getSaveFileHandle silent save skip",
+      "stage": 1,
+      "priority": 9,
+      "risk": "moderate",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/storage/folder.ts"
+      ],
+      "objective": "getSaveFileHandle collapses two meanings: catch { } -> return null, so a permission fault reads as 'no linked file' and writeBundleToFile silently skips the save.",
+      "acceptance": [
+        "A permission fault is distinguishable from an absent handle",
+        "A failed save surfaces to the writer rather than being skipped"
+      ],
+      "tests": [
+        "src/storage/folder.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R06",
+      "title": "Fix Google Drive listing return type",
+      "stage": 1,
+      "priority": 10,
+      "risk": "moderate",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/storage/gdrive.ts",
+        "src/components/GoogleDriveFolderPicker.tsx",
+        "src/components/GoogleDriveFileOpener.tsx"
+      ],
+      "objective": "listGoogleDriveFiles returns [] for no-token, 500 and misconfigured, where listOneDriveFiles throws. A Drive 500 renders 'Nothing here' and overwrites the good cached listing. Fix the RETURN TYPE to {status:'ok'|'error'} \u2014 the shape archiveWriteback.ts already proves. Do NOT unify the two functions.",
+      "acceptance": [
+        "An error is distinguishable from an empty folder at the type level",
+        "A simulated 500 does not overwrite a cached listing",
+        "GoogleDriveFolderPicker's catch path is reachable"
+      ],
+      "tests": [
+        "src/storage/gdrive.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R07",
+      "title": "Fix three live R7 lifetime bugs",
+      "stage": 1,
+      "priority": 11,
+      "risk": "moderate",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/editor/suggestions/ThesaurusPopover/ThesaurusPopover.tsx",
+        "src/components/SourceBrowser.tsx",
+        "src/routes/SnapshotView.tsx"
+      ],
+      "objective": "Three independent fixes, each separately revertible. (a) ThesaurusPopover:379-429 is a capture-phase window keydown listener with `cycle` in its deps, so it is removed and re-added ~60x/s during a reel spin; the correct pattern is written 20 lines below at :431. (b) SourceBrowser:638-646 dock-room cleanup consumes handingOverRef under per-frame deps. (c) SnapshotView:2616-2650 checks cancellation before the await and never after, on the provenance record.",
+      "acceptance": [
+        "Each fix lands as its own commit",
+        "(a) mirrors cycle into a ref and subscribes once on [editor]",
+        "(c) re-checks cancelled after the await before patching"
+      ],
+      "tests": [],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R08",
+      "title": "Pin CANONICAL_FONT_SIZE across TS and CSS",
+      "stage": 1,
+      "priority": 12,
+      "risk": "low",
+      "depends_on": [
+        "R01"
+      ],
+      "files": [
+        "src/editor/canonicalMeasure.test.ts",
+        "src/styles/index.css",
+        "src/editor/canonicalMeasure.ts"
+      ],
+      "objective": "canonicalMeasure.test.ts:32 asserts the constant against itself. The value is written four times \u2014 canonicalMeasure.ts:14, index.css:1148, index.css:831 (phone x1.25), index.css:1509 (print). Change the CSS base font and every canonical break in every document moves with the suite green. Copy the cross-language pin pattern from prodType.test.ts:213-231.",
+      "acceptance": [
+        "A planted change to the CSS value alone turns the test RED",
+        "All four sites are covered"
+      ],
+      "tests": [
+        "src/editor/canonicalMeasure.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R20",
+      "title": "Probe repair, then triage \u2014 the retirement premise changed",
+      "stage": 1,
+      "priority": 25,
+      "risk": "low",
+      "depends_on": [
+        "R01c",
+        "R01d"
+      ],
+      "files": [
+        "scripts/**"
+      ],
+      "objective": "148 scripts / 24,690 lines. Of 49 one-shots, 21 carry DO-NOT-DELETE \u2014 they are the only thing holding a rule no unit test can reach. The honest clean cut is 1,712 lines across 17 files, not 'the largest reduction in the repo'. 33 probes cannot run at all: 16 hardcode a port and boot no server, 6 point at dead port 5219, the rest use machine-specific absolute paths. REPAIR FIRST. PETER RULED 2026-09-06: repair + CONSERVATIVE cut \u2014 the 1,712 lines across 17 files that are unwired AND unrunnable AND guard no live invariant. Not the aggressive option.",
+      "acceptance": [
+        "The 33 unrunnable probes either run or are retired with their findings archived",
+        "13 scrub probes stop slicing their fixture by matching comment text",
+        "Deleting any .prove.mjs is done as a three-file change: file, package.json line, probeVoidBaseline.json entry",
+        "Conservative cut only: 1,712 lines / 17 files, each verified unwired AND unrunnable AND guarding no live invariant",
+        "The 21 DO-NOT-DELETE one-shots are untouched",
+        "Repair lands BEFORE any deletion"
+      ],
+      "tests": [
+        "src/audit/probesRunnable.test.ts",
+        "src/styles/contrastWalkerContract.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R09",
+      "title": "Lazy the storage-failure recovery screen behind a static fallback",
+      "stage": 2,
+      "priority": 13,
+      "risk": "moderate",
+      "depends_on": [
+        "R00",
+        "R12"
+      ],
+      "files": [
+        "src/routes/Edit.tsx",
+        "src/components/StorageUnavailable.tsx",
+        "src/components/OpfsInspector.tsx",
+        "public/sw.js"
+      ],
+      "objective": "One static import owns ~50% of the landing critical path: Edit.tsx -> StorageUnavailable.tsx -> OpfsInspector.tsx pulls provenance/bundle.ts, scas/pool.ts, data/wordFrequency.ts (318KB), @citation-js/core and all three cloud adapters. StorageUnavailable renders only on a FAILED read. Do NOT simply React.lazy it: sw.js caches on demand and never precaches, so the first offline storage failure would render nothing \u2014 the white page the data-loss invariant forbids. Keep a zero-import static fallback that always ships; lazy only the rich OpfsInspector behind it.",
+      "acceptance": [
+        "A forced read failure while OFFLINE still renders a usable screen in a real browser \u2014 this is the acceptance criterion, not the bytes",
+        "The / critical path drops from 316.8 KB gz toward ~155 KB",
+        "No writer-visible recovery capability is removed"
+      ],
+      "tests": [
+        "src/storage/openDocArchiveFail.test.ts",
+        "src/storage/notFound.test.ts"
+      ],
+      "browser_proofs": [
+        "a forced-offline forced-read-failure browser check"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R10",
+      "title": "Decouple provenance/receipts.ts from scas/pool.ts",
+      "stage": 2,
+      "priority": 14,
+      "risk": "low",
+      "depends_on": [
+        "R12"
+      ],
+      "files": [
+        "src/provenance/receipts.ts",
+        "src/scas/poolId.ts",
+        "src/scas/pool.ts"
+      ],
+      "objective": "Finish the partial fix poolId.ts began: receipts.ts still value-imports pool.ts, which imports the 318KB word list into the landing chunk.",
+      "acceptance": [
+        "The word list is absent from every asset preloaded by /",
+        "Pool identity still verifies \u2014 poolId.test.ts stays green",
+        "FALSIFIER: if the built asset list does not move, the chunk graph re-hoisted pool.ts through another edge; check assets, not source"
+      ],
+      "tests": [
+        "src/scas/poolId.test.ts",
+        "src/provenance/receipts.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R11",
+      "title": "Lazy the gesture-gated panels, one package per panel",
+      "stage": 2,
+      "priority": 15,
+      "risk": "moderate",
+      "depends_on": [
+        "R09",
+        "R12"
+      ],
+      "files": [
+        "src/editor/TiptapEditor.tsx",
+        "src/components/SourceBrowser.tsx",
+        "src/components/CitationPanel.tsx",
+        "src/components/VerifyModal.tsx",
+        "src/components/ReceiptPanel.tsx",
+        "src/components/EmailComposePanel.tsx",
+        "src/components/OneDriveFileOpener.tsx",
+        "src/components/GoogleDriveFileOpener.tsx"
+      ],
+      "objective": "Move gesture-gated panels behind lazy boundaries. CRITICAL: user-gesture APIs must stay synchronous with the gesture. The boundary goes AROUND the panel, never IN FRONT OF the handler \u2014 no await may precede an OAuth popup, file picker, download or clipboard write.",
+      "acceptance": [
+        "Each panel opens on FIRST click with no activation error, in a real browser, desktop and phone",
+        "One package per panel so each reverts alone",
+        "Critical-path bytes drop measurably per panel"
+      ],
+      "tests": [],
+      "browser_proofs": [
+        "a real-browser first-click check per panel, desktop and phone"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R12",
+      "title": "Add a chunk budget and fix prodLoadPath's pass-on-rename regex",
+      "stage": 2,
+      "priority": 16,
+      "risk": "low",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "package.json",
+        "scripts/prodLoadPath.prove.mjs",
+        "src/music/chunk.test.ts"
+      ],
+      "objective": "Nothing asserts a bundle size. prodLoadPath.prove.mjs hinges on /^TiptapEditor-.*\\.js$/ at :29, so renaming TiptapEditor.tsx makes it match nothing and PASS. Without a budget, R09 and R10 regress silently.",
+      "acceptance": [
+        "A gate asserts the / critical path stays under an agreed gz ceiling",
+        "The prodLoadPath regex is observed to FAIL when its target is renamed",
+        "Planting an eager import of provenance/bundle.ts in Edit.tsx turns the budget RED"
+      ],
+      "tests": [
+        "src/music/chunk.test.ts"
+      ],
+      "browser_proofs": [
+        "prodLoadPath.prove.mjs"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R12b",
+      "title": "Lazy ScrubDebugOverlay, which is statically imported into the live /snapshot chunk",
+      "stage": 2,
+      "priority": 17,
+      "risk": "low",
+      "depends_on": [
+        "R12"
+      ],
+      "files": [
+        "src/routes/SnapshotView.tsx",
+        "src/routes/ScrubDebugOverlay.tsx"
+      ],
+      "objective": "SnapshotView.tsx:16 imports it statically and :3330 renders it behind snapThumbsDebug(). The runtime guard is real; the module boundary is not, and its --iw-hud-* tokens are present in the shipped /snapshot chunk.",
+      "acceptance": [
+        "The overlay's tokens are absent from the /snapshot chunk",
+        "The debug flag still shows the overlay when set"
+      ],
+      "tests": [
+        "src/routes/snapshotPalette.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R12c",
+      "title": "Dependency cleanup and heavy-dep deferral from the editor graph",
+      "stage": 2,
+      "priority": 18,
+      "risk": "moderate",
+      "depends_on": [
+        "R12"
+      ],
+      "files": [
+        "package.json",
+        "src/editor/extensions/MathInlineView.tsx",
+        "src/editor/extensions/MathBlockView.tsx",
+        "src/citations/styles.ts",
+        "src/components/AccountControl.tsx",
+        "src/components/OptionsMenu.tsx"
+      ],
+      "objective": "Remove @testing-library/jest-dom (zero references, no setupFiles, never loaded) and @types/katex (katex ships its own types, and it sits in dependencies). Then defer the three heavy deps that are EAGER in the editor chunk: katex (via editorExtensions -> MathInline/MathBlock, plus 6 font files), @citation-js/core (via CitationNode -> format -> styles) and @clerk/clerk-react (via OptionsMenu -> AccountControl).",
+      "acceptance": [
+        "The two unused deps are gone and the gate stays green",
+        "katex, @citation-js/core and @clerk/clerk-react are absent from the eager editor graph",
+        "Math renders on first insertion with no flash of unstyled formula",
+        "@clerk/clerk-react deferral respects CLAUDE.md's rule that auth must not mount for the free tier",
+        "DO NOT remove @react-router/node or isbot \u2014 they have no direct import but are required by React Router's own default server entry, and ssr:false still prerenders 5 routes"
+      ],
+      "tests": [
+        "src/music/chunk.test.ts"
+      ],
+      "browser_proofs": [
+        "prodLoadPath.prove.mjs"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R13",
+      "title": "Memoise ScasController.lookup()",
+      "stage": 3,
+      "priority": 18,
+      "risk": "low",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/scas/controller.ts",
+        "src/scas/state.ts"
+      ],
+      "objective": "lookup() has no memo; buildLookup allocates three Sets per call. The hot caller is isLockedLemma inside candidates.filter at usePopoverLayout.ts:188 \u2014 a full rebuild per candidate, up to 40. Measured 7.7ms at 800 lemmas, 24.9ms at 2600. FIRST take one browser reading of a real document's locked+liveKicks+satisfied sizes; if they are in the low tens, STOP and report that \u2014 it is the falsifier, not a failure.",
+      "acceptance": [
+        "Memo keyed on this.state identity AND this.setSize",
+        "Infinite mode still returns an empty lookup after a state-identical transition",
+        "Popover-open timing reported before and after"
+      ],
+      "tests": [
+        "src/scas/state.test.ts",
+        "src/scas/controller.presence.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R14",
+      "title": "Typed inkwave:* event registry",
+      "stage": 3,
+      "priority": 19,
+      "risk": "low",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/editor/extensions/PaginationExtension.ts",
+        "src/types/document.ts"
+      ],
+      "objective": "inkwave:arith-exit is listened for and never dispatched \u2014 its only two references are the add and remove. Three events are dispatched with no listener. ~35 of ~44 use repeated string literals; two prefix conventions coexist plus one bare name.",
+      "acceptance": [
+        "Every event name is an exported constant with a typed detail",
+        "A rename is a compile error, not a silent no-op",
+        "Dead events are either wired or removed, with the choice stated"
+      ],
+      "tests": [],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R13b",
+      "title": "Bound the synonym prefetch: key the scan, negative-cache failures, evict instead of clearing",
+      "stage": 3,
+      "priority": 19,
+      "risk": "moderate",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/editor/suggestions/thesaurus.ts",
+        "src/editor/TiptapEditor.tsx"
+      ],
+      "objective": "TiptapEditor.tsx:1340-1347 re-arms a 600ms timer on every doc-changing transaction and rescans every .scas-red element, keyed on nothing. The DOM scan is the lesser half. thesaurus.ts:94-96 deliberately does not cache failures while drainPrefetchQueue:125 deletes from prefetchQueued regardless of outcome, so offline or under a 429 every red word is re-queued and re-fetched twice per pause, indefinitely. thesaurus.ts:91 caps the cache with CACHE.clear() rather than eviction, so a doc with >4000 distinct lemmas thrashes.",
+      "acceptance": [
+        "FIRST measure: install a fetch counter and type 3 minutes OFFLINE on a thesis-scale doc; report requests per pause-cycle before any change",
+        "Skip the pause-scan when the SCAS tick reported stateChanged === false and the red-word count is unchanged",
+        "Negative-result TTL bounds retry - this is the change that actually bounds the amplification",
+        "TTL is reconnect-aware: flush on the `online` event, or the first click after reconnect shows an empty reel",
+        "LRU eviction replaces CACHE.clear()",
+        "FALSIFIER 1: prefetchDraining is held for the whole drain, so a new pause only appends - if typing pauses are shorter than the drain the amplification is far smaller than predicted. Measure before building.",
+        "FALSIFIER 2: if real DISTINCT LEMMA counts are in the low hundreds rather than ~2600, the finding shrinks ~8x",
+        "Does not touch ThesaurusPopover.tsx, which another lane is editing"
+      ],
+      "tests": [
+        "src/editor/suggestions/thesaurus.test.ts"
+      ],
+      "browser_proofs": [
+        "offline fetch-count check on a thesis-scale document"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R15",
+      "title": "Unify six duplicated localStorage literals",
+      "stage": 3,
+      "priority": 20,
+      "risk": "low",
+      "depends_on": [
+        "R04"
+      ],
+      "files": [
+        "src/components/dockLayout.ts",
+        "src/components/PdfSidePanel.tsx",
+        "src/editor/viewSettings.ts",
+        "src/components/SettingsMenu.tsx",
+        "src/editor/extensions/RedHighlightExtension.ts"
+      ],
+      "objective": "dockLayout.ts:20-23 says the keys are shared on purpose and PdfSidePanel.tsx:38-39 keeps private copies. inkwave:debugHighlightAll is honoured by RedHighlightExtension and invisible to SettingsMenu, so the checkbox renders unchecked while the feature is on. stickyFlag.ts is the correctly-solved template.",
+      "acceptance": [
+        "One owner per key",
+        "R01's widened dockLayout guard goes green",
+        "The debug checkbox reflects the live state"
+      ],
+      "tests": [
+        "src/components/dockLayout.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R16",
+      "title": "Shared production/dev API adapter",
+      "stage": 3,
+      "priority": 21,
+      "risk": "moderate",
+      "depends_on": [
+        "R01b"
+      ],
+      "files": [
+        "vite.config.ts",
+        "api/reader.mjs",
+        "api/sync-profile.mjs",
+        "api/me.mjs"
+      ],
+      "objective": "Five live divergences: no method gate on /api/reader (405 prod, 200 dev), rateLimit called by ZERO dev routes, raw upstream error strings leak past the SSRF allow-list, body parsed before auth on /api/sync-profile, http:// vs https:// into PayPal. The four Class-A routes prove the transport works. Keep reader/fetchRules.ts's deliberate 4MB/2MB duplication \u2014 it states its invariant and argues the difference.",
+      "acceptance": [
+        "Dev and prod share one method gate, rate limiter, auth check and error vocabulary",
+        "Production behaviour is unchanged by construction",
+        "clerk-webhook stays separate \u2014 its Request/Response signature cannot be hosted by the dev wrapper"
+      ],
+      "tests": [],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R19",
+      "title": "SCAS windowing: fix magnify coordinates, measure, then decide graduation",
+      "stage": 4,
+      "priority": 24,
+      "risk": "moderate",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/editor/extensions/RedHighlightExtension.ts",
+        "CLAUDE.md"
+      ],
+      "objective": "CLAUDE.md:1649-1653 says this was 'not attempted'. It is implemented, flagged default OFF, and unit-pinned. Three steps: fix the coordinate bug (computeWide reads getBoundingClientRect().bottom at :273 with no scaleFor/unscale conversion, against magnify.ts:19-20); measure with the ablation harness; graduate only if the number moves beyond noise.",
+      "acceptance": [
+        "The window is computed in layout px at magnify != 1",
+        "Ablation cells scasWindow=0 vs =1 reported with median keydown->paint",
+        "A NULL RESULT IS A SUCCESSFUL PACKAGE \u2014 record it, leave the flag off, and say so",
+        "CLAUDE.md:1649-1653 corrected",
+        "Report before flipping any default"
+      ],
+      "tests": [
+        "src/editor/extensions/redHighlightWindow.test.ts",
+        "src/scas/controller.window.test.ts"
+      ],
+      "browser_proofs": [
+        "the 4x-throttle ablation harness on a 100-page synthetic with seeded SCAS state"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R17",
+      "title": "OneDrive/Drive parity: pagination, heartbeat, throttle, ensureExt",
+      "stage": 5,
+      "priority": 22,
+      "risk": "moderate",
+      "depends_on": [
+        "R06"
+      ],
+      "files": [
+        "src/storage/gdrive.ts",
+        "src/storage/onedrive.ts"
+      ],
+      "objective": "Drive has no listing pagination, no multi-device heartbeat and no write throttle. ensureExt/stripExt are byte-identical duplicates. renameOneDriveFile pins the name before the PATCH result, which silently kills sync on OneDrive alone.",
+      "acceptance": [
+        "Drive follows page tokens the way OneDrive follows nextLink",
+        "ensureExt/stripExt have one definition",
+        "rename pins the name only after the PATCH succeeds",
+        "DO NOT unify the three archive readers \u2014 only 404/404/NotFoundError means absence",
+        "DO NOT unify the sign-in blocks \u2014 MSAL loginRedirect destroys the component, GIS popup does not"
+      ],
+      "tests": [
+        "src/storage/cloudLocalRead.test.ts",
+        "src/storage/cloudWriteback.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R18",
+      "title": "IndexedDB open shell plus close/onblocked/versionchange",
+      "stage": 5,
+      "priority": 23,
+      "risk": "low",
+      "depends_on": [
+        "R00"
+      ],
+      "files": [
+        "src/storage/indexeddb.ts",
+        "src/storage/folder.ts"
+      ],
+      "objective": "Unify the 6-line open shell only. Keep the store semantics separate \u2014 one uses an in-line key (keyPath:'id'), the other an out-of-line key because a FileSystemFileHandle is opaque. Zero db.close(), onblocked or versionchange handlers exist anywhere, so a future DB_VERSION=2 hangs both DBs.",
+      "acceptance": [
+        "One open shell, two store contracts",
+        "A simulated version bump does not hang",
+        "Missing-record semantics are normalised in one place"
+      ],
+      "tests": [
+        "src/storage/folder.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R24",
+      "title": "TiptapEditor readability decomposition",
+      "stage": 6,
+      "priority": 29,
+      "risk": "moderate",
+      "depends_on": [
+        "R01",
+        "R09"
+      ],
+      "files": [
+        "src/editor/TiptapEditor.tsx"
+      ],
+      "objective": "READABILITY ONLY \u2014 this buys no measurable performance and will produce net POSITIVE lines. All 53 useState stay in one component, so extracting hooks reduces re-render scope by exactly zero; there is one React.memo in all of src/. Order: cloud sync orchestration, then toolbar slot model, then keyboard/footer geometry, then panel registry \u2014 each a separate package.",
+      "acceptance": [
+        "Characterization tests written BEFORE each move, against the unmoved code",
+        "recoverAndPurge STAYS at :2738 \u2014 it deleted 79 Bitcoin-anchored snapshots to 4 on Peter's real thesis",
+        "useEditor stays in a default-lane render \u2014 never lazy/Suspense",
+        "Three path-keyed guards re-pointed AND re-proved in the same commit",
+        "colourBaseline re-baselined (cap 16)",
+        "Reported as a readability change, not a performance one"
+      ],
+      "tests": [
+        "src/citations/citeWalk.perf.test.ts",
+        "src/music/chunk.test.ts"
+      ],
+      "browser_proofs": [
+        "scripts/prodLoadPath.prove.mjs"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R25",
+      "title": "TiptapEditor re-render project \u2014 measure before building",
+      "stage": 6,
+      "priority": 30,
+      "risk": "moderate",
+      "depends_on": [
+        "R24"
+      ],
+      "files": [
+        "src/editor/TiptapEditor.tsx"
+      ],
+      "objective": "Move state ownership down into children or out into stores, and memoise. MEASURE FIRST: because shouldRerenderOnTransaction:false is in force, these re-renders may be a UI-interaction cost and not a typing cost at all.",
+      "acceptance": [
+        "An ablation reading is taken BEFORE any change",
+        "Do not claim a typing win without it",
+        "FALSIFIER: if the ablation shows no keystroke difference, the value is UI responsiveness only \u2014 say so and re-rank the package"
+      ],
+      "tests": [],
+      "browser_proofs": [
+        "the 4x-throttle ablation harness"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R21",
+      "title": "Extract CitationPanel CSL formatters",
+      "stage": 7,
+      "priority": 26,
+      "risk": "low",
+      "depends_on": [
+        "R01"
+      ],
+      "files": [
+        "src/components/CitationPanel.tsx",
+        "src/citations/citationFields.ts"
+      ],
+      "objective": "CitationPanel.tsx:180-229 holds six pure CSL formatters (itemSource, authorFamily, authorsToString, strField, fmtVal, relTime) with ZERO tests, unreachable by a guard without loading a 1,126-line component plus the citation network stack. This is commit 1c843c2's shape \u2014 the only split in this repo with a measured payoff (6x collect).",
+      "acceptance": [
+        "The six formatters have tests written BEFORE the move, against the unmoved code",
+        "citeWalk.perf.test.ts:63 is re-pointed AND RE-PROVED to fire \u2014 it is a negative assertion, so a bad re-point passes silently on an empty read",
+        "colourBaseline re-baselined (cap 39, the largest in the repo) with a reviewer"
+      ],
+      "tests": [
+        "src/citations/citeWalk.perf.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R22",
+      "title": "Extract Scroll load-wave choreography",
+      "stage": 7,
+      "priority": 27,
+      "risk": "low",
+      "depends_on": [
+        "R01"
+      ],
+      "files": [
+        "src/editor/Scroll.tsx"
+      ],
+      "objective": "It is already a module hiding in a component: loadCoast, driftSurfaces, watchdogT, a module-level window listener, injectAdditiveCoastFrames, ADDITIVE_COAST, timelineNow. Its correctness is CROSS-INSTANCE and currently untestable at all. Lowest guard friction in the audit \u2014 no path-keyed guard, colour cap 3.",
+      "acceptance": [
+        "Characterization tests written BEFORE the move",
+        "The cross-instance reference rule is testable: the first-mounted surface becomes the wave clock reference and is never rewritten",
+        "SnapshotView's Scroll still passes no `revealed` prop \u2014 its layers must not join driftSurfaces"
+      ],
+      "tests": [
+        "src/editor/wheelArming.test.ts",
+        "src/editor/scrollRatio.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R23",
+      "title": "Extract SourceBrowser mark rendering",
+      "stage": 7,
+      "priority": 28,
+      "risk": "low",
+      "depends_on": [
+        "R01"
+      ],
+      "files": [
+        "src/components/SourceBrowser.tsx"
+      ],
+      "objective": "markedStyle/InsertedText/BoxCard/Runs at :184-351 are prop-only with no shared refs. Four guards currently load the whole 2,221-line component and its extension graph to reach text assertions.",
+      "acceptance": [
+        "useClampedX MUST STAY \u2014 touchTargets.test.ts:267 asserts the literal 'function useClampedX' appears in this file",
+        "All four path-keyed guards re-pointed and re-proved",
+        "colourBaseline re-baselined (cap 27)"
+      ],
+      "tests": [
+        "src/components/touchTargets.test.ts",
+        "src/styles/readerContrast.test.ts",
+        "src/reader/pdfAddress.test.ts",
+        "src/reader/extensionDownload.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R26",
+      "title": "staticPagination reference-list force-break",
+      "stage": 8,
+      "priority": 31,
+      "risk": "moderate",
+      "depends_on": [
+        "R01"
+      ],
+      "files": [
+        "src/editor/staticPagination.ts"
+      ],
+      "objective": "PaginationExtension:478-485 and arithmeticLayout:611-616 force a break before the reference list; grep refList staticPagination.ts returns 0. So any /snapshot document with a bibliography pages differently from the editor today, and breakRuleParity.test.ts passes refListPos=-1 everywhere so it structurally cannot see it. PETER RULED 2026-09-06: fix it \u2014 snapshot page numbers must match the editor; changing how old .studio docs page is explicitly acceptable. The blast-radius check is DONE and clean: the only persisted `page` field (types/document.ts:54) is PDF highlight rects, citation back-refs read docPageOf off live DOM widgets, and SnapshotView's pageGeo is display-only React state that is never persisted or signed.",
+      "acceptance": [
+        "Break POSITIONS compared, not page counts \u2014 equal counts hide divergent offsets",
+        "pnpm prove:breaks prints byte-identical positions and the same contentWidth",
+        "Snapshot pane page numbers match the editor on a document with a bibliography",
+        "Back-ref page labels rendered inside the pane also correct (pageGap.ts:3 \u2014 staticPagination emits the same .inkwave-page-gap DOM)"
+      ],
+      "tests": [
+        "src/editor/breakRuleParity.test.ts"
+      ],
+      "browser_proofs": [
+        "prove:breaks",
+        "inkwave:pagCheck=1"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R27",
+      "title": "Diagnose whether the phone break divergence is phone-specific or WebKit-specific",
+      "stage": 8,
+      "priority": 32,
+      "risk": "low",
+      "depends_on": [
+        "R01",
+        "R26"
+      ],
+      "files": [
+        "src/editor/extensions/PaginationExtension.ts",
+        "src/editor/staticPagination.ts",
+        "src/editor/arithmeticLayout.ts"
+      ],
+      "objective": "PETER RULED 2026-09-06: DO NOT consolidate the three break rules. His reasoning: liveIsCanonical is false on phoneLike() BECAUSE the phone renders at a different font size, so the non-canonical configuration exists on purpose and the measured 99-vs-127 split was taken inside exactly that intended configuration. His sharper question: is the divergence actually iOS/WebKit-specific rather than phone-specific? If so the CONDITION is wrong, not the rule \u2014 phoneLike() would be the wrong axis (R9), and consolidating would cement a bad predicate into one place instead of three. 'I'd rather not change it without finding the bug in testing.' INSTRUMENT AND OBSERVE ONLY.",
+      "acceptance": [
+        "Break positions compared on iOS Safari vs desktop Chrome AT THE SAME FONT SIZE, and on Android Chrome",
+        "Determine whether the divergence tracks PHONE or tracks WEBKIT",
+        "Report the finding and propose nothing until it is known",
+        "NO code change to the break rule or to phoneLike() in this package \u2014 any change to the condition returns to Peter",
+        "R01's widened parity guard runs underneath and catches new drift meanwhile"
+      ],
+      "tests": [
+        "src/editor/breakRuleParity.test.ts",
+        "src/editor/lineRuleParity.test.ts"
+      ],
+      "browser_proofs": [
+        "iOS Safari on a real device",
+        "desktop Chrome at matched font size",
+        "Android Chrome"
+      ],
+      "requires_peter_decision": false
+    },
+    {
+      "id": "R29",
+      "title": "Name the existing z-index bands and fix the three scrim/content ties",
+      "stage": 8,
+      "priority": 34,
+      "risk": "low",
+      "depends_on": [
+        "R01"
+      ],
+      "files": [
+        "src/components/PdfViewer.tsx",
+        "src/components/SourceBrowser.tsx",
+        "src/components/PdfReaderView.tsx",
+        "src/components/PdfSidePanel.tsx",
+        "src/styles/index.css"
+      ],
+      "objective": "A full census across BOTH syntaxes (inline zIndex: N and Tailwind z-[N]) shows a coherent ladder ALREADY EXISTS, and the N=scrim / N+1=content convention is already used correctly by AiConsentDialog 130/131, ProductivityReportModal 130/131, SettingsMenu 90/91, CitationPanel 90/91 and 100/101, GuideMenu 99/100, MathMenu 199/200, ReviewBar and StyleBar 98/99. DO NOT RENUMBER THEM. The defect is that the ladder is invisible (two syntaxes), that three sites did not follow the convention, and that two outliers exist.",
+      "acceptance": [
+        "Existing bands named as tokens - DESCRIBING what is there, not changing it",
+        "PdfViewer.tsx:2070/:2188 (scrims) and :2418/:2434 (mark popovers) no longer share zIndex 20; apply the existing N/N+1 convention. Same for SourceBrowser.tsx:1396/:2001 and PdfReaderView.tsx:403",
+        "Note these sit INSIDE panel roots at position:fixed zIndex:80 - a stacking context - so the tie is local and so is the fix; they never compete with Toast",
+        "PdfSidePanel.tsx:373 (9999) escapes via createPortal so it IS global, but it only exists while dragging and a drag-capture surface should be on top - give it a NAME, not a new number",
+        "index.css:242 .iw-media-image__details at 10020 sits above every modal - confirm with Peter whether that is intended",
+        "A guard asserts a dismiss scrim never shares a value with what it dismisses",
+        "Toast(300) above VerifyModal(200) is correct and stays"
+      ],
+      "tests": [
+        "src/components/touchTargets.test.ts"
+      ],
+      "browser_proofs": [],
+      "requires_peter_decision": false
+    }
+  ],
+  "rulings_2026_09_06": {
+    "R26": "approved \u2014 fix it; old .studio paging changes are acceptable; blast-radius check done and clean",
+    "R27": "do NOT consolidate; re-scoped to a phone-vs-WebKit diagnostic",
+    "R28": "dropped \u2014 package removed",
+    "R29": "approved \u2014 agree layer order with Peter first",
+    "R20": "approved \u2014 repair + conservative cut only"
+  }
+}
