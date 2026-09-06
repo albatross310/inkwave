@@ -1238,9 +1238,10 @@ scripts/textrender-probe/zoomcost.prove.mjs.
 ### Modifier mode, the gesture latch, and arming the wheel listener
 
 MODIFIER MODE (Peter, 2026-09-06): cursor position does not select zoom behaviour.
-A plain trackpad pinch (reported by browsers as ctrl+wheel) performs font reflow;
-Command+scroll/pinch performs whole-page magnify. Unmodified two-finger scrolling remains native
-document scrolling. Diagonal pinch events project a bounded amount of deltaX into the deltaY scale
+Natural trackpad pinch (reported by browsers as ctrl+wheel) performs font reflow; Shift makes any
+two-finger movement perform the same reflow, using its dominant axis so no direction is dead.
+Command+scroll/pinch performs whole-page magnify. Ordinary unmodified two-finger scrolling remains
+native document scrolling. Diagonal pinch events project a bounded amount of deltaX into the deltaY scale
 magnitude, so an angled approach does not feel dead; deltaY retains the zoom direction and a purely
 horizontal event remains ignored. Latched per gesture — see zoomZone.ts.
 `isIdle()` must be read BEFORE `resolve()` — resolve() itself latches a mode on its first

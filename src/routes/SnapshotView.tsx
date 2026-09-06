@@ -26,7 +26,7 @@ import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { probePerf } from '../editor/perflog'
 import { stepDetent, newDetent, resetDetent, trimmed, TRACKPAD_DETENT, TOUCH_DETENT } from '../editor/scrubDetent'
-import { createZoomLatch, zoomModeForWheel } from '../editor/zoomZone'
+import { createZoomLatch, omnidirectionalZoomDelta, zoomModeForWheel } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { RichDiffView } from '../components/RichDiffView'
@@ -985,16 +985,21 @@ function SplitDiffView({
     const el = containerRef.current
     if (!el) return
     // Modifier/latch/cursor parity with the live editor: Command selects the whole-page cursor;
-    // plain pinch/ctrl-scroll selects text. Snapshot has one scale pipeline, so both drive diffZoom.
+    // Shift+pinch selects text. Snapshot has one scale pipeline, so both drive diffZoom.
     const latch = createZoomLatch(() => containerRef.current)
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
+      const requestedMode = zoomModeForWheel(e, true)
+      if (!requestedMode) return
       e.preventDefault()
+      const zoomDelta = requestedMode === 'text' && e.shiftKey
+        ? omnidirectionalZoomDelta(e.deltaX, e.deltaY)
+        : e.deltaY || e.deltaX
+      if (zoomDelta === 0) return
       const pane = leftScrollRef.current?.contains(e.target as Node) ? leftScrollRef.current
         : rightScrollRef.current?.contains(e.target as Node) ? rightScrollRef.current : null
       latch.resolve(
-        () => zoomModeForWheel(e, true),
-        e.deltaY > 0,
+        () => requestedMode,
+        requestedMode === 'water' ? zoomDelta < 0 : zoomDelta > 0,
       )
       if (pane) {
         const offY = e.clientY - pane.getBoundingClientRect().top
@@ -1006,7 +1011,8 @@ function SplitDiffView({
           dzAnchor.current = { el: pane, offY, mode: 'right', z0: diffZoomRef.current, paperTop: 0, rel: pane.scrollTop + offY }
         }
       } else dzAnchor.current = null
-      setDiffZoom(z => { const n = Math.max(0.6, Math.min(2.5, +(z * (e.deltaY < 0 ? 1.08 : 0.926)).toFixed(3))); try { localStorage.setItem('inkwave:diffZoom', String(n)) } catch { /* private */ }; return n })
+      const zoomIn = requestedMode === 'water' ? zoomDelta > 0 : zoomDelta < 0
+      setDiffZoom(z => { const n = Math.max(0.6, Math.min(2.5, +(z * (zoomIn ? 1.08 : 0.926)).toFixed(3))); try { localStorage.setItem('inkwave:diffZoom', String(n)) } catch { /* private */ }; return n })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => { el.removeEventListener('wheel', onWheel); latch.dispose() }

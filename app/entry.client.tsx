@@ -1,6 +1,7 @@
 import { startTransition, StrictMode, useEffect, type ReactNode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { installInkwaveWindowCycling, reapplyInkwaveWindowSlot } from '../src/pwa/windows'
+import { installStudioFileLaunch } from '../src/pwa/fileLaunch'
 import { HydratedRouter } from 'react-router/dom'
 
 // Build marker — confirms the live build in the console (helps catch stale-cache situations).
@@ -286,28 +287,19 @@ if (window.matchMedia?.('(pointer: coarse) and (hover: none)')?.matches) {
   }, { passive: false, capture: true })
 }
 
-// PWA file handling (Chrome/Edge/Brave, installed): double-clicking a .inkwave file launches the app
-// here with the file handle. Open it (and resume syncing back to it). No-op in browsers without it.
-const lq = (window as unknown as { launchQueue?: { setConsumer: (cb: (p: { files?: FileSystemFileHandle[] }) => void) => void } }).launchQueue
-if (lq && typeof lq.setConsumer === 'function') {
-  lq.setConsumer((params) => {
-    const handle = params.files?.[0]
-    if (!handle) return
-    void (async () => {
-      try {
-        // Try for write access so edits save back to the opened file.
-        try { await (handle as unknown as { requestPermission?: (d: { mode: string }) => Promise<string> }).requestPermission?.({ mode: 'readwrite' }) } catch { /* read-only ok */ }
-        const file = await handle.getFile()
-        const { openInkwaveFile } = await import('../src/storage/openDoc')
-        await openInkwaveFile(file, { handle })
-      } catch (err) {
-        // Surface parse failures — a renamed plain-text file would otherwise silently do nothing.
-        const msg = err instanceof Error ? err.message : 'Could not open file'
-        alert(`Inkwave couldn't open this file:\n\n${msg}`)
-      }
-    })()
-  })
-}
+// PWA file handling (desktop Chromium, installed): Finder/Explorer launches arrive through
+// LaunchQueue. The shared coordinator waits until Edit's in-place open listener is mounted, so a
+// cold one-click launch cannot parse successfully and then lose its final event before hydration.
+installStudioFileLaunch(async (handle) => {
+  // Try for write access so edits sync back to the file. A read-only launch still opens normally.
+  try { await (handle as unknown as { requestPermission?: (d: { mode: string }) => Promise<string> }).requestPermission?.({ mode: 'readwrite' }) } catch { /* read-only ok */ }
+  const file = await handle.getFile()
+  const { openInkwaveFile } = await import('../src/storage/openDoc')
+  await openInkwaveFile(file, { handle })
+}, (error) => {
+  const message = error instanceof Error ? error.message : 'Could not open file'
+  alert(`Inkwave couldn't open this file:\n\n${message}`)
+})
 
 // ─── Capability floor (iOS/Safari 16.4) ─────────────────────────────────────────
 // CompressionStream gates the gzip snapshot archive (provenance/snapshots.ts) and its worker reads.

@@ -121,23 +121,28 @@
     text-align: center;
   }
   .iw-media-image__caption {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    align-items: baseline;
-    gap: 0 0.45em;
-    white-space: nowrap;
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: start;
+    row-gap: 0.08em;
+    box-sizing: border-box;
     padding: 0.38rem 0.1rem 0.12rem;
     color: var(--iw-ink, #302438);
     font-family: inherit;
-    font-size: inherit;
+    font-size: calc(1em - 2pt);
     line-height: inherit;
     text-align: left;
   }
   .iw-media-image__title {
+    min-width: 0;
+    max-width: 100%;
+    justify-self: start;
     cursor: text;
     font: inherit;
     font-style: italic;
+    overflow-wrap: anywhere;
   }
   .iw-media-image__title-input {
     min-width: 2ch;
@@ -153,10 +158,37 @@
   .iw-media-image__meta {
     color: var(--iw-doc-muted, #6b5b7a);
     font-family: inherit;
-    font-size: 0.72em;
+    font-size: inherit;
     font-style: normal;
   }
-  .iw-media-image__source { color: var(--iw-doc-accent, #302438); text-decoration: underline; text-underline-offset: 0.12em; }
+  .iw-media-image__caption-tail {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: baseline;
+    justify-self: end;
+    gap: 0.45em;
+    white-space: nowrap;
+  }
+  .iw-media-image__source {
+    display: inline-flex;
+    flex: none;
+    width: 1em;
+    height: 1em;
+    align-items: center;
+    justify-content: center;
+    color: var(--iw-doc-accent, #302438);
+    vertical-align: -0.12em;
+  }
+  .iw-media-image__source-icon {
+    display: block;
+    width: 1em;
+    height: 1em;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   button.iw-media-image__source {
     padding: 0;
     border: 0;
@@ -233,7 +265,8 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
   }
-  .iw-media-image__details input {
+  .iw-media-image__details input,
+  .iw-media-image__details select {
     width: 100%;
     box-sizing: border-box;
     padding: 0.5rem 0.58rem;

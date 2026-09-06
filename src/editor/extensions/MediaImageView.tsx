@@ -11,6 +11,9 @@ import {
   type ImageDragMode,
   type ImageGeometry,
 } from '../imageGeometry'
+import { bibProvider } from '../../citations/bibProvider'
+import { openCitationPanel } from '../../citations/panelOpen'
+import type { CSLItem, IwCitationMeta } from '../../types/document'
 
 interface OpenPanel {
   left: number
@@ -48,6 +51,11 @@ export function MediaImageView({ node, selected, updateAttributes, extension }: 
   const [editingTitle, setEditingTitle] = useState(false)
   const [draftTitle, setDraftTitle] = useState(String(attrs.title ?? ''))
   const [draftSource, setDraftSource] = useState(String(attrs.source ?? ''))
+  const [draftSourceCitekey, setDraftSourceCitekey] = useState(String(attrs.sourceCitekey ?? ''))
+  const [, setReferenceVersion] = useState(0)
+
+  useEffect(() => bibProvider.subscribe(() => setReferenceVersion((version) => version + 1)), [])
+  const references = bibProvider.getAll()
 
   useEffect(() => {
     if (dragRef.current) return
@@ -156,6 +164,7 @@ export function MediaImageView({ node, selected, updateAttributes, extension }: 
     event.preventDefault()
     event.stopPropagation()
     setDraftSource(String(attrs.source ?? ''))
+    setDraftSourceCitekey(String(attrs.sourceCitekey ?? ''))
     const width = 320
     const left = Math.max(12, Math.min(event.clientX, window.innerWidth - width - 12))
     const top = Math.max(12, Math.min(event.clientY, window.innerHeight - 270))
@@ -173,14 +182,46 @@ export function MediaImageView({ node, selected, updateAttributes, extension }: 
       contentEditable={false}
     >
       <label>
-        <span>Source</span>
+        <span>Reference in this document</span>
+        <select
+          value={draftSourceCitekey}
+          onChange={(event) => {
+            const citekey = event.target.value
+            setDraftSourceCitekey(citekey)
+            if (!citekey) {
+              updateAttributes({ sourceCitekey: '' })
+              return
+            }
+            const item = bibProvider.get(citekey)
+            if (!item) return
+            const source = sourceForReference(item)
+            setDraftSource(source)
+            updateAttributes({ sourceCitekey: citekey, source })
+          }}
+        >
+          <option value="">No linked reference</option>
+          {references.map((item) => <option key={item.id} value={item.id}>{referenceLabel(item)}</option>)}
+        </select>
+      </label>
+      <button
+        type="button"
+        onClick={() => {
+          setPanel(null)
+          openCitationPanel({ newReference: true })
+        }}
+      >
+        Add new reference
+      </button>
+      <label>
+        <span>Web address or description</span>
         <input
           value={draftSource}
           placeholder="Webpage URL or description, e.g. screenshot"
           onChange={(event) => {
             const source = event.target.value
             setDraftSource(source)
-            updateAttributes({ source })
+            setDraftSourceCitekey('')
+            updateAttributes({ source, sourceCitekey: '' })
           }}
           autoFocus
         />
@@ -288,4 +329,20 @@ export function MediaImageView({ node, selected, updateAttributes, extension }: 
     </NodeViewWrapper>
     {detailsPanel}
   </>
+}
+
+function sourceForReference(item: CSLItem): string {
+  const meta = (item as { _iw?: IwCitationMeta })._iw
+  const direct = meta?.sourceUrl ?? item.URL
+  if (typeof direct === 'string' && direct.trim()) return direct.trim()
+  if (typeof item.DOI === 'string' && item.DOI.trim()) return `https://doi.org/${item.DOI.trim()}`
+  return String(item.title ?? item.id)
+}
+
+function referenceLabel(item: CSLItem): string {
+  const author = item.author?.[0]?.family ?? item.author?.[0]?.literal
+  const year = item.issued?.['date-parts']?.[0]?.[0]
+  const lead = [author, year].filter(Boolean).join(', ')
+  const title = String(item.title ?? item.id)
+  return lead ? `${lead} — ${title}` : title
 }

@@ -17,6 +17,7 @@ export interface StoredMediaImageAttrs {
   sha256?: string | null
   title?: string | null
   source?: string | null
+  sourceCitekey?: string | null
   addedAt?: string | null
   captionPosition?: 'top' | 'bottom' | null
   captionFontFamily?: string | null
@@ -97,25 +98,32 @@ export function MediaImageCaption({
 }) {
   const source = String(attrs.source ?? '').trim()
   const href = /^https?:\/\//i.test(source) ? source : null
+  const sourceIcon = (
+    <svg className="iw-media-image__source-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M10.1 13.9a4.5 4.5 0 0 0 6.36 0l2.12-2.12a4.5 4.5 0 0 0-6.36-6.36L11 6.64" />
+      <path d="M13.9 10.1a4.5 4.5 0 0 0-6.36 0l-2.12 2.12a4.5 4.5 0 0 0 6.36 6.36L13 17.36" />
+    </svg>
+  )
   return (
     <figcaption className="iw-media-image__caption" style={{ fontFamily: attrs.captionFontFamily || undefined }}>
       {titleEditor ?? (attrs.title && <span className="iw-media-image__title" onClick={onTitleClick}>{attrs.title}</span>)}
-      <span className="iw-media-image__meta">
-        {attrs.addedAt && <time dateTime={attrs.addedAt}>Date added {displayMediaDate(attrs.addedAt)}</time>}
-        {attrs.addedAt && <span aria-hidden="true"> · </span>}
+      <span className="iw-media-image__caption-tail">
+        {attrs.addedAt && <span className="iw-media-image__meta"><time dateTime={attrs.addedAt}>Added: {displayMediaTime(attrs.addedAt)}</time></span>}
         {onSourceClick
-          ? <button type="button" className={`iw-media-image__source${source ? '' : ' is-empty'}`} title={source || 'No source added'} onClick={onSourceClick}>Source</button>
+          ? <button type="button" className={`iw-media-image__source${source ? '' : ' is-empty'}`} aria-label="Edit image source" title={source || 'Add image source'} onClick={onSourceClick}>{sourceIcon}</button>
           : href
-            ? <a className="iw-media-image__source" href={href} target="_blank" rel="noopener noreferrer" title={source}>Source</a>
-            : <span className={`iw-media-image__source${source ? '' : ' is-empty'}`} title={source || 'No source added'}>Source</span>}
+            ? <a className="iw-media-image__source" href={href} target="_blank" rel="noopener noreferrer" aria-label="Open image source" title={source}>{sourceIcon}</a>
+            : <span className={`iw-media-image__source${source ? '' : ' is-empty'}`} aria-label="Image source" title={source || 'No source added'}>{sourceIcon}</span>}
       </span>
     </figcaption>
   )
 }
 
-function displayMediaDate(value: string): string {
+function displayMediaTime(value: string): string {
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
 export function StoredMediaFigureContents({

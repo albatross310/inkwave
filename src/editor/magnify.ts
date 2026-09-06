@@ -9,10 +9,9 @@
 //     continuously as the window shrinks. The user never sees a horizontally cut-off page:
 //     zooming IN is capped at the fit scale. Zooming OUT below fit is unlimited (a tiny page
 //     floating in water is valid — Peter, 2026-07-09).
-//   • USER MAGNIFY — Ctrl/⌘+wheel with the cursor over the WATER (outside the parchment, or in
-//     a between-pages gap) magnifies the whole page (layout untouched — canonical breaks can't
-//     move). Intent is persisted separately from the cap, so widening the window releases the
-//     cap and the user's magnify comes back.
+//   • USER MAGNIFY — Command+scroll/pinch anywhere on the document surface magnifies the whole
+//     page (layout untouched — canonical breaks can't move). Intent is persisted separately from
+//     the cap, so widening the window releases the cap and the user's magnify comes back.
 //
 // effectiveMagnify = min(clamp(userMagnify, 0.02..2.5), fitCap)
 //

@@ -10,6 +10,8 @@ export interface MediaImageAttrs {
   sha256?: string | null
   title?: string | null
   source?: string | null
+  /** Stable id of a source selected from this document's reference library. */
+  sourceCitekey?: string | null
   addedAt?: string | null
   captionPosition?: 'top' | 'bottom'
   captionFontFamily?: string | null
@@ -70,6 +72,11 @@ export const MediaImage = Node.create<MediaImageOptions>({
         default: '',
         parseHTML: (element) => element.getAttribute('data-source') ?? '',
         renderHTML: (attrs) => attrs.source ? { 'data-source': String(attrs.source) } : {},
+      },
+      sourceCitekey: {
+        default: '',
+        parseHTML: (element) => element.getAttribute('data-source-citekey') ?? '',
+        renderHTML: (attrs) => attrs.sourceCitekey ? { 'data-source-citekey': String(attrs.sourceCitekey) } : {},
       },
       addedAt: {
         default: '',

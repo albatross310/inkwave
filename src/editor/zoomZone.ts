@@ -1,8 +1,8 @@
 // ─── Zoom gesture mode + latch — shared by Scroll.tsx + SnapshotView ──────────────────────────
 //
-// Peter, 2026-09-06: cursor position is no longer a mode. A plain trackpad pinch (the browser
-// reports ctrlKey) performs text reflow; ⌘+scroll/pinch performs whole-page magnify. Ordinary
-// unmodified two-finger scroll remains ordinary document scrolling. This is deliberate: it gives
+// Peter, 2026-09-06: cursor position is no longer a mode. A natural trackpad pinch performs text
+// reflow, and Shift makes ANY two-finger direction perform the same reflow; ⌘+scroll/pinch performs
+// whole-page magnify. Ordinary unmodified two-finger scroll remains ordinary document scrolling.
 // trackpads a reliable scroll-shaped zoom gesture when their native pinch recogniser rejects an
 // angled two-finger movement, and the mode can never flip because the page moved under the cursor.
 //
@@ -19,9 +19,26 @@ export type ZoomMode = 'water' | 'text'
 /** Cooldown after the last zoom event before the gesture's mode (and cursor) release. */
 export const ZOOM_LATCH_COOLDOWN_MS = 300
 
-/** Plain pinch/ctrl-scroll reflows text; Command adds whole-page magnify where it exists. */
-export function zoomModeForWheel(input: Pick<WheelEvent, 'metaKey'>, canMagnify = true): ZoomMode {
-  return input.metaKey && canMagnify ? 'water' : 'text'
+/** Natural pinch or Shift+two-finger movement reflows text; Command selects whole-page magnify. */
+export function zoomModeForWheel(
+  input: Pick<WheelEvent, 'metaKey' | 'ctrlKey' | 'shiftKey'>,
+  canMagnify = true,
+): ZoomMode | null {
+  if (input.metaKey && canMagnify) return 'water'
+  if (input.ctrlKey || input.shiftKey) return 'text'
+  return null
+}
+
+/**
+ * Shift deliberately removes direction dead-zones: whichever wheel axis carries more movement
+ * becomes zoom direction and the full vector supplies magnitude. This accepts vertical,
+ * horizontal and diagonal two-finger movement without guessing that the browser preserved deltaY.
+ */
+export function omnidirectionalZoomDelta(deltaX: number, deltaY: number): number {
+  if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return 0
+  if (deltaX === 0 && deltaY === 0) return 0
+  const primary = Math.abs(deltaY) >= Math.abs(deltaX) ? deltaY : deltaX
+  return Math.sign(primary) * Math.hypot(deltaX, deltaY)
 }
 
 /**

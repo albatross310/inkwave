@@ -1,21 +1,30 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createZoomLatch, projectedZoomDelta, zoomModeForWheel, ZOOM_LATCH_COOLDOWN_MS } from './zoomZone'
+import { createZoomLatch, omnidirectionalZoomDelta, projectedZoomDelta, zoomModeForWheel, ZOOM_LATCH_COOLDOWN_MS } from './zoomZone'
 
 describe('modifier-selected zoom mode', () => {
-  it('plain pinch/ctrl-scroll is text reflow and Command selects whole-page magnify', () => {
-    expect(zoomModeForWheel({ metaKey: false })).toBe('text')
-    expect(zoomModeForWheel({ metaKey: true })).toBe('water')
+  it('natural pinch and Shift+two-finger motion are text reflow; Command is whole-page magnify', () => {
+    expect(zoomModeForWheel({ metaKey: false, ctrlKey: true, shiftKey: true })).toBe('text')
+    expect(zoomModeForWheel({ metaKey: true, ctrlKey: false, shiftKey: false })).toBe('water')
+    expect(zoomModeForWheel({ metaKey: false, ctrlKey: true, shiftKey: false })).toBe('text')
+    expect(zoomModeForWheel({ metaKey: false, ctrlKey: false, shiftKey: true })).toBe('text')
+    expect(zoomModeForWheel({ metaKey: false, ctrlKey: false, shiftKey: false })).toBeNull()
   })
 
-  it('falls back to text reflow on a surface that cannot whole-page magnify', () => {
-    expect(zoomModeForWheel({ metaKey: true }, false)).toBe('text')
+  it('does not silently turn Command zoom into text reflow on a non-magnifying surface', () => {
+    expect(zoomModeForWheel({ metaKey: true, ctrlKey: false, shiftKey: false }, false)).toBeNull()
   })
 
   it('makes diagonal pinch movement responsive without inventing a horizontal zoom direction', () => {
     expect(projectedZoomDelta(8, -4)).toBeCloseTo(-Math.hypot(4, 8))
     expect(projectedZoomDelta(100, 4)).toBeCloseTo(Math.hypot(4, 8)) // cross-axis boost is bounded
     expect(projectedZoomDelta(20, 0)).toBe(0)
+  })
+
+  it('gives Shift motion a direction and magnitude on every axis', () => {
+    expect(omnidirectionalZoomDelta(0, -8)).toBe(-8)
+    expect(omnidirectionalZoomDelta(8, 0)).toBe(8)
+    expect(omnidirectionalZoomDelta(-8, 2)).toBeCloseTo(-Math.hypot(8, 2))
   })
 })
 

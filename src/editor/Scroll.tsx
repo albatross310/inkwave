@@ -6,7 +6,7 @@ import { syncPrintPageStyle } from './printPageStyle'
 import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
 import { presentedPaperWidth, usesTransformMagnify, type SurfacePresentation } from './surfacePresentation'
 import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
-import { createZoomLatch, projectedZoomDelta, zoomModeForWheel } from './zoomZone'
+import { createZoomLatch, omnidirectionalZoomDelta, projectedZoomDelta, zoomModeForWheel } from './zoomZone'
 import { probePerf, notePerf } from './perflog'
 import { syncTwinkles, setScrollScene, swayFields } from './waveTwinkle'
 
@@ -346,8 +346,9 @@ export function Scroll({
     if (fill && !hybrid) magnifyBoxRef.current?.style.removeProperty('width')
   }, [fill, hybrid])
 
-  // In-app editor zoom: Ctrl/⌘+wheel (desktop) or two-finger pinch (phone) over the editor scales
-  // the font (so text REFLOWS, like a webpage) — isolated from the PDF panel because we
+  // In-app editor zoom: natural pinch OR Shift+any two-finger movement (desktop), and two-finger
+  // pinch (phone), scale the font so text REFLOWS. Command+scroll/pinch magnifies the whole page.
+  // Both are isolated from the PDF panel because we
   // preventDefault the browser zoom. Persisted; both inputs share the same key + pipeline.
   // LATTICE (predictive step cache): the level is always a zoomStep.ts lattice point — legacy
   // persisted floats snap to the nearest step on load, so every rendered zoom is a cacheable one.
@@ -364,16 +365,17 @@ export function Scroll({
   // because reflow does not grow uniformly. → docs/archive/editor-surface.md#scroll-anchor
   useEffect(() => {
     const el = surfaceRef.current
-    if (!el) return // desktop: Ctrl/⌘+wheel on the surface; phone: two-finger pinch (body-scroll, below)
+    if (!el) return // desktop: modifier+pinch on the surface; phone: two-finger pinch (body-scroll, below)
     // ⚠ FRAME COALESCING: every zoom step forces a FULL-document reflow, and trackpads emit several
     // wheel events per frame, so events only ACCUMULATE and ONE rAF applies the net step count —
     // one reflow per painted frame, and rAF runs pre-paint so the anchor logic stays flicker-free.
     // BOTH accumulators are FRACTIONAL and commit WHOLE lattice steps (the remainder carries), so
     // every input quantizes onto the shared zoomStep lattice — which is what makes zoom levels
     // precomputable at all. → docs/archive/editor-surface.md#scroll-anchor
-    let steps = 0 // plain pinch/ctrl-scroll: font reflow
+    let steps = 0 // natural pinch or Shift+two-finger movement: font reflow
     let mSteps = 0 // Command+scroll/pinch: whole-page magnify
     let raf = 0
+    let rafQueuedAt = 0
     let settle: ReturnType<typeof setTimeout> | undefined
     // Phone is BODY-scroll: the anchor correction must move window.scrollY — the surface itself
     // never scrolls there. ONE pair of helpers keeps every path identical for both scrollers (R2).
@@ -502,6 +504,7 @@ export function Scroll({
     }
     const applyFrame = () => {
       raf = 0
+      rafQueuedAt = 0
       holdWavesFor(350) // zoom corrections (and the clamps they trigger) must not sway the waves
       applyMagnifyFrame()
       // GESTURE REBASE: a busy main thread at gesture start bursts its queued touchmoves in
@@ -614,12 +617,24 @@ export function Scroll({
         setTimeout(() => window.removeEventListener('inkwave:pagination-measured', onMeasured), 1000)
       }, ZOOM_SETTLE_MS)
     }
-    // MODE LATCH + COOLDOWN: a plain pinch/ctrl-scroll is font reflow; ⌘+scroll/pinch is whole-page
+    // Normally one scheduled rAF coalesces every event before the next paint. A starved/background
+    // frame can leave a request id live long after its useful window, though; a later gesture then
+    // accumulates deltas behind that stale id and appears dead until ANOTHER mode schedules work.
+    // Repair only requests older than 100ms, preserving ordinary per-frame coalescing.
+    const requestApplyFrame = () => {
+      const now = performance.now()
+      if (raf && now - rafQueuedAt <= 100) return
+      if (raf) cancelAnimationFrame(raf)
+      rafQueuedAt = now
+      raf = requestAnimationFrame(applyFrame)
+    }
+    // MODE LATCH + COOLDOWN: natural pinch or Shift+movement is font reflow; ⌘ is whole-page
     // magnify. Cursor position is irrelevant. The first event stays latched for the full gesture.
     // → docs/archive/editor-surface.md#scroll-zone
     const latch = createZoomLatch(() => surfaceRef.current)
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) {
+      const requestedMode = zoomModeForWheel(e, hybrid)
+      if (!requestedMode) {
         // CONTENT-PROPORTIONAL PLAIN SCROLL below the knee only: the wrapper sizes scroll space to
         // VISUAL dims, so at a deep zoom-out a native notch covers 1/scale× the document distance
         // and the tiny page zips past. Scale 1 returns without preventDefault.
@@ -642,13 +657,20 @@ export function Scroll({
         return
       }
       e.preventDefault()
-      const zoomDelta = projectedZoomDelta(e.deltaX, e.deltaY)
+      const zoomDelta = requestedMode === 'text'
+        ? e.shiftKey
+          ? omnidirectionalZoomDelta(e.deltaX, e.deltaY)
+          // The OS has already classified ctrl+wheel as a natural pinch. Preserve deltaY's true
+          // scale direction whenever present, but accept a purely horizontal residue too — every
+          // pinch event the browser gives us should work even though raw finger angles are hidden.
+          : projectedZoomDelta(e.deltaX, e.deltaY) || e.deltaX
+        : projectedZoomDelta(e.deltaX, e.deltaY)
       if (zoomDelta === 0) return
       // ⚠ `isIdle()` must be read BEFORE `resolve()`, which latches a mode on its first call.
       const freshGesture = latch.isIdle()
       const mode = latch.resolve(
-        () => zoomModeForWheel(e, hybrid),
-        zoomDelta > 0,
+        () => requestedMode,
+        requestedMode === 'water' ? zoomDelta < 0 : zoomDelta > 0,
       )
       // LATTICE QUANTIZATION: a full wheel notch (|ΔY| ≥ 100) is exactly ±1 step; fine-deltas
       // contribute proportional FRACTIONS that accumulate until a whole step commits, so every
@@ -661,11 +683,14 @@ export function Scroll({
       // does not affect which accumulator gets it; `freshGesture` was captured pre-resolve).
       if (freshGesture) stepDelta += dir * FIRST_STEP_BONUS
       if (mode === 'water') {
-        mSteps += stepDelta
+        // Whole-page direction is intentionally the physical-pinch direction: fingers together
+        // (the browser's negative delta) means zoom IN. Its wheel stream is opposite the text
+        // lattice's historical sign, so reverse only this accumulator.
+        mSteps -= stepDelta
       } else {
         steps += stepDelta
       }
-      if (!raf) raf = requestAnimationFrame(applyFrame)
+      requestApplyFrame()
     }
     // PHONE PINCH-TO-ZOOM — LIVE font reflow per lattice step, exactly like the desktop wheel, on
     // the LIVE-REFLOW WINDOW's budget; the anchor is the pinch MIDPOINT (horizontal is fixed by the
@@ -895,7 +920,7 @@ export function Scroll({
       if (dx) el.scrollLeft -= dx // horizontal has no phone/window equivalent — phone content is edge-to-edge
       if (dy) setScrollTop(getScrollTop() - dy)
       pinchX = curMidX; pinchY = curMidY
-      if (!raf) raf = requestAnimationFrame(applyFrame) // live commit — one visible-window reflow per frame
+      requestApplyFrame() // live commit — one visible-window reflow per frame
     }
     const onTouchEnd = (e: TouchEvent) => {
       if (e.touches.length >= 2 || !pinchDist) return

@@ -98,8 +98,33 @@ try {
   })
   const bodyFamily = await editor.evaluate((element) => getComputedStyle(element).fontFamily)
   check(titleStyle.family === bodyFamily && titleStyle.italic === 'italic', 'the title inherits the writing font and defaults to italics')
-  check(/Date added/.test(await figure.locator('.iw-media-image__meta').textContent() || ''), 'the caption includes the date added')
-  check((await figure.locator('.iw-media-image__source').getAttribute('title')) === 'No source added', 'an empty source has a hoverable placeholder')
+  check(/^Added: \d{1,2}:\d{2}/.test((await figure.locator('.iw-media-image__meta').textContent() || '').trim()), 'the caption shows only the 12-hour time added')
+  const captionSizes = await figure.evaluate((element) => ({
+    title: getComputedStyle(element.querySelector('.iw-media-image__title')).fontSize,
+    meta: getComputedStyle(element.querySelector('.iw-media-image__meta')).fontSize,
+    body: getComputedStyle(element.closest('.ProseMirror')).fontSize,
+  }))
+  check(captionSizes.title === captionSizes.meta, 'title, date and source icon share one caption size', JSON.stringify(captionSizes))
+  check(Math.abs((parseFloat(captionSizes.body) - parseFloat(captionSizes.title)) - (2 * 96 / 72)) < 0.35,
+    'the caption is exactly 2pt smaller than the surrounding body', JSON.stringify(captionSizes))
+  check((await figure.locator('.iw-media-image__source').getAttribute('title')) === 'Add image source', 'an empty source icon has a hoverable prompt')
+  check((await figure.locator('.iw-media-image__source-icon').count()) === 1, 'source is a compact link icon rather than a text label')
+  const captionPositions = await figure.evaluate((element) => {
+    const caption = element.querySelector('.iw-media-image__caption').getBoundingClientRect()
+    const title = element.querySelector('.iw-media-image__title').getBoundingClientRect()
+    const tail = element.querySelector('.iw-media-image__caption-tail').getBoundingClientRect()
+    const source = element.querySelector('.iw-media-image__source').getBoundingClientRect()
+    return {
+      sourceRightGap: Math.abs(caption.right - source.right),
+      titleLeftGap: Math.abs(caption.left - title.left),
+      tailRightGap: Math.abs(caption.right - tail.right),
+      twoRows: tail.top >= title.bottom - 1,
+    }
+  })
+  check(captionPositions.sourceRightGap < 3 && captionPositions.tailRightGap < 3,
+    'Added, time and source icon are bound to the caption’s lower-right corner')
+  check(captionPositions.titleLeftGap < 3 && captionPositions.twoRows,
+    'the title is bound to the caption’s upper-left corner')
   check((await snapshotCount()) === snapsBefore + 1, 'one paste creates one ordinary global snapshot', `${snapsBefore} → ${await snapshotCount()}`)
 
   const readLatestSnapshot = async (targetPage) => {
@@ -125,9 +150,19 @@ try {
   await figure.locator('.iw-media-image__source').click()
   const panel = page.getByRole('dialog', { name: 'Image details' })
   await panel.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-  check((await panel.count()) === 1, 'clicking “Source” opens its editing panel')
+  check((await panel.count()) === 1, 'clicking the source icon opens its editing panel')
+  check((await panel.getByRole('combobox', { name: 'Reference in this document' }).count()) === 1, 'the source panel offers this document’s references')
+  check((await panel.getByRole('button', { name: 'Add new reference' }).count()) === 1, 'the source panel can add a new reference')
   check(!/Date added/i.test(await panel.textContent().catch(() => '') || ''), 'date added stays automatic and out of the popup')
-  await panel.getByText('Source').locator('..').locator('input').fill('https://example.com/evidence')
+  await panel.getByRole('button', { name: 'Add new reference' }).click()
+  const newReference = page.getByRole('dialog', { name: 'Edit citation' })
+  await newReference.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {})
+  check((await newReference.count()) === 1, 'Add new reference opens the document citation editor directly')
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await figure.locator('.iw-media-image__source').click()
+  await panel.waitFor({ state: 'visible', timeout: 3_000 })
+  await panel.getByRole('textbox', { name: 'Web address or description' }).fill('https://example.com/evidence')
   await panel.getByRole('button', { name: 'Move title to top' }).click()
   check((await figure.getAttribute('data-caption-position')) === 'top', 'the panel moves the title above the image')
   check((await panel.locator('a.iw-media-image__open-source').getAttribute('href')) === 'https://example.com/evidence', 'a webpage source remains navigable from the popup')

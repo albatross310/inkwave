@@ -21,6 +21,7 @@ import { installHolder, requestSwitch, takeOverHere } from '../storage/singleOpe
 import { StorageUnavailable } from '../components/StorageUnavailable'
 import { DocumentOpenElsewhere, SurrenderedBanner } from '../components/DocumentOpenElsewhere'
 import { duplicateEmailAsNew } from '../email/duplicateEmail'
+import { setOpenDocListenerReady, waitForStudioFileLaunch, STUDIO_FILE_ACTION_PARAM } from '../pwa/fileLaunch'
 import { LoadingTip } from '../components/LoadingTip'
 import { currentDocIds } from '../storage/currentDocs'
 
@@ -188,6 +189,22 @@ export function Edit() {
           claimTabDoc(fresh.id)
           claimedId = null
           setDoc(fresh)
+        }
+        // An installed desktop PWA can be launched by double-clicking a `.studio` file. The OS
+        // navigates to this one-shot action URL while LaunchQueue delivers the actual file on a
+        // separate clock. Do not open Recent (or mint a blank) underneath it: wait briefly for the
+        // launch coordinator, then let the ordinary open-doc event own the first document.
+        const launchUrl = new URL(window.location.href)
+        const expectsStudioFile = launchUrl.searchParams.get(STUDIO_FILE_ACTION_PARAM) === '1'
+        if (expectsStudioFile) {
+          // Keep the marker through the await. In development StrictMode cleans up and remounts
+          // this effect; consuming it before yielding let invocation two miss the OS intent and
+          // open a blank over the imported file. Only the live invocation consumes the marker.
+          const launched = await waitForStudioFileLaunch()
+          if (cancelled) return
+          launchUrl.searchParams.delete(STUDIO_FILE_ACTION_PARAM)
+          window.history.replaceState(window.history.state, '', launchUrl.toString())
+          if (launched) return
         }
         // "New blank" is an explicit new-window intent. `noopener` gives it no session identity,
         // and this flag tells it not to walk Current docs before minting its blank document.
@@ -442,7 +459,11 @@ export function Edit() {
       })
     }
     window.addEventListener('inkwave:open-doc', onOpen as EventListener)
-    return () => window.removeEventListener('inkwave:open-doc', onOpen as EventListener)
+    setOpenDocListenerReady(true)
+    return () => {
+      setOpenDocListenerReady(false)
+      window.removeEventListener('inkwave:open-doc', onOpen as EventListener)
+    }
   }, [])
 
   // The persistent shell is the SHARED empty-editor facsimile (the same Scroll chrome + an empty

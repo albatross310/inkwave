@@ -1,6 +1,8 @@
 // GuideMenu — ⓘ toolbar button; opens a wide 3-column shortcut reference.
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from 'react-router'
+import { STUDIO_FILE_SETUP_MAC } from '../pwa/studioFileSetup'
 
 const INK = '#302438'
 
@@ -51,6 +53,19 @@ const ALIGN: Array<{ k: string; d: string }> = [
 const SYMBOLS: Array<{ k: string; d: string }> = [
   { k: '"name = latex', d: 'define a symbol (press Enter)' },
   { k: 'Σ → Symbols',   d: 'manage & browse definitions' },
+]
+
+const WINDOWS: Array<{ k: string; d: string }> = [
+  { k: '⌥Tab', d: 'next Inkwave window on Mac' },
+  { k: '⌃⌥Tab', d: 'previous Inkwave window on Mac' },
+  { k: '⌘W', d: 'close only this window (⌘Q quits the whole installed app)' },
+  { k: 'Ctrl+Alt+←/→', d: 'cycle Inkwave windows on Windows' },
+]
+
+const ZOOM: Array<{ k: string; d: string }> = [
+  { k: 'pinch', d: 'reflow the text at a new size' },
+  { k: 'Shift + two fingers', d: 'reflow text using any movement direction' },
+  { k: '⌘ + scroll/pinch', d: 'magnify the whole page and water' },
 ]
 
 export function GuideMenu() {
@@ -146,6 +161,8 @@ export function GuideMenu() {
                 { title: 'Block alignment', rows: ALIGN },
                 { title: 'Greek keyboard (in math box)', rows: GREEK },
                 { title: 'Custom symbols', rows: SYMBOLS },
+                { title: 'Windows', rows: WINDOWS },
+                { title: 'Zoom', rows: ZOOM },
               ]).map(sec => (
                 <Fragment key={sec.title}>
                   <div style={{ gridColumn: '1 / -1', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.09em', color: 'var(--iw-pill-fg, #78716c)', margin: '14px 0 3px' }}>{sec.title}</div>
@@ -158,6 +175,23 @@ export function GuideMenu() {
                 </Fragment>
               ))}
             </div>
+
+            <section style={{ marginTop: '22px', paddingTop: '16px', borderTop: '1px solid var(--iw-nightable-border, #e7e5e4)' }}>
+              <h3 style={{ margin: '0 0 7px', color: 'var(--iw-ink, #302438)', fontSize: '1rem' }}>
+                Open .studio files in one click
+              </h3>
+              <p style={{ margin: 0, color: 'var(--iw-panel-fg, #4a4035)', fontSize: '0.92rem', lineHeight: 1.45 }}>
+                {STUDIO_FILE_SETUP_MAC.join(' ')} Desktop Chromium only; Safari does not currently
+                offer this installed-app file handling.
+              </p>
+              <Link
+                to="/tips"
+                onClick={() => setOpen(false)}
+                style={{ display: 'inline-flex', marginTop: '10px', color: 'var(--iw-doc-accent, #302438)', fontSize: '0.94rem' }}
+              >
+                See all tips and Windows setup →
+              </Link>
+            </section>
           </div>
         </>,
         document.body,

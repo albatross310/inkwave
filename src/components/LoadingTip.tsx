@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { STUDIO_FILE_SETUP_TIP } from '../pwa/studioFileSetup'
 
 export const LOADING_TIPS = [
   'Install Inkwave from your browser’s Share or app menu for a focused writing window.',
@@ -7,6 +8,9 @@ export const LOADING_TIPS = [
   'Press ⌘/Ctrl+Shift+N to create a blank document in a new window.',
   'On Mac, use ⌥Tab for the next Inkwave window and ⌃⌥Tab for the previous one.',
   'On Windows, use Ctrl+Alt+→ for the next Inkwave window and Ctrl+Alt+← for the previous one.',
+  'Use ⌘W to close only this Inkwave window. ⌘Q quits every window in the installed app.',
+  'Zoom two ways: pinch naturally or hold Shift with any two-finger direction to reflow text; hold ⌘ to magnify the whole page and water.',
+  STUDIO_FILE_SETUP_TIP,
 ] as const
 
 export const LOADING_TIP_COUNTDOWN_MS = 3000

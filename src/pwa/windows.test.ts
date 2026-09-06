@@ -26,6 +26,13 @@ describe('openNewInkwaveWindow', () => {
     expect(manifest.shortcuts).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'New doc', url: NEW_INKWAVE_WINDOW_URL }),
     ]))
+    expect(manifest.file_handlers).toEqual([
+      expect.objectContaining({
+        action: '/?file-launch=1',
+        accept: { 'application/x-inkwave-studio': ['.studio', '.inkwave'] },
+        launch_type: 'multiple-clients',
+      }),
+    ])
   })
 
   it('can explicitly open a blank document in a separate window', () => {

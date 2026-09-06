@@ -42,6 +42,7 @@
     "prove:cssfloor": "node scripts/cssfloor.prove.mjs",
     "prove:email": "node scripts/email.prove.mjs",
     "prove:imagepaste": "node scripts/imagepaste.prove.mjs",
+    "prove:filelaunch": "node scripts/filelaunch.prove.mjs",
     "prove:scrollzoom": "node scripts/scrollzoom.prove.mjs",
     "prove:fontcertify": "node scripts/fontCertify.prove.mjs",
     "prove:fontstrip": "node scripts/fontStrip.prove.mjs",

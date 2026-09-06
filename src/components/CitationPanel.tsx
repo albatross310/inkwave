@@ -450,17 +450,17 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
 
 // ─── Main panel ──────────────────────────────────────────────────────────────
 
-export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, initialCapture, onInitialCaptureConsumed }: Props) {
+export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, initialCapture, onInitialCaptureConsumed, initialNewReference = false }: Props & { initialNewReference?: boolean }) {
   const [, force] = useState(0)
   const rerender = useCallback(() => force(n => n + 1), [])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'warn' | 'err' } | null>(null)
-  const [editItem, setEditItem] = useState<CSLItem | null>(null)
+  const [editItem, setEditItem] = useState<CSLItem | null>(() => initialNewReference ? ({ id: '__new__', type: 'article-journal' } as CSLItem) : null)
   const [clickReads, setClickReads] = useState(citeClickOpensReader)
   const [legacyCount, setLegacyCount] = useState(0)
   useEffect(() => { void legacyLibrarySize().then(setLegacyCount).catch(() => {}) }, [])
-  const [isNewRef, setIsNewRef] = useState(false)
+  const [isNewRef, setIsNewRef] = useState(initialNewReference)
   // URL-lookup consent: holds the input that triggered the dialog so "yes" resumes the capture.
   const [urlConsentPending, setUrlConsentPending] = useState<string | null>(null)
   const [recheckingAll, setRecheckingAll] = useState(false)

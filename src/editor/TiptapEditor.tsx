@@ -102,6 +102,7 @@ import { loadLibrary, persistLibrary } from '../citations/library'
 import { bibProvider } from '../citations/bibProvider'
 import { startExtensionChannel } from '../citations/extensionChannel'
 import { setCitationStyle as setCitationStyleBus } from '../citations/citationsBus'
+import { OPEN_CITATION_PANEL_EVENT } from '../citations/panelOpen'
 import { embedBibliography } from '../citations/resolve'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
@@ -472,9 +473,19 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
 
   // ── Citation / bibliography state ─────────────────────────────────────────
   const [bibPanelOpen, setBibPanelOpen] = useState(false)
+  const [bibPanelStartsNew, setBibPanelStartsNew] = useState(false)
   const bibBtnRef = useRef<HTMLButtonElement>(null)
   const [citationStyle, setCitationStyle] = useState(doc.citationStyle ?? 'apa')
   const [shareCapture, setShareCapture] = useState<string | null>(null)
+
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      setBibPanelStartsNew(Boolean((event as CustomEvent<{ newReference?: boolean }>).detail?.newReference))
+      setBibPanelOpen(true)
+    }
+    window.addEventListener(OPEN_CITATION_PANEL_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_CITATION_PANEL_EVENT, onOpen)
+  }, [])
 
   // Hydrate the native citation library (OPFS) and seed the render bus with the doc's style.
   // THEN fill any citekeys the device library lacks from the doc's own embedded bibliography —
@@ -3625,6 +3636,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
             citationStyle={citationStyle}
             btnRef={bibBtnRef}
             initialCapture={shareCapture}
+            initialNewReference={bibPanelStartsNew}
             onInitialCaptureConsumed={() => setShareCapture(null)}
             onStyleChange={s => {
               setCitationStyle(s)
@@ -3632,7 +3644,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               const updated = { ...docRef.current, citationStyle: s, updatedAt: new Date().toISOString() }
               commitDoc(updated)
             }}
-            onClose={() => setBibPanelOpen(false)}
+            onClose={() => { setBibPanelOpen(false); setBibPanelStartsNew(false) }}
           />
         )}
       </div>
