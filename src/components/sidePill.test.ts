@@ -1,7 +1,7 @@
 // The toolbar's side reserve is MEASURED from the two side pills, not assumed (see sidePill.ts).
 // These pin the arithmetic the editor's effect feeds `--iw-side-reserve` from, plus the registry.
 import { describe, it, expect } from 'vitest'
-import { sideReserve, registerSidePill, sidePillElements, subscribeSidePills, SIDE_RESERVE_FALLBACK_PX } from './sidePill'
+import { sideReserve, registerSidePill, sidePillElements, subscribeSidePills, SIDE_RESERVE_FALLBACK_PX, footerCramped, FOOTER_CRAMPED_BELOW_PX } from './sidePill'
 
 describe('sideReserve — the wider pill bounds a CENTRED toolbar', () => {
   it('takes the wider side, measured from that side’s own edge', () => {
@@ -45,5 +45,16 @@ describe('registry — mount, unmount, notify', () => {
     registerSidePill('right', a)
     expect(n).toBe(3)
     registerSidePill('right', null)
+  })
+})
+
+describe('footerCramped — the pills fold below one viewport width', () => {
+  it('folds under the threshold and not at it', () => {
+    expect(footerCramped(FOOTER_CRAMPED_BELOW_PX - 1)).toBe(true)
+    expect(footerCramped(FOOTER_CRAMPED_BELOW_PX)).toBe(false)
+  })
+  it('covers the desktop app’s docked browser pane (~300px) and not a half-screen Retina window (~570px)', () => {
+    expect(footerCramped(296)).toBe(true)
+    expect(footerCramped(570)).toBe(false)
   })
 })

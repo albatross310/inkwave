@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SnapshotMeta } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
-import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill } from './sidePill'
+import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill, useFooterCramped } from './sidePill'
 
 // Module-level so its identity is stable: React re-invokes a callback ref (null, then el) whenever
 // its identity changes, and an inline arrow would re-register the pill on every render.
@@ -11,6 +11,8 @@ const registerLeftPill = (el: HTMLButtonElement | null) => registerSidePill('lef
 // Peter, 2026-09-05: +50% horizontal breathing room (10px → 15px). The surrounding fixed-left
 // wrapper and bottom-left scale origin keep the pill's outer left edge anchored as it widens right.
 const SNAP_PILL_PAD_X = 15
+// Below FOOTER_CRAMPED_BELOW_PX (sidePill.ts) — just enough not to touch the glyph.
+const SNAP_PILL_PAD_X_CRAMPED = 6
 
 
 // ── Bitcoin coin icon ─────────────────────────────────────────────────────────
@@ -129,6 +131,8 @@ export function ReceiptPanel({
     window.addEventListener('resize', on)
     return () => window.removeEventListener('resize', on)
   }, [])
+  // Narrow viewport → shed the side padding so the toolbar gets the width (sidePill.ts).
+  const cramped = useFooterCramped()
   const n = snapshots.length
   const pending = snapshots.some((s) => s.ots.status === 'pending')
 
@@ -202,7 +206,7 @@ export function ReceiptPanel({
               border: `1px solid rgb(var(--iw-ink-rgb) / 0.75)`,
               borderRadius: compact ? 9999 : 12,
               color: 'var(--iw-pill-fg, #302438)',
-              paddingInline: compact ? undefined : SNAP_PILL_PAD_X,
+              paddingInline: compact ? undefined : cramped ? SNAP_PILL_PAD_X_CRAMPED : SNAP_PILL_PAD_X,
               // Shared with the sync pill opposite so the pair reads as a matched set — see
               // components/sidePill.ts. Natural height here was ~27.5px, so this grows it ~2.5px.
               ...(compact ? {} : { height: SIDE_PILL_H, display: 'flex', alignItems: 'center', fontSize: SIDE_PILL_FONT }),

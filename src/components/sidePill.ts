@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 // THE TWO SIDE PILLS THAT FLANK THE FOOTER TOOLBAR — one source of truth for their geometry.
 //
 // `ReceiptPanel`'s snaps pill (left) and `SyncStatus` (right) are separate components that never
@@ -115,4 +117,37 @@ export function sidePillElements(): ReadonlyMap<SidePillSide, HTMLElement> {
 export function subscribeSidePills(fn: () => void): () => void {
   subscribers.add(fn)
   return () => { subscribers.delete(fn) }
+}
+
+// ─── CRAMPED: below a width both pills fold, so the bar gets the room (2026-09-15) ────────────────
+//
+// Peter, at the desktop app's ~300px docked browser pane, with the measured reserve already in:
+// "we need to shrink the res pill to just an icon and left pill padding to squeeze the whole bar
+// in". The measured reserve handles every width where the FULL pills leave eight circles room; below
+// that the pills themselves are the cost. So under this width the sync pill drops to its ☁ glyph
+// (the same form it already takes with the PDF panel open) and the ◈ pill sheds its side padding.
+// The reserve is measured off the triggers, so it follows the fold automatically — nothing else
+// needs to know. One threshold on the VIEWPORT, not on the pills' own size, so folding cannot
+// un-trigger itself (a rule that read the pills would flip the moment they shrank).
+//
+// 440 is where the full pills push the circles below ~24px (measured: 23px at 430, 19 at 400).
+
+export const FOOTER_CRAMPED_BELOW_PX = 440
+
+/** Pure form of the rule, for the test and for anything without a window. */
+export function footerCramped(viewportWidth: number): boolean {
+  return viewportWidth < FOOTER_CRAMPED_BELOW_PX
+}
+
+/** True while the viewport is narrower than FOOTER_CRAMPED_BELOW_PX. False during SSR. */
+export function useFooterCramped(): boolean {
+  const [cramped, setCramped] = useState(() => typeof window !== 'undefined' && footerCramped(window.innerWidth))
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${FOOTER_CRAMPED_BELOW_PX - 1}px)`)
+    const on = () => setCramped(mq.matches)
+    on()
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return cramped
 }
