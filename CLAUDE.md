@@ -1197,10 +1197,18 @@ On the Mac, `scripts/follow-lanes.sh` runs each row in its own throwaway worktre
 (`../inkwave-lane-<L>`) on a FIXED port — **A=5181, B=5182, C=5183, D=5184, E=5185, F=5186,
 G=5187** — pulling every 5s, and opens each at `http://localhost:<port>/?seed`. `?seed` (DEV only,
 `src/dev/seedDocument.ts`) fills the fresh blank with generic sample text so the tab is testable at
-once; it is reachable only from the absence path and never Peter's prose. The tab title reads
-`7/A · …` (`VITE_LANE`, set by the script, unset in prod) so four tabs read as four PRs. The single-
+once; it is reachable only from the absence path and never Peter's prose. The tab title is the
+BARE LANE LETTER — `A`, `B`, `C`, `E` (`VITE_LANE`, set by the script, unset in prod) — Peter's
+ask, so he can flick between tabs by letter; the PR number lives in `lanes.tsv` and the script's
+start-up table, not the tab. The single-
 branch `scripts/follow-branch.sh` still serves 5173 with no lane. **Keep `lanes.tsv` current** — a
 lane that opens a PR without a row is one Peter cannot open.
+
+**NAME BRANCHES AFTER THE FOCUS (Peter, 2026-09-16).** The harness hands a cloud session a random
+branch (`claude/great-wozniak-gpki8p` was this one's) and Peter cannot tell from the name what it
+holds. Push work to a branch named for what it does — `claude/lanes-localhost`,
+`claude/refactor-breakrule` — and open the PR from that. The random branch is the session's
+scratch identity, not the name a PR should wear.
 
 **`/root/dev/iw-master` IS A SHARED CHECKOUT. NEVER `git add -A` THERE (2026-07-17).** With 5–6 lanes
 running, that checkout is a contended resource: other agents check their branches out in it and leave
