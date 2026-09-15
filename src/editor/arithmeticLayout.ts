@@ -23,6 +23,7 @@
 // → docs/archive/pagination-rounds.md#arith-engine
 
 import { MARGIN_BOTTOM } from './pageSettings'
+import { pickBreaks } from './breakRule'
 
 // ─── Certified font palette ───────────────────────────────────────────────────────────────────
 // The PRIMARY family name of each css stack the StyleBar can emit (CLAUDE.md math-certified list).
@@ -568,15 +569,15 @@ export function figureBlockBox(opts: {
   return { height: imgH + caption, marginTopPx: opts.marginTopPx ?? 0, marginBottomPx: opts.marginBottomPx ?? 0 }
 }
 
-// ─── Page splitter (a port of PaginationExtension.computeBreaks) ───────────────────────────────
-// Same math as the live break loop, emitting the same `at:round(botMargin)|…|pages:N` signature so a
-// prover can compare arithmetic-sourced lines against DOM-sourced lines through ONE splitter.
-// Desktop/canonical only — the phone bottom-margin branch is not modelled.
-// ⚠ THIS IS ONE OF THREE COPIES OF THE BREAK RULE, and its orphan snap HAD DRIFTED from production.
-// `snapOrphans` now DEFAULTS to production's `false`; the retired rule must be opted IN (R2).
-// ⚠ A PROVER RUNNING BOTH SIDES THROUGH THIS FUNCTION CANNOT SEE THAT DRIFT — a shared constant
-// cancels on both sides, and a unit test can only see a rule it VARIES (R6). Only the live editor's
-// own gap widgets can (breaks.prove.mjs). → docs/archive/pagination-rounds.md#three-copies
+// ─── Page splitter — THE break rule (`breakRule.ts`), reported for the canvas model ────────────
+// Same loop as the live editor and the /snapshot pane, by construction: this is a caller, not a
+// copy. It emits the same `at:round(botMargin)|…|pages:N` signature so a prover can compare
+// arithmetic-sourced lines against DOM-sourced lines through ONE splitter.
+// Desktop/canonical only — the phone bottom margin is not modelled; the off-canonical snap is not
+// modelled either, which is why the engine is parked (→ docs/archive/pagination-rounds.md#arith-engine).
+// ⚠ A PROVER RUNNING BOTH SIDES THROUGH THIS FUNCTION CANNOT SEE A DRIFT IN IT — a shared constant
+// cancels on both sides (R6). Only the live editor's own gap widgets can (breaks.prove.mjs).
+// → docs/archive/pagination-rounds.md#three-copies
 // ⚠ R2: ONE bottom margin. This is `pageSettings.MARGIN_BOTTOM` under this module's own name, not
 // a second copy — a private 72 here would diverge on EVERY break the day the real one moves.
 export const MARGIN_BOTTOM_PX = MARGIN_BOTTOM
@@ -592,47 +593,14 @@ export function paginate(
   refListPos: number,      // -1 if none
   pageH: number,
   topM: number,
-  snapOrphans = false,      // matches production (computeBreaks `snap = false`). Opt IN for legacy.
+  snapOrphans = false,      // production rides the default; the RETIRED orphan snap is opt-in for known-negative tests only
 ): SplitResult {
-  const textArea = Math.max(1, pageH - topM - MARGIN_BOTTOM_PX)
-  const sig: string[] = []
-  const breaks: Array<{ at: number; botMargin: number }> = []
-  let used = 0
-  let pageNo = 1
-  let curBlock = -1
-  let blockStartUsed = 0
-  let refBroken = false
-
-  for (let i = 0; i < lines.length; i++) {
-    const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
-    if (lines[i].blockIdx !== curBlock) { curBlock = lines[i].blockIdx; blockStartUsed = used }
-    const blockStart = blocks[lines[i].blockIdx].start
-
-    if (refListPos > 0 && !refBroken && blockStart >= refListPos && used > 4) {
-      const botMargin = Math.max(MARGIN_BOTTOM_PX, pageH - topM - used)
-      breaks.push({ at: refListPos, botMargin })
-      sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
-      pageNo++; used = 0; curBlock = -1; refBroken = true
-    }
-
-    if (i > 0 && used + lh > textArea && lines[i].pos > 0) {
-      const orphan = used - blockStartUsed
-      const snap = snapOrphans && orphan <= textArea * 0.22 && blockStart > 0
-      const at = snap ? blockStart : lines[i].pos
-      const brokeUsed = snap ? blockStartUsed : used
-      const botMargin = Math.max(MARGIN_BOTTOM_PX, pageH - topM - brokeUsed)
-      if (at > 0 && !(refBroken && at === refListPos)) {
-        breaks.push({ at, botMargin })
-        sig.push(`${at}:${Math.round(botMargin)}`)
-        pageNo++
-        used = snap ? orphan : 0
-        curBlock = -1
-      }
-    }
-    used += lh
-  }
-  sig.push(`pages:${pageNo}`)
-  return { sig: sig.join('|'), breaks, pages: pageNo }
+  const r = pickBreaks(lines, blocks, {
+    pageH, topM, phone: false, refListPos,
+    posOf: (i) => lines[i].pos,
+    snap: snapOrphans ? { kind: 'legacy-orphan' } : { kind: 'never' },
+  })
+  return { sig: r.sig, breaks: r.picks.map((p) => ({ at: p.at, botMargin: p.botMargin })), pages: r.pages }
 }
 
 // ⚠ `document.fonts.check()` RETURNS TRUE FOR A FAMILY WITH NO @font-face — the system fallback

@@ -558,6 +558,11 @@ ONE build, that it can still SEE the bug. A negative that cannot fire is not a n
 <a id="three-copies"></a>
 ### The break rule exists in three copies — and the orphan snap drifted in two of them
 
+**FOLDED 2026-09-15.** The three copies below are now callers of one pure loop,
+`src/editor/breakRule.ts` `pickBreaks`; the snap policy is data (`never` / `off-canonical` /
+`legacy-orphan`). Characterization first (36 hand-derived cases in `breakRuleParity.test.ts`),
+`prove:breaks` byte-identical before/after. The story below is why the fold was worth its risk.
+
 **MERGED ENTRY.** The same incident was written out three times: in `staticPagination.ts` (19
 lines), in `arithmeticLayout.ts`'s `paginate()` header (24 lines) and in
 `PaginationExtension.ts`'s `_computeBreaksForTest` seam (12 lines). One incident, one entry.

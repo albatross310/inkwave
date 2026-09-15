@@ -414,11 +414,18 @@ keep them out of the conversation by default so earlier chat remains readable.
     since `ef96306`). A run is a SLICE of an op, never a new op: it must emit the same
     `diff-add`/`diff-del` classes and the same `data-opidx`, because hover, click-to-jump,
     highlight injection and `computeDiffPagesFor` all key on exactly those.
-  - **`staticPagination` re-runs the editor's canonical break pipeline** — the break rule exists in
-    three copies (`PaginationExtension.computeBreaks`, `arithmeticLayout.paginate`,
+  - **`staticPagination` re-runs the editor's canonical break pipeline, and THE BREAK RULE IS ONE
+    MODULE — `src/editor/breakRule.ts` `pickBreaks` (2026-09-15).** It used to exist in three
+    copies (`PaginationExtension.computeBreaks`, `arithmeticLayout.paginate`,
     `staticPagination.computeBreakPicks`) and a retired widow/orphan rule was once fixed in two and
-    missed in the third, putting the pane +2 pages out on plain prose. **Change one, check all
-    three**, and compare break POSITIONS, not page counts — equal counts hide divergent offsets.
+    missed in the third, putting the pane +2 pages out on plain prose. The three are now CALLERS:
+    each supplies geometry (page box, phone) and POLICY (`refListPos`, `posOf`, `snap: never |
+    off-canonical | legacy-orphan`) and renders the picks its own way — widgets, char offsets, sig.
+    Do not grow a fourth loop, and do not add a policy branch a caller could express as data.
+    Guarded by `breakRuleParity.test.ts` (36 hand-derived cases pinning sig, widget keys, band
+    breaks and lastUsed for every shape where the copies could have differed) — and still compare
+    break POSITIONS, not page counts, whenever the rule or its callers move
+    (`pnpm prove:breaks`: byte-identical first-10 + `contentWidth` before and after).
 
 ## Productivity + email (`src/productivity/`, `src/email/`, LIVE except email send)
 
@@ -1021,8 +1028,12 @@ write shim, so metadata can say a PDF exists with no local bytes).
     the engine only ever runs in the condition the new snap rule governs**, so it is now guaranteed
     to disagree on every break. Canonical rendering is byte-unchanged (`prove:breaks` green), which
     is why live pagination and print are unaffected.
-  - **THE REAL BLOCKER IS NOW `arithmeticLayout.ts`, NOT WebKit.** It does not implement
-    `shouldSnapToBlock`. Graduating on a WebKit pass alone would ship an engine that cuts lines in
+  - **THE REAL BLOCKER IS NOW `arithmeticLayout.ts`, NOT WebKit.** Its `paginate` selects the
+    `never` snap policy of the one break rule (`breakRule.ts`, 2026-09-15) — deliberately, because
+    textRender and `prove:breaks` compare it against CANONICAL rendering, where the editor never
+    snaps either. The splitter is shared now, so the 17/17 · 25/25 · 34/34 divergence (re-measured
+    unchanged after the fold) must come from the LINES/BLOCKS the engine feeds it, not from the
+    rule. Graduating on a WebKit pass alone would ship an engine that cuts lines in
     half at every zoom — reintroducing verbatim the bug Peter reported on 2026-08-28. The WebKit
     cross-device pass and the scoped-arith typing A/B are still required, just no longer first.
   - **IT WAS RED FOR TWO DAYS AND THE GATE SAID GREEN**, because `prove:arith` was one of 52

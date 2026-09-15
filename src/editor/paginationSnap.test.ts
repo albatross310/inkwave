@@ -11,7 +11,7 @@
 // this is what stops it silently reverting.
 
 import { describe, it, expect } from 'vitest'
-import { shouldSnapToBlock } from './extensions/PaginationExtension'
+import { shouldSnapToBlock } from './breakRule'
 
 const S = (o: Partial<Parameters<typeof shouldSnapToBlock>[0]> = {}) =>
   shouldSnapToBlock({ liveIsCanonical: false, orphan: 40, blockStart: 500, lastBreakAt: 100, ...o })

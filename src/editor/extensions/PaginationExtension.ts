@@ -33,7 +33,8 @@ import { stepToZoom, zoomToStep, ZOOM_STEP_MIN, ZOOM_STEP_MAX } from '../zoomSte
 import { planLiveWarm } from '../zoomWarm'
 // gapEl + GAP/PHONE_PAGE_MARGIN/phoneLike live in pageGap.ts — shared with the snapshot view's
 // static paginator (staticPagination.ts) so both build byte-identical gap DOM.
-import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, GAP, PHONE_GAP, PHONE_SHEET_RADIUS, phoneLike, gapEl } from '../pageGap'
+import { PHONE_PAGE_MARGIN, GAP, PHONE_GAP, PHONE_SHEET_RADIUS, phoneLike, gapEl } from '../pageGap'
+import { pickBreaks } from '../breakRule'
 import { bibProvider } from '../../citations/bibProvider'
 import { harvestCiteBoxes, clearCiteBoxes } from '../../citations/citeBox'
 import { getCitationStyle } from '../../citations/citationsBus'
@@ -434,31 +435,15 @@ export function _computeBreaksForTest(
 // ⚠ IS THE LAYOUT THE WRITER SEES CANONICAL? Set by the measure BEFORE it enters the forced context
 // — inside that window the DOM is canonical by construction, so `canonicalIsLive` cannot be asked
 // there and would answer about the wrong layout (R7).
-/**
- * Should this break snap to the block boundary instead of splitting the paragraph?
- * Pure and exported, because the whole fix is one predicate and a browser probe that ran once is not
- * a guard (R3). ⚠ Both extra conditions are load-bearing: `orphan > 0` (with 0 the block begins at
- * this very line, so snapping is a no-op) and `blockStart > lastBreakAt` (or a block TALLER than a
- * page is pushed whole, overflows again, and snaps to the same boundary forever).
- * → docs/archive/pagination-rounds.md#zoom-snap
- */
-export function shouldSnapToBlock(o: {
-  liveIsCanonical: boolean; orphan: number; blockStart: number; lastBreakAt: number
-}): boolean {
-  return !o.liveIsCanonical && o.orphan > 0 && o.blockStart > o.lastBreakAt
-}
-
 let liveIsCanonical = true
 export function _setLiveIsCanonicalForTest(v: boolean): void { liveIsCanonical = v }
 
 /**
- * ⚠ A CANONICAL LINE START IS NOT A RENDERED LINE START AT ANY OTHER ZOOM. A break placed at a
- * canonical line start lands MID-LINE in a layout that wraps elsewhere, and the gap widget is
- * `display:block`, so it slices that line. Measured: every zoom except exactly 1 cut almost every
- * page. A BLOCK BOUNDARY is a line start in EVERY layout by construction, so when the rendering is
- * not canonical the break snaps there instead — the page is a little less full and no line is cut.
- * At canonical rendering (default desktop, and every print/PDF path) NOTHING changes, byte for byte.
- * → docs/archive/pagination-rounds.md#zoom-snap
+ * Render THE break rule (`breakRule.ts` — one definition, shared with the /snapshot pane and the
+ * canvas model) as gap-widget decorations + the `sig` the provers compare. Policy: the editor's
+ * off-canonical snap — at canonical rendering (default desktop, every print/PDF path) the break
+ * splits the block so the page fills; when the writer is zoomed it snaps to the block boundary so
+ * no rendered line is cut. → docs/archive/pagination-rounds.md#zoom-snap
  */
 function computeBreaks(
   lines: MeasuredLine[],
@@ -473,72 +458,28 @@ function computeBreaks(
   // pixel top arithmetically (see computeArithBands), so the zoom-exit never un-skips the doc.
   bandOut?: { breaks: Array<{ at: number; brokeUsed: number; botMargin: number }>; lastUsed: number },
 ): { decos: Decoration[]; sig: string } {
-  // TEXT area per page = pageH minus the top margin (from settings) and the bottom margin constant.
-  // Using the live topM ensures the break lands at pageH - MARGIN_BOTTOM from the sheet top —
-  // the same Y as the dashed rule in non-gapped mode — regardless of the top-margin setting.
-  const textArea = Math.max(1, pageH - topM - MARGIN_BOTTOM)
-  // The reference list always starts on a fresh page (position from findRefListPos). It's an atom
-  // the paginator can't split internally, so this at least guarantees a clean start (Peter's call).
-  let refBroken = false
+  const phone = phoneLike()
+  const r = pickBreaks(lines, blocks, {
+    pageH, topM, phone, refListPos,
+    posOf: (i) => posOf(lines[i]),
+    snap: { kind: 'off-canonical', liveIsCanonical },
+  })
   const decos: Decoration[] = []
-  const sig: string[] = []
-  let used = 0
-  let pageNo = 1
-  // Block identity comes from the collector (one posAtDOM per block); doc positions of individual
-  // lines resolve LAZILY via posOf — only the line a break actually lands on pays the hit-test.
-  // `curBlock = -1` after a break mirrors the old reset: orphan counting restarts per page.
-  let curBlock = -1, blockStartUsed = 0
-  let lastBreakAt = -1 // guards the block snap against pushing an over-tall block forever
-  for (let i = 0; i < lines.length; i++) {
-    const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
-    if (lines[i].blockIdx !== curBlock) {
-      curBlock = lines[i].blockIdx
-      blockStartUsed = used
+  for (const p of r.picks) {
+    if (p.kind === 'ref') {
+      // The reference list always starts on a fresh page — an atom the paginator can't split.
+      const gapTopM = phone ? PHONE_PAGE_MARGIN : topM
+      decos.push(Decoration.widget(refListPos, () => gapEl(p.botMargin, gapTopM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
+    } else {
+      // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height
+      // into cursor/selection mapping so a click at the page-above end jumps the caret past the gap.
+      // midBlock: Decision 1's dotted continuation bracket marks a mid-paragraph split.
+      decos.push(Decoration.widget(p.at, () => gapEl(p.botMargin, phoneLike() ? PHONE_PAGE_MARGIN : topM, gapped, p.midBlock), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${p.pageNo}-${p.at}${p.midBlock ? 'b' : ''}` }))
     }
-    const blockStart = blocks[lines[i].blockIdx].start
-    // Force the reference list onto a fresh page (before the normal overflow check). Block-level
-    // test: a line is at/after the refList exactly when its block starts at/after refListPos.
-    if (refListPos > 0 && !refBroken && blockStart >= refListPos && used > 4) {
-      const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - used)
-      const gapTopM = phoneLike() ? PHONE_PAGE_MARGIN : topM
-      decos.push(Decoration.widget(refListPos, () => gapEl(botMargin, gapTopM, gapped), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gapref-${refListPos}` }))
-      sig.push(`ref:${refListPos}:${Math.round(botMargin)}`)
-      bandOut?.breaks.push({ at: refListPos, brokeUsed: used, botMargin })
-      pageNo++; used = 0; curBlock = -1; refBroken = true; lastBreakAt = refListPos
-    }
-    // Break before the LINE that would overflow the text area.
-    if (i > 0 && used + lh > textArea && posOf(lines[i]) > 0) {
-      const orphan = used - blockStartUsed             // height of the current block already on this page
-      // ⚠ ALWAYS SPLIT mid-block so the page fills (Decision 5, Peter 2026-07-15: "probably split")
-      // — the widow/orphan snap is GONE, and `orphan` survives only for the sig/used accounting.
-      // Snap ONLY where a mid-block break would cut a RENDERED line, i.e. off-canonical rendering.
-      // → docs/archive/pagination-rounds.md#zoom-snap
-      const snap = shouldSnapToBlock({ liveIsCanonical, orphan, blockStart, lastBreakAt })
-      const at = snap ? blockStart : lines[i].pos      // else break mid-block so the page fills
-      const brokeUsed = snap ? blockStartUsed : used   // used-on-page at the actual break point
-      const botMargin = phoneLike() ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - brokeUsed)
-      // MID-PARAGRAPH split? — the line before the break is in the SAME block, so this block spans
-      // the boundary. Decision 1's dotted continuation bracket marks these, and it is INDEPENDENT of
-      // renderFill: a mid-paragraph split is semantically true at canonical breaks too.
-      const midBlock = i > 0 && lines[i - 1].blockIdx === lines[i].blockIdx
-      // Don't re-break at the reference-list boundary (already forced above; the atom can't split).
-      if (at > 0 && !(refBroken && at === refListPos)) {
-        // ignoreSelection: the gap is a TALL block widget; without this, ProseMirror folds its height
-        // into cursor/selection mapping so a click at the page-above end jumps the caret past the gap.
-        decos.push(Decoration.widget(at, () => gapEl(botMargin, phoneLike() ? PHONE_PAGE_MARGIN : topM, gapped, midBlock), { side: -1, ignoreSelection: true, stopEvent: () => true, key: `gap-${pageNo}-${at}${midBlock ? 'b' : ''}` }))
-        sig.push(`${at}:${Math.round(botMargin)}`)
-        bandOut?.breaks.push({ at, brokeUsed, botMargin })
-        pageNo++
-        lastBreakAt = at
-        used = snap ? orphan : 0  // snapped: the orphan lines move to the next page; mid-block: line i starts it
-        curBlock = -1             // recompute the block-on-page baseline at the next line
-      }
-    }
-    used += lh
+    bandOut?.breaks.push({ at: p.at, brokeUsed: p.brokeUsed, botMargin: p.botMargin })
   }
-  sig.push(`pages:${pageNo}`)
-  if (bandOut) bandOut.lastUsed = used
-  return { decos, sig: sig.join('|') }
+  if (bandOut) bandOut.lastUsed = r.lastUsed
+  return { decos, sig: r.sig }
 }
 
 // ─── SCOPED CANONICAL MEASURE ─────────────────────────────────────────────────────────────────
