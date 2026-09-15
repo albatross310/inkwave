@@ -91,7 +91,8 @@ keep them out of the conversation by default so earlier chat remains readable.
   from popovers); swap → resolves; verdicts freeze at commit so `S_v` rotation never
   reflows committed text. Unit-tested (`scas/engine.test.ts`) + browser-verified.
 - **Provenance spine M1 — snapshots + local hashing: DONE.** `provenance/hash.ts`
-  (RFC 8785 JCS + SHA-256 + bundleHash), `provenance/wordNudges.ts` (the nudge emitter),
+  (SHA-256 + bundleHash; the RFC 8785 JCS canonicaliser it re-exports is `provenance/jcs.mjs`, ONE
+  file shared with the signing server — see M3), `provenance/wordNudges.ts` (the nudge emitter),
   `provenance/snapshots.ts` (OPFS append-only store; snapshot on a resolved kick when
   the contentHash changed — typing/pastes never snapshot), `components/ReceiptPanel.tsx`.
   Offline, no network; `ots:unstamped` until M2. Unit-tested (`hash.test.ts`) +
@@ -110,7 +111,12 @@ keep them out of the conversation by default so earlier chat remains readable.
   content-free signing service issues a rotating server-held exclusion set S_v and signs
   hash-chained receipts. Server (Node; Vercel functions + dev middleware):
   `api/_provenance-core.mjs` (Ed25519 @noble, seed derivation H(masterSecret,docId,v),
-  S_v INDEX sampling → bitmask, signPeriod), `api/session.mjs`, `api/sign.mjs`. Client:
+  S_v INDEX sampling → bitmask, signPeriod; it IMPORTS the canonicaliser from `src/provenance/jcs.mjs`
+  — the same file `hash.ts` re-exports, never a copy, because the signature is over its output and one
+  byte of drift makes every receipt unverifiable. `provenance/jcs.test.ts` pins every canonical byte
+  from BOTH entry points (19 RFC fixtures, hand-written) plus a GOLDEN receipt signed by the
+  pre-extraction core: a shared canonicaliser cannot be checked by agreement — server and client
+  consume the same mutant and agree — only by a pin; a one-byte mutant reddens 36 tests), `api/session.mjs`, `api/sign.mjs`. Client:
   `provenance/receipts.ts` (verifyReceipt/verifyChain), `provenance/session.ts`
   (SessionRunner). The editor opens a session on doc load, drives the SCAS controller off
   the server's S_v (`controller.useServerSet`), and on the period timer signs the period's
