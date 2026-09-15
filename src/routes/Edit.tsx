@@ -265,6 +265,14 @@ export function Edit() {
             // it. The compiler now makes ignoring this case impossible to do by accident.
             if (r.kind === 'error') throw r.error
             if (r.kind === 'found') {
+              // `?seed` on a tab that already holds an UNTOUCHED blank: the blank protects no
+              // writing (same structural predicate as the duplicate-tab rule above), so give the
+              // tab a seeded page instead. A blank that contains anything is never replaced.
+              if (seedRequested() && isBlankUntitledDocument(r.doc)) {
+                releaseDocLock(storedId); claimedId = null
+                openFresh()
+                return
+              }
               claimTabDoc(r.doc.id) // pin to THIS tab (a `?doc=`/hint boot has not claimed it yet)
               claimedId = null // committed — the tab owns this for real now, not this closure's job
               setDoc(migrateDocument(r.doc))
@@ -321,6 +329,11 @@ export function Edit() {
             continue
           }
           if (r.kind === 'found') {
+            if (seedRequested() && isBlankUntitledDocument(r.doc)) { // as above: an untouched blank
+              releaseDocLock(id); claimedId = null
+              openFresh()
+              return
+            }
             // Heal an OPFS orphan's lightweight index while opening it; the document bytes remain
             // the source of truth and were already read successfully above.
             await upsertMeta({ id: r.doc.id, title: r.doc.title, updatedAt: r.doc.updatedAt })
