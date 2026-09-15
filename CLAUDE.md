@@ -1181,9 +1181,12 @@ write shim, so metadata can say a PDF exists with no local bytes).
 `0.0.0.0:5173` (log `/tmp/inkwave-dev.log`) — Peter's standing ask, so every cloud session begins
 with a live app to test against. The container's ports are unreachable from his browser; the server
 is for the session's own headed browsers: Chromium/Firefox/WebKit under `xvfb-run -a` (real
-engines, CPU raster, no compositor — the same fidelity ceiling as WSL). The proxy CA must be in
-Chromium's NSS store (`certutil -d sql:$HOME/.pki/nssdb -A -t C,, -i /root/.ccr/agent-proxy-ca.crt`)
-or every HTTPS load is `ERR_CERT_AUTHORITY_INVALID`. `codeload.github.com` tarballs are 403'd by the
+engines, CPU raster, no compositor — the same fidelity ceiling as WSL; all three VERIFIED rendering
+the app, 4-10s to first paint). The hook installs Firefox/WebKit + their libs and puts the proxy CA in
+Chromium's NSS store, all best-effort — without the CA every HTTPS load is `ERR_CERT_AUTHORITY_INVALID`.
+Two probe traps: `| tail` on a multi-engine run hides everything until the LAST engine exits (Firefox
+hung 11 min and nothing printed); and `pkill -f firefox` kills YOUR OWN shell when its command line
+contains the word. `codeload.github.com` tarballs are 403'd by the
 egress policy — a git-URL dependency will never install here (why `bignumber.js` is overridden).
 `inkwave.studio` currently REDIRECTS to `iwzero.me` ("Inkwave Zero"); the OneDrive app's registered
 redirect URIs are still `iwsolo.me` + localhost (`docs/archive/storage-and-sync.md#od-scopes`).
