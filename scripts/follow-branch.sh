@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Follow a cloud session's branch on your own machine: pull every few seconds and keep `pnpm dev` up,
+# Follow a cloud session's branch on your own machine: pull every 5s and keep `pnpm dev` up,
 # so every push from a Claude Code cloud session shows on http://localhost:5173 via HMR without a
 # hand in it (Peter, 2026-09-15: "test on localhost all the changes you make on the cloud
 # automatically"). Usage:  scripts/follow-branch.sh <branch> [interval-seconds]
@@ -7,7 +7,7 @@
 # see CLAUDE.md "NEVER share a checkout". Ctrl-C stops both the puller and the dev server.
 set -u
 BRANCH="${1:?usage: scripts/follow-branch.sh <branch> [interval]}"
-EVERY="${2:-20}"
+EVERY="${2:-5}"
 ROOT="$(git rev-parse --show-toplevel)"
 WT="$ROOT/../inkwave-follow"
 
