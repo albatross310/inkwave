@@ -57,4 +57,9 @@ describe('footerCramped — the pills fold below one viewport width', () => {
     expect(footerCramped(296)).toBe(true)
     expect(footerCramped(570)).toBe(false)
   })
+  it('sits at or above the width where the unfolded layout reaches the circle cap (monotonic sizing)', () => {
+    // Measured: unfolded circles reach 34px between ~520 and ~560 depending on the pills' painted
+    // width. A threshold below that makes the bar SHRINK as the window widens across it.
+    expect(FOOTER_CRAMPED_BELOW_PX).toBeGreaterThanOrEqual(520)
+  })
 })

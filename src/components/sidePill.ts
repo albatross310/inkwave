@@ -130,9 +130,15 @@ export function subscribeSidePills(fn: () => void): () => void {
 // needs to know. One threshold on the VIEWPORT, not on the pills' own size, so folding cannot
 // un-trigger itself (a rule that read the pills would flip the moment they shrank).
 //
-// 440 is where the full pills push the circles below ~24px (measured: 23px at 430, 19 at 400).
+// THE THRESHOLD IS WHERE THE UNFOLDED LAYOUT REACHES THE CIRCLES' 34px CAP, so sizing stays
+// MONOTONIC across it. The first cut was 440 — where the full pills push the circles below ~24px —
+// and the local Mac session measured the flaw: at 439 (folded) the circles were 34px, at 440
+// (unfolded) they DROPPED to 24 and only regained 34 near 520. The bar got smaller as the window
+// got bigger. Folding up to the cap point means the circles hold 34px from the fold's floor all the
+// way up, and the threshold only swaps the pills' form. (Measured unfolded: 32px at 500, 34 by
+// ~520-560 depending on the pills' exact painted width; 540 clears it on both machines.)
 
-export const FOOTER_CRAMPED_BELOW_PX = 440
+export const FOOTER_CRAMPED_BELOW_PX = 540
 
 /** Pure form of the rule, for the test and for anything without a window. */
 export function footerCramped(viewportWidth: number): boolean {
