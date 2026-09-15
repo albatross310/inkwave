@@ -19,8 +19,11 @@ dist-ssr
 PROVENANCE-SECURITY-AUDIT.md
 SECURITY-AUDIT-2026-06.md
 
-# Claude Code local worktrees / session data
-.claude/
+# Claude Code local worktrees / session data — but the shared session-start hook + settings are
+# repo content (they are what lets a cloud session install deps and run the gate).
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 .vercel
 
 # bench harness: built vendor bundle (rebuild from tiptap-src) + scratch

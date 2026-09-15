@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  bignumber.js: 2.0.7
+
 importers:
 
   .:
@@ -2173,9 +2176,8 @@ packages:
   bcrypt-pbkdf@1.0.2:
     resolution: {integrity: sha512-qeFIXtP4MSoi6NLqO12WfqARWWuCKi2Rn/9hJLEmtB5yTNr9DqFWkJRCf2qShWzPeAMRnOgCrq0sg/KLv5ES9w==}
 
-  bignumber.js@https://codeload.github.com/debris/bignumber.js/tar.gz/94d7146671b9719e00a09c29b01a691bc85048c2:
-    resolution: {tarball: https://codeload.github.com/debris/bignumber.js/tar.gz/94d7146671b9719e00a09c29b01a691bc85048c2}
-    version: 2.0.7
+  bignumber.js@2.0.7:
+    resolution: {integrity: sha512-KBmCSH2MWELnzR80Ti7s30uyhC5sMfrpAf0PQFFKDWMi70voQ6UtRhUDAmCsm5n9BqEtPNbRAFfyyDbDOZfU/A==}
 
   binary-extensions@2.3.0:
     resolution: {integrity: sha512-Ceh+7ox5qe7LJuLHoY0feh3pHuUDHAcRUeyL2VYghZwfpkNIy/+8Ocg0a3UuSoYzavmylwuLWQOf3hl0jjMMIw==}
@@ -6781,7 +6783,7 @@ snapshots:
     dependencies:
       tweetnacl: 0.14.5
 
-  bignumber.js@https://codeload.github.com/debris/bignumber.js/tar.gz/94d7146671b9719e00a09c29b01a691bc85048c2: {}
+  bignumber.js@2.0.7: {}
 
   binary-extensions@2.3.0: {}
 
@@ -9267,7 +9269,7 @@ snapshots:
 
   web3@0.18.4:
     dependencies:
-      bignumber.js: https://codeload.github.com/debris/bignumber.js/tar.gz/94d7146671b9719e00a09c29b01a691bc85048c2
+      bignumber.js: 2.0.7
       crypto-js: 3.3.0
       utf8: 2.1.2
       xhr2: 0.2.1
