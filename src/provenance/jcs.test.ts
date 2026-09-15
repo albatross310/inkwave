@@ -29,6 +29,8 @@ import { canonicalize as clientCanonicalize, sha256Hex as clientSha256Hex } from
 // The REAL server core (Node ESM outside the TS project — `declare module '*.mjs'`), as the M3
 // interop tests import it. The shape is asserted at this boundary and nowhere else.
 import * as serverCore from '../../api/_provenance-core.mjs'
+import { verifyReceipt, chainHash, DEV_SIGNING_PK } from './receipts'
+import type { SignedReceipt } from '../types/document'
 
 const { canonicalize: serverCanonicalize } = serverCore as unknown as {
   canonicalize: (value: unknown) => string
@@ -270,3 +272,42 @@ describe('JCS corpus — client (hash.ts) vs server (api/_provenance-core.mjs)',
   })
 })
 
+// ── GOLDEN: a receipt signed by the PRE-REFACTOR server core ────────────────────
+// Agreement tests (verify/index.test.ts signs with the server and verifies with the client) cannot
+// see a change in a SHARED canonicaliser: both sides consume it and agree. Only a pin can. This
+// receipt was signed ONCE, by the server core as it stood at ea349cc (its own private copy of
+// canonicalize, before extraction), with the committed dev key and dev master secret, over the
+// corpus's TipTap document with no kicks. If the shared module's output ever changes, this
+// verification is the first thing to go red — the same way every receipt Peter's documents already
+// hold would. The docId is 'jcs-golden-doc'; nothing here is Peter's writing.
+const GOLDEN: SignedReceipt =
+  {
+    "v": 1,
+    "sessionToken": "d0cb2c8247b22ec35f16f7c623f35e24f3d66248bba16507975fcd0b16a03ba6.d916dd0da6e9fd81b1f89c15d4c4fab0f61f58748765e804c2d3a6f12cbd8295",
+    "counter": 0,
+    "prevHash": "eebad0fee5ab3b0686303d0a0285d7a40138eb9f6a572e828529c3df2e767048",
+    "contentHash": "7b85e51b71b2a5888c14d4e9f0c816fe134c87943ba437b698ce1c82ea79df66",
+    "setVersion": 0,
+    "lockedSetHash": "39896123e8595f0d0f6db4a10e109c519ea002ee2cbf1532b14abc2e6612027e",
+    "kicks": [],
+    "serverTime": "2026-09-15T21:34:08.805Z",
+    "signature": "IBeixv4zDzydflVyvr6F6RpoLy0n3f2j9CZeQ2bewOlF5+hppV/8S1AycOlDZiyW2W5bjIjTrmCE9B8+z3eyCw==",
+    "lockedSet": "EAAAAAAAAQAAAAAAEAAIBACACQAAAMBAAQEAACAAAAAABCACAAAABoAACAMAADAAAAAACAAAACSCAEgQAAAAAAAAAAAAAEAAAAAAAAgAAIECAAAEAAAAAAAQAABcAAAAACAAAACAMAAAAAAAAAAACQUAEAAACAAAAAAAAAAAAAAAwQAAAAAABAACAQAAAAAIAAYACAAAAAAAgAAAAAUAAAAAAAAAAAAAgAACAAiAiAQIAAACAAAAAAABAAAAAwAQAALgAQAASAAAEAAgBABAAAAAAAAAAAABAICAkAgAAAAAQAAQAAAQIAAQAAAIAACBABIAACAAAAAAAAAAKEQAAAACAQAAAACAAAAAICAAAAEAAAAAAQkECAQAQAAAIQICAAAAMAgAQBFwAAAAAAIAAEAEAAAAAAAAAAAIAAAAAAQgMAAIAgQAgAGAABCAAAAEAAgIAggIgAAABCJAAgAAAAAAQACEAAAAACBBCQIADACAAAQCAAAIQAAAAAQABAOAAIAKACABABAAABIAAAIAAAAAAAgAAEBABAAAAAQQAgAQAQAKGAIgAAAAQAAEACABAAIAAAAAIAACAIAAAQAAIEAAAgBEgAAEEEAAADAAAAgggAAAAAIAAAVAAAAEAAkAAgKwQAABgAJIIAAARCEAYAAQAEAAAIASAAACAAwAQAAQAAAIAAAAgAAAEAAEKAAAQIAAQAIAIAIMMAEAAAAAQAEAAgAAUAAAAAmBBBAAAgCAAQA="
+  }
+
+describe('GOLDEN receipt signed by the pre-refactor core', () => {
+  it('verifies against the dev public key (Ed25519 over the shared canonical core)', async () => {
+    expect(await verifyReceipt(GOLDEN, DEV_SIGNING_PK)).toEqual({ ok: true })
+  })
+  it('its lockedSetHash is sha256(canonicalize(lockedSet)) — offline hashlib hex', async () => {
+    expect(await clientSha256Hex(clientCanonicalize(GOLDEN.lockedSet))).toBe(GOLDEN.lockedSetHash)
+    expect(nobleHex(serverCanonicalize(GOLDEN.lockedSet))).toBe(GOLDEN.lockedSetHash)
+  })
+  it('its chainHash (the next receipt\'s prevHash) is pinned — offline hashlib hex', async () => {
+    expect(await chainHash(GOLDEN)).toBe('fe8736929a1787c01a87f25e3ba1daea238c0be86100bee8d36870a2a226d166')
+  })
+  it('KNOWN-NEGATIVE: one flipped kick breaks it (the pin is not satisfiable by a broken verifier)', async () => {
+    const tampered: SignedReceipt = { ...GOLDEN, counter: 1 }
+    expect((await verifyReceipt(tampered, DEV_SIGNING_PK)).ok).toBe(false)
+  })
+})
