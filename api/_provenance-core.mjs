@@ -48,7 +48,7 @@ function sha256Hex(s) { return toHex(sha256(enc.encode(s))) }
 
 // RFC 8785 (JCS) subset — MUST match src/provenance/hash.ts byte-for-byte (the signature is over
 // this canonical string). Integers/strings/booleans/null/objects/arrays only.
-function canonicalize(value) {
+export function canonicalize(value) {
   if (value === null) return 'null'
   const t = typeof value
   if (t === 'number') { if (!Number.isFinite(value)) throw new Error('JCS: non-finite'); return JSON.stringify(value) }
