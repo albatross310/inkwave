@@ -36,7 +36,8 @@ import {
   stopPomodoro, subscribe,
 } from '../productivity/pomodoroStore'
 import { dismissSummary, pendingSummary, startWork, submitSummary, WORK_SUMMARY_EVENT, type PendingSummary } from '../productivity/workSession'
-import { isPostHoc, isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection, splitByEntry, unreflectedRows } from '../productivity/sessionLogic'
+import { dayTotals } from '../productivity/aggregate'
+import { isPostHoc, isoWithOffset, localDayOf, localMonthOf, shouldOfferReflection, unreflectedRows } from '../productivity/sessionLogic'
 import type { DocType, Reflection, SessionRow } from '../productivity/types'
 import { TOUCH_MIN, TYPE } from '../music/typeScale'
 import { bibProvider } from '../citations/bibProvider'
@@ -146,36 +147,36 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 /**
  * §A3.3's day summary, in the app's voice. Descriptive; never a score.
  *
- * ⚠ A SECOND PLACE THE DAY'S MINUTES ARE SUMMED — `aggregate.ts` is the other — and it is how
- * §A6.1's rule got broken once already: reducing over ALL rows reported 45 REMEMBERED minutes back
- * to the writer as "focused minutes", with every unit test green, because they guard `aggregate.ts`
- * and this panel never calls it. **A guard on one implementation of a rule says nothing about the
- * other.** So the split happens HERE too; a third summariser must do the same, or all three should
- * call one rule. → docs/archive/panels-and-popovers.md#clock-day-summary
+ * ⚠ PHRASES `dayTotals`; SUMS NOTHING ITSELF. A private reduce here once reported 45 REMEMBERED
+ * minutes to the writer as "focused minutes" past a green suite — every guard sat on `aggregate.ts`,
+ * which this panel never called. One sum, so a guard on it is a guard on this screen. The precision
+ * is this function's own: whole minutes, `Math.round` of the raw sum (the wire rounds to 0.1).
+ * → docs/archive/panels-and-popovers.md#clock-day-summary
  */
 function daySummary(allRows: SessionRow[]): string {
-  const { measured: rows, postHoc } = splitByEntry(allRows)
-  const added = Math.round(postHoc.reduce((a, r) => a + r.active_minutes, 0))
+  const totals = dayTotals(allRows)
+  const added = Math.round(totals.posthoc_minutes)
   // §A5's register: stated plainly, neither praised nor apologised for. Adding time you forgot to
   // track is ordinary record-keeping, so this sentence does not editorialise about it.
   const addedClause = added > 0 ? ` You also added ${added} minute${added === 1 ? '' : 's'} from memory.` : ''
 
-  if (rows.length === 0) {
+  if (totals.session_count === 0) {
     return added > 0
       ? `Nothing tracked today —${addedClause.replace(' You also added', ' but you added')}`
       : 'Nothing recorded yet today. Whenever you start, it will show up here.'
   }
-  const mins = Math.round(rows.reduce((a, r) => a + r.active_minutes, 0))
-  const net = rows.reduce((a, r) => a + r.net_words, 0)
+  const mins = Math.round(totals.active_minutes)
+  const net = totals.net_words
+  const sessions = totals.session_count
   const shape = mins < 25 ? 'A short spell of work' : mins < 90 ? 'A steady stretch' : 'A long day at it'
   const words =
     net > 0 ? `, and the writing grew by ${net} word${net === 1 ? '' : 's'}` :
     net < 0 ? ', and you cut it back — editing is writing too' :
     ', spent shaping what was already there'
-  return `${shape}: ${mins} focused minute${mins === 1 ? '' : 's'} across ${rows.length} session${rows.length === 1 ? '' : 's'}${words}.${addedClause}`
+  return `${shape}: ${mins} focused minute${mins === 1 ? '' : 's'} across ${sessions} session${sessions === 1 ? '' : 's'}${words}.${addedClause}`
 }
 
-/** Test seam — `daySummary` is a pure function and the §A6.1 rule it carries must stay in the gate. */
+/** Test seam — `daySummary` is a pure function; its every sentence is pinned verbatim, from the screen's side. */
 export const _daySummaryForTest = daySummary
 
 // The timer lengths, edited AS NUMBER INPUTS (Peter, 2026-07-18: "all customisable JUST BY CLICKING

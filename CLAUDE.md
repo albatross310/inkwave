@@ -476,9 +476,14 @@ or the tone.
   `isPostHoc()`, which asks the positive question. Show "about 45m", never start–end times: printing
   "13:15–14:00" dresses testimony as measurement.
 - **A guard on one implementation of a rule says nothing about the other.** `daySummary` in
-  `ClockMenu.tsx` is a SECOND implementation of "sum the day's minutes"; every guard was on
+  `ClockMenu.tsx` WAS a second implementation of "sum the day's minutes"; every guard was on
   `aggregate.ts`, so the drop-up reported 45 remembered minutes to Peter as "focused minutes" with
-  the full suite green.
+  the full suite green. Consolidated (queue item 2): `aggregate.ts dayTotals` is THE day sum —
+  unrounded, no day filter — and `dayAggregate` (round1, the wire) and `daySummary` (Math.round,
+  the screen) both read it. MEASURED: a merge planted in `dayTotals` fails 5 aggregate guards (the
+  4 that existed + 1 on `dayTotals` itself) AND 13 of the drop-up's 31 verbatim-sentence tests; the
+  same plant in `dayAggregate` on master failed 4 and 0. A new summariser must call `dayTotals`,
+  never sum for itself.
 - **Measured numbers never round-trip.** Out yes, back never: `judged.ts` REFUSES a judged table
   carrying any measured column; `claims.ts` flags narrative numerals absent from the payload.
 - **You cannot judge writing from minutes and word counts.** `insight`/`quality` are asked for ONLY

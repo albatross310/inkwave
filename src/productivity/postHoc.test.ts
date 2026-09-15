@@ -8,7 +8,7 @@
 // exactly the tautology `phase.variants.test.ts` (F1) was caught in.
 
 import { describe, expect, it } from 'vitest'
-import { aggregateDays, dayAggregate, isPostHoc, splitByEntry, windowDocs } from './aggregate'
+import { aggregateDays, dayAggregate, dayTotals, isPostHoc, splitByEntry, windowDocs } from './aggregate'
 import { POSTHOC_MAX_MINUTES, buildPostHocRow } from './sessionLogic'
 import type { SessionRow } from './types'
 
@@ -113,6 +113,16 @@ describe('§A6.1 — post-hoc time NEVER merges into the measured bars', () => {
     const { measured, postHoc } = splitByEntry(rows)
     expect(measured).toHaveLength(2)
     expect(postHoc).toHaveLength(1)
+  })
+
+  it('dayTotals — THE shared sum — keeps the two populations in two fields', () => {
+    // `dayAggregate` and the clock drop-up's `daySummary` both read this, so a merge planted here
+    // fails the drop-up's sentence tests as well as these (measured, see ClockMenu.test.tsx).
+    const t = dayTotals(rows)
+    expect(t.active_minutes).toBe(100)      // NOT 145
+    expect(t.session_count).toBe(2)         // NOT 3
+    expect(t.posthoc_minutes).toBe(45)
+    expect(t.posthoc_session_count).toBe(1)
   })
 
   it('dayAggregate: active_minutes counts ONLY what the timer watched', () => {

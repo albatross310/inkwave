@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  aggregateDays, aggregateLedger, aggregateWeeks, buildWindow, dayAggregate, deepShallowRatio,
+  aggregateDays, aggregateLedger, aggregateWeeks, buildWindow, dayAggregate, dayTotals, deepShallowRatio,
   MIN_CORRELATION_N, monthsSpanning, noteDigest, pearson, windowBounds, windowDocs,
 } from './aggregate'
 import type { SessionRow } from './types'
@@ -75,6 +75,51 @@ describe('dayAggregate (§A3.3)', () => {
     const a = dayAggregate('2026-07-17', [rows[0]])
     expect(a.busiest_hours[9]).toBe(25)
     expect(a.busiest_hours[23]).toBe(0)
+  })
+})
+
+describe('dayTotals — THE day sum, read by the wire rollup and the drop-up alike', () => {
+  it('is UNROUNDED: the caller states its precision, so nothing rounds twice', () => {
+    // 10.1 + 10.2 + 10.2 is 30.5 in decimal and carries float hair in IEEE-754. The raw sum is what
+    // comes back; `dayAggregate` rounds it to 0.1 for the wire, the drop-up to whole minutes.
+    const rows = [
+      row({ start: '2026-07-17T09:00:00+10:00', active_minutes: 10.1 }),
+      row({ start: '2026-07-17T10:00:00+10:00', active_minutes: 10.2 }),
+      row({ start: '2026-07-17T11:00:00+10:00', active_minutes: 10.2 }),
+    ]
+    const raw = rows.reduce((a, r) => a + r.active_minutes, 0)
+    expect(dayTotals(rows).active_minutes).toBe(raw)
+    expect(raw).not.toBe(30.5) // the hair is real — which is why the primitive must not pre-round
+    expect(dayAggregate('2026-07-17', rows).active_minutes).toBe(30.5)
+  })
+
+  it('dayAggregate reads it for exactly these fields, rounding only where the wire always did', () => {
+    const rows = [
+      row({ start: '2026-07-17T09:00:00+10:00', active_minutes: 25.25, net_words: 280 }),
+      row({ start: '2026-07-17T14:00:00+10:00', active_minutes: 40, net_words: -30 }),
+    ]
+    const t = dayTotals(rows)
+    const a = dayAggregate('2026-07-17', rows)
+    expect(t).toEqual({ active_minutes: 65.25, session_count: 2, net_words: 250, posthoc_minutes: 0, posthoc_session_count: 0 })
+    expect(a.active_minutes).toBe(65.3)
+    expect(a.session_count).toBe(t.session_count)
+    expect(a.net_words).toBe(t.net_words)
+  })
+
+  it('sums what it is handed — no day filter: scoping the day is the CALLER\'s job', () => {
+    // `dayAggregate(day, rows)` labels its output with `day` and sums every row it is given; the
+    // drop-up filters by its own `today` first. A filter here would silently drop a row the screen
+    // shows (offset edges), so its absence is pinned.
+    const rows = [
+      row({ start: '2026-07-17T09:00:00+10:00', active_minutes: 20 }),
+      row({ start: '2026-07-18T09:00:00+10:00', active_minutes: 30 }),
+    ]
+    expect(dayTotals(rows).active_minutes).toBe(50)
+    expect(dayAggregate('2026-07-17', rows).active_minutes).toBe(50)
+  })
+
+  it('an empty day is all zeros, never NaN', () => {
+    expect(dayTotals([])).toEqual({ active_minutes: 0, session_count: 0, net_words: 0, posthoc_minutes: 0, posthoc_session_count: 0 })
   })
 })
 

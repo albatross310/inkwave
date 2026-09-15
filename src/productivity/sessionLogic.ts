@@ -266,9 +266,10 @@ export function isPostHoc(r: SessionRow): boolean {
  * Split rows by where their time came from. Every consumer that TOTALS anything starts here, so
  * "measured" and "told to us" cannot be accidentally summed.
  *
- * ⚠ EXPORTED because the drop-up's `daySummary` is a REAL caller: it summed all rows and reported
- * 45 remembered minutes as "focused minutes" with every unit test green (they guard `aggregate.ts`,
- * which the panel never calls). → docs/archive/productivity-email-build.md#session-ispost-hoc
+ * Exported for `aggregate.ts` (which re-exports it, and whose `dayTotals` is THE day sum). The
+ * drop-up's `daySummary` no longer splits for itself — it summed all rows once and reported 45
+ * remembered minutes as "focused minutes" past a green suite; now it reads `dayTotals`, so the
+ * guards on the rollup cover the screen. → docs/archive/productivity-email-build.md#session-ispost-hoc
  */
 export function splitByEntry(rows: readonly SessionRow[]): { measured: SessionRow[]; postHoc: SessionRow[] } {
   const measured: SessionRow[] = [], postHoc: SessionRow[] = []
