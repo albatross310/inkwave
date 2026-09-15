@@ -1,0 +1,22 @@
+# pnpm settings. `pnpm.overrides` in package.json is ignored by newer pnpm 10.x (measured on the Mac),
+# so the override lives here, which every pnpm 10 reads. Why it exists: web3@0.18.4 pins bignumber.js
+# to a GitHub tarball the cloud egress policy 403s; the fork is 2.0.7 with two lookaheads removed in
+# hex parsing, reachable only via the Ethereum path the OTS relay never uses. Registry 2.0.7 it is.
+overrides:
+  bignumber.js: 2.0.7
+
+# Build scripts, decided once so no machine needs an interactive `pnpm approve-builds` (the local
+# Mac session surfaced the prompt, 2026-09-15). None of these need to run: esbuild takes its binary
+# from @esbuild/<platform> (verified: buildSync works unbuilt); gl is OSMD's NODE-side renderer and
+# nothing in src/scripts/api requires it (its native build needs a C++ toolchain + GL headers and is
+# the flaky one); keccak/bufferutil/utf-8-validate are optional accelerators with JS fallbacks;
+# core-js, @clerk/shared and browser-tabs-lock only print funding/telemetry notices.
+ignoredBuiltDependencies:
+  - '@clerk/shared'
+  - browser-tabs-lock
+  - bufferutil
+  - core-js
+  - esbuild
+  - gl
+  - keccak
+  - utf-8-validate
