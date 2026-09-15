@@ -24,6 +24,7 @@ import { duplicateEmailAsNew } from '../email/duplicateEmail'
 import { setOpenDocListenerReady, waitForStudioFileLaunch, STUDIO_FILE_ACTION_PARAM } from '../pwa/fileLaunch'
 import { LoadingTip } from '../components/LoadingTip'
 import { currentDocIds } from '../storage/currentDocs'
+import { seedRequested, seededDocument } from '../dev/seedDocument'
 
 function newDocument(): InkwaveDocument {
   return withScasDefaults({
@@ -185,7 +186,9 @@ export function Edit() {
     async function init() {
       try {
         const openFresh = () => {
-          const fresh = newDocument()
+          // `?seed` (DEV only) fills the blank a fresh tab would have minted anyway with sample
+          // text, so a lane's localhost tab is testable at once. Absence path only — see seedDocument.ts.
+          const fresh = seedRequested() ? seededDocument() : newDocument()
           claimTabDoc(fresh.id)
           claimedId = null
           setDoc(fresh)

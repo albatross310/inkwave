@@ -1,15 +1,37 @@
 #!/usr/bin/env bash
 # Follow a cloud session's branch on your own machine: pull every 5s and keep `pnpm dev` up,
-# so every push from a Claude Code cloud session shows on http://localhost:5173 via HMR without a
-# hand in it (Peter, 2026-09-15: "test on localhost all the changes you make on the cloud
-# automatically"). Usage:  scripts/follow-branch.sh <branch> [interval-seconds]
-# Runs in a THROWAWAY worktree (../inkwave-follow) so it never touches the checkout you write in —
-# see CLAUDE.md "NEVER share a checkout". Ctrl-C stops both the puller and the dev server.
+# so every push from a Claude Code cloud session shows on localhost via HMR without a hand in it
+# (Peter, 2026-09-15: "test on localhost all the changes you make on the cloud automatically").
+#
+#   scripts/follow-branch.sh <branch> [interval-seconds]
+#
+# Env (all optional; scripts/follow-lanes.sh sets them per lane):
+#   LANE=A      lane letter → worktree ../inkwave-lane-A and port 5180+index (A=5181 … G=5187)
+#   PR=7        PR number; with LANE the tab title reads "7/A · …" (VITE_LANE)
+#   PORT=5181   explicit port (overrides the LANE-derived one; default 5173)
+#   SEED=1      open http://localhost:<port>/?seed once the server answers (dev-only sample text)
+#   OPEN=0      do not open a browser tab
+#
+# Runs in a THROWAWAY worktree so it never touches the checkout you write in — see CLAUDE.md
+# "NEVER share a checkout". Ctrl-C stops both the puller and the dev server.
 set -u
 BRANCH="${1:?usage: scripts/follow-branch.sh <branch> [interval]}"
 EVERY="${2:-5}"
 ROOT="$(git rev-parse --show-toplevel)"
-WT="$ROOT/../inkwave-follow"
+
+LANE="${LANE:-}"
+if [ -n "$LANE" ]; then
+  LETTERS=ABCDEFGHIJ
+  idx="${LETTERS%%$LANE*}"; idx="${#idx}"
+  [ "$idx" -lt "${#LETTERS}" ] || { echo "LANE must be one of A–J"; exit 1; }
+  PORT="${PORT:-$((5181 + idx))}"
+  WT="$ROOT/../inkwave-lane-$LANE"
+  export VITE_LANE="${PR:+$PR/}$LANE"
+else
+  PORT="${PORT:-5173}"
+  WT="$ROOT/../inkwave-follow"
+fi
+URL="http://localhost:$PORT/${SEED:+?seed}"
 
 git -C "$ROOT" fetch -q origin "$BRANCH" || { echo "no such branch on origin: $BRANCH"; exit 1; }
 if [ ! -d "$WT" ]; then
@@ -18,9 +40,21 @@ fi
 cd "$WT"
 pnpm install --frozen-lockfile >/dev/null 2>&1
 
-pnpm dev &
+pnpm dev --port "$PORT" &
 DEV=$!
 trap 'kill $DEV 2>/dev/null; exit 0' INT TERM
+echo "[follow${LANE:+ $LANE}] $BRANCH → $URL"
+
+# Open the tab once the server answers (macOS `open`, else xdg-open), never before.
+if [ "${OPEN:-1}" != "0" ]; then
+  ( for _ in $(seq 1 60); do
+      if curl -sfo /dev/null "http://localhost:$PORT/"; then
+        command -v open >/dev/null && open "$URL" || xdg-open "$URL" 2>/dev/null
+        break
+      fi
+      sleep 1
+    done ) &
+fi
 
 last=""
 while kill -0 $DEV 2>/dev/null; do
@@ -30,7 +64,7 @@ while kill -0 $DEV 2>/dev/null; do
     git checkout -q --detach "$head"
     # a lockfile change means new deps; HMR cannot cover that
     git diff --quiet "${last:-$head}" "$head" -- pnpm-lock.yaml || pnpm install --frozen-lockfile >/dev/null 2>&1
-    echo "[follow] $(date +%H:%M:%S) now at ${head:0:7}: $(git log -1 --format=%s "$head")"
+    echo "[follow${LANE:+ $LANE}] $(date +%H:%M:%S) now at ${head:0:7}: $(git log -1 --format=%s "$head")"
     last="$head"
   fi
   sleep "$EVERY"

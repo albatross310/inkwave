@@ -109,7 +109,10 @@ export function HydrateFallback() {
 export default function App() {
   useEffect(() => {
     const pick = TAB_TITLES[Math.floor(Math.random() * TAB_TITLES.length)]
-    document.title = pick
+    // A lane's dev server (scripts/follow-lanes.sh) exports VITE_LANE="<pr>/<lane>" so its tab reads
+    // "7/A · …" and Peter can tell four localhost tabs apart at a glance. Unset in production.
+    const lane = import.meta.env.VITE_LANE
+    document.title = lane ? `${lane} · ${pick}` : pick
   }, [])
   return <Outlet />
 }
