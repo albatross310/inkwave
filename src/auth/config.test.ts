@@ -14,10 +14,7 @@
 //      provider and throws. Three answers, deliberately not one.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import {
-  authRequested, authEnabled, CLERK_PUBLISHABLE_KEY,
-  markClerkProviderMounted, clerkProviderMounted,
-} from './config'
+import { authRequested, markClerkProviderMounted, clerkProviderMounted } from './config'
 
 const KEY = 'inkwave:auth'
 
@@ -93,18 +90,40 @@ describe('authRequested — DEFAULT OFF, sticky, uncached', () => {
   })
 })
 
-// (2) above. The Clerk key is a BUILD-TIME env var, absent in this suite, so authEnabled() is false
-// here whatever the flag says — which is itself the guarantee worth pinning: the free tier never
-// loads Clerk, and no URL param can make it.
+// (2) above. The Clerk key is a BUILD-TIME env var, and authEnabled() is false without it whatever
+// the flag says — which is itself the guarantee worth pinning: the free tier never loads Clerk, and
+// no URL param can make it.
+//
+// The key is CONSTRUCTED here, never inherited: Vite folds every VITE_* in the process env into
+// import.meta.env, so a host that exports VITE_CLERK_PUBLISHABLE_KEY (the cloud dev environment
+// does) would otherwise hand this test a key and fail its "no key" precondition. The module reads
+// the key at import, so each case re-imports under its own stubbed env.
 describe('authEnabled — the flag AND the key', () => {
-  beforeEach(() => vi.unstubAllGlobals())
-  afterEach(() => vi.unstubAllGlobals())
+  beforeEach(() => { vi.unstubAllGlobals(); vi.resetModules() })
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
-  it('stays OFF with the flag on when no publishable key is configured', () => {
+  async function configWithKey(key: string) {
+    vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', key)
+    return await import('./config')
+  }
+
+  it('stays OFF with the flag on when no publishable key is configured', async () => {
+    const cfg = await configWithKey('')
     stubEnv('?auth=1')
-    expect(authRequested()).toBe(true)
-    expect(CLERK_PUBLISHABLE_KEY).toBeFalsy() // the precondition, stated not assumed
-    expect(authEnabled()).toBe(false)
+    expect(cfg.authRequested()).toBe(true)
+    expect(cfg.CLERK_PUBLISHABLE_KEY).toBeFalsy() // the precondition, stated not assumed
+    expect(cfg.authEnabled()).toBe(false)
+  })
+
+  // The known-positive: proves the stub reaches the module, so the negative above is an observation
+  // rather than a harness that could never see a key.
+  it('turns ON with the flag on when a publishable key IS configured', async () => {
+    const cfg = await configWithKey('pk_test_known_positive')
+    stubEnv('?auth=1')
+    expect(cfg.CLERK_PUBLISHABLE_KEY).toBe('pk_test_known_positive')
+    expect(cfg.authEnabled()).toBe(true)
+    stubEnv('') // and the key alone is not enough — the flag is still required
+    expect(cfg.authEnabled()).toBe(false)
   })
 })
 

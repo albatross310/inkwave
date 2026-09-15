@@ -154,5 +154,10 @@
     "vite": "^6.1.0",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.0.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "bignumber.js": "2.0.7"
+    }
   }
 }
