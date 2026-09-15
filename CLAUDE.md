@@ -1176,6 +1176,18 @@ write shim, so metadata can say a PDF exists with no local bytes).
 
 ## Working model (how these sessions run)
 
+**CLOUD SESSIONS (claude.ai/code, 2026-09-15).** `.claude/hooks/session-start.sh` runs only under
+`CLAUDE_CODE_REMOTE`: frozen install, `react-router typegen`, and it STARTS THE DEV SERVER on
+`0.0.0.0:5173` (log `/tmp/inkwave-dev.log`) — Peter's standing ask, so every cloud session begins
+with a live app to test against. The container's ports are unreachable from his browser; the server
+is for the session's own headed browsers: Chromium/Firefox/WebKit under `xvfb-run -a` (real
+engines, CPU raster, no compositor — the same fidelity ceiling as WSL). The proxy CA must be in
+Chromium's NSS store (`certutil -d sql:$HOME/.pki/nssdb -A -t C,, -i /root/.ccr/agent-proxy-ca.crt`)
+or every HTTPS load is `ERR_CERT_AUTHORITY_INVALID`. `codeload.github.com` tarballs are 403'd by the
+egress policy — a git-URL dependency will never install here (why `bignumber.js` is overridden).
+`inkwave.studio` currently REDIRECTS to `iwzero.me` ("Inkwave Zero"); the OneDrive app's registered
+redirect URIs are still `iwsolo.me` + localhost (`docs/archive/storage-and-sync.md#od-scopes`).
+
 **`/root/dev/iw-master` IS A SHARED CHECKOUT. NEVER `git add -A` THERE (2026-07-17).** With 5–6 lanes
 running, that checkout is a contended resource: other agents check their branches out in it and leave
 work uncommitted in the tree. Both failure modes bit in one minute of one session:

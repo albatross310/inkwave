@@ -26,3 +26,11 @@ pnpm exec react-router typegen
 
 # Playwright: the image ships Chromium at /opt/pw-browsers and sets PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD;
 # nothing to fetch. Probes (`pnpm prove:*`) need no extra setup beyond this.
+
+# Dev server, always up for in-session browser testing (Peter, 2026-09-15). The container's ports are
+# unreachable from outside, so this exists for the headed Xvfb browsers in the session, not for him.
+# Detached + logged; `strictPort` means a second start just fails quietly rather than forking a port.
+if ! curl -sf -o /dev/null http://127.0.0.1:5173/; then
+  nohup pnpm dev >/tmp/inkwave-dev.log 2>&1 </dev/null &
+  disown
+fi
