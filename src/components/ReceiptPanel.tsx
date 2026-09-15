@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SnapshotMeta } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
-import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
+import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill } from './sidePill'
+
+// Module-level so its identity is stable: React re-invokes a callback ref (null, then el) whenever
+// its identity changes, and an inline arrow would re-register the pill on every render.
+const registerLeftPill = (el: HTMLButtonElement | null) => registerSidePill('left', el)
 
 // Peter, 2026-09-05: +50% horizontal breathing room (10px → 15px). The surrounding fixed-left
 // wrapper and bottom-left scale origin keep the pill's outer left edge anchored as it widens right.
@@ -190,6 +194,7 @@ export function ReceiptPanel({
       >
         {!hideTrigger && (
           <button
+            ref={registerLeftPill}
             type="button"
             onClick={() => setOpen(!open)}
             className={`iw-nightable iw-toolbar-outline ${compact ? 'flex items-center justify-center w-10 h-10 bg-white text-lg' : 'bg-white leading-tight text-left text-sm py-1 max-w-[7.25rem] max-lg:max-w-[6.75rem]'}`}

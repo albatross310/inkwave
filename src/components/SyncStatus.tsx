@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useZoomScale } from '../editor/useZoomScale'
-import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
+import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill } from './sidePill'
+
+// Module-level for a stable ref identity — see the matching note in ReceiptPanel.tsx.
+const registerRightPill = (el: HTMLButtonElement | null) => registerSidePill('right', el)
 import { relativeTime } from './relativeTime'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
@@ -143,6 +146,7 @@ export function SyncStatus({
           ~2 lines (a narrow width) so it never collides with the centred toolbar on a half-screen. */}
       {!hideTrigger && (
         <button
+          ref={registerRightPill}
           type="button"
           onClick={() => {
             // Just open the detail panel — DON'T fire the connect/sign-in action (e.g. the Microsoft

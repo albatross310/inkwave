@@ -60,6 +60,7 @@ import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignI
 import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, getGDriveFileTag, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
+import { sideReserve, sidePillElements, subscribeSidePills, SIDE_RESERVE_FALLBACK_PX, TOOLBAR_SIDE_GAP_PX } from '../components/sidePill'
 import { UnsyncedNotice } from '../components/UnsyncedNotice'
 import { shouldWarnUnsynced, unsyncedReducer, initialUnsyncedState } from './unsyncedWatch'
 import { VerifyModal } from '../components/VerifyModal'
@@ -125,14 +126,13 @@ import type { Snapshot, SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../t
 // `editor/toolbarContract.ts` and are never re-declared here. Register a button by adding a member
 // to `SlotId` + `ALL_SLOTS` there and the row, the ▲ overflow, drag-to-swap and migration follow.
 
-/**
- * ⚠ Visual px reserved on EACH SIDE of the centred footer toolbar for the edge-anchored pills that
- * share its band. All three are independently `position: fixed` with no awareness of each other,
- * so without this the centred toolbar grows into the sync pill below ~650px of viewport width. It
- * must stay ONE number shared with the per-circle shrink clamp in index.css.
- * → docs/archive/editor-surface.md#editor-side-reserve
- */
-const TOOLBAR_SIDE_RESERVE_PX = 140
+// ⚠ The visual px reserved on EACH SIDE of the centred footer toolbar for the edge-anchored pills
+// that share its band is now MEASURED (`--iw-side-reserve`, written by the effect beside the
+// `--iw-toolbar-h` one) rather than a constant. It was a fixed 140px per side — nearly double the
+// pills' real width — and on a ~430px window that left the pill a 134px box for eight circles that
+// need 154 even at their 17px floor: the R and ⋮ hung past the border (Peter, 2026-09-15). The
+// fallback until a pill is measured, the gap, and the arithmetic all live in components/sidePill.ts.
+// → docs/archive/editor-surface.md#editor-side-reserve
 
 interface TiptapEditorProps {
   doc: InkwaveDocument
@@ -1643,6 +1643,35 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     ro.observe(el)
     write()
     return () => { ro.disconnect(); root.style.removeProperty('--iw-toolbar-h') }
+  }, [])
+
+  // `--iw-side-reserve`: the painted px the WIDER side pill claims from its own edge, measured off
+  // the two registered trigger buttons (components/sidePill.ts) and re-measured when either resizes,
+  // mounts, unmounts, or the window resizes. The toolbar's budget subtracts it twice — it is centred,
+  // so only symmetric growth is possible. Desktop only: the phone bar is full-width.
+  useEffect(() => {
+    if (isTouchDevice()) return
+    const root = document.documentElement
+    let ro: ResizeObserver | null = null
+    const write = () => {
+      const els = sidePillElements()
+      const l = els.get('left')?.getBoundingClientRect() ?? null
+      const r = els.get('right')?.getBoundingClientRect() ?? null
+      root.style.setProperty('--iw-side-reserve', `${Math.ceil(sideReserve(window.innerWidth, l, r))}px`)
+    }
+    const attach = () => {
+      ro?.disconnect()
+      ro = new ResizeObserver(write)
+      for (const el of sidePillElements().values()) ro.observe(el)
+      write()
+    }
+    const unsubscribe = subscribeSidePills(attach)
+    window.addEventListener('resize', write)
+    attach()
+    return () => {
+      unsubscribe(); ro?.disconnect(); window.removeEventListener('resize', write)
+      root.style.removeProperty('--iw-side-reserve')
+    }
   }, [])
   // ⚠ PM's own scrollIntoView IGNORES CSS scroll-padding, so Enter parked the new caret line
   // BEHIND the floating toolbar and only the next character — which triggers the BROWSER's native
@@ -3339,7 +3368,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               // collision happens in PAINTED px. Sweep the WIDTH RANGE when testing this: it is
               // invisible above ~700px. → docs/archive/editor-surface.md#editor-side-reserve
               ...(isTouch ? {} : {
-                ['--iw-bar-budget' as string]: `calc((100vw - ${TOOLBAR_SIDE_RESERVE_PX * 2}px) / ${(zoom * 1.12).toFixed(4)})`,
+                ['--iw-bar-budget' as string]: `calc((100vw - 2 * var(--iw-side-reserve, ${SIDE_RESERVE_FALLBACK_PX}px) - ${2 * TOOLBAR_SIDE_GAP_PX}px) / ${(zoom * 1.12).toFixed(4)})`,
                 maxWidth: 'var(--iw-bar-budget)',
               }),
               border: '1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.75))',
