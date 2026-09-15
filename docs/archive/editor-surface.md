@@ -2045,7 +2045,16 @@ would have to carry a day value that disagrees with `--iw-subtle-bg`'s `#fcfcfb`
 <a id="editor-side-reserve"></a>
 ### The footer band is three independent fixed elements
 
-`TOOLBAR_SIDE_RESERVE_PX` is the visual px reserved on EACH SIDE of the centred footer toolbar for
+**SUPERSEDED 2026-09-15 — the reserve is MEASURED now.** `TOOLBAR_SIDE_RESERVE_PX` is gone; each
+side pill's trigger registers itself in `components/sidePill.ts` and the editor publishes
+`--iw-side-reserve` = the wider pill's painted claim from its own edge (a centred box grows only
+symmetrically, so `w ≤ 100vw − 2·max(L, R)`); 140 is the fallback until a pill is measured. Why:
+on Peter's ~430px window the fixed 140 per side — nearly double what the pills paint — left the pill
+a 134px box for eight circles needing 154 at their floor, and R + ⋮ hung past the border (measured
++24px at 430, +54 at 400; contained from 400 up after). The rest of this entry is the history of the
+budget itself, which still stands.
+
+`TOOLBAR_SIDE_RESERVE_PX` WAS the visual px reserved on EACH SIDE of the centred footer toolbar for
 the edge-anchored pills that share its band — SyncStatus (`right:0`, ~138px painted: max-w-7.5rem +
 padding, ×1.12 scale) and ReceiptPanel's snaps pill (`left:0`, ~96px painted). Sized to the larger
 of the two plus a ~12px gap. All three are independently `position: fixed` with no awareness of each

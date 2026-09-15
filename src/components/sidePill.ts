@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 // THE TWO SIDE PILLS THAT FLANK THE FOOTER TOOLBAR — one source of truth for their geometry.
 //
 // `ReceiptPanel`'s snaps pill (left) and `SyncStatus` (right) are separate components that never
@@ -52,4 +54,106 @@ export const TOOLBAR_BOTTOM_PX = 13
 export function sidePillBottom(zoom: number, height = SIDE_PILL_H): string {
   const halfPill = (height * zoom * 1.12) / 2
   return `calc(${TOOLBAR_BOTTOM_PX * zoom}px + (var(--iw-toolbar-h, 56px) / 2) - ${halfPill.toFixed(2)}px + var(--iw-pdf-room-bottom, 0px))`
+}
+
+// ─── The side pills' WIDTH feeds the toolbar's budget (2026-09-15) ────────────────────────────────
+//
+// Peter, on a ~430px-wide window with the R and ⋮ circles hanging past the pill's border: "it needs
+// to have wider buffer if that narrow, it can go all the way to the side pills". The toolbar's
+// `--iw-bar-budget` used to subtract a FIXED reserve of 140px per side — nearly double what the two
+// pills actually occupy (the ◈ pill ~60px painted, "Save to folder" ~90px). At 430px that left the
+// centred pill a 134px box for eight circles that need 154 even at their 17px floor: a guaranteed
+// 24px spill, on the one window size Peter tests in. MEASURED before this change, headless Chromium:
+// overflow +54px at 400, +24 at 430, contained from 460 up.
+//
+// So the reserve is MEASURED, not assumed. Each pill's trigger registers its element here; the
+// editor observes them and publishes `--iw-side-reserve` = the painted px the WIDER pill claims from
+// its own edge. Wider, not each side separately, because the toolbar is CENTRED: it can only ever
+// grow symmetrically, so the narrower side's slack is unusable and the wider side is the bound
+// (w ≤ 100vw − 2·max(L, R)). Registering the TRIGGER rather than the fixed wrapper matters: the
+// wrapper also holds the open detail panel (w-64), and measuring it would shrink the toolbar every
+// time a panel opened.
+
+export type SidePillSide = 'left' | 'right'
+
+/** What the budget assumes per side until a pill has been measured — the historical constant. */
+export const SIDE_RESERVE_FALLBACK_PX = 140
+
+/** Breathing room between the toolbar's edge and a side pill, painted px, each side. */
+export const TOOLBAR_SIDE_GAP_PX = 8
+
+/**
+ * Painted px the toolbar must leave clear on EACH side, from the two pills' trigger rects (post-
+ * transform, viewport coordinates) — the wider pill's claim from its own edge. A side with no pill
+ * mounted (hidden trigger, panel-only state) claims nothing. Never negative: a rect that has
+ * scrolled or animated past its edge is treated as flush with it.
+ */
+export function sideReserve(
+  viewportWidth: number,
+  left: { right: number } | null,
+  right: { left: number } | null,
+): number {
+  const l = left ? Math.max(0, left.right) : 0
+  const r = right ? Math.max(0, viewportWidth - right.left) : 0
+  return Math.max(l, r)
+}
+
+const registered = new Map<SidePillSide, HTMLElement>()
+const subscribers = new Set<() => void>()
+
+/** Ref-callback target for a side pill's TRIGGER element. Pass null on unmount (React does). */
+export function registerSidePill(side: SidePillSide, el: HTMLElement | null): void {
+  const prev = registered.get(side)
+  if (el) registered.set(side, el)
+  else registered.delete(side)
+  if (prev !== el) for (const fn of subscribers) fn()
+}
+
+export function sidePillElements(): ReadonlyMap<SidePillSide, HTMLElement> {
+  return registered
+}
+
+/** Notified whenever a side pill mounts, unmounts or swaps its element. Returns the unsubscribe. */
+export function subscribeSidePills(fn: () => void): () => void {
+  subscribers.add(fn)
+  return () => { subscribers.delete(fn) }
+}
+
+// ─── CRAMPED: below a width both pills fold, so the bar gets the room (2026-09-15) ────────────────
+//
+// Peter, at the desktop app's ~300px docked browser pane, with the measured reserve already in:
+// "we need to shrink the res pill to just an icon and left pill padding to squeeze the whole bar
+// in". The measured reserve handles every width where the FULL pills leave eight circles room; below
+// that the pills themselves are the cost. So under this width the sync pill drops to its ☁ glyph
+// (the same form it already takes with the PDF panel open) and the ◈ pill sheds its side padding.
+// The reserve is measured off the triggers, so it follows the fold automatically — nothing else
+// needs to know. One threshold on the VIEWPORT, not on the pills' own size, so folding cannot
+// un-trigger itself (a rule that read the pills would flip the moment they shrank).
+//
+// THE THRESHOLD IS WHERE THE UNFOLDED LAYOUT REACHES THE CIRCLES' 34px CAP, so sizing stays
+// MONOTONIC across it. The first cut was 440 — where the full pills push the circles below ~24px —
+// and the local Mac session measured the flaw: at 439 (folded) the circles were 34px, at 440
+// (unfolded) they DROPPED to 24 and only regained 34 near 520. The bar got smaller as the window
+// got bigger. Folding up to the cap point means the circles hold 34px from the fold's floor all the
+// way up, and the threshold only swaps the pills' form. (Measured unfolded: 32px at 500, 34 by
+// ~520-560 depending on the pills' exact painted width; 540 clears it on both machines.)
+
+export const FOOTER_CRAMPED_BELOW_PX = 540
+
+/** Pure form of the rule, for the test and for anything without a window. */
+export function footerCramped(viewportWidth: number): boolean {
+  return viewportWidth < FOOTER_CRAMPED_BELOW_PX
+}
+
+/** True while the viewport is narrower than FOOTER_CRAMPED_BELOW_PX. False during SSR. */
+export function useFooterCramped(): boolean {
+  const [cramped, setCramped] = useState(() => typeof window !== 'undefined' && footerCramped(window.innerWidth))
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${FOOTER_CRAMPED_BELOW_PX - 1}px)`)
+    const on = () => setCramped(mq.matches)
+    on()
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return cramped
 }

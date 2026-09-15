@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useZoomScale } from '../editor/useZoomScale'
-import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
+import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill, useFooterCramped } from './sidePill'
+
+// Module-level for a stable ref identity — see the matching note in ReceiptPanel.tsx.
+const registerRightPill = (el: HTMLButtonElement | null) => registerSidePill('right', el)
 import { relativeTime } from './relativeTime'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
@@ -35,6 +38,8 @@ export function SyncStatus({
   // PDF panel open → shrink to the compact cloud so the pill never overlaps the toolbar
   // (Peter, 2026-07-10: the wrapped 'Synced to OneDrive' pill collided, dead space at its left).
   const [pdfOpen, setPdfOpen] = useState(false)
+  // Narrow viewport → same ☁ form as the PDF-open case, so the toolbar gets the width (sidePill.ts).
+  const cramped = useFooterCramped()
   useEffect(() => {
     const read = () => {
       const cs = getComputedStyle(document.documentElement)
@@ -143,6 +148,7 @@ export function SyncStatus({
           ~2 lines (a narrow width) so it never collides with the centred toolbar on a half-screen. */}
       {!hideTrigger && (
         <button
+          ref={registerRightPill}
           type="button"
           onClick={() => {
             // Just open the detail panel — DON'T fire the connect/sign-in action (e.g. the Microsoft
@@ -150,7 +156,7 @@ export function SyncStatus({
             setOpen(!open)
           }}
           title={tooltip}
-          className={`iw-nightable iw-toolbar-outline ${compact || pdfOpen
+          className={`iw-nightable iw-toolbar-outline ${compact || pdfOpen || cramped
             // ⚠ STILL A PILL WITH A PANEL OPEN (Peter, 2026-08-28: "this button should be a pill
             // like the lhs pill of same height and have same midline horizontally as the main
             // pill"). It used to become a w-10 h-10 CIRCLE — 40px against the side pills' 30px, on
@@ -189,7 +195,7 @@ export function SyncStatus({
             }),
           }}
         >
-          {compact || pdfOpen ? '☁' : label}
+          {compact || pdfOpen || cramped ? '☁' : label}
         </button>
       )}
     </div>
