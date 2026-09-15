@@ -413,8 +413,22 @@ export function _computeBreaksForTest(
   topM: number,
   gapped: boolean,
   posOf: (l: MeasuredLine) => number,
-): { sig: string } {
-  return { sig: computeBreaks(lines, blocks, refListPos, pageH, topM, gapped, posOf).sig }
+): {
+  sig: string
+  // The decoration INPUTS, so a characterization can pin the widgets and not only the sig: the key
+  // carries pageNo + at + the mid-block continuation flag; the band carries the raw botMargin.
+  decos: Array<{ from: number; to: number; key: string }>
+  breaks: Array<{ at: number; brokeUsed: number; botMargin: number }>
+  lastUsed: number
+} {
+  const bandOut = { breaks: [] as Array<{ at: number; brokeUsed: number; botMargin: number }>, lastUsed: 0 }
+  const { decos, sig } = computeBreaks(lines, blocks, refListPos, pageH, topM, gapped, posOf, bandOut)
+  return {
+    sig,
+    decos: decos.map((d) => ({ from: d.from, to: d.to, key: String((d.spec as { key?: string }).key) })),
+    breaks: bandOut.breaks,
+    lastUsed: bandOut.lastUsed,
+  }
 }
 
 // ⚠ IS THE LAYOUT THE WRITER SEES CANONICAL? Set by the measure BEFORE it enters the forced context
