@@ -1,0 +1,6 @@
+# pnpm settings. `pnpm.overrides` in package.json is ignored by newer pnpm 10.x (measured on the Mac),
+# so the override lives here, which every pnpm 10 reads. Why it exists: web3@0.18.4 pins bignumber.js
+# to a GitHub tarball the cloud egress policy 403s; the fork is 2.0.7 with two lookaheads removed in
+# hex parsing, reachable only via the Ethereum path the OTS relay never uses. Registry 2.0.7 it is.
+overrides:
+  bignumber.js: 2.0.7
