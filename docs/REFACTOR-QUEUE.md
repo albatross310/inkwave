@@ -71,6 +71,43 @@ your belief instead of the behaviour. Plus: every path-keyed guard that scans a 
 (`touchTargets`, `snapshotPalette`, `readerContrast`, `noAutoDelete`) must be re-pointed AND
 re-proved to fire in the same commit.
 
+**LANDED 2026-09-15 — seam 1: toolbar slot customisation** (`src/editor/useToolbarSlots.ts`). One
+phrase: *the writer's arrangement of the footer's slot row, and the positional hotkeys that address
+it.* TiptapEditor.tsx 3,698 → 3,370 (the heading's 3,463 was already stale when this lane started);
+the hook is 407 lines, of which 330 are the moved block byte-for-byte (diffed against the original
+line ranges, not eyeballed) and 77 are header, imports, the input/output interfaces and the return.
+Net **+79** on the two files and **+598** across `src/editor` with the three test files — the "+598" warning
+above held, to the line.
+- **Characterization before the move, as R6 demands, in two halves.** `toolbarSlotsWiring.test.ts`
+  (8, path-keyed on TiptapEditor.tsx) ran green on the UNMOVED file (8/8, re-proved 2026-09-15 by
+  checking master's file back in) and 5 JSX mutants were killed there; it pins the footer JSX's half
+  of the seam, which does not move. `useToolbarSlots.test.tsx`
+  (28, jsdom) was authored from the unmoved code on the `docTitle.test.ts` precedent and runs
+  against the hook; its first cut failed on the ORIGINAL behaviour (it assumed the ledger flag off;
+  the flag is default ON wherever a window exists) — the corollary working — and the premise is
+  now SET in the test, not assumed. 7 named mutants die (the list is in the test's header); the
+  WIP had claimed 10 against a list its commit message never carried, so 7 is the measured number.
+- **Rendering TiptapEditor in jsdom was tried and abandoned on evidence**: 8 missing platform
+  APIs/contexts across 3 render layers (canvas, Router, matchMedia, ResizeObserver,
+  elementFromPoint, indexedDB, navigator.storage) with the 63-effect layer only just begun. R5.
+- **Path-keyed guards.** `commitDoc.test.ts` now scans the hook too (measured first: with the
+  longhand triple pasted into the hook, the un-re-pointed guard stayed 4/4 green). `touchTargets`
+  and `toolbarOutline` read JSX/guard text that did not move — verified green, not re-pointed.
+  `noAutoDelete.test.ts` WALKS all of `src/`, so the hook is in its scope with no re-point (a planted
+  `deleteSnapshot` in the hook turns it red); `cloudLocalRead.test.ts` names TiptapEditor.tsx only in
+  prose and reads no file.
+  `chunk.test.ts` was never a source guard on TiptapEditor.tsx: its walker starts at
+  `app/routes/home.tsx` and stops at Edit.tsx's `import()` (a music value import in the hook
+  leaves it 15/15 green, as it would have in TiptapEditor.tsx); its built-assets guard covers the
+  hook because it bundles into the same chunk.
+- **Effect order (R7):** the hook is called at the block's exact position; the 14 lines it skips
+  over (the lifted ledger/graphs/opps state, "a slot is a trigger, never an owner") declare no
+  effects, so the three moved effects keep their place in the sequence.
+- **Still here:** save orchestration, the zoom handlers, the effect cluster — and `recoverAndPurge`
+  stays regardless (below). Save orchestration was NOT attempted this lane: it threads through
+  `commitDoc`, the OneDrive throttle, the folder mirror, the heartbeat and the unsynced notice, and
+  one evening's proof budget was spent on seam 1.
+
 ---
 
 ## 4. Dead exports

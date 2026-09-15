@@ -22,15 +22,20 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const SRC = readFileSync(resolve(__dirname, 'TiptapEditor.tsx'), 'utf8')
-const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+const CODE = strip(readFileSync(resolve(__dirname, 'TiptapEditor.tsx'), 'utf8'))
+// THE MOVED HALF (2026-09-15). The toolbar slot customisation left TiptapEditor.tsx for
+// useToolbarSlots.ts and took a caller of commitDoc with it (`updateSlots`). A guard that scans only
+// the file the text LEFT is green forever — measured: with the longhand triple pasted into the hook,
+// the un-re-pointed guard stayed 4/4 green — so the hook is scanned here too.
+const HOOK = strip(readFileSync(resolve(__dirname, 'useToolbarSlots.ts'), 'utf8'))
 
 /** The longhand triple, at any indent: the shape `commitDoc` replaced. */
 const TRIPLE = /docRef\.current = (\w+)\n\s*onDocChange\(\1\)\n\s*scheduleSave\(\1\)/g
 
 /** `commitDoc`'s own body IS the triple — that is the point of it. Scan everything else. */
 const COMMIT_DOC = /const commitDoc = \([^)]*\) => \{[\s\S]*?\n  \}/.exec(CODE)?.[0] ?? ''
-const ELSEWHERE = CODE.replace(COMMIT_DOC, '')
+const ELSEWHERE = CODE.replace(COMMIT_DOC, '') + '\n' + HOOK
 
 describe('TiptapEditor commits a document mutation through exactly one path', () => {
   // VOID GUARD. Every assertion below is about a file this test located by path and stripped. If the
@@ -42,6 +47,9 @@ describe('TiptapEditor commits a document mutation through exactly one path', ()
     // If this regex ever stops matching, ELSEWHERE silently becomes the whole file and the triple
     // test starts failing on the definition — loud, but for the wrong reason. Pin it here instead.
     expect(COMMIT_DOC, 'commitDoc body not located — the triple scan would be mis-scoped').not.toBe('')
+    // ...and the moved half is really being scanned: it is a real file that really calls the one path.
+    expect(HOOK.length).toBeGreaterThan(5_000)
+    expect(HOOK).toContain('commitDoc(updated)')
   })
 
   it('the longhand triple appears NOWHERE — commitDoc is the only path', () => {
@@ -63,7 +71,7 @@ describe('TiptapEditor commits a document mutation through exactly one path', ()
   // notifies a TITLE change after the write has already happened — calling scheduleSave there would
   // schedule a second save of what was just saved. It is not a mutation commit.
   it('only two places call onDocChange: commitDoc, and the post-save title notify', () => {
-    const calls = [...CODE.matchAll(/[^.\w]onDocChange\(/g)]
+    const calls = [...(CODE + '\n' + HOOK).matchAll(/[^.\w]onDocChange\(/g)]
     expect(calls.length, 'a third caller is either a missing scheduleSave or a new exception to document')
       .toBe(2)
   })

@@ -1125,6 +1125,16 @@ write shim, so metadata can say a PDF exists with no local bytes).
   and Alt+S is Firefox's History menu — an UNRESOLVED possible collision (its `preventDefault` may
   or may not claim the key first); a Firefox probe of it was inconclusive because the review layer
   never armed. Phone renders no hints and binds nothing — it has no Alt and loses nothing.
+  **THE CODE LIVES IN `editor/useToolbarSlots.ts` (2026-09-15, `docs/REFACTOR-QUEUE.md` item 3, seam 1
+  — split out of TiptapEditor.tsx VERBATIM, 330 lines byte-checked):** the row state, the ▲ drawer,
+  both touch-hold drags, the write-back and these hotkeys. The footer JSX that attaches what the hook
+  hands back (`slotElsRef` by row index, `toolbarPickerRef` on the ▲) stays in TiptapEditor.tsx and
+  `toolbarSlotsWiring.test.ts` pins that attachment (written BEFORE the move and re-proved on the
+  unmoved file: 8/8 green there, 5 JSX mutants die); `useToolbarSlots.test.tsx` (28 tests, a jsdom
+  harness of the footer's SHAPE, 7 named mutants die — listed in its header) pins the behaviour. The hook is called exactly where the block sat so its three effects keep their place
+  in the component's effect order (R7) — do not move the call. Rendering TiptapEditor itself in jsdom
+  was tried and abandoned on evidence (8 missing platform APIs across 3 render layers before the
+  63-effect layer began); the in-browser truth stays `scripts/toolbar.prove.mjs`.
 - **Toolbar slots are ONE population (2026-07-12):** the 6 main-row circles + the ▲ drop-up
   overflow (S style and ⚙ settings are slots too — CONFIRMED still true; only ▲/⋮ fixed).
   Peter 2026-07-17: the row is SIX because "it fits well on phone" and phone/desktop must stay
@@ -1435,7 +1445,10 @@ set it), so `afterEach(cleanup)` is MANDATORY or every test silently measures th
 still-mounted components (it inflated a re-render count from 2 to 4 here and read as a component
 bug); and in a `.tsx` file `vi.mock`'s factory is hoisted above vitest's OWN import, so `vi.hoisted`
 and `await import('vitest')` both fail — build the recorder inside the factory out of plain
-functions (see `ScoreView.test.tsx`).
+functions (see `ScoreView.test.tsx`). Third (2026-09-15, `useToolbarSlots.test.tsx`): under
+`vi.useFakeTimers()` wrap every timer advance in `act()` or the state it flips never commits, and
+build a touch event as a plain `Event` wearing a `touches` property — jsdom cannot construct a
+`Touch`, and React's synthetic touch event only copies the field off the native one.
 
 **Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
 `fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #302438)`), never a bare hex, so the
@@ -1688,6 +1701,8 @@ src/
   types/document.ts                    # InkwaveDocument, Snapshot, ProvenanceEvent types
   editor/
     TiptapEditor.tsx                   # editor surface, scroll-head chrome, footer, prefetch
+    useToolbarSlots.ts                 # toolbar slot customisation: the row + ▲ drawer state, both touch-hold drags, the write-back, Alt-hotkeys (split from TiptapEditor 2026-09-15)
+    toolbarContract.ts                 # THE toolbar contract: slot population, migration, bar layers, per-doc config
     extensions/RedHighlightExtension.ts# PM plugin: red decorations + hint badges + line compression
     suggestions/
       thesaurus.ts                     # Datamuse lookups, in-memory cache, form-matching (sp=)

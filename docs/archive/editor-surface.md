@@ -1515,6 +1515,11 @@ same frame instead of popping in a beat late (image decode is async even from ca
 
 ## `TiptapEditor.tsx` — the editor surface, the footer band, and the load choreography
 
+*2026-09-15: the toolbar slot customisation — the row/▲ state, both touch-hold drags, the write-back
+and the Alt hotkeys (`#editor-alt-hints`, `#editor-hotkey-tap`, `#editor-slot-drag`) — now lives in
+`src/editor/useToolbarSlots.ts`, moved verbatim with its comments and these pointers intact. The
+footer JSX (`#editor-row-slots`) stays in TiptapEditor.tsx.*
+
 <a id="editor-lazy-chunks"></a>
 ### Lazy must stay lazy, and a flag must be read INLINE
 
