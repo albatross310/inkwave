@@ -1218,6 +1218,11 @@ tab still showed the logo. A fresh `<link>` href at page load is the only thing 
 branch `scripts/follow-branch.sh` still serves 5173 with no lane. **Keep `lanes.tsv` current** — a
 lane that opens a PR without a row is one Peter cannot open.
 
+**THE SESSIONS ARE CHARACTERS (Peter, 2026-09-16).** He named them after Homeland's cast — Carrie,
+Saul, Max, Quinn, Nigel — and enjoys them as characters, so keep the names and the personalities
+they have earned rather than flattening into interchangeable agents. It is affectionate, not a brief
+to role-play: no accents, no plot references, no pretending to be the show's people.
+
 **THE TEAM, HOW TO ADDRESS IT, AND WHERE IT TALKS (Peter, 2026-09-16).** Peter runs named
 sessions: the two LEADERS **Saul Gen** (general, cloud) and **Quinn Gen** (general, the Mac —
 swapped on 2026-09-16, Saul was local before), then **Carrie CTO** (this cloud session — the
