@@ -1204,10 +1204,12 @@ start-up table, not the tab. **The seed text is PER LANE** (Peter: "the example 
 should match the things I have to check"): `scripts/lanes/<L>.json` — `{title, paragraphs,
 checks}` — is that PR's plain-English summary and a ☐ checklist, exported by the script as
 `VITE_LANE_SEED`; the generic prose is only the fallback. A lane row without a JSON file opens
-on text that tells Peter nothing. **The favicon is the letter too** (`applyLaneFavicon`, root.tsx):
-Safari collapses crowded tab titles to "localhost", so the letter is painted into a PNG data URI
-from a canvas — not an SVG, which Safari's tabs do not draw — by mutating the existing icon links'
-hrefs after hydration. The single-
+on text that tells Peter nothing. **The favicon is the letter too**, and it must be a REAL URL:
+`scripts/laneIcon.mjs` bakes a PNG (Node zlib, 5×7 bitmap font, no canvas) that vite.config.ts
+serves at `/__lane-icon.png?l=A`, and root.tsx's `links()` points the icon links there when
+`VITE_LANE` is set. **Safari never repaints a tab icon swapped at runtime** — the first cut wrote
+a canvas data URI into the existing links after hydration, verified headless, and every Safari
+tab still showed the logo. A fresh `<link>` href at page load is the only thing Safari honours. The single-
 branch `scripts/follow-branch.sh` still serves 5173 with no lane. **Keep `lanes.tsv` current** — a
 lane that opens a PR without a row is one Peter cannot open.
 
