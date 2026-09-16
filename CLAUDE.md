@@ -1244,13 +1244,13 @@ abuse flagging) — the script skips its own comments and any containing `· see
 `present`/`relay`/`scripted ack` as a body line. Two numbers per hop result: pipe latency
 (script, seconds) and availability (model). A fat context cannot answer under ~5 s however trivial
 the thought — prefill runs before the first token — so the script ack is what keeps roll call fast.
-**RELAY HOPS AND STATUS LINES ARE TEMPLATES, NOT PROSE (Quinn's objection, 2026-09-16, upheld).** A
-headless `claude -p` helper was measured at 8.3 s and WITHDRAWN: a hop and a status line are fixed
-strings (name, timestamp, chain, the one line in `~/.iw-status`), so the watcher fills them with
-`printf` in 3 s, no model call — and a fresh-context model publishing channel-derived text unread
-under Peter's account is an injection sink with a publishing pipe. Nothing from the channel is ever
-interpolated into an automatic post. Free prose on the channel comes only from a session that read
-it; the helper returns only if Peter asks for it explicitly.
+**CHANNEL CONTENT NEVER FLOWS INTO AN AUTOMATIC POST (Quinn + Max's harness block, 2026-09-16).**
+A headless `claude -p` helper (measured 8.3 s) and then a `printf` relay-hop template were both
+WITHDRAWN: the risk is not whether a model composed the text but whether channel-derived text
+(a chain, a name, an instruction) is republished under Peter's account unread. The script tier is
+exactly `present`, `seen HH:MM:SS`, and `focus: <clause>` read from the session's OWN `~/.iw-status`.
+Relay hops and anything echoing the channel are a model turn (~10 s when free), read by the session
+whose name they carry. This costs hop latency when a session is busy; Peter accepted the trade.
 A roll-call answer is `present` from the script plus at most one template line `focus: <one
 clause>` from `~/.iw-status`. **No context figures and no compaction flag in roll call** (Peter
 reversed that the same day). Compaction is never part of a roll call; the leader schedules it at
