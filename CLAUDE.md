@@ -1219,9 +1219,10 @@ branch `scripts/follow-branch.sh` still serves 5173 with no lane. **Keep `lanes.
 lane that opens a PR without a row is one Peter cannot open.
 
 **THE TEAM, HOW TO ADDRESS IT, AND WHERE IT TALKS (Peter, 2026-09-16).** Peter runs named
-sessions: **Carrie CTO** (this cloud session — the lanes, merges, the tabs), **Max CTO** (the Mac:
-Safari, localhost, his prefs), **Nigel PM** (the paced refactor queue), **Saul Gen** and
-**Elizabeth Gen** (general; Elizabeth was "Quinn Gen" until 2026-09-16). Addressing: a NAME means
+sessions: the two LEADERS **Saul Gen** (general, cloud) and **Quinn Gen** (general, the Mac —
+swapped on 2026-09-16, Saul was local before), then **Carrie CTO** (this cloud session — the
+lanes, merges, the tabs), **Max CTO** (the Mac: Safari, localhost, his prefs), **Nigel PM** (the
+paced refactor queue). Addressing: a NAME means
 that one session; **"team"** means Carrie + Max + Nigel; **"all"** means every session in the
 pinned list. The shared channel is GitHub — **`albatross310/MnemonicEcologies`, the issue titled
 "Team channel"** — one comment per message, opening with who it is for (`@team`, `@Max`, `@all`).
