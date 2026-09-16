@@ -1274,10 +1274,10 @@ nor appear in the summary. The fixed header is what lets Peter read the channel 
 **TEAM SHORT NAMES AND THE STARTUP RITUAL (Peter, 2026-09-16).** On the channel, `IW` = the
 Inkwave team (Carrie, Max, Nigel) and `Gen` = the General team (Quinn, Saul); `TO IW` / `TO Gen`
 replaces `@team`, `TO all` is both. **Provider suffix (Peter, 2026-09-16):** `allc`/`iwc`/`genc`/
-`carriec` = the Claude sessions; suffix `K` = Kimi (`allK`, `iwK`), suffix `C` = Codex (`allC`, `iwC`);
-bare `all`/`IW`/`Gen`/`Carrie` = everyone online whatever the provider, and while no Kimi/Codex agent
-is online bare is enough. Watchers match the TO token CASE-SENSITIVELY (`allc` ≠ `allC`) and accept
-both their bare and `c` forms. A comment reading `ROLL CALL <IW|Gen|all>` is answered by every
+`carriec` = the Claude sessions; `k` = Kimi (`allk`, `iwk`); `x` = Codex (`allx`, `iwx` — `x` because
+`c` is taken and addressing is NOT case-sensitive; Peter may rename it); bare `all`/`iw`/`gen`/`carrie`
+= everyone online whatever the provider, and while no Kimi/Codex agent is online bare is enough.
+Watchers match the TO token case-insensitively and accept both their bare and `c` forms. A comment reading `ROLL CALL <IW|Gen|all>` is answered by every
 member of that team with ONE comment (`**FROM <name> → TO <caller>** · HH:MM:SS AEST` / `present`),
 and the caller reports who answered and each member's response time. **Every time Peter loads
 Claude, the leader runs the three-part ritual in order:** (a) a timed relay through every session
