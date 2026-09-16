@@ -1233,6 +1233,15 @@ another session, every decision, goes as a comment on that issue as well as wher
 said. The `LOCAL:` commits and trigger pokes stay as the fast lanes for Max and Nigel; the issue
 is the record.
 
+**TEAM SHORT NAMES AND THE STARTUP RITUAL (Peter, 2026-09-16).** On the channel, `IW` = the
+Inkwave team (Carrie, Max, Nigel) and `Gen` = the General team (Quinn, Saul); `TO IW` / `TO Gen`
+replaces `@team`, `TO all` is both. A comment reading `ROLL CALL <IW|Gen|all>` is answered by every
+member of that team with ONE comment (`**FROM <name> → TO <caller>** · HH:MM:SS AEST` / `present`),
+and the caller reports who answered and each member's response time. **Every time Peter loads
+Claude, the leader runs the three-part ritual in order:** (a) a timed relay through every session
+(post the per-hop table), (b) ROLL CALL IW, then ROLL CALL Gen, reporting each member's time,
+(c) ROLL CALL all. Kimi and Codex agents join the roll calls once they are wired in.
+
 **EVERY CHANNEL COMMENT OPENS WITH A FROM → TO HEADER (Peter, 2026-09-16).** Every session posts under
 Peter's one GitHub account, so the author column says nothing. The first line of every comment on
 the channel issue is exactly `**FROM <sender> → TO <recipient>** · HH:MM AEST` — sender is the
