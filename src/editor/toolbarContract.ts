@@ -121,11 +121,6 @@ export function overflowSlots(row: readonly SlotId[]): SlotId[] {
   return livePopulation().filter(id => !row.includes(id))
 }
 
-/** Read + migrate. The ONLY reader of SLOT_KEY. */
-export function loadToolbarSlots(): SlotId[] {
-  return migrateSlots(readStoredRow())
-}
-
 /**
  * The writer's OWN last layout, raw and unmigrated — `null` when they have none.
  *
@@ -154,7 +149,6 @@ export function saveStoredRow(row: readonly SlotId[]): void {
 // position is identity on a homescreen. NOT Alt+<letter>: Firefox on Windows/Linux (Peter's own
 // browser) binds Alt+F/E/V/S/B/T/H to the menu bar, while Alt+digit is unbound in both engines.
 // The phone renders no hints and loses nothing. → docs/archive/editor-surface.md#toolbar-hotkeys
-export const HOTKEY_MOD = 'Alt'
 
 /** Alt+1…Alt+6 address the row by POSITION (1-based). Alt+0 opens the ▲ drawer. */
 export const SLOT_HOTKEY_MAX = ROW_SLOTS

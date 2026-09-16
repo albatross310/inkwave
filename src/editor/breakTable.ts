@@ -96,11 +96,6 @@ export function buildBreakTable(
   }
 }
 
-/** Is page N's break trustworthy? Positional — pages below the first estimated block are exact. */
-export function tablePageReliable(t: BreakTable, pageIdx: number): boolean {
-  return pageIdx < t.reliablePages
-}
-
 /** The doc position page N begins at — the seam the window renderer opens from. */
 export function pageStart(t: BreakTable, pageIdx: number): number | null {
   return t.starts[pageIdx] ?? null

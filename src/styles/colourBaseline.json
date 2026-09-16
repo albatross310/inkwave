@@ -1,5 +1,5 @@
 {
-  "total": 628,
+  "total": 625,
   "driftingTokens": 7,
   "files": {
     "src/citations/citationNav.ts": 20,
@@ -51,7 +51,7 @@
     "src/editor/staticPagination.ts": 1,
     "src/editor/suggestions/ThesaurusPopover/ThesaurusPopover.tsx": 4,
     "src/editor/textRender.ts": 13,
-    "src/editor/waveTwinkle.ts": 6,
+    "src/editor/waveTwinkle.ts": 3,
     "src/editor/waveVideo.ts": 6,
     "src/music/HeatmapScreen.tsx": 2,
     "src/music/MusicStudio.tsx": 13,

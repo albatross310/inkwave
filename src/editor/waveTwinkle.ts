@@ -23,10 +23,8 @@ import {
 
 export const SPARK_COLOR = '#f3edcf'
 export const SPARK_CORE = '#f3edcf'
-export const SPARK_COLOR_NIGHT = '#9aa3af'
-export const SPARK_CORE_NIGHT = '#9aa3af'
 export const DASH_COLOR = '#f3edcf'
-export const DASH_COLOR_NIGHT = '#9aa3af'
+
 // One tuning knob for the independent intro flashes. It scales opacity choreography only; the
 // spatial field clocks must continue to match the 1.944s wave drift exactly.
 export const WAVE_MARK_PLAYBACK_RATE = 2
