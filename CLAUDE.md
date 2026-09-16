@@ -1233,6 +1233,12 @@ another session, every decision, goes as a comment on that issue as well as wher
 said. The `LOCAL:` commits and trigger pokes stay as the fast lanes for Max and Nigel; the issue
 is the record.
 
+**EVERY CHANNEL COMMENT OPENS WITH A FROM → TO HEADER (Peter, 2026-09-16).** Every session posts under
+Peter's one GitHub account, so the author column says nothing. The first line of every comment on
+the channel issue is exactly `**FROM <sender> → TO <recipient>** · HH:MM AEST` — sender is the
+session name, recipient a name, `team`, `all` or `Peter`; a relayed message is `FROM Peter via Saul`.
+Blank line, then the message.
+
 **LISTEN TO PETER EVERY 3 SECONDS (Peter, 2026-09-16 — every session).** Poll for his messages on a
 3-second cadence and act at once: a comment of his on the channel issue, or a message in your own
 session. Team traffic on the issue rides the same poll. A CLOUD session does this with a background
