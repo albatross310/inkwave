@@ -18,8 +18,21 @@ const TAB_TITLES = [
 // declared stylesheet in the replacement head, so the editor cannot mount completely unstyled.
 import stylesheetHref from '../src/styles/index.css?url'
 
+// A lane dev server (scripts/follow-lanes.sh, VITE_LANE="A") gets its LETTER as the favicon, served
+// as a real PNG by vite.config.ts's /__lane-icon.png middleware. It must be a fresh <link> URL at
+// page load: Safari never repaints a tab icon swapped at runtime, so the earlier canvas/data-URI
+// approach showed the logo on every lane tab. Unset in production, so the real icon set stands.
+const LANE = import.meta.env.VITE_LANE
+const laneIconLinks = LANE
+  ? [
+      { rel: 'icon', type: 'image/png', href: `/__lane-icon.png?l=${LANE}` },
+      { rel: 'apple-touch-icon', href: `/__lane-icon.png?l=${LANE}` },
+    ]
+  : null
+
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheetHref },
+  ...(laneIconLinks ?? []),
   // NO SVG favicon: our logo SVG uses userSpaceOnUse gradients that Firefox can't rasterise at tab size —
   // and Firefox, having "preferred" the SVG, then shows its generic page icon WITHOUT falling back to the
   // PNGs. Rasterised PNG/ICO render reliably in every browser (a 128px PNG is crisp at tab size). The ?v
@@ -29,12 +42,14 @@ export const links: LinksFunction = () => [
   // TiptapEditor effect swapped the first icon link to an inline document-glyph SVG at editor mount,
   // which at tab size looks like Firefox's default page icon. The swap is removed (see TiptapEditor);
   // ?v=20 displaces the doc glyph any returning Firefox profile has stored against the page URL.
+  ...(laneIconLinks ? [] : [
   { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=20' },
   { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=20' },
   { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=20' },
   { rel: 'icon', href: '/favicon.ico?v=20', sizes: 'any' },
   { rel: 'shortcut icon', href: '/favicon.ico?v=20' },
   { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=20' },
+  ]),
   // Version the manifest URL when install metadata/assets change. Chromium and macOS otherwise
   // keep a previously installed Dock icon even when the bytes behind the old icon URL changed.
   { rel: 'manifest', href: '/manifest.webmanifest?v=studio-file-handler-2' },
@@ -106,38 +121,6 @@ export function HydrateFallback() {
   return <div className="iw-boot-water" aria-hidden="true" />
 }
 
-// LANE FAVICON (Peter via the Mac session, 2026-09-16: "every lane branch sets the favicon to its
-// letter"). Safari collapses a tab title to "localhost" once tabs crowd, so the letter is painted
-// into the icon too. A PNG data URI from a canvas, not an SVG: Safari does not draw SVG favicons in
-// tabs, and this repo's own icon rules say PNG/ICO only. Runs AFTER hydration (App's effect) and
-// only mutates hrefs on the existing icon links — never removes a React-owned head node. A changed
-// href is what makes Safari repaint. Unset in production, so the real icon stands.
-function laneFaviconPng(letter: string): string | null {
-  try {
-    const c = document.createElement('canvas')
-    c.width = 64; c.height = 64
-    const g = c.getContext('2d')
-    if (!g) return null
-    g.fillStyle = '#302438'
-    g.beginPath(); g.roundRect(0, 0, 64, 64, 12); g.fill()
-    g.fillStyle = '#f3edcf'
-    g.font = 'bold 44px serif'
-    g.textAlign = 'center'; g.textBaseline = 'middle'
-    g.fillText(letter, 32, 36)
-    return c.toDataURL('image/png')
-  } catch { return null }
-}
-
-function applyLaneFavicon(letter: string) {
-  const href = laneFaviconPng(letter)
-  if (!href) return
-  document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"], link[rel="apple-touch-icon"]').forEach((l) => {
-    l.href = href
-    l.type = 'image/png'
-    l.removeAttribute('sizes')
-  })
-}
-
 export default function App() {
   useEffect(() => {
     const pick = TAB_TITLES[Math.floor(Math.random() * TAB_TITLES.length)]
@@ -147,7 +130,6 @@ export default function App() {
     // TiptapEditor's own title write honours the same variable, or it would overwrite this.
     const lane = import.meta.env.VITE_LANE
     document.title = lane || pick
-    if (lane) applyLaneFavicon(lane)
   }, [])
   return <Outlet />
 }
