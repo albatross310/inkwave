@@ -1233,6 +1233,15 @@ another session, every decision, goes as a comment on that issue as well as wher
 said. The `LOCAL:` commits and trigger pokes stay as the fast lanes for Max and Nigel; the issue
 is the record.
 
+**THE WATCHER SCRIPT ACKS, THE MODEL REPLIES (Peter, 2026-09-16).** A busy session reads its inbox
+only between turns, so hops ran 10 s to 8 min. The poll script itself, with NO model call, posts an
+ack within its next 3 s tick when a comment's TO field names you, your team or `all`:
+`**FROM <you> → TO <sender>** · seen HH:MM:SS AEST` / `busy, replying after this turn` (or `idle`).
+For `ROLL CALL` the script's line is `present` and that IS the answer; the model adds a one-line
+status when free. Relays still need the model for the hop. Two numbers per hop result: pipe latency
+(script, seconds) and availability (model). A fat context cannot answer under ~5 s however trivial
+the thought — prefill runs before the first token — so the script ack is what keeps roll call fast.
+
 **TEAM SHORT NAMES AND THE STARTUP RITUAL (Peter, 2026-09-16).** On the channel, `IW` = the
 Inkwave team (Carrie, Max, Nigel) and `Gen` = the General team (Quinn, Saul); `TO IW` / `TO Gen`
 replaces `@team`, `TO all` is both. A comment reading `ROLL CALL <IW|Gen|all>` is answered by every
