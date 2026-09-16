@@ -273,7 +273,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     const local = fileName?.replace(/\.(inkwave|studio|json)$/i, '')
     const cloud = oneDriveFilename(doc.id)?.replace(/\.(inkwave|studio|json)$/i, '')
     const tabName = local || cloud || (doc.title ? doc.title.slice(0, 40) : 'Untitled')
-    document.title = `Inkwave Zero: ${tabName}`
+    // A lane dev server (scripts/follow-lanes.sh) owns the tab: the bare lane letter, nothing else,
+    // so Peter's Safari tabs read A B C E F. This write runs after root.tsx's and had been
+    // overwriting it (Max, 2026-09-16: "the lane letter never shows"). Unset in production.
+    const lane = import.meta.env.VITE_LANE
+    document.title = lane || `Inkwave Zero: ${tabName}`
   }, [doc.title, doc.id, fileName])
 
   // NO dynamic favicon swap (2026-07-10). This used to flip the first link[rel~=icon] to an inline
