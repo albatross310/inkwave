@@ -27,6 +27,9 @@ if [ -n "$LANE" ]; then
   PORT="${PORT:-$((5181 + idx))}"
   WT="$ROOT/../inkwave-lane-$LANE"
   export VITE_LANE="$LANE"
+  # The lane's own summary + checklist for the ?seed page (scripts/lanes/<L>.json, kept by the
+  # parent session beside lanes.tsv). Read from ROOT, not the worktree, so it is never behind.
+  [ -f "$ROOT/scripts/lanes/$LANE.json" ] && export VITE_LANE_SEED="$(cat "$ROOT/scripts/lanes/$LANE.json")"
 else
   PORT="${PORT:-5173}"
   WT="$ROOT/../inkwave-follow"

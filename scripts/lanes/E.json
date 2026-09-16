@@ -1,0 +1,8 @@
+{"title": "E — #10 one canonicaliser for client and signing server",
+ "paragraphs": [
+  "Before a document is hashed it is turned into one exact byte form (JCS). The browser and the signing server each had their own copy of that step. Now both import the same one, so they cannot drift apart.",
+  "Receipts signed by the server must still verify in the browser."],
+ "checks": [
+  "Type a paragraph, press Enter, wait a moment. ◈ shows a new snapshot.",
+  "Open ◈ → verify chain. It reads ✓.",
+  "Export the bundle, drop it on /verify. Content and chain both pass."]}
