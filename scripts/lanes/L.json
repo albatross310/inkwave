@@ -1,0 +1,8 @@
+{"title": "L — #21 the experimental wave video is gone; the water you see is unchanged",
+ "paragraphs": [
+  "Your ruling on decision 2. The second water that only ever ran when you typed ?waveVideo — 516 lines of code, six probe scripts, 24 video clips (6.5 MB) — is removed. The CSS water everyone sees goes through the same gate with the same 390 marks; measured byte-identical on both builds.",
+  "Three helpers that measure the LIVE water were moved to scripts/wave-desk rather than deleted, because the live water's own browser instruments import them. Stacked on K (#20). Gate green."],
+ "checks": [
+  "Watch this tab load: the water reveals as always, marks twinkle, nothing looks different.",
+  "In the console: window.__iwWaterGate.reason is \"complete\", document.querySelectorAll('video').length is 0, and document.querySelectorAll('.iw-wave-twinkles *').length is 390.",
+  "Open this tab with ?waveVideo on the URL: it loads exactly like plain /, and localStorage.getItem('inkwave:waveVideo') is null."]}
