@@ -24,7 +24,7 @@ import { duplicateEmailAsNew } from '../email/duplicateEmail'
 import { setOpenDocListenerReady, waitForStudioFileLaunch, STUDIO_FILE_ACTION_PARAM } from '../pwa/fileLaunch'
 import { LoadingTip } from '../components/LoadingTip'
 import { currentDocIds } from '../storage/currentDocs'
-import { seedRequested, seededDocument } from '../dev/seedDocument'
+import { seedRequested, seedFreshRequested, seededDocument } from '../dev/seedDocument'
 
 function newDocument(): InkwaveDocument {
   return withScasDefaults({
@@ -193,6 +193,9 @@ export function Edit() {
           claimedId = null
           setDoc(fresh)
         }
+        // `?seed=fresh` (DEV only) skips the tab's remembered document outright — see seedDocument.ts.
+        // Nothing is read or written on its behalf; the previous document stays where it was.
+        if (seedFreshRequested()) { openFresh(); return }
         // An installed desktop PWA can be launched by double-clicking a `.studio` file. The OS
         // navigates to this one-shot action URL while LaunchQueue delivers the actual file on a
         // separate clock. Do not open Recent (or mint a blank) underneath it: wait briefly for the
