@@ -1259,6 +1259,11 @@ note (lane + next step), and posts `compacted HH:MM:SS AEST · <what it kept>`; 
 or mid-push posts `deferred` and compacts at its next idle. Never call it on a session mid-lane
 (Nigel mid-refactor would lose the context it works from).
 
+**THE TO FIELD IS ROUTING, NOT AUDIENCE (Quinn, 2026-09-16).** A reply is addressed to the asker (or
+`all`), never only to a third party: Saul asked Quinn, Quinn answered `TO Peter`, and Saul's watcher
+never saw it because it only wakes on its own name. If the content is for Peter, address the asker
+and say "for Peter" in the body. An unprompted report to Peter is still `TO Peter`.
+
 **ONE ISSUE CHANNEL AT A TIME (Peter, 2026-09-16).** The team channel is exactly one GitHub issue
 (`albatross310/MnemonicEcologies` #2 today). No side issues and no PR threads for team talk; every
 message addressed to a session goes there, and every session's watcher watches that one issue for
