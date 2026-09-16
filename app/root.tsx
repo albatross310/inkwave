@@ -106,10 +106,48 @@ export function HydrateFallback() {
   return <div className="iw-boot-water" aria-hidden="true" />
 }
 
+// LANE FAVICON (Peter via the Mac session, 2026-09-16: "every lane branch sets the favicon to its
+// letter"). Safari collapses a tab title to "localhost" once tabs crowd, so the letter is painted
+// into the icon too. A PNG data URI from a canvas, not an SVG: Safari does not draw SVG favicons in
+// tabs, and this repo's own icon rules say PNG/ICO only. Runs AFTER hydration (App's effect) and
+// only mutates hrefs on the existing icon links — never removes a React-owned head node. A changed
+// href is what makes Safari repaint. Unset in production, so the real icon stands.
+function laneFaviconPng(letter: string): string | null {
+  try {
+    const c = document.createElement('canvas')
+    c.width = 64; c.height = 64
+    const g = c.getContext('2d')
+    if (!g) return null
+    g.fillStyle = '#302438'
+    g.beginPath(); g.roundRect(0, 0, 64, 64, 12); g.fill()
+    g.fillStyle = '#f3edcf'
+    g.font = 'bold 44px serif'
+    g.textAlign = 'center'; g.textBaseline = 'middle'
+    g.fillText(letter, 32, 36)
+    return c.toDataURL('image/png')
+  } catch { return null }
+}
+
+function applyLaneFavicon(letter: string) {
+  const href = laneFaviconPng(letter)
+  if (!href) return
+  document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"], link[rel="apple-touch-icon"]').forEach((l) => {
+    l.href = href
+    l.type = 'image/png'
+    l.removeAttribute('sizes')
+  })
+}
+
 export default function App() {
   useEffect(() => {
     const pick = TAB_TITLES[Math.floor(Math.random() * TAB_TITLES.length)]
-    document.title = pick
+    // A lane's dev server (scripts/follow-lanes.sh) exports VITE_LANE="A" and the tab title is
+    // exactly that letter (Peter, 2026-09-16: "change the tab names to A, B, C, E") — four
+    // localhost tabs read A B C E, nothing else. Unset in production, so the real title stands.
+    // TiptapEditor's own title write honours the same variable, or it would overwrite this.
+    const lane = import.meta.env.VITE_LANE
+    document.title = lane || pick
+    if (lane) applyLaneFavicon(lane)
   }, [])
   return <Outlet />
 }

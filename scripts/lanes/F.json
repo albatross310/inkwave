@@ -1,0 +1,8 @@
+{"title": "F — #12 one wrapper for the API handlers",
+ "paragraphs": [
+  "The session and sign endpoints each parsed their own JSON, checked their own method and wrote their own error replies. The two payment webhooks each read the raw body their own way. Now there is one jsonPost wrapper and one readRawBody, and the handlers hold only what is specific to them.",
+  "The API's answers must be byte-identical: session 200, sign 200 with a signature, malformed input 400, a forged token 401."],
+ "checks": [
+  "Reload. The ◈ panel shows a live signing session, no offline fallback banner.",
+  "Type and pause. A receipt appears in the chain and verify chain reads ✓.",
+  "Sign-in and payment buttons still open (no console errors from /api)."]}
