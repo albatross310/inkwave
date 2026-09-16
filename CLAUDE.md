@@ -1204,7 +1204,9 @@ start-up table, not the tab. **The seed text is PER LANE** (Peter: "the example 
 should match the things I have to check"): `scripts/lanes/<L>.json` — `{title, paragraphs,
 checks}` — is that PR's plain-English summary and a ☐ checklist, exported by the script as
 `VITE_LANE_SEED`; the generic prose is only the fallback. A lane row without a JSON file opens
-on text that tells Peter nothing. **The favicon is the letter too**, and it must be a REAL URL:
+on text that tells Peter nothing. `?seed=fresh` always mints a NEW seeded document for the tab
+(the script opens with it): a tab that already holds an earlier seed is neither absent nor an
+untouched blank, so plain `?seed` leaves it alone and Peter sees stale sample text. **The favicon is the letter too**, and it must be a REAL URL:
 `scripts/laneIcon.mjs` bakes a PNG (Node zlib, 5×7 bitmap font, no canvas) that vite.config.ts
 serves at `/__lane-icon.png?l=A`, and root.tsx's `links()` points the icon links there when
 `VITE_LANE` is set. **Safari never repaints a tab icon swapped at runtime** — the first cut wrote
