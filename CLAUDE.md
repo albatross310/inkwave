@@ -1223,6 +1223,11 @@ Any session that opens a browser tab on Peter's Mac does it in the BACKGROUND �
 <url>` — so Safari is never raised over what he is doing and focus never moves. The same standing
 rule as "no browser windows over Peter's screen" for headed probes, applied to real tabs.
 
+**THE MAC SESSION MAY CHANGE PETER'S PREFERENCES (Peter, 2026-09-16: "max can update prefs").**
+When a fix is a setting on his Mac — Safari's tab layout, a default browser, a system pref — the
+Mac session changes it (`defaults write`, AppleScript) and says what it changed, rather than
+telling Peter which menu to open.
+
 **NAME BRANCHES AFTER THE FOCUS (Peter, 2026-09-16).** The harness hands a cloud session a random
 branch (`claude/great-wozniak-gpki8p` was this one's) and Peter cannot tell from the name what it
 holds. Push work to a branch named for what it does — `claude/lanes-localhost`,
