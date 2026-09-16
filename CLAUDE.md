@@ -1275,6 +1275,13 @@ dozen stray acks to old comments before it was caught. Act (wake, ack) only when
 exactly your name, your team (`IW`/`Gen`) or `all`; everything else is logged, never acked. Poll with
 `since=<timestamp>`, because `per_page=100` page 1 stops showing new comments past 100.
 
+**A CLOUD SESSION HANDS LOCAL-ONLY WORK TO A LOCAL, PROACTIVELY (Peter via Saul, 2026-09-16).** Never
+report the limitation and stop; route it with enough context that the local acts without going back
+to Peter. Quinn for the General team, Max for the Mac and Inkwave. Local-only: the Mac (desktop,
+Safari, localhost, prefs) and anything needing continuity across the container's lifetime. NOT
+local-only, despite the relay's wording: a cloud session CAN poll (the background-loop watcher, this
+file) and CAN push to Peter's phone (`PushNotification`), both measured working from this session.
+
 **A QUIET CHECK-IN IS SILENT (Peter, 2026-09-16).** A watcher roll-over, a lane check-in that found
 nothing merged, a channel with no new posts: re-arm and say nothing. Report only when something
 changed or something needs Peter.
