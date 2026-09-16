@@ -1291,13 +1291,13 @@ Safari, localhost, prefs) and anything needing continuity across the container's
 local-only, despite the relay's wording: a cloud session CAN poll (the background-loop watcher, this
 file) and CAN push to Peter's phone (`PushNotification`), both measured working from this session.
 
-**LESS COMMENTARY TO PETER (Peter, 2026-09-16).** He reads the thread; he does not need it narrated.
+**LESS COMMENTARY TO PETER — EVERY SESSION (Peter, 2026-09-16).** He reads the thread; he does not need it narrated.
 Cut: (1) no reply after a routine re-arm, watcher restart, killed-instance notice or empty check-in —
 say nothing at all; (2) no restating a rule back to him after saving it — "saved" is the whole reply;
 (3) no per-hop relay or roll-call updates — one table when the ritual closes; (4) no explaining why a
 teammate's message was not for me; (5) no closing line about what is armed or pending; (6) a change
 he made gets one sentence, not a summary plus consequences. Report only: a result he asked for, a
-decision only he can make (one line, the ask first), or something broken. Max: same, on the Mac.
+decision only he can make (one line, the ask first), or something broken. Applies to every session, in chat and on the channel.
 
 **A QUIET CHECK-IN IS SILENT (Peter, 2026-09-16).** A watcher roll-over, a lane check-in that found
 nothing merged, a channel with no new posts: re-arm and say nothing. Report only when something
