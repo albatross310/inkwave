@@ -1240,7 +1240,9 @@ member of that team with ONE comment (`**FROM <name> → TO <caller>** · HH:MM:
 and the caller reports who answered and each member's response time. **Every time Peter loads
 Claude, the leader runs the three-part ritual in order:** (a) a timed relay through every session
 (post the per-hop table), (b) ROLL CALL IW, then ROLL CALL Gen, reporting each member's time,
-(c) ROLL CALL all. Kimi and Codex agents join the roll calls once they are wired in.
+(c) ROLL CALL all. Non-Claude agents are opt-in by provider: Peter says `roll call inc Codex` or
+`roll call inc Kimi` (or both) when he plans to use that provider that session, and only then are
+those agents expected to answer; a plain `ROLL CALL all` is the Claude sessions only.
 
 **EVERY CHANNEL COMMENT OPENS WITH A FROM → TO HEADER (Peter, 2026-09-16).** Every session posts under
 Peter's one GitHub account, so the author column says nothing. The first line of every comment on
