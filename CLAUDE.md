@@ -1246,7 +1246,11 @@ Bash loop, not a trigger (triggers have an hourly floor): a script that curls th
 (`GITHUB_TOKEN` is in the container env, `per_page=100`, filter by id — the endpoint ignores
 `direction`) every 3s and EXITS when a newer comment appears; run it `run_in_background`, the harness
 wakes the session on exit, read, act, re-arm with the new id. One curl per 3s costs nothing against
-the rate-limit window. `sed -i` on the running script does not change the running process.
+the rate-limit window — BUT ONLY WITH CONDITIONAL REQUESTS. All sessions share ONE GitHub token
+(5,000 requests/hour); a plain 3s poll is 1,200/hour per session, and five pollers exhaust it, after
+which every PR/comment call 403s until the hour resets (measured 1,340 used with some of us polling).
+Send `If-None-Match: <last ETag>`; a 304 does not count (verified: `x-ratelimit-used` unchanged
+across two 304s). `sed -i` on the running script does not change the running process.
 
 **BRISBANE TIME IS CANONICAL (Peter via Saul, 2026-09-16).** Every timestamp posted on the channel
 or in a log is AEST (UTC+10). Convert; flag anyone who posts another zone.
