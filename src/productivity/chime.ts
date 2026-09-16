@@ -178,16 +178,6 @@ function playVoice(voice: ChimeVoice, kind: 'work-end' | 'break-end', repeats = 
 }
 
 /**
- * Play the writer's chosen chime. `kind` shapes the interval: work ending RISES ("come back to it"),
- * a break ending SETTLES. Silent when muted; never throws.
- */
-export function playChime(kind: 'work-end' | 'break-end' = 'work-end'): void {
-  if (chimeMuted()) return
-  const voice = CHIME_VOICES.find((v) => v.id === chimeVoiceId()) ?? CHIME_VOICES[0]
-  playVoice(voice, kind)
-}
-
-/**
  * The end-of-timer chime, REPEATED (Peter, 2026-07-18: "Chimes REPEAT on end of timer").
  *
  * A single gentle chime is easy to miss when you have wandered off — which is exactly when the block

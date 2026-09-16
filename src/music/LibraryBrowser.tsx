@@ -166,5 +166,3 @@ export function LibraryBrowser({ onImported, corpus = CORPORA[0] }: LibraryBrows
     </section>
   )
 }
-
-export default LibraryBrowser

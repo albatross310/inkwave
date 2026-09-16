@@ -171,5 +171,3 @@ export function ScoreView({
     </div>
   )
 }
-
-export default ScoreView

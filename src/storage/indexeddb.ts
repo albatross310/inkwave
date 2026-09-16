@@ -38,16 +38,6 @@ export async function upsertMeta(meta: DocumentMeta): Promise<void> {
   })
 }
 
-/** Get metadata for a single document. */
-export async function getMeta(id: string): Promise<DocumentMeta | null> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(id)
-    req.onsuccess = () => resolve((req.result as DocumentMeta) ?? null)
-    req.onerror = () => reject(req.error)
-  })
-}
-
 /** List all document metadata rows, most-recently-updated first. */
 export async function listMeta(): Promise<DocumentMeta[]> {
   const db = await openDB()

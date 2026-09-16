@@ -91,11 +91,6 @@ export async function getSaveFileHandle(docId: string, interactive = false): Pro
   return null
 }
 
-/** Does this document have a linked save file at all (regardless of current permission)? */
-export async function hasSaveFile(docId: string): Promise<boolean> {
-  return !!(await idbGet<FileHandle>(keyFor(docId)))
-}
-
 /** The linked file's name (the `name` property needs no permission), or null if none. For showing
  *  a "Reconnect to keep saving to <name>" state when write permission has lapsed. */
 export async function getSaveFileName(docId: string): Promise<string | null> {

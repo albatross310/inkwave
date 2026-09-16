@@ -53,13 +53,3 @@ export function setCurrentPlace(label: string | undefined): void {
     localStorage.setItem(RECENTS_KEY, JSON.stringify([clean, ...rest].slice(0, MAX_RECENTS)))
   } catch { /* private mode — the label stays session-only */ }
 }
-
-/** Drop a label from the reuse list. */
-export function forgetPlace(label: string): void {
-  try {
-    localStorage.setItem(
-      RECENTS_KEY,
-      JSON.stringify(recentPlaces().filter((p) => p.toLowerCase() !== label.toLowerCase())),
-    )
-  } catch { /* private mode */ }
-}

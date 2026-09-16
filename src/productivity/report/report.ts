@@ -104,21 +104,6 @@ export function parseReply(reply: string, opts: ParseOpts): ParsedReply {
   }
 }
 
-/** The graceful failure message (§A7.1.5 / §A9) — always paired with the expected format. */
-export function failureHelp(judged: JudgedResult, headerLine: string): string {
-  const first = judged.issues[0]
-  return [
-    first ? first.message : 'Couldn\'t read the table in that reply.',
-    '',
-    'Paste the FULL reply, including the fenced block. Inkwave is looking for:',
-    '',
-    '```csv',
-    headerLine,
-    '…one row per item, judged fields only',
-    '```',
-  ].join('\n')
-}
-
 /** Every issue, deduped by message — the panel lists these; nothing is dropped in silence. */
 export function allIssues(parsed: ParsedReply): Issue[] {
   const seen = new Set<string>()

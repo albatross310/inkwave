@@ -12,4 +12,3 @@ export const WATCH_KEY = 'inkwave:panelWatch'
 // EXPIRE after HISTORY_TTL_MS — the extension keeps no lasting record of pages you captured.
 export const HISTORY_KEY = 'inkwave:captureHistory'
 export const HISTORY_TTL_MS = 5 * 60 * 1000
-export const MAILTO = 'hello@inkwave.studio'

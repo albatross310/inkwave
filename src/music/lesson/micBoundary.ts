@@ -45,9 +45,6 @@ export const CAPTURE_APIS = [
  */
 export const RECOGNISER_APIS = ['SpeechRecognition', 'webkitSpeechRecognition'] as const
 
-/** For reporting. */
-export const MIC_APIS = [...CAPTURE_APIS, ...RECOGNISER_APIS] as const
-
 /**
  * The one pattern the firebreak judges by: any capture API, or the CONSTRUCTION of a recogniser.
  *
