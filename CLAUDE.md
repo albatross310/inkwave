@@ -1226,8 +1226,11 @@ paced refactor queue). Addressing: a NAME means
 that one session; **"team"** means Carrie + Max + Nigel; **"all"** means every session in the
 pinned list. The shared channel is GitHub — **`albatross310/MnemonicEcologies`, the issue titled
 "Team channel"** — one comment per message, opening with who it is for (`@team`, `@Max`, `@all`).
-The `LOCAL:` commits and trigger pokes stay as the fast lanes for Max and Nigel; the issue is the
-record every session can read.
+**THE LEADERS — Carrie (cloud) and Quinn (local) — POST EVERYTHING THERE** (Peter, 2026-09-16:
+"so that all my AI chats show up on MnemonicEcologies"): every report to Peter, every ask to
+another session, every decision, goes as a comment on that issue as well as wherever else it is
+said. The `LOCAL:` commits and trigger pokes stay as the fast lanes for Max and Nigel; the issue
+is the record.
 
 **BE PROACTIVE ACROSS THE TEAM (Peter, 2026-09-16 — a standing rule for every session).** When
 Peter reports that another session has not done something ("Max still hasn't opened them"), the
