@@ -81,8 +81,10 @@ function seedContent(): TiptapJSON {
 
 export function seededDocument(): InkwaveDocument {
   const now = new Date().toISOString()
+  const id = uuidv4()
+  markSeedHistoryPending(id)
   return withScasDefaults({
-    id: uuidv4(),
+    id,
     title: laneSeed()?.title ?? 'Sample text (dev seed)',
     contentJson: seedContent(),
     createdAt: now,
@@ -91,4 +93,48 @@ export function seededDocument(): InkwaveDocument {
     scasLimitN: 'infinite',
     scasSessionSeed: uuidv4(),
   })
+}
+
+// ─── Seed HISTORY (Peter, 2026-09-16: "no snapshots still") ───────────────────────────────────
+// A seeded document lands as ONE write, and snapshots mint only on chunked arrival, so every lane
+// opened with ◈ 0 and nothing to scrub. So the editor, once, commits the seed CUMULATIVELY —
+// blocks 1..k for k = 1..N — through the same manual-snapshot funnel the ⊕ button uses, so the
+// archive holds real versions with settled hashes. The marker is sessionStorage (per tab, like
+// document identity), written when the seed is minted and CONSUMED by the first editor that sees
+// it, so a reload never replays the history. DEV only, like everything else in this file.
+const SEED_HISTORY_KEY = 'inkwave:seedHistory'
+export const SEED_HISTORY_MAX_STEPS = 8
+
+function markSeedHistoryPending(docId: string) {
+  try { sessionStorage.setItem(SEED_HISTORY_KEY, docId) } catch { /* private mode: no history, no harm */ }
+}
+
+/** True exactly once per seeded document: the first caller takes the marker. */
+export function takeSeedHistory(docId: string): boolean {
+  if (!import.meta.env.DEV) return false
+  try {
+    if (sessionStorage.getItem(SEED_HISTORY_KEY) !== docId) return false
+    sessionStorage.removeItem(SEED_HISTORY_KEY)
+    return true
+  } catch { return false }
+}
+
+/**
+ * The cumulative prefixes to snapshot, oldest first, EXCLUDING the full document (the caller
+ * snapshots the live document last). Blocks are grouped evenly so a long seed still yields at most
+ * `maxSteps` versions; a 1-block document yields none. Pure, so it is unit-tested.
+ */
+export function seedHistorySlices(content: TiptapJSON, maxSteps = SEED_HISTORY_MAX_STEPS): TiptapJSON[] {
+  const blocks = Array.isArray(content.content) ? content.content : []
+  const n = blocks.length
+  if (n < 2 || maxSteps < 2) return []
+  const steps = Math.min(n, maxSteps)
+  const out: TiptapJSON[] = []
+  for (let i = 1; i < steps; i++) {
+    const end = Math.round((i * n) / steps)
+    if (end <= 0 || end >= n) continue
+    if (out.length && out[out.length - 1].content?.length === end) continue
+    out.push({ type: 'doc', content: blocks.slice(0, end) })
+  }
+  return out
 }
