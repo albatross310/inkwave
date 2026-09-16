@@ -1218,6 +1218,16 @@ tab still showed the logo. A fresh `<link>` href at page load is the only thing 
 branch `scripts/follow-branch.sh` still serves 5173 with no lane. **Keep `lanes.tsv` current** — a
 lane that opens a PR without a row is one Peter cannot open.
 
+**THE TEAM, HOW TO ADDRESS IT, AND WHERE IT TALKS (Peter, 2026-09-16).** Peter runs named
+sessions: **Carrie CTO** (this cloud session — the lanes, merges, the tabs), **Max CTO** (the Mac:
+Safari, localhost, his prefs), **Nigel PM** (the paced refactor queue), **Saul Gen** and
+**Elizabeth Gen** (general; Elizabeth was "Quinn Gen" until 2026-09-16). Addressing: a NAME means
+that one session; **"team"** means Carrie + Max + Nigel; **"all"** means every session in the
+pinned list. The shared channel is GitHub — **`albatross310/MnemonicEcologies`, the issue titled
+"Team channel"** — one comment per message, opening with who it is for (`@team`, `@Max`, `@all`).
+The `LOCAL:` commits and trigger pokes stay as the fast lanes for Max and Nigel; the issue is the
+record every session can read.
+
 **BE PROACTIVE ACROSS THE TEAM (Peter, 2026-09-16 — a standing rule for every session).** When
 Peter reports that another session has not done something ("Max still hasn't opened them"), the
 session he is talking to messages that session AGAIN itself — a `LOCAL:` commit to the Mac, a
