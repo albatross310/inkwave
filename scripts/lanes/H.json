@@ -1,0 +1,9 @@
+{"title": "H — #17 twenty-five dead exports deleted",
+ "paragraphs": [
+  "Repo hygiene, no user-visible feature. Twenty-five exported functions and constants that nothing anywhere referenced (ts-prune, then git grep across src, api, scripts, the extension and docs, plus every open PR) are gone, along with the orphan file bibRuns.ts. Forty flagged names were kept on purpose: route exports, extension-shared constants, test seams, and six types listed for your decision.",
+  "Three findings were left alone rather than fixed: two cache-clear functions nobody ever calls (the missing caller is the bug), the lesson panel is mounted nowhere so ?lesson reaches nothing, and the caps layer is imported only by its own test. Product calls, not hygiene."],
+ "checks": [
+  "This tab loads and you can type. The gate (typecheck, tests, build) is green, so the only thing to catch is a runtime path that only a browser exercises.",
+  "Open ⚙ Settings, the ◈ panel and the clock drop-up; each still opens and closes.",
+  "Insert a citation from the bibliography panel and confirm the in-text hook and the reference list still render.",
+  "Decide the six kept types (ProvenanceEvent, ParagraphMetadata, MediaRef, CommentAttrs, MediaImageAttrs, BarRef): delete or keep."]}
