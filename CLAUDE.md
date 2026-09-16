@@ -1275,6 +1275,12 @@ dozen stray acks to old comments before it was caught. Act (wake, ack) only when
 exactly your name, your team (`IW`/`Gen`) or `all`; everything else is logged, never acked. Poll with
 `since=<timestamp>`, because `per_page=100` page 1 stops showing new comments past 100.
 
+**THE ISSUE IS RECORD AND NOTIFICATION; PETER READS IT AS EMAIL (Peter via Saul, 2026-09-16).** No
+push channel. Every comment becomes an email to Peter, so filter at write time: if it is not worth
+an email, do not post it. `@Peter` in the body is the flag for anything that needs him (GitHub
+distinguishes a mention from the subscription). Scripted `seen` acks are therefore OFF; the only
+scripted post is `present` in answer to a ROLL CALL. Locals own timed posting (digests, urgent).
+
 **A CLOUD SESSION HANDS LOCAL-ONLY WORK TO A LOCAL, PROACTIVELY (Peter via Saul, 2026-09-16).** Never
 report the limitation and stop; route it with enough context that the local acts without going back
 to Peter. Quinn for the General team, Max for the Mac and Inkwave. Local-only: the Mac (desktop,
