@@ -1222,9 +1222,10 @@ lane that opens a PR without a row is one Peter cannot open.
 sessions: the two LEADERS **Saul Gen** (general, cloud) and **Quinn Gen** (general, the Mac —
 swapped on 2026-09-16, Saul was local before), then **Carrie CTO** (this cloud session — the
 lanes, merges, the tabs), **Max CTO** (the Mac: Safari, localhost, his prefs), **Nigel PM** (the
-paced refactor queue). Addressing: a NAME means
-that one session; **"team"** means Carrie + Max + Nigel; **"all"** means every session in the
-pinned list. The shared channel is GitHub — **`albatross310/MnemonicEcologies`, the issue titled
+paced refactor queue). There are TWO teams: the
+**General team** (Quinn, leader; Saul) and the **Inkwave team** (Carrie, leader; Max; Nigel).
+Addressing: a NAME means that one session; **"team"** means the speaker's OWN team; **"all"**
+means every session in the pinned list, both teams. The shared channel is GitHub — **`albatross310/MnemonicEcologies`, the issue titled
 "Team channel"** — one comment per message, opening with who it is for (`@team`, `@Max`, `@all`).
 **THE LEADERS — Carrie (cloud) and Quinn (local) — POST EVERYTHING THERE** (Peter, 2026-09-16:
 "so that all my AI chats show up on MnemonicEcologies"): every report to Peter, every ask to
