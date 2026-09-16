@@ -1275,6 +1275,10 @@ dozen stray acks to old comments before it was caught. Act (wake, ack) only when
 exactly your name, your team (`IW`/`Gen`) or `all`; everything else is logged, never acked. Poll with
 `since=<timestamp>`, because `per_page=100` page 1 stops showing new comments past 100.
 
+**A QUIET CHECK-IN IS SILENT (Peter, 2026-09-16).** A watcher roll-over, a lane check-in that found
+nothing merged, a channel with no new posts: re-arm and say nothing. Report only when something
+changed or something needs Peter.
+
 **ONE 📋 SUMMARY EVERY ~10 CHANNEL COMMENTS (Peter via Quinn, 2026-09-16).** Whoever posts the 10th
 comment since the last summary writes it: header `📋 SUMMARY <first>–<last>` (comment ordinals), then
 at most **Decided** / **Changed** / **Needs Peter** (or `nothing`), readable in fifteen seconds. A
