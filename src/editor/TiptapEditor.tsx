@@ -6,6 +6,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
 import { Fragment as PmFragment, Slice as PmSlice } from '@tiptap/pm/model'
 import { v4 as uuidv4 } from 'uuid'
+import { takeSeedHistory, seedHistorySlices } from '../dev/seedDocument'
 import { buildEditorExtensions } from './extensions/editorExtensions'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
@@ -1837,6 +1838,29 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     })
     return off
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // DEV ONLY — a freshly SEEDED document (dev/seedDocument.ts) gets a history: its blocks are
+  // committed cumulatively through the manual funnel below, oldest prefix first, then the live
+  // document, so a lane tab opens with ◈ N and the scrub has versions. `takeSeedHistory` consumes
+  // the per-tab marker, so this runs once per seed and never on a reload or a real document.
+  // NO cancellation token, deliberately: StrictMode's double-invoke would cancel the run the
+  // first invocation started while the second finds the marker already taken — measured as
+  // exactly ◈ 1 on every lane. The marker is the once-guard; the doc-id check is the only bail.
+  useEffect(() => {
+    if (!editor || !takeSeedHistory(doc.id)) return
+    void (async () => {
+      const base = docRef.current
+      const slices = seedHistorySlices(base.contentJson)
+      const t0 = Date.parse(base.createdAt) || Date.now()
+      for (let i = 0; i < slices.length; i++) {
+        if (docRef.current.id !== base.id) return
+        // Each prefix is a frozen document of its own; the funnel hashes and stamps it as if the
+        // writer had pressed ⊕ after that paragraph.
+        await createManualSnapshot({ ...base, contentJson: slices[i], updatedAt: new Date(t0 + (i + 1) * 60_000).toISOString() })
+      }
+      if (docRef.current.id === base.id) await createManualSnapshot()
+    })()
+  }, [editor, doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ONE global manual-snapshot funnel. The ordinary "save version" control and an email's
   // "Snapshot this draft" both come here, so the archive, live counter, OTS state, mirrors and diff
