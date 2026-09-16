@@ -351,6 +351,14 @@ keep them out of the conversation by default so earlier chat remains readable.
   zoom = pinch → the font-reflow pipeline (Scroll.tsx touch handlers); browser-native zoom is
   suppressed app-wide on phone (universal `touch-action: pan-x pan-y` — NB touch-action does NOT
   inherit, hence the `*` rule — + gesture*/two-finger-touchmove preventDefault + 16px input floor).
+  **WHERE THE HANDLERS LIVE (mapped 2026-09-16, refactor queue item 3 seam 4):** ALL input handling
+  is in `Scroll.tsx` L355–1017 — wheel, trackpad, pinch, the `__iwZoomHold` writes and both
+  `inkwave:zoom-settled` dispatches; `magnify.ts` owns the scale, `zoomStep.ts`/`viewSettings.ts`
+  the steps and persistence, `PaginationExtension` the `zoom-step`/`zoom-settled` re-measure.
+  `TiptapEditor.tsx` holds NO zoom handler — 34 lines touch zoom and all are consumers (the SCAS
+  tick's hold deferral, the keyboard detector's `vv.scale` guard, the ⋮ menu's `paperRight` re-read
+  on magnify) plus `useZoomScale`, which counters BROWSER zoom and is not the hybrid zoom. Do not
+  go looking for a zoom seam in TiptapEditor.tsx; `docs/REFACTOR-QUEUE.md` item 3 has the map.
 - **Review layer — MERGED AND LIVE ON MASTER (probed 2026-07-17: `origin/feat/review` is an
   ancestor of `origin/master`, ZERO commits ahead; ReviewBar.tsx and the R button ship on master).
   This entry said "IN PROGRESS, unmerged" long after it landed** — a lane that refactors "under"
