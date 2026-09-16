@@ -33,21 +33,26 @@ const HOOK = strip(readFileSync(resolve(__dirname, 'useToolbarSlots.ts'), 'utf8'
   // hook with docRef in hand is exactly where the triple could be re-inlined. Measured before this
   // line existed: the triple planted in useCloudSync.ts left this guard 4/4 green.
   + '\n' + strip(readFileSync(resolve(__dirname, 'useCloudSync.ts'), 'utf8'))
+// SEAM 3 (2026-09-16): `commitDoc` ITSELF moved to useSaveOrchestration.ts, so its body is located
+// THERE now, and that file is scanned for a second triple like the others. Measured first: with the
+// editor rewired and this file un-re-pointed, 3 of 4 went red (the body could not be located).
+const SAVE = strip(readFileSync(resolve(__dirname, 'useSaveOrchestration.ts'), 'utf8'))
 
 /** The longhand triple, at any indent: the shape `commitDoc` replaced. */
 const TRIPLE = /docRef\.current = (\w+)\n\s*onDocChange\(\1\)\n\s*scheduleSave\(\1\)/g
 
 /** `commitDoc`'s own body IS the triple — that is the point of it. Scan everything else. */
-const COMMIT_DOC = /const commitDoc = \([^)]*\) => \{[\s\S]*?\n  \}/.exec(CODE)?.[0] ?? ''
-const ELSEWHERE = CODE.replace(COMMIT_DOC, '') + '\n' + HOOK
+const COMMIT_DOC = /const commitDoc = \([^)]*\) => \{[\s\S]*?\n  \}/.exec(SAVE)?.[0] ?? ''
+const ELSEWHERE = CODE + '\n' + HOOK + '\n' + SAVE.replace(COMMIT_DOC, '')
 
-describe('TiptapEditor commits a document mutation through exactly one path', () => {
+describe('the editor commits a document mutation through exactly one path', () => {
   // VOID GUARD. Every assertion below is about a file this test located by path and stripped. If the
   // strip ever ate the file, or the path moved, "no violations" would be true and meaningless.
   it('the scan found the file and it still contains the things it reasons about', () => {
     expect(CODE.length).toBeGreaterThan(50_000)
-    expect(CODE).toContain('const commitDoc =')
-    expect(CODE).toContain('scheduleSave')
+    expect(SAVE).toContain('const commitDoc =')
+    expect(CODE).toContain('scheduleSave') // the autosave beat and the goals write still schedule from the editor
+    expect(CODE).toContain('commitDoc(updated)') // ...and the editor still commits through the hook's path
     // If this regex ever stops matching, ELSEWHERE silently becomes the whole file and the triple
     // test starts failing on the definition — loud, but for the wrong reason. Pin it here instead.
     expect(COMMIT_DOC, 'commitDoc body not located — the triple scan would be mis-scoped').not.toBe('')
@@ -55,6 +60,8 @@ describe('TiptapEditor commits a document mutation through exactly one path', ()
     expect(HOOK.length).toBeGreaterThan(5_000)
     expect(HOOK).toContain('commitDoc(updated)')
     expect(HOOK).toContain('function mirrorIfActive()') // ...and the cloud-sync half is really in the scan
+    expect(SAVE.length).toBeGreaterThan(5_000)
+    expect(SAVE).toContain('function ensureDocFresh(): InkwaveDocument {') // ...and the save half
   })
 
   it('the longhand triple appears NOWHERE — commitDoc is the only path', () => {
@@ -76,7 +83,7 @@ describe('TiptapEditor commits a document mutation through exactly one path', ()
   // notifies a TITLE change after the write has already happened — calling scheduleSave there would
   // schedule a second save of what was just saved. It is not a mutation commit.
   it('only two places call onDocChange: commitDoc, and the post-save title notify', () => {
-    const calls = [...(CODE + '\n' + HOOK).matchAll(/[^.\w]onDocChange\(/g)]
+    const calls = [...(CODE + '\n' + HOOK + '\n' + SAVE).matchAll(/[^.\w]onDocChange\(/g)]
     expect(calls.length, 'a third caller is either a missing scheduleSave or a new exception to document')
       .toBe(2)
   })

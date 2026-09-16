@@ -161,6 +161,65 @@ TiptapEditor.tsx 3,370 → 2,940; the hook is 570 lines, of which 446 are the mo
   (needs a real gesture) — the same two gaps `cloudWriteback.test.ts` states.
 - **Still here:** the zoom handlers, the effect cluster, `recoverAndPurge` (stays regardless).
 
+**LANDED 2026-09-16 — seam 3: save orchestration** (`src/editor/useSaveOrchestration.ts`). One
+phrase: *the path from an edit to the record on disk — the one commit funnel, the lazily rebuilt
+document every consumer reads, and the single snapshot queue with the guarded archive read every
+publishing action shares.* THE DATA-LOSS FAMILY's front door (CLAUDE.md), so held to "verbatim or
+nothing". TiptapEditor.tsx 2,944 → 2,705; the hook is 371 lines, of which 262 are the moved lines
+byte-for-byte (the diff of the deleted non-import lines against the extraction is EMPTY but for the
+eager-load effect's `const docId = doc.id` dropped and `[doc.id]` → `[docId]`) and 109 are header,
+imports, the two interfaces and the return. Effects 55 → 53 + 2. Net **+132** on the two files,
+**+782** across `src/editor` with the two test files.
+- **The map, before deciding the boundary:** 5 state/ref declarations (`snapshots`, `snapshotsRef`,
+  `snapQueueRef`, `docStaleRef`; `editorRef` relocates, unchanged), 11 functions and 2 effects MOVE;
+  the autosave beat (inside `onUpdate`, behind the docChanged gate), the paragraph trigger, the
+  word-nudge effect, the period signer, `recoverAndPurge`, `runWhenQuiet`, `lastNotifiedTitleRef`,
+  the goals write and all the JSX (◈ panel, email panel, ⋮ menu) STAY and read the hook's return
+  (13 members). Inputs: 12 — `docRef`, `docId`, `onDocChange`, `editorRef`, `scasRef`, `sessionRef`,
+  `setFileOpenError`, and five from `useCloudSync` (`mirrorIfActive`, `saveToFile`, the three
+  last-sync setters).
+- **The two-way coupling, and why it is not a stop.** `useCloudSync` needs `ensureDocFresh` and
+  `snapshotsForAction`; the save hook needs the cloud hook's mirror and setters. The unmoved code
+  already resolved this by HOISTING (function declarations called only after render), so the
+  component keeps two one-line hoisted delegates of the same names and calls the cloud hook first —
+  no ref, no late binding, no reorder of the cloud hook's inputs. The alternative (a `cloudRef` the
+  hook reads through) would have touched seven moved lines.
+- **Characterization before the move, R6, in two halves.** `saveOrchestrationWiring.test.ts` (7,
+  path-keyed on TiptapEditor.tsx) ran green on the UNMOVED file first; 3 planted editor mutants die
+  (the stale mark, the word-nudge abort, `onSnapshotDraft`). `useSaveOrchestration.test.tsx` (28,
+  jsdom, storage + provenance mocked at the module boundary) was written from the unmoved code and
+  run against the BYTE-IDENTICAL extraction while TiptapEditor.tsx was untouched (commit `3ef86aa`
+  has the hook + tests and no editor change). One assertion FAILED on the original — it counted the
+  mount's eager list read as a manual-snapshot read — the corollary working. 8 mutants, 8 die (the
+  list is in the test's header); the one that matters is m1, `snapshotsForAction` answering `[]`
+  instead of null on a failed read, which dies in three named tests. NOT under test here: the
+  autosave DEBOUNCE and its platform delays, which live in `storage/opfs.ts scheduleSave` and did
+  not move.
+- **Effect order (R7).** The block was not contiguous (commitDoc at L146, state at L226–236 and
+  L329, the save-failed effect at L613, the functions at L1722–1956); the hook is called after
+  `fileOpenError`'s state (its toast) and after `useCloudSync`, before `useToolbarSlots` (needs
+  `commitDoc`) and `useEditor` (its `onUpdate` reads `setSnapshots` / `docStaleRef`). So its two
+  effects run at positions 22–23 rather than ~34 (save-failed) and ~53 (eager load). Free by
+  inspection: the save-failed effect adds two listeners and a 10s interval; the eager load starts a
+  promise whose `.then` sets state; neither reads a value another effect sets synchronously, and no
+  effect between reads `snapshots`. `editorRef`'s `useRef(null)` moved up 270 lines to precede the
+  call — the one relocated line.
+- **Path-keyed guards.** `commitDoc.test.ts` locates `commitDoc`'s body in the HOOK now and scans it
+  for a second triple (measured first: rewired + un-re-pointed, 3 of 4 red; re-pointed, a triple
+  planted in the hook AND one planted in the editor each turn 2 red). `cloudSyncWiring.test.ts`
+  went 3/12 red on the rewire (the mirror count, the `ensureDocFresh` body, `saveRecord`) and is
+  re-pointed at the hook for those three (the mirror count is now 3 editor + 1 hook; dropping the
+  hook's mirror or the three setters each turns it red). `noAutoDelete.test.ts` walks `src/` — a
+  planted `deleteSnapshot` in the hook turns it red with no re-point. `touchTargets`,
+  `toolbarOutline`, `toolbarSlotsWiring`, `chunk` read text that did not move — verified green, not
+  re-pointed. `cloudLocalRead.test.ts` reads no file and its prose names the cloud hook, still right.
+- **In-browser:** type → wait past autosave → reload → text still there, asked of the UI AND of
+  OPFS directly, on the branch build and on the unmoved control build in the same container:
+  identical cells (persisted, same tab document id, 2 `inkwave:doc-saved` before reload, 0
+  `save-failed`, the marker in 1 OPFS file). `scripts/tabdoc-probe/repro.mjs` on both — see the
+  lane report.
+- **Still here:** the zoom handlers, the effect cluster, `recoverAndPurge` (stays regardless).
+
 ---
 
 ## 4. Dead exports

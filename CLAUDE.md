@@ -208,7 +208,13 @@ keep them out of the conversation by default so earlier chat remains readable.
     StrictMode double-invoke is a real second claimant: skipping the stale `setState` alone still
     leaks the lock.
   - **A take-over is enforced at the bytes, not asserted.** The write freeze lives at the
-    `saveDocument` funnel; the holder flushes → freezes → ACKs, and the taker waits for that ack
+    `saveDocument` funnel (storage/opfs.ts). Everything that REACHES that funnel from the editor —
+    the one `commitDoc` path, the lazy `ensureDocFresh` rebuild the autosave beat consumes, the
+    single snapshot queue and the `snapshotsForAction` read guard every publishing action shares —
+    lives in **`editor/useSaveOrchestration.ts`** (2026-09-16, seam 3: moved VERBATIM out of
+    TiptapEditor.tsx, which keeps the autosave beat inside `onUpdate`, the paragraph and word-nudge
+    triggers, and `recoverAndPurge`). `useSaveOrchestration.test.tsx` drives the read-failure abort
+    as a named test with a mutant. The holder flushes → freezes → ACKs, and the taker waits for that ack
     before stealing. After an ack TIMEOUT, steal, then wait a brief grace for a LATE `surrendered` —
     a live slow-flusher posts it once frozen, so the caller reads AFTER the freeze; a dead holder
     never posts and the grace expires.
@@ -1739,6 +1745,7 @@ src/
     TiptapEditor.tsx                   # editor surface, scroll-head chrome, footer, prefetch
     useCloudSync.ts                    # cloud sync + writer-held files: folder/OneDrive/Drive state, mirrorIfActive + the OneDrive throttle, sign-in/pickers/openers, re-link on load, the other-device heartbeat (split from TiptapEditor 2026-09-15; THE DATA-LOSS FAMILY's mirror rules live here)
     useToolbarSlots.ts                 # toolbar slot customisation: the row + ▲ drawer state, both touch-hold drags, the write-back, Alt-hotkeys (split from TiptapEditor 2026-09-15)
+    useSaveOrchestration.ts            # save orchestration: commitDoc (THE one commit path), ensureDocFresh (the lazy rebuild), the snapshot queue + snapshotsForAction (R1 read guard), the manual-snapshot funnel, OTS sweep, export/save, the save-failed toast (split from TiptapEditor 2026-09-16; THE DATA-LOSS FAMILY's front door)
     toolbarContract.ts                 # THE toolbar contract: slot population, migration, bar layers, per-doc config
     extensions/RedHighlightExtension.ts# PM plugin: red decorations + hint badges + line compression
     suggestions/

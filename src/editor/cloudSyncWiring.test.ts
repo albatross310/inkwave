@@ -20,8 +20,15 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const SRC = readFileSync(resolve(__dirname, 'TiptapEditor.tsx'), 'utf8')
-const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+const CODE = strip(readFileSync(resolve(__dirname, 'TiptapEditor.tsx'), 'utf8'))
+// SEAM 3 (2026-09-16): save orchestration left for useSaveOrchestration.ts and took two things this
+// file pins with it — `ensureDocFresh` (the coupling) and `saveRecord` (the dispatch) — plus the
+// manual snapshot's mirror call. Measured FIRST: with them moved and this file un-re-pointed, three
+// tests went red (the mirror count, the ensureDocFresh body, saveRecord), so the re-point is proved
+// to bite. What remains in TiptapEditor.tsx is a hoisted one-line delegate of the same name, which
+// is exactly why the body must be located in the HOOK, not by name in the editor.
+const SAVE = strip(readFileSync(resolve(__dirname, 'useSaveOrchestration.ts'), 'utf8'))
 
 describe('the editor wires the cloud-sync hook', () => {
   // VOID GUARD. Every assertion below is about a file located by path and stripped. If the strip ate
@@ -38,11 +45,16 @@ describe('the editor wires the cloud-sync hook', () => {
   // signing period's receipt. Each calls `mirrorIfActive()` — a call, not the definition (the
   // lookbehind excludes `function mirrorIfActive()`), and exactly four of them.
   it('exactly four call sites mirror: three after a stamped snapshot, one after the signed period', () => {
+    // Since seam 3 the manual "save version" lives in the save hook; the other three are still here.
     const calls = [...CODE.matchAll(/(?<!function )\bmirrorIfActive\(\)/g)]
-    expect(calls.length).toBe(4)
-    // Three follow `stampSnapshot(...)` + the metadata patch; the fourth follows the period commit.
-    const afterStamp = [...CODE.matchAll(/stampSnapshot\(snap\.documentId, snap\.id\)[^\n]*\n[^\n]*\n\s*mirrorIfActive\(\)/g)]
-    expect(afterStamp.length).toBe(3)
+    expect(calls.length).toBe(3)
+    const hookCalls = [...SAVE.matchAll(/\bmirrorIfActive\(\)/g)]
+    expect(hookCalls.length).toBe(1)
+    // Three follow `stampSnapshot(...)` + the metadata patch (two here, one in the hook); the fourth
+    // follows the period commit.
+    const stampThenMirror = /stampSnapshot\(snap\.documentId, snap\.id\)[^\n]*\n[^\n]*\n\s*mirrorIfActive\(\)/g
+    expect([...CODE.matchAll(stampThenMirror)].length).toBe(2)
+    expect([...SAVE.matchAll(stampThenMirror)].length).toBe(1)
     expect(CODE).toMatch(/scasReceipts: allReceipts,\s*\}\s*commitDoc\(updated\)\s*mirrorIfActive\(\)/)
   })
 
@@ -55,13 +67,17 @@ describe('the editor wires the cloud-sync hook', () => {
     expect(CODE).toMatch(/<UnsyncedNotice\s+show=\{warnUnsynced\}/)
   })
 
-  // THE COUPLING, PINNED. `ensureDocFresh` (save orchestration — stays) marks a rebuilt document as
-  // not-yet-mirrored by clearing all three "last sync" times. Drop one and that pill claims "Synced"
-  // over content it has never seen.
+  // THE COUPLING, PINNED. `ensureDocFresh` (save orchestration — in useSaveOrchestration.ts since
+  // seam 3) marks a rebuilt document as not-yet-mirrored by clearing all three "last sync" times.
+  // Drop one and that pill claims "Synced" over content it has never seen. The editor keeps a
+  // one-line hoisted delegate of the same name for the cloud hook's input; the BODY is in the hook.
   it('ensureDocFresh clears all three last-sync times when it rebuilds the document', () => {
-    const body = /function ensureDocFresh\(\): InkwaveDocument \{[\s\S]*?\n  \}/.exec(CODE)?.[0] ?? ''
-    expect(body, 'ensureDocFresh body not located').not.toBe('')
+    const body = /function ensureDocFresh\(\): InkwaveDocument \{[\s\S]*?\n  \}/.exec(SAVE)?.[0] ?? ''
+    expect(body, 'ensureDocFresh body not located in the save hook').not.toBe('')
     expect(body).toMatch(/setLastFileSave\(null\)\s*setLastSync\(null\)\s*setLastGdriveSync\(null\)/)
+    // ...and the editor still hands the cloud hook a function of that name (the delegate).
+    expect(CODE).toContain('function ensureDocFresh(): InkwaveDocument { return save.ensureDocFresh() }')
+    expect(CODE).toContain('useCloudSync({ docRef, docId: doc.id, ensureDocFresh, snapshotsForAction, runWhenQuiet })')
   })
 
   // THE PILL'S BRANCHES. Chromium (File System Access) → the local folder pill in its three honest
@@ -116,7 +132,7 @@ describe('the editor wires the cloud-sync hook', () => {
   // "Save" is one button with two honest behaviours: Chromium writes the linked file, everyone else
   // downloads the record. It dispatches; it does not re-implement either.
   it('saveRecord dispatches to saveToFile or exportBundle', () => {
-    expect(CODE).toMatch(/function saveRecord\(\) \{\s*if \(fileSaveAvailable\(\)\) void saveToFile\(\)\s*else exportBundle\(\)\s*\}/)
+    expect(SAVE).toMatch(/function saveRecord\(\) \{\s*if \(fileSaveAvailable\(\)\) void saveToFile\(\)\s*else exportBundle\(\)\s*\}/)
   })
 
   // The other-device banner shows on the heartbeat verdict and is dismissed through the hook's setter.
