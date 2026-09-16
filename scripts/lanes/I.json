@@ -1,0 +1,8 @@
+{"title": "I — #18 saving moved into its own file",
+ "paragraphs": [
+  "The path from an edit to the record on disk — the one commit funnel, the lazily rebuilt document every consumer reads, and the single snapshot queue with the guarded archive read that every publishing action shares — has moved out of the 3,000-line editor file into useSaveOrchestration.ts. This is seam 3 of the editor split, stacked on G (#15) and C (#9).",
+  "Zero behaviour change is the claim: 262 lines moved byte-for-byte, with 28 behaviour tests written against the OLD code first. The one that matters most — a failed archive read must abort a snapshot rather than write an empty one — is proved by a test that fails when the guard is removed."],
+ "checks": [
+  "Type a sentence, wait about 2 seconds, reload the tab. The sentence is still there.",
+  "Open ◈ and choose save version. The count goes up by one and the pill shows pending, then stamped.",
+  "Open ⋮ and export the bundle. Drop the file on /verify; it is accepted."]}
