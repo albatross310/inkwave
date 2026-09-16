@@ -1,0 +1,8 @@
+{"title": "B — #8 the clock drop-up reads one day total",
+ "paragraphs": [
+  "The clock drop-up had its own private way of adding up the day's minutes, separate from the one every guard was written against. That is how 45 remembered minutes were once shown as focused minutes. Now it reads the shared day-total calculator.",
+  "The wording on the drop-up should be byte-identical to production."],
+ "checks": [
+  "Open the clock drop-up. Focused minutes for today match production.",
+  "Add a post-hoc (remembered) block of about 45 minutes. It shows as about 45m, separately, never as focused minutes.",
+  "Start and stop the timer once. The day total updates."]}
