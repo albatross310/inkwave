@@ -1259,6 +1259,12 @@ note (lane + next step), and posts `compacted HH:MM:SS AEST · <what it kept>`; 
 or mid-push posts `deferred` and compacts at its next idle. Never call it on a session mid-lane
 (Nigel mid-refactor would lose the context it works from).
 
+**ONE 📋 SUMMARY EVERY ~10 CHANNEL COMMENTS (Peter via Quinn, 2026-09-16).** Whoever posts the 10th
+comment since the last summary writes it: header `📋 SUMMARY <first>–<last>` (comment ordinals), then
+at most **Decided** / **Changed** / **Needs Peter** (or `nothing`), readable in fifteen seconds. A
+summary never introduces a decision. Scripted acks are transport: they neither count toward the ten
+nor appear in the summary. The fixed header is what lets Peter read the channel as summaries only.
+
 **TEAM SHORT NAMES AND THE STARTUP RITUAL (Peter, 2026-09-16).** On the channel, `IW` = the
 Inkwave team (Carrie, Max, Nigel) and `Gen` = the General team (Quinn, Saul); `TO IW` / `TO Gen`
 replaces `@team`, `TO all` is both. A comment reading `ROLL CALL <IW|Gen|all>` is answered by every
