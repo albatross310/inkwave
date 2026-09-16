@@ -181,7 +181,10 @@ keep them out of the conversation by default so earlier chat remains readable.
     could not read is not. `deleteSnapshot` must ask for `allowShrink`; it defaults false so a new
     write path cannot silently acquire the power to truncate.
   - **The cloud mirrors do not re-read.** `syncToOneDrive` takes the array it is handed, so
-    `oneDriveWriteNow`'s local-read check (TiptapEditor.tsx) is load-bearing.
+    `oneDriveWriteNow`'s local-read check is load-bearing. It lives in **`editor/useCloudSync.ts`**
+    (2026-09-15 — the cloud-sync orchestration moved there VERBATIM out of TiptapEditor.tsx; the
+    editor calls the hook and keeps the pill/pickers/⋮ JSX). `useCloudSync.test.tsx` drives the
+    refusal for all three mirrors (folder / OneDrive / Drive) with named tests, mutant-proved.
   - **Decide an open by ANCESTRY, never by `updatedAt`.** `storage/openConflict.ts classifyOpen`:
     incoming hash in the local archive ⇒ `incoming-stale`, keep local (its snapshots still merge —
     pure gain); local in the incoming archive ⇒ `incoming-newer`, adopt; neither, ambiguous, **or
@@ -1701,6 +1704,7 @@ src/
   types/document.ts                    # InkwaveDocument, Snapshot, ProvenanceEvent types
   editor/
     TiptapEditor.tsx                   # editor surface, scroll-head chrome, footer, prefetch
+    useCloudSync.ts                    # cloud sync + writer-held files: folder/OneDrive/Drive state, mirrorIfActive + the OneDrive throttle, sign-in/pickers/openers, re-link on load, the other-device heartbeat (split from TiptapEditor 2026-09-15; THE DATA-LOSS FAMILY's mirror rules live here)
     useToolbarSlots.ts                 # toolbar slot customisation: the row + ▲ drawer state, both touch-hold drags, the write-back, Alt-hotkeys (split from TiptapEditor 2026-09-15)
     toolbarContract.ts                 # THE toolbar contract: slot population, migration, bar layers, per-doc config
     extensions/RedHighlightExtension.ts# PM plugin: red decorations + hint badges + line compression

@@ -108,6 +108,59 @@ above held, to the line.
   `commitDoc`, the OneDrive throttle, the folder mirror, the heartbeat and the unsynced notice, and
   one evening's proof budget was spent on seam 1.
 
+**LANDED 2026-09-15 — seam 2: cloud sync + writer-held files** (`src/editor/useCloudSync.ts`). One
+phrase: *the document's writer-held destinations — a granted folder, OneDrive, Google Drive —
+connecting them, mirroring the record to them, and the state the sync pill reports.* This is THE
+DATA-LOSS FAMILY's code (CLAUDE.md), so the move was held to "verbatim or nothing".
+TiptapEditor.tsx 3,370 → 2,940; the hook is 570 lines, of which 446 are the moved lines byte-for-byte
+(the diff of the deleted non-import lines against the extraction is EMPTY; one edit, the heartbeat's
+`[doc.id]` → `[docId]`) and 124 are header, imports, the two interfaces and the return. Effects 61 →
+55 + 6. Net **+140** on the two files, **+1,218** across `src/editor` with the two test files.
+- **The map, before deciding the boundary:** 20 state/ref declarations, 24 functions and 6 effects
+  MOVE; the tab-title effect, the `syncActive` derivation + the unsynced notice's wiring (a CONSUMER
+  that reads four flags), `saveRecord`, the four `mirrorIfActive()` provenance checkpoints and all
+  the JSX (pill, banner, pickers, openers, phone ☁, ⋮ menu) STAY and read the hook's return; ONE
+  two-way coupling — `ensureDocFresh` (stays) clears `lastFileSave`/`lastSync`/`lastGdriveSync`, so
+  those three setters are exposed rather than hidden. Inputs: `docRef`, `docId`, `ensureDocFresh`,
+  `snapshotsForAction` (the R1 archive-read guard every PUBLISHING action shares — not sync-specific,
+  so it stays), `runWhenQuiet`.
+- **What did NOT move, and why:** `fetchCloudBytes` + the two cloud openers DID move (they adopt the
+  opened file as the sync target and own the opener state); print/export (`printDoc`, `exportPdf`,
+  `exportLatex`, `exportEquations`) sat physically INSIDE the block and stayed — they are not
+  destinations. `snapshotsForAction`, `ensureDocFresh`, `exportBundle`, `commitDoc`, `saveDocument`,
+  `recoverAndPurge` untouched.
+- **Characterization before the move, R6, in two halves.** `cloudSyncWiring.test.ts` (12, path-keyed
+  on TiptapEditor.tsx) ran green on the UNMOVED file first — its writer-count assertion FAILED on the
+  original (it assumed 8 call sites; the file had 10), the corollary working, and the measured
+  number is the one it carries. `useCloudSync.test.tsx` (37, jsdom, the storage layer mocked at the
+  module boundary) was written from the unmoved code and run against the BYTE-IDENTICAL extraction
+  while TiptapEditor.tsx was still untouched (commit `e3deb8b` has the hook + tests and no editor
+  change). 10 mutants, 10 die — the list is in the test's header; the three that matter are the
+  three "archive unreadable ⇒ no write" refusals (OneDrive / Drive / folder), each a named test.
+- **Effect order (R7) — the one place this seam differs from seam 1.** The block was NOT contiguous:
+  its state stood at L252–296 (read by the tab-title effect at L272 and the unsynced notice at L376)
+  and its functions/effects at L1966–2417. A hook is called at ONE position, so it is called where
+  the STATE stood and its six effects moved from sequence positions 55–60 to 5–10. Proved free by
+  inspection of each effect's synchronous acts: two resolve promises (Drive/OneDrive resume), one
+  `void linkSaveFileNow()` + a listener on `inkwave:save-file-linked` (its ONLY listener), two
+  `runWhenQuiet` timers, and the heartbeat's `setOtherDevice(false); setConflictDismissed(false)`
+  + a `void check()` whose ref reads see refs nothing sets synchronously in ANY effect. No effect in
+  positions 5–54 reads a value one of the six sets synchronously. The alternative — calling the hook
+  at L1966 — would have required moving the tab-title effect and the four unsynced-notice effects
+  later, which is a reorder of NON-sync effects, or a two-hook line-count split.
+- **Path-keyed guards.** `commitDoc.test.ts` now scans this hook too (measured FIRST: with the
+  longhand triple planted in useCloudSync.ts the un-re-pointed guard stayed 4/4 green; re-pointed,
+  it fails). `noAutoDelete.test.ts` walks `src/` — a planted `deleteSnapshot` in the hook turns it
+  red with no re-point. `touchTargets` (`[data-iw-selectable]`) and `toolbarOutline` (the reconnect
+  pill's JSX) read text that did not move — verified green, not re-pointed. `cloudLocalRead.test.ts`
+  reads no file; its prose named TiptapEditor.tsx as the guard's home and now names the hook.
+- **In-browser:** the editor mounts, typing works and the sync pill renders on the branch build;
+  `scripts/tabdoc-probe/unsynced.mjs` (the notice's wiring, which READS the hook's flags) run on the
+  branch and on unmoved `83d0d93` in the same container — see the lane report for the cells.
+  NOT verifiable headless: OneDrive/Drive sign-in (needs a real account) and a Chromium folder grant
+  (needs a real gesture) — the same two gaps `cloudWriteback.test.ts` states.
+- **Still here:** the zoom handlers, the effect cluster, `recoverAndPurge` (stays regardless).
+
 ---
 
 ## 4. Dead exports

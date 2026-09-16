@@ -29,6 +29,10 @@ const CODE = strip(readFileSync(resolve(__dirname, 'TiptapEditor.tsx'), 'utf8'))
 // the file the text LEFT is green forever — measured: with the longhand triple pasted into the hook,
 // the un-re-pointed guard stayed 4/4 green — so the hook is scanned here too.
 const HOOK = strip(readFileSync(resolve(__dirname, 'useToolbarSlots.ts'), 'utf8'))
+  // Seam 2 (same day): the cloud-sync orchestration left for useCloudSync.ts holding `docRef` — a
+  // hook with docRef in hand is exactly where the triple could be re-inlined. Measured before this
+  // line existed: the triple planted in useCloudSync.ts left this guard 4/4 green.
+  + '\n' + strip(readFileSync(resolve(__dirname, 'useCloudSync.ts'), 'utf8'))
 
 /** The longhand triple, at any indent: the shape `commitDoc` replaced. */
 const TRIPLE = /docRef\.current = (\w+)\n\s*onDocChange\(\1\)\n\s*scheduleSave\(\1\)/g
@@ -50,6 +54,7 @@ describe('TiptapEditor commits a document mutation through exactly one path', ()
     // ...and the moved half is really being scanned: it is a real file that really calls the one path.
     expect(HOOK.length).toBeGreaterThan(5_000)
     expect(HOOK).toContain('commitDoc(updated)')
+    expect(HOOK).toContain('function mirrorIfActive()') // ...and the cloud-sync half is really in the scan
   })
 
   it('the longhand triple appears NOWHERE — commitDoc is the only path', () => {

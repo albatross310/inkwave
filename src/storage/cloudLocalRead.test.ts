@@ -7,6 +7,9 @@
 // > `syncToOneDrive` takes the array it is handed and never re-reads, so `oneDriveWriteNow`'s
 // > local-read check in `TiptapEditor.tsx` IS load-bearing.
 //
+// (That check lives in `editor/useCloudSync.ts` since 2026-09-15 — the hook TiptapEditor calls — and
+// `editor/useCloudSync.test.tsx` now drives it directly: the refusal is a named test with a mutant.)
+//
 // The first half is TRUE and is pinned below: `syncToOneDrive(doc, snapshots)` writes what it is
 // given. The remote half is guarded by `planWriteback` (pure, tested) — but `planWriteback` unions
 // the remote with the LOCAL ARRAY IT WAS HANDED, and a union with a lie is still a lie. Nothing
@@ -16,11 +19,12 @@
 // ─── WHAT THIS FILE IS, AND WHAT IT IS NOT ────────────────────────────────────────────────────────
 // It drives the REAL `readSnapshotArchive` (through a REAL faulting OPFS shim, the REAL gzip write
 // chain, the REAL write-through cache) into the REAL `syncToOneDrive`, composed EXACTLY as
-// TiptapEditor.tsx composes them — and it drives the PRE-FIX composition the same way, in the same
+// useCloudSync.ts composes them — and it drives the PRE-FIX composition the same way, in the same
 // build, to see what each does with the same fault.
 //
 // ⚠ IT IS A MODEL OF THE CALL SITE, NOT THE CALL SITE. It cannot fail if someone deletes
-// `oneDriveWriteNow`'s guard tomorrow — no test in this repo renders TiptapEditor. That is stated
+// `oneDriveWriteNow`'s guard tomorrow — no test in this repo renders TiptapEditor (useCloudSync.test.tsx
+// renders the HOOK, which is the next best thing, and its mutant m1 is that deletion). That is stated
 // here rather than left for a reader to discover, because a cell that quietly certifies a line it
 // cannot reach is the exact trap this lane was warned about. What it CAN establish is the thing the
 // claim actually turns on: WHICH line refuses, and what happens if you take each one away.
@@ -142,7 +146,7 @@ describe('syncToOneDrive writes WHAT IT IS HANDED — the premise the whole clai
 })
 
 describe('THE VECTOR: a failed LOCAL read must never reach the wire', () => {
-  // THE GUARDED COMPOSITION — exactly TiptapEditor.tsx's `oneDriveWriteNow`:
+  // THE GUARDED COMPOSITION — exactly useCloudSync.ts's `oneDriveWriteNow`:
   //   readSnapshotArchive(id).then(r => { if (r.kind === 'error') return; syncToOneDrive(doc, r.snapshots) })
   it('the GUARDED composition (oneDriveWriteNow) refuses: nothing reaches the wire', async () => {
     await seedArchive()
@@ -162,7 +166,7 @@ describe('THE VECTOR: a failed LOCAL read must never reach the wire', () => {
   //
   // Restore the PRE-FIX composition — no union, no `kind === 'error'` check, the shape that shipped
   // before today: `listSnapshots(id).then(snaps => syncToOneDrive(doc, snaps)).catch(() => {})`.
-  // It ALSO refuses. Not because of anything in TiptapEditor.tsx — because `listSnapshots` now
+  // It ALSO refuses. Not because of anything in useCloudSync.ts — because `listSnapshots` now
   // THROWS on a failed read (`readSnapshotsFromDisk`'s `catch { return [] }` is gone), and the
   // fire-and-forget `.catch` that was there all along swallows the throw before the sync is called.
   //
