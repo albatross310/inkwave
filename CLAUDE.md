@@ -1253,8 +1253,11 @@ Relay hops and anything echoing the channel are a model turn (~10 s when free), 
 whose name they carry. This costs hop latency when a session is busy; Peter accepted the trade.
 A roll-call answer is `present` from the script plus at most one template line `focus: <one
 clause>` from `~/.iw-status`. **No context figures and no compaction flag in roll call** (Peter
-reversed that the same day). Compaction is never part of a roll call; the leader schedules it at
-idle or rotates the role to a fresh session with a written hand-off.
+reversed that the same day). Compaction is never part of a roll call. It is its own ritual, the **COMPACTION RELAY**, which
+Peter calls at a quiet moment: each session finishes its turn, compacts with a one-line hand-off
+note (lane + next step), and posts `compacted HH:MM:SS AEST · <what it kept>`; a session mid-gate
+or mid-push posts `deferred` and compacts at its next idle. Never call it on a session mid-lane
+(Nigel mid-refactor would lose the context it works from).
 
 **TEAM SHORT NAMES AND THE STARTUP RITUAL (Peter, 2026-09-16).** On the channel, `IW` = the
 Inkwave team (Carrie, Max, Nigel) and `Gen` = the General team (Quinn, Saul); `TO IW` / `TO Gen`
