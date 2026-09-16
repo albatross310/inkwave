@@ -1218,6 +1218,11 @@ trigger poke to a cloud session — with the specific ask and a request to confi
 "Max reported it done" and stop: his eyes are ground truth, a report is not. The same goes the
 other way — a session that sees a sibling stalled nudges it without being asked.
 
+**OPEN TABS QUIETLY (Peter, 2026-09-16: "stop opening tabs in my screen when you open them").**
+Any session that opens a browser tab on Peter's Mac does it in the BACKGROUND — `open -g -a Safari
+<url>` — so Safari is never raised over what he is doing and focus never moves. The same standing
+rule as "no browser windows over Peter's screen" for headed probes, applied to real tabs.
+
 **NAME BRANCHES AFTER THE FOCUS (Peter, 2026-09-16).** The harness hands a cloud session a random
 branch (`claude/great-wozniak-gpki8p` was this one's) and Peter cannot tell from the name what it
 holds. Push work to a branch named for what it does — `claude/lanes-localhost`,
