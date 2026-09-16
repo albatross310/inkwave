@@ -1259,6 +1259,11 @@ note (lane + next step), and posts `compacted HH:MM:SS AEST · <what it kept>`; 
 or mid-push posts `deferred` and compacts at its next idle. Never call it on a session mid-lane
 (Nigel mid-refactor would lose the context it works from).
 
+**ONE ISSUE CHANNEL AT A TIME (Peter, 2026-09-16).** The team channel is exactly one GitHub issue
+(`albatross310/MnemonicEcologies` #2 today). No side issues and no PR threads for team talk; every
+message addressed to a session goes there, and every session's watcher watches that one issue for
+everything addressed to it (name, team, or `all`, any case, with or without the provider suffix).
+
 **A WATCHER ACTS ONLY ON COMMENTS AFTER NOW, AND ONLY THOSE ADDRESSED TO IT (Peter, 2026-09-16).**
 Arm from the current time, never from an id you were handed: a listener re-armed from id 0 posted a
 dozen stray acks to old comments before it was caught. Act (wake, ack) only when the `TO` field is
