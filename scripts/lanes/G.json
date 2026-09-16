@@ -1,0 +1,8 @@
+{"title": "G — #15 cloud sync moved into its own file",
+ "paragraphs": [
+  "Everything about the places a document is mirrored to — a granted folder, OneDrive, Google Drive — connecting them, mirroring the record, and what the sync pill reports — has moved out of the 3,400-line editor file into useCloudSync.ts. This is seam 2 of the editor split, stacked on C (#9).",
+  "Zero behaviour change is the claim. The data-loss rules (the local-read guard before a OneDrive write, the failed folder write dropping the link) moved with it and are each proved by a test that fails when the guard is removed."],
+ "checks": [
+  "Type a paragraph and pause. The sync pill (bottom right) still reads Saved locally.",
+  "Leave the tab 5 minutes without linking anything. The unsynced-work notice appears once and never again after you wave it away.",
+  "If you have a folder or OneDrive linked on this machine: link it, type, and confirm the mirror updates as before."]}
