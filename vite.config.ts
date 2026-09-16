@@ -13,6 +13,15 @@ const devApi: PluginOption = {
   name: 'dev-api',
   apply: 'serve',
   configureServer(server) {
+    // Lane favicon: a real PNG URL per letter (see scripts/laneIcon.mjs for why not a data URI).
+    server.middlewares.use('/__lane-icon.png', async (req, res) => {
+      const l = new URL(req.url ?? '', 'http://x').searchParams.get('l') ?? ''
+      // @ts-expect-error - untyped Node-only ESM module (scripts/, outside the src TS project)
+      const { laneIconPng } = await import('./scripts/laneIcon.mjs')
+      res.setHeader('Content-Type', 'image/png')
+      res.setHeader('Cache-Control', 'no-store')
+      res.end(laneIconPng(/^[A-L]$/.test(l) ? l : ''))
+    })
     const route = async (raw: string, path: string, authorization?: string) => {
       const body = JSON.parse(raw || '{}')
       // @ts-expect-error - untyped Node-only ESM modules (live in api/, outside the src TS project)
