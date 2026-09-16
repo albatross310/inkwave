@@ -420,3 +420,6 @@ and `window.__iwWaterGate.reason` makes `complete` vs `timeout` observable. Post
 Chromium 8/8 and WebKit 4/4 same-tab navigation/reloads opened `complete`, twinkles-ready and
 water-ready landed in the same measured millisecond, the visible surface was complete on frame 0,
 and shared-field skew stayed 0.00px.
+
+**The wave video was removed 2026-09-16** (Peter's ruling — decision 2 in `docs/REFACTOR-QUEUE.md`,
+branch `claude/refactor-drop-wavevideo`). The rounds above are history; nothing else here changed.

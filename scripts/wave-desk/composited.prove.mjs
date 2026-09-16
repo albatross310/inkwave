@@ -28,12 +28,12 @@
 //      can open pre-hydration). The spin itself freezes the class by construction: a blocked main
 //      thread cannot run the reveal timers, so the surface CANNOT leave the drift mid-measurement.
 //
-// Serving: scripts/wave-video/server.mjs (build/client + SPA fallback + prod-like CSP).
+// Serving: scripts/wave-desk/server.mjs (build/client + SPA fallback + prod-like CSP).
 // NOT `vite preview` — CLAUDE.md PROBE RULES.
 //
 // Usage: node scripts/wave-desk/composited.prove.mjs [--sabotage] [--port 4321]
 import { chromium } from '@playwright/test'
-import { autoWaveBase } from '../wave-video/autoserve.mjs'
+import { autoWaveBase } from './autoserve.mjs'
 
 const args = process.argv.slice(2)
 const sabotage = args.includes('--sabotage')

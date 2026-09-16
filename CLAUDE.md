@@ -706,6 +706,12 @@ phase-synchronised editor water uncovers. Phone retains its separate keep-shell-
 
 **The rebuild's rounds, the wave-video ladder, and the refuted desync hypothesis are in
 `docs/archive/wave-system-rounds.md`. EVERY RULE BELOW WAS A LIVE BUG** — none is preference.
+**The wave video itself was REMOVED 2026-09-16** (Peter's ruling, decision 2 in
+`docs/REFACTOR-QUEUE.md`): `?waveVideo` never graduated (unresolved desync), and `waveVideo.ts`, the
+`public/wave/*.mp4` rungs, the SW's `/wave/` Range path and its six probes went together. The rules
+below that name the video (`iw-wave-video-on`, `pickRung`, the tile rung) are kept as written — each
+was a live bug, and each is about the CSS water's own hand-offs too; read them as the lesson's
+origin, not as a description of shipped code.
 
 - **NOTHING MAY WRITE TO THE DOM BEFORE HYDRATION.** `hydrateRoot(document)` makes React own every
   node, so an imperative pre-hydration append triggers React #418/#423 and React then **REPLACES the
@@ -782,8 +788,8 @@ phase-synchronised editor water uncovers. Phone retains its separate keep-shell-
   (measured 0.00px on 4/5 loads; WAAPI and CSS share `document.timeline`). Next tool is on-device
   capture, not another headless probe.
 - PROBE RULES: /snapshot needs a fallback-faithful static server; never `pkill` a shared
-  `vite preview`; no windows over Peter's screen (`scripts/pw-headed.sh`). The wave-video probes need
-  `scripts/wave-video/server.mjs` — the scrub-probe server has no `.mp4` MIME and no Range/206.
+  `vite preview`; no windows over Peter's screen (`scripts/pw-headed.sh`). The wave-desk probes need
+  `scripts/wave-desk/server.mjs` (via `autoserve.mjs`) — the scrub-probe server has no Range/206.
   **A `.prove.mjs` is truth where it is KEEP and a guard nowhere** (2026-09-16): 71 one-shot probes
   were retired to `docs/archive/probes/` AFTER their claims moved into unit tests or archive anchors
   (`docs/archive/probes/README.md` maps every file → its guard; `docs/REFACTOR-QUEUE.md` §5 has the
@@ -1311,11 +1317,14 @@ now allots 11GB + 8GB swap, and **6 lanes is the observed safe ceiling**. So the
 - **A finished, tested feature SHIPS LIVE — no flag.** Don't reflexively wrap new work in a default-OFF flag; the default is that a writer sees it.
 - **A flag is now the EXCEPTION and must earn itself** — only for work genuinely not ready (incomplete, experimental, blocked on an external dependency). It's a temporary scaffold, not a home: it comes with a plan to graduate, and the report says WHY it's not live and WHAT closes the gap.
 - **Graduating ≠ flipping a switch on a stub.** Turn a flag on only when the thing behind it is real. `musicEnabled()`=true over a placeholder panel ships a stub to every writer — worse than the flag.
-- **Genuinely-unfinished stay gated for now** (updated 2026-07-19): the wave video (`?waveVideo`,
-  unresolved desync), the parked arithmetic layout (`?arithLayout`, held because the engine does not
+- **Genuinely-unfinished stay gated for now** (updated 2026-09-16): the parked arithmetic layout
+  (`?arithLayout`, held because the engine does not
   implement `8f5ae9d`'s mid-line snap and now diverges from the DOM measure on EVERY break — see the
   ⚠ entry in the iOS/WebKit section; the WebKit pass is no longer the first blocker), email send
   (`?email`, blocked on Google verification). Name the reason when you touch them.
+  ~~The wave video (`?waveVideo`, unresolved desync)~~ **REMOVED 2026-09-16** (decision 2,
+  `docs/REFACTOR-QUEUE.md`) — a flag that cannot graduate is not a scaffold, it is a second water
+  nobody sees; its rules stay in the wave section above.
   ~~The experimental scrub renderer (`?textRender`)~~ **GRADUATED 2026-07-18 (`ef96306`)** — see the
   "graduate textRender to default-ON" entry in round 14/15 of the canonical-pagination section below;
   it no longer belongs on this still-gated list.

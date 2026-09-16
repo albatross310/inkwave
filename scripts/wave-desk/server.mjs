@@ -1,11 +1,7 @@
-// Fallback-faithful static server for the WAVE VIDEO probes. Same contract as
-// scripts/scrub-probe/server.mjs (build/client + SPA fallback + production-like CSP), plus the two
-// things the video path actually needs and that server lacks:
-//   1. `.mp4` in the MIME table (it would otherwise serve application/octet-stream and no engine
-//      would decode it — a probe that "proves" the video fails for the wrong reason);
-//   2. REAL Range/206 responses. The 2026-07-16 iPhone-8 fix turns on Range-ability (the SW serves
-//      /wave/ cache-first WITH 206); a probe server answering 200-only would be testing a
-//      transport iOS never uses.
+// Fallback-faithful static server for the wave-desk probes (the LIVE CSS/SVG water). Same contract
+// as scripts/scrub-probe/server.mjs (build/client + SPA fallback + production-like CSP), plus real
+// Range/206 responses, which WebKit uses and that server lacks. It served the wave video's probes
+// too until that feature was removed (2026-09-16, docs/REFACTOR-QUEUE.md decision 2).
 // Deliberately NOT `vite preview` — see CLAUDE.md PROBE RULES.
 import http from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -19,7 +15,6 @@ const MIME = {
   '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
   '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff',
   '.txt': 'text/plain', '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm',
-  '.mp4': 'video/mp4',
 }
 
 const CSP = [
@@ -27,7 +22,6 @@ const CSP = [
   "script-src 'self' 'unsafe-inline' https:",
   "connect-src 'self' https://api.datamuse.com",
   "img-src 'self' data: https:",
-  "media-src 'self' blob:",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "worker-src 'self' blob:",
@@ -48,18 +42,11 @@ http.createServer(async (req, res) => {
       body = await readFile(file)
     }
     const type = MIME[extname(file)] || 'application/octet-stream'
-    // CACHE POLICY, and it MATTERS for the video (2026-07-17). `no-store` everywhere is faithful to
-    // NOTHING: it made waveVideo's pre-hydration warm fetch warm precisely nothing, so the <video>
-    // re-downloaded the whole 280KB h264 clip and blew its 2.5s decode budget — a "decode timeout"
-    // that was purely my server. In production /wave/ is served cache-first from the SW's Cache
-    // Storage (permanent for the build id), so the clip is fetched once and every later read is
-    // local. Immutable caching is the behavioural equivalent for a probe. Everything else stays
-    // no-store so the app itself is never stale.
-    const wave = path.startsWith('wave/')
+    // `no-store` throughout so the app under test is never stale.
     const base = {
       'content-type': type,
       'content-security-policy': CSP,
-      'cache-control': wave ? 'public, max-age=31536000, immutable' : 'no-store',
+      'cache-control': 'no-store',
     }
 
     // Range: the media path. WebKit asks for bytes=0- first, then ranges around the moov atom.
@@ -90,4 +77,4 @@ http.createServer(async (req, res) => {
     res.writeHead(500)
     res.end(String(e))
   }
-}).listen(PORT, () => console.log(`wave-video probe server on :${PORT} serving ${ROOT}`))
+}).listen(PORT, () => console.log(`wave-desk probe server on :${PORT} serving ${ROOT}`))

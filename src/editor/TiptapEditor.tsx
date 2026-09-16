@@ -1862,30 +1862,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       window.dispatchEvent(new Event('inkwave:editor-load-ready'))
       if (continueRequested) beginReveal()
     }
-    // ── THE DELIBERATE DELAY: show at least one wave-video loop before the document appears.
-    // "Warm up the document" needs no code of its own — fonts.ready, the first pagination measure
-    // and the editor's mount are ALREADY running through this window; the delay only stops the
-    // reveal cutting them short.
-    // ⚠ THE FLAG IS READ INLINE, never imported from waveVideo: importing a helper to decide
-    // whether to wait would pull the whole video module into the editor bundle on every load.
-    let waveVideoOn = false
-    try { const v = localStorage.getItem('inkwave:waveVideo'); waveVideoOn = v === '1' || v === 'debug' } catch { /* private mode */ }
-    // ⚠ ASK, THEN SUBSCRIBE, IN ONE SYNCHRONOUS BLOCK — the video can loop before we get here, and
-    // a bare addEventListener would wait for an event already in the past, forever. waveVideo fires
-    // this on EVERY exit, so it always arrives — but it is CAPPED here independently anyway,
-    // because that guarantee holds only if the module LOADED. The document must never depend on
-    // the animation succeeding. → docs/archive/editor-surface.md#editor-reveal
-    const waveLooped: Promise<void> = !waveVideoOn
-      ? Promise.resolve()
-      : new Promise<void>((res) => {
-          if ((window as unknown as { __iwWaveVideoLoopDone?: boolean }).__iwWaveVideoLoopDone) { res(); return }
-          const on = () => { window.removeEventListener('inkwave:wave-video-loop', on); res() }
-          window.addEventListener('inkwave:wave-video-loop', on)
-          setTimeout(() => { console.warn('[inkwave] wave video never reported a loop — revealing anyway'); on() }, 7000)
-        })
-    // The 1200ms safety cap predates the video and would fire straight through a ~2s loop; with the
-    // video ON it becomes the loop gate's own backstop plus the old margin, and OFF it is untouched.
-    const cap = setTimeout(markReady, waveVideoOn ? 8200 : 1200)
+    // The document must never depend on the load animation succeeding: the reveal waits on fonts
+    // and the first pagination measure only, capped at 1200ms.
+    // → docs/archive/editor-surface.md#editor-reveal
+    const cap = setTimeout(markReady, 1200)
     const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
     // Pagination measures in BOTH page modes, so always wait for its first measure — the cap covers
     // any mode where it never fires.
@@ -1896,7 +1876,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
             const on = () => { window.removeEventListener('inkwave:pagination-ready', on); res() }
             window.addEventListener('inkwave:pagination-ready', on)
           })
-    void Promise.all([fontsReady, paginationReady, waveLooped]).then(() =>
+    void Promise.all([fontsReady, paginationReady]).then(() =>
       requestAnimationFrame(() => requestAnimationFrame(markReady)), // one clean frame after the last reflow
     )
     return () => {

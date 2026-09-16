@@ -717,70 +717,6 @@
     height: 100lvh;
   }
 
-  /* ─── WAVE VIDEO VEIL (EXPERIMENTAL — waveVideo.ts, flag `inkwave:waveVideo`) ────────────────
-     A pregenerated loop video of this exact water, played over the LOAD on the hardware media
-     pipeline. It lives INSIDE the visible surface's .iw-wave-twinkles host (the sanctioned
-     imperative container — inserted only after the atomic gate, so hydration never sees it):
-     the host is z:-1 like the wave pseudos, so the video paints above ::before + the gradient +
-     the twinkle sets, below all content. ::after (tree order after children) still paints OVER
-     it, so while the veil is master the html class hides the DOM water wholesale — it keeps
-     RUNNING unpainted underneath (visibility, not display: the drift/coast clocks and the freeze
-     state machine are untouched — the covered-editor precedent), which is what makes it the
-     instant fallback and the SETTLE handoff target. Sized inline by waveVideo.ts to the rung's
-     exact CSS dims (object-fit fill = 1:1 device px at the rung's design scale) so wave tiles
-     stay exactly 140 CSS px — cover-cropped top-left. */
-  .iw-wave-video-el {
-    position: fixed;
-    top: 0;
-    left: 0;
-    /* NO width/height HERE — waveVideo.ts writes the chosen rung's DESIGN CSS BOX inline. It is a
-       per-rung fact, and the ladder's whole purpose is that it differs by device. */
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.3s linear;
-    /* CROP, NEVER RESIZE (2026-07-17 — Peter's ruling; replaces `object-fit: cover`).
-       `fill` + an element sized to the clip's design CSS box = the clip's pixels map 1:1 onto that
-       box, so a 140px wave tile is 140 CSS px at EVERY viewport and the VIEWPORT crops the
-       overflow. That congruence with the CSS water IS the hand-off at the coast.
-       `cover` scaled the clip to the viewport instead: MEASURED tile 122.5px @1100×700 and 157.5px
-       @1440×900 against the CSS water's 140.0 — the 12.5% jump Peter saw live. Crop measures
-       140.0 vs 140.0, 0.0% error (tilescale.prove.mjs).
-       ⚠️ NOT `object-fit: none`: that maps 1 video px → 1 CSS px, so a dsf:2 clip renders 2× too
-       big. The rule is clip @ (design CSS × dsf) + element @ design CSS + `fill`.
-       NB the comment this replaces described `object-fit: fill` as the shipped design — `git log
-       -S"object-fit: fill"` is EMPTY: no commit ever contained it. It was never implemented. */
-    object-fit: fill;
-    /* Survives the veil-on host hide below AND the covered-editor twinkle hide — visibility
-       (unlike display) lets a child re-assert itself under a hidden ancestor. */
-    visibility: visible;
-  }
-  html.iw-wave-video-on .inkwave-editor-surface.iw-fill::before,
-  html.iw-wave-video-on .inkwave-editor-surface.iw-fill::after,
-  html.iw-wave-video-on .inkwave-editor-surface.iw-fill .iw-wave-twinkles {
-    visibility: hidden;
-  }
-
-  /* ─── BLANK WHITE UNTIL THE VIDEO COMES UP ──────────────────────────────────────────────────
-     Peter: "we have to just have blank white screen until the video comes up and play the video
-     every time". Without this the CSS water paints from the prerendered `.iw-wave-anim` class (it
-     runs from first paint, by design) and is then replaced by the video a beat later — two
-     different waters in one load, which IS the "partial/janky first frame" this stops.
-     Set on <html> by entry.client BEFORE hydration (the same shape as .iw-water-ready /
-     data-theme — a class on the root, never a node append; appending pre-hydration IS the #418
-     bug). Cleared by waveVideo.ts on EVERY exit, and by entry.client's own timeout if that module
-     never loads: white must never be a state you can get stuck in.
-     The gradient is overridden too — the surface's aqua is the thing that would otherwise flash.
-     The video lives inside .iw-wave-twinkles and re-asserts `visibility: visible` (see
-     .iw-wave-video-el), so hiding the host here cannot hide the video we are waiting for. */
-  html.iw-wave-video-wait .inkwave-editor-surface.iw-fill {
-    background: #fff;
-  }
-  html.iw-wave-video-wait .inkwave-editor-surface.iw-fill::before,
-  html.iw-wave-video-wait .inkwave-editor-surface.iw-fill::after,
-  html.iw-wave-video-wait .inkwave-editor-surface.iw-fill .iw-wave-twinkles {
-    visibility: hidden;
-  }
-
   /* ─── DETERMINISTIC WATER MARKS ─────────────────────────────────────────────────────────────
      One checked-in scene table owns every coordinate and time window. It mounts synchronously,
      before the atomic water gate opens. Two fields—one per wave direction—carry ALL marks using
@@ -2717,7 +2653,7 @@
      viewport with nothing to scroll, which is precisely when the browser decides the gesture was
      meant for it. `overscroll-behavior` on the ROOT ELEMENT propagates to the viewport (it does
      NOT propagate from `body`), so the root is where the rule has to live. SnapshotView adds the
-     class on mount and drops it on unmount — the `.iw-water-ready` / `.iw-wave-video-wait` shape.
+     class on mount and drops it on unmount — the `.iw-water-ready` shape.
 
    `contain` RATHER THAN `none`: both suppress the native swipe navigation, and `contain` keeps the
    rubber-band affordance, so nothing about how the panes feel changes.

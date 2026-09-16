@@ -1,9 +1,9 @@
 // ─── Are the short lines out of sync with the waves? MEASURE IT. (Peter, live, Firefox + Chrome:
 // "the little short lines… often appear out of sync with the waves") ─────────────────────────────
 //
-// SCOPE: this measures the CSS/WAAPI water — the LOAD animation everyone gets today. The wave video
-// is behind `?waveVideo` and DEFAULT OFF, and it cannot be the cause: Peter sees this with the flag
-// off, and the video bakes marks and waves into ONE clip where they cannot desync by construction.
+// SCOPE: this measures the CSS/WAAPI water — the LOAD animation everyone gets. (The wave video that
+// once sat behind `?waveVideo` was removed 2026-09-16; it was never the cause — Peter saw this with
+// the flag off.)
 //
 // WHAT IS MEASURED: the deterministic rebuild removes per-object spatial tracks entirely. The two
 // mark fields and the two wave pseudos use the same named CSS drifts, and individual marks animate
@@ -126,7 +126,6 @@ function sampler() {
 async function oneLoad(browser, port, { injectSkewMs = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
   const page = await ctx.newPage()
-  await page.addInitScript(() => { try { localStorage.removeItem('inkwave:waveVideo') } catch { /* private */ } })
   await page.addInitScript((ms) => { window.__injectSkew = ms }, injectSkewMs)
   await page.addInitScript(sampler)
   await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'commit' })

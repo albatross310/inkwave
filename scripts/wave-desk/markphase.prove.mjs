@@ -24,10 +24,10 @@
 // THE NEGATIVE MUST FIRE: --perturb MS shifts one track's startTime by a known amount; the probe
 // must report that mark at MS*0.072 px of lag, or it cannot see lag at all.
 //
-// Serving: scripts/wave-video/server.mjs. NOT `vite preview` (CLAUDE.md PROBE RULES).
+// Serving: scripts/wave-desk/server.mjs. NOT `vite preview` (CLAUDE.md PROBE RULES).
 // Usage: node scripts/wave-desk/markphase.prove.mjs [--spike MS] [--perturb MS] [--port 4321]
 import { chromium } from '@playwright/test'
-import { autoWaveBase } from '../wave-video/autoserve.mjs'
+import { autoWaveBase } from './autoserve.mjs'
 
 const args = process.argv.slice(2)
 const num = (f, d) => (args.includes(f) ? Number(args[args.indexOf(f) + 1]) : d)
