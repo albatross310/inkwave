@@ -9,48 +9,28 @@ bundle, real shipped+stripped fonts, real device DPR, real live ProseMirror docu
 ```sh
 pnpm build
 node scripts/scrub-probe/server.mjs "$(pwd)/build/client" 4231 &   # own port + PID
-PROBE_PORT=4231 NODE_PATH="$(pwd)/node_modules" node scripts/textrender-probe/probe.mjs
 PROBE_PORT=4231 node scripts/textrender-probe/breaks.prove.mjs   # arith breaks == live editor breaks
-PROBE_PORT=4231 node scripts/textrender-probe/fidelity.mjs       # pixel diff vs the real editor
-PROBE_PORT=4231 node scripts/textrender-probe/mapcompare.mjs     # thumbnail vs text vs line-rect
-PROBE_PORT=4231 node scripts/textrender-probe/isolate.prove.mjs  # engine vs live, per content kind
 
-# The collectLines NodeView-rect fix (2026-07-17) — all three must pass:
-PROBE_PORT=4231 node scripts/textrender-probe/linecount.prove.mjs    # phantom lines, per block
+# The collectLines NodeView-rect fix (2026-07-17) — the phantom-line count is unit-held now
+# (src/editor/extensions/collectLines.nodeview.test.ts); the live break audit still runs here:
 PROBE_PORT=4231 node scripts/textrender-probe/midline.prove.mjs      # every break at a true line start
 PROBE_PORT=4231 node scripts/textrender-probe/crossdevice.prove.mjs  # canonical breaks: desktop == phone
 PROBE_PORT=4231 node scripts/textrender-probe/pagcheck.prove.mjs     # scoped measure == full measure
 EXPECT_POSITIVE=1 … node scripts/textrender-probe/midline.prove.mjs  # run against an UNFIXED build:
                                                                      # the probe must REPRODUCE the bug
-
-# The /snapshot PANE's container rule (2026-07-17) — the same bug, the pane's own copy. Runs the
-# KNOWN-NEGATIVE and the shipped rule in ONE pass and requires the negative to FIRE first:
-PROBE_PORT=4231 node scripts/textrender-probe/panerect.mjs
 ```
+
+**Retired 2026-09-16** to `docs/archive/probes/textrender-probe/` (claims unit-held or recorded — see
+that folder's README): `probe.mjs` (the perf matrix), `panerect.mjs`, `fidelity.mjs`, `mapcompare.mjs`,
+`isolate.prove`, `linecount.prove`, `landingcost.prove`, `versioncost.prove`/`.attrib`,
+`panecontent.prove`, and the diagnostics named in the traps below (`topdiag`, `breakwhere`, `listdiag`,
+`rectdiag`, `strutrule`, …). The trap list is kept verbatim: each trap is a rule, and the file that found
+it is its citation.
 
 ## Files
 
-- `probe.mjs` — the perf matrix: {2k,10k,40k words} × {build cold/warm, paint text/rects, map strip}
-  + BASELINE A (real SVG-foreignObject bake) + BASELINE B (real WebP encode→decode→blit) + memory.
-- `panerect.mjs` — **`rectdiag.mjs` pointed at the /snapshot pane**, and the gate for
-  `staticPagination.staticLineRects`. Reads the line list PRODUCTION published
-  (`window.__iwStaticLinesHook`) — not a replica of the rule — and compares it against the DOM's own
-  TEXT-NODE rects, which are lines by construction because a text node has no border box. It fires
-  the LIVE KNOWN-NEGATIVE (`window.__iwStaticLineRule = 'range'` ⇒ the pre-fix rule) FIRST and
-  refuses to read the verdict until the negative reproduces the drift.
-  Two design points, each of which a more obvious probe would have got wrong:
-  · **The hook, not a buffer.** It fires inside the pane's FORCED CANONICAL window; those tops mean
-    nothing in the live layout (trap #8), so the truth pass must run in the same coordinate system.
-  · **The artifact, not the rate.** See trap #18 — reading gap offsets cannot see this bug at all.
 - `breaks.prove.mjs` — **the load-bearing one.** Compares the arithmetic model's break positions
   against the LIVE editor's own gap widgets. This is what caught the orphan-snap drift.
-- `fidelity.mjs` — screenshot diff vs the real ProseMirror, with an offset sweep + ink denominator.
-- `mapcompare.mjs` — the minimap question, shown: real editor pixels downscaled vs text vs line-rect.
-- `landingcost.prove.mjs` — what a RICH pane costs at rest, measured against the rich landing that
-  already exists (`ops === null` → DocView) vs the flat one, byte-identical content, thesis scale,
-  desktop + phone-emu. Answer: rich paginates ~2× CHEAPER than flat. Both numbers are floors and both
-  caveats favour flat; the unmeasured number is RichDiffView's diff-mark increment.
-  `TRIALS=12 PROBE_PORT=… node scripts/textrender-probe/landingcost.prove.mjs`
 - `opfs.prove.mjs` — **the break-table store's FIRST EXECUTION.** `loadTables`/`putTable`/`getTable`/
   `persist`/`tableStats` had zero callers and had never run once. Builds 116 tables → persists through
   `storage/opfsWrite.ts` → **reloads the page** → hydrates from real OPFS → asserts a hit with
@@ -62,18 +42,6 @@ PROBE_PORT=4231 node scripts/textrender-probe/panerect.mjs
   a fresh disk. Chromium only — Playwright's Linux WebKit has no `navigator.storage`, so the iOS
   worker `createSyncAccessHandle` branch is unproven here.
   `PROBE_PORT=… node scripts/textrender-probe/opfs.prove.mjs`
-- `versioncost.prove.mjs` / `versioncost.attrib.mjs` — what a build ACTUALLY costs per version, and
-  why two readings of the same operation disagreed. Confirms the ~9.1s/116 baseline is real, shows the
-  word-width cache is already built and already banked (67% off a cold build), and pins the 2.4×
-  discrepancy on **JIT tier-up** (291.7 → settled 81.8ms in-page). Timing a handful of builds over
-  separate CDP round-trips measures the tier-up, not the build.
-- `panecontent.prove.mjs` — **read this before wiring anything into `show()`.** Asks the /snapshot
-  doc pane what it is actually made of. Every other probe here drives the LIVE EDITOR; this one drives
-  the pane the renderer is meant to PAINT, and they are not the same document (round 12). Its control
-  is snap-00 (`ops === null` → rich DocView) vs snap-01 (`ops !== null` → flat FullDiffView) on
-  BYTE-IDENTICAL content: one census, one route, one pane, so a blind census reports "no headings" on
-  the rich path too and the probe exits 1 rather than return a verdict.
-
 ## Traps this harness had to survive (each produced a confident WRONG number first)
 
 1. **JS-only timing.** `fillText` RECORDS a command; it does not rasterise. Timing the record loop
