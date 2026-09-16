@@ -1218,6 +1218,14 @@ tab still showed the logo. A fresh `<link>` href at page load is the only thing 
 branch `scripts/follow-branch.sh` still serves 5173 with no lane. **Keep `lanes.tsv` current** — a
 lane that opens a PR without a row is one Peter cannot open.
 
+**DAILY REFLECTIONS (Peter via Saul, 2026-09-16).** `docs/reflections/` in MnemonicEcologies: once a
+day each session contributes what was genuinely worth thinking about from that day's conversations —
+a distinction that dissolves a confusion, a mechanism that predicts behaviour, a frame that
+transfers, a correction where the old understanding was confidently wrong. NOT facts looked up,
+decisions, status, or anything that only reads as insightful. **A day that produced nothing gets an
+empty entry saying so**; padding it is how the log becomes worthless. One line for the claim, two or
+three sentences on why, attribution. A local owns collecting and committing the dated file.
+
 **THE SESSIONS ARE CHARACTERS (Peter, 2026-09-16).** He named them after Homeland's cast — Carrie,
 Saul, Max, Quinn, Nigel — and enjoys them as characters, so keep the names and the personalities
 they have earned rather than flattening into interchangeable agents. It is affectionate, not a brief
