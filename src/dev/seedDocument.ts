@@ -15,6 +15,15 @@ export function seedRequested(): boolean {
   try { return new URL(window.location.href).searchParams.has(SEED_PARAM) } catch { return false }
 }
 
+// `?seed=fresh` (DEV only): ALWAYS mint a new seeded document for this tab, ignoring the one its
+// sessionStorage already names. Max, 2026-09-16: a tab that had been seeded with the earlier
+// generic text kept it forever, because that document is neither absent nor an untouched blank.
+// The held document is left exactly as it was — nothing is overwritten; the tab simply moves on.
+export function seedFreshRequested(): boolean {
+  if (!import.meta.env.DEV) return false
+  try { return new URL(window.location.href).searchParams.get(SEED_PARAM) === 'fresh' } catch { return false }
+}
+
 const PARAGRAPHS = [
   'The earliest paper mills in Europe were built beside fast rivers, because the pulp had to be beaten for hours and water wheels were the only engines available. A sheet made this way was slow to produce and expensive to buy, so a writer planned each page before the pen touched it.',
   'That habit of planning survived the arrival of cheap paper by several centuries. Drafts were written small in the margins, corrections were squeezed between lines, and a fair copy was made only once the argument had settled. The physical cost of the page shaped the shape of the thought.',
