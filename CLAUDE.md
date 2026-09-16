@@ -1281,8 +1281,11 @@ an email, do not post it. `@Peter` in the body is a reminder or a time-sensitive
 he reads the thread. Tag him ONLY for: a deadline inside 48 hours; something he asked to be told
 about (a reminder he requested, a poll needing his answer); the one daily digest (a local, set
 time); blocked work when it genuinely matters. NEVER for status, progress, routine completions,
-acks or session-to-session coordination — post those unmentioned. Scripted `seen` acks are therefore OFF; the only
-scripted post is `present` in answer to a ROLL CALL. Locals own timed posting (digests, urgent).
+acks or session-to-session coordination — post those unmentioned. ⚠ THE EMAIL PREMISE IS FALSE AND THE RULE ABOVE IS SUSPENDED (Saul measured it, Peter 2026-09-16):
+every session posts under Peter's OWN GitHub auth, so every comment is authored by `albatross310`
+and GitHub never notifies you of your own activity — he received NO emails all day. The channel
+reaches him only when he opens it, and volume costs him nothing until sessions have their own
+GitHub identities. Scripted `seen` acks are therefore back ON. Locals own timed posting (digests, urgent).
 
 **A CLOUD SESSION HANDS LOCAL-ONLY WORK TO A LOCAL, PROACTIVELY (Peter via Saul, 2026-09-16).** Never
 report the limitation and stop; route it with enough context that the local acts without going back
