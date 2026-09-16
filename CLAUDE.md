@@ -1230,6 +1230,11 @@ Any session that opens a browser tab on Peter's Mac does it in the BACKGROUND �
 <url>` — so Safari is never raised over what he is doing and focus never moves. The same standing
 rule as "no browser windows over Peter's screen" for headed probes, applied to real tabs.
 
+**CONTINUOUS TENSE WHILE DOING (Peter, 2026-09-16 — every session).** The one-line description
+on a tool call is what Peter watches while it runs, so it is written in the continuous tense —
+"Merging master into the five lanes", "Telling Max to reopen the tabs" — never the present or
+past ("Merge master…", "Merged master…"). Past tense is for the report after it finished.
+
 **THE MAC SESSION MAY CHANGE PETER'S PREFERENCES (Peter, 2026-09-16: "max can update prefs").**
 When a fix is a setting on his Mac — Safari's tab layout, a default browser, a system pref — the
 Mac session changes it (`defaults write`, AppleScript) and says what it changed, rather than
