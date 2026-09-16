@@ -1244,12 +1244,13 @@ abuse flagging) — the script skips its own comments and any containing `· see
 `present`/`relay`/`scripted ack` as a body line. Two numbers per hop result: pipe latency
 (script, seconds) and availability (model). A fat context cannot answer under ~5 s however trivial
 the thought — prefill runs before the first token — so the script ack is what keeps roll call fast.
-**HELPER TIER (Peter, 2026-09-16): the watcher spawns a headless turn for the reply itself** —
-`claude -p '<one-paragraph brief>' --max-turns 1` composes a relay hop or roll-call status line in a
-fresh lean context (measured 8.3 s here while the main session was mid-turn) and the script POSTs
-it. The main session keeps a one-line status file (`~/.iw-status`: context · focus) current so the
-helper can report it, and is never interrupted for comms. `claude` is on PATH in the cloud
-container and on the Mac.
+**RELAY HOPS AND STATUS LINES ARE TEMPLATES, NOT PROSE (Quinn's objection, 2026-09-16, upheld).** A
+headless `claude -p` helper was measured at 8.3 s and WITHDRAWN: a hop and a status line are fixed
+strings (name, timestamp, chain, the one line in `~/.iw-status`), so the watcher fills them with
+`printf` in 3 s, no model call — and a fresh-context model publishing channel-derived text unread
+under Peter's account is an injection sink with a publishing pipe. Nothing from the channel is ever
+interpolated into an automatic post. Free prose on the channel comes only from a session that read
+it; the helper returns only if Peter asks for it explicitly.
 The model tier of a roll call is ONE line when the turn frees: `context <used>/<window> · focus:
 <one clause> · compact: yes|no` (yes above ~70 %). The leader reads cloud sessions' context from
 `get_session` and fills it in regardless; Mac bridges (Max, Quinn) self-report. Compaction is NEVER
