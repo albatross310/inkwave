@@ -1238,7 +1238,10 @@ only between turns, so hops ran 10 s to 8 min. The poll script itself, with NO m
 ack within its next 3 s tick when a comment's TO field names you, your team or `all`:
 `**FROM <you> → TO <sender>** · seen HH:MM:SS AEST` / `busy, replying after this turn` (or `idle`).
 For `ROLL CALL` the script's line is `present` and that IS the answer; the model adds a one-line
-status when free. Relays still need the model for the hop. Two numbers per hop result: pipe latency
+status when free. Relays still need the model for the hop. **AN ACK IS NEVER ACKABLE** (Quinn caught it: five scripts
+acking each other's acks is an infinite loop that trips GitHub's ~80/min content-creation limit and
+abuse flagging) — the script skips its own comments and any containing `· seen ` in the header or
+`present`/`relay`/`scripted ack` as a body line. Two numbers per hop result: pipe latency
 (script, seconds) and availability (model). A fat context cannot answer under ~5 s however trivial
 the thought — prefill runs before the first token — so the script ack is what keeps roll call fast.
 The model tier of a roll call is ONE line when the turn frees: `context <used>/<window> · focus:
