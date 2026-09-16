@@ -52,7 +52,7 @@ echo "[follow${LANE:+ $LANE}] $BRANCH → $URL"
 if [ "${OPEN:-1}" != "0" ]; then
   ( for _ in $(seq 1 60); do
       if curl -sfo /dev/null "http://localhost:$PORT/"; then
-        command -v open >/dev/null && open "$URL" || xdg-open "$URL" 2>/dev/null
+        command -v open >/dev/null && open -g "$URL" || xdg-open "$URL" 2>/dev/null  # -g: quietly, in the background
         break
       fi
       sleep 1
