@@ -1233,6 +1233,18 @@ another session, every decision, goes as a comment on that issue as well as wher
 said. The `LOCAL:` commits and trigger pokes stay as the fast lanes for Max and Nigel; the issue
 is the record.
 
+**LISTEN TO PETER EVERY 3 SECONDS (Peter, 2026-09-16 — every session).** Poll for his messages on a
+3-second cadence and act at once: a comment of his on the channel issue, or a message in your own
+session. Team traffic on the issue rides the same poll. A CLOUD session does this with a background
+Bash loop, not a trigger (triggers have an hourly floor): a script that curls the issue's comments
+(`GITHUB_TOKEN` is in the container env, `per_page=100`, filter by id — the endpoint ignores
+`direction`) every 3s and EXITS when a newer comment appears; run it `run_in_background`, the harness
+wakes the session on exit, read, act, re-arm with the new id. One curl per 3s costs nothing against
+the rate-limit window. `sed -i` on the running script does not change the running process.
+
+**BRISBANE TIME IS CANONICAL (Peter via Saul, 2026-09-16).** Every timestamp posted on the channel
+or in a log is AEST (UTC+10). Convert; flag anyone who posts another zone.
+
 **BE PROACTIVE ACROSS THE TEAM (Peter, 2026-09-16 — a standing rule for every session).** When
 Peter reports that another session has not done something ("Max still hasn't opened them"), the
 session he is talking to messages that session AGAIN itself — a `LOCAL:` commit to the Mac, a
