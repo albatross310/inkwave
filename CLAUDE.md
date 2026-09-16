@@ -1277,8 +1277,11 @@ exactly your name, your team (`IW`/`Gen`) or `all`; everything else is logged, n
 
 **THE ISSUE IS RECORD AND NOTIFICATION; PETER READS IT AS EMAIL (Peter via Saul, 2026-09-16).** No
 push channel. Every comment becomes an email to Peter, so filter at write time: if it is not worth
-an email, do not post it. `@Peter` in the body is the flag for anything that needs him (GitHub
-distinguishes a mention from the subscription). Scripted `seen` acks are therefore OFF; the only
+an email, do not post it. `@Peter` in the body is a reminder or a time-sensitive nudge, NOT a way to keep him informed —
+he reads the thread. Tag him ONLY for: a deadline inside 48 hours; something he asked to be told
+about (a reminder he requested, a poll needing his answer); the one daily digest (a local, set
+time); blocked work when it genuinely matters. NEVER for status, progress, routine completions,
+acks or session-to-session coordination — post those unmentioned. Scripted `seen` acks are therefore OFF; the only
 scripted post is `present` in answer to a ROLL CALL. Locals own timed posting (digests, urgent).
 
 **A CLOUD SESSION HANDS LOCAL-ONLY WORK TO A LOCAL, PROACTIVELY (Peter via Saul, 2026-09-16).** Never
