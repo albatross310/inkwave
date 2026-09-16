@@ -26,12 +26,46 @@ const PARAGRAPHS = [
   'This sample document exists so that a fresh development tab has a few pages of text on it. It is not part of any real document and it carries no provenance of its own. Edit it freely, delete it, or replace it with whatever the feature under test needs.',
 ]
 
+// PER-LANE SEED (Peter, 2026-09-16: "the example text on docs should match the things I have to
+// check"). scripts/follow-branch.sh exports VITE_LANE_SEED as the JSON of scripts/lanes/<L>.json —
+// {title, paragraphs, checks} — so the tab opens on THAT PR's plain-English summary and a checklist
+// he can tick in place. The generic prose above is the fallback when no lane file exists.
+export type LaneSeed = { title: string; paragraphs: string[]; checks: string[] }
+
+export function laneSeed(): LaneSeed | null {
+  const raw = import.meta.env.VITE_LANE_SEED
+  if (!raw) return null
+  try {
+    const j = JSON.parse(raw) as Partial<LaneSeed>
+    if (typeof j.title !== 'string' || !Array.isArray(j.paragraphs)) return null
+    return { title: j.title, paragraphs: j.paragraphs.filter((x) => typeof x === 'string'), checks: Array.isArray(j.checks) ? j.checks.filter((x) => typeof x === 'string') : [] }
+  } catch { return null }
+}
+
+const para = (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
+
 function seedContent(): TiptapJSON {
+  const lane = laneSeed()
+  if (lane) {
+    return {
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: lane.title }] },
+        ...lane.paragraphs.map(para),
+        ...(lane.checks.length
+          ? [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Check' }] }, ...lane.checks.map((c) => para(`☐ ${c}`))]
+          : []),
+        // A few pages of ordinary prose below the checklist so pagination, SCAS and scrolling
+        // still have something to work on.
+        ...PARAGRAPHS.map(para),
+      ],
+    }
+  }
   return {
     type: 'doc',
     content: [
       { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'The cost of the page' }] },
-      ...PARAGRAPHS.map((text) => ({ type: 'paragraph', content: [{ type: 'text', text }] })),
+      ...PARAGRAPHS.map(para),
     ],
   }
 }
@@ -40,7 +74,7 @@ export function seededDocument(): InkwaveDocument {
   const now = new Date().toISOString()
   return withScasDefaults({
     id: uuidv4(),
-    title: 'Sample text (dev seed)',
+    title: laneSeed()?.title ?? 'Sample text (dev seed)',
     contentJson: seedContent(),
     createdAt: now,
     updatedAt: now,
