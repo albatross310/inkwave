@@ -1211,6 +1211,13 @@ hrefs after hydration. The single-
 branch `scripts/follow-branch.sh` still serves 5173 with no lane. **Keep `lanes.tsv` current** — a
 lane that opens a PR without a row is one Peter cannot open.
 
+**BE PROACTIVE ACROSS THE TEAM (Peter, 2026-09-16 — a standing rule for every session).** When
+Peter reports that another session has not done something ("Max still hasn't opened them"), the
+session he is talking to messages that session AGAIN itself — a `LOCAL:` commit to the Mac, a
+trigger poke to a cloud session — with the specific ask and a request to confirm. Never answer
+"Max reported it done" and stop: his eyes are ground truth, a report is not. The same goes the
+other way — a session that sees a sibling stalled nudges it without being asked.
+
 **NAME BRANCHES AFTER THE FOCUS (Peter, 2026-09-16).** The harness hands a cloud session a random
 branch (`claude/great-wozniak-gpki8p` was this one's) and Peter cannot tell from the name what it
 holds. Push work to a branch named for what it does — `claude/lanes-localhost`,
