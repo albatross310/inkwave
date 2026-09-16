@@ -2183,22 +2183,23 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // committed cumulatively through the manual funnel below, oldest prefix first, then the live
   // document, so a lane tab opens with ◈ N and the scrub has versions. `takeSeedHistory` consumes
   // the per-tab marker, so this runs once per seed and never on a reload or a real document.
+  // NO cancellation token, deliberately: StrictMode's double-invoke would cancel the run the
+  // first invocation started while the second finds the marker already taken — measured as
+  // exactly ◈ 1 on every lane. The marker is the once-guard; the doc-id check is the only bail.
   useEffect(() => {
     if (!editor || !takeSeedHistory(doc.id)) return
-    let cancelled = false
     void (async () => {
       const base = docRef.current
       const slices = seedHistorySlices(base.contentJson)
       const t0 = Date.parse(base.createdAt) || Date.now()
       for (let i = 0; i < slices.length; i++) {
-        if (cancelled || docRef.current.id !== base.id) return
+        if (docRef.current.id !== base.id) return
         // Each prefix is a frozen document of its own; the funnel hashes and stamps it as if the
         // writer had pressed ⊕ after that paragraph.
         await createManualSnapshot({ ...base, contentJson: slices[i], updatedAt: new Date(t0 + (i + 1) * 60_000).toISOString() })
       }
-      if (!cancelled && docRef.current.id === base.id) await createManualSnapshot()
+      if (docRef.current.id === base.id) await createManualSnapshot()
     })()
-    return () => { cancelled = true }
   }, [editor, doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ONE global manual-snapshot funnel. The ordinary "save version" control and an email's
