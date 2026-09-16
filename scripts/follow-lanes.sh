@@ -29,7 +29,7 @@ echo "logs: /tmp/inkwave-lane-<LANE>.log — Ctrl-C stops all"
 # in his Safari, not a report that they were opened.
 for port in "${ports[@]}"; do
   for _ in $(seq 1 90); do curl -sfo /dev/null "http://localhost:$port/" && break; sleep 1; done
-  url="http://localhost:$port/?seed"
+  url="http://localhost:$port/?seed=fresh"
   # -g: open QUIETLY in the background — never steal Peter's focus or raise Safari over his screen.
   if command -v open >/dev/null; then open -g -a Safari "$url" 2>/dev/null || open -g "$url"; else xdg-open "$url" 2>/dev/null; fi
   echo "opened $url"
