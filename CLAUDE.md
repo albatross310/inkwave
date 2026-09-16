@@ -1718,7 +1718,7 @@ app/                                   # React Router v7 framework layer (thin; 
 src/
   routes/Edit.tsx                      # loads/creates the active doc; renders the shell until it loads
   editor/Scroll.tsx                    # shared scroll-paper chrome + EmptyEditorSurface facsimile (CSS-function shell)
-  types/document.ts                    # InkwaveDocument, Snapshot, ProvenanceEvent types
+  types/document.ts                    # InkwaveDocument, Snapshot types (ProvenanceEvent/ParagraphMetadata: spec-shape, no live producer)
   editor/
     TiptapEditor.tsx                   # editor surface, scroll-head chrome, footer, prefetch
     extensions/RedHighlightExtension.ts# PM plugin: red decorations + hint badges + line compression
