@@ -61,24 +61,3 @@ export const FIELD_LABELS: Record<string, string> = {
   issue:           'Issue',
   accessed:        'Date accessed',
 }
-
-/**
- * Given a CSLItem (or partial), return the required field keys that are absent.
- * 'year' is checked via issued['date-parts'], not a flat key.
- */
-export function missingRequiredFields(
-  type: string,
-  item: Record<string, unknown>,
-  extractedFields?: Record<string, { value?: string } | undefined>,
-): string[] {
-  const required = REQUIRED_BY_TYPE[type] ?? []
-  return required.filter(f => {
-    if (f === 'year') {
-      const issued = item.issued as { 'date-parts'?: number[][] } | undefined
-      return !issued?.['date-parts']?.[0]?.[0]
-    }
-    if (item[f]) return false
-    if (extractedFields?.[f]?.value) return false
-    return true
-  })
-}
