@@ -1,0 +1,8 @@
+{"title": "K — #20 seventy-one one-shot probe scripts archived, guards landed first",
+ "paragraphs": [
+  "Repo hygiene, no user-visible feature. Seventy-one measurement scripts that each ran once and then only pretended to guard anything have moved to docs/archive/probes, and BEFORE any moved, every claim they held either became a real unit test that runs on every pnpm test (47 new tests, 15/15 mutants die) or was written into the archive with its numbers.",
+  "The one assertion that changed is a census floor (probes present > 60 became > 40), because a floor of 60 could only be met by keeping dead probes. Every other assertion is untouched and the gate is green."],
+ "checks": [
+  "This tab loads and you can type; nothing user-visible changed, so a working editor is the check.",
+  "In the repo, git log c9563cf..6d751bd shows the guard commits landing before the move commit.",
+  "Change MAX_PER_FRAME = 1 to 2 in SnapshotView.tsx and run the snapshotScrubDriver test: it goes red, which nothing in the repo did yesterday."]}
