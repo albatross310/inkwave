@@ -1241,6 +1241,11 @@ For `ROLL CALL` the script's line is `present` and that IS the answer; the model
 status when free. Relays still need the model for the hop. Two numbers per hop result: pipe latency
 (script, seconds) and availability (model). A fat context cannot answer under ~5 s however trivial
 the thought — prefill runs before the first token — so the script ack is what keeps roll call fast.
+The model tier of a roll call is ONE line when the turn frees: `context <used>/<window> · focus:
+<one clause> · compact: yes|no` (yes above ~70 %). The leader reads cloud sessions' context from
+`get_session` and fills it in regardless; Mac bridges (Max, Quinn) self-report. Compaction is NEVER
+part of a roll call — it is a summarising turn that costs minutes and drops detail; the leader
+schedules it at idle or rotates the role to a fresh session with a written hand-off.
 
 **TEAM SHORT NAMES AND THE STARTUP RITUAL (Peter, 2026-09-16).** On the channel, `IW` = the
 Inkwave team (Carrie, Max, Nigel) and `Gen` = the General team (Quinn, Saul); `TO IW` / `TO Gen`
