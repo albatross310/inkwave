@@ -1251,11 +1251,10 @@ strings (name, timestamp, chain, the one line in `~/.iw-status`), so the watcher
 under Peter's account is an injection sink with a publishing pipe. Nothing from the channel is ever
 interpolated into an automatic post. Free prose on the channel comes only from a session that read
 it; the helper returns only if Peter asks for it explicitly.
-The model tier of a roll call is ONE line when the turn frees: `context <used>/<window> · focus:
-<one clause> · compact: yes|no` (yes above ~70 %). The leader reads cloud sessions' context from
-`get_session` and fills it in regardless; Mac bridges (Max, Quinn) self-report. Compaction is NEVER
-part of a roll call — it is a summarising turn that costs minutes and drops detail; the leader
-schedules it at idle or rotates the role to a fresh session with a written hand-off.
+A roll-call answer is `present` from the script plus at most one template line `focus: <one
+clause>` from `~/.iw-status`. **No context figures and no compaction flag in roll call** (Peter
+reversed that the same day). Compaction is never part of a roll call; the leader schedules it at
+idle or rotates the role to a fresh session with a written hand-off.
 
 **TEAM SHORT NAMES AND THE STARTUP RITUAL (Peter, 2026-09-16).** On the channel, `IW` = the
 Inkwave team (Carrie, Max, Nigel) and `Gen` = the General team (Quinn, Saul); `TO IW` / `TO Gen`
