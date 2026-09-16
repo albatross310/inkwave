@@ -21,9 +21,9 @@ ROOT="$(git rev-parse --show-toplevel)"
 
 LANE="${LANE:-}"
 if [ -n "$LANE" ]; then
-  LETTERS=ABCDEFGHIJ
+  LETTERS=ABCDEFGHIJKLMNOP
   idx="${LETTERS%%$LANE*}"; idx="${#idx}"
-  [ "$idx" -lt "${#LETTERS}" ] || { echo "LANE must be one of A–J"; exit 1; }
+  [ "$idx" -lt "${#LETTERS}" ] || { echo "LANE must be one of A–P"; exit 1; }
   PORT="${PORT:-$((5181 + idx))}"
   WT="$ROOT/../inkwave-lane-$LANE"
   export VITE_LANE="$LANE"
