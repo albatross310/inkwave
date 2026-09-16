@@ -94,6 +94,50 @@ the repo, and it touches no production code.
 thing holding a rule no unit test can reach. The rot audit found 11 rotten checks and 34 probes that
 could not run at all — triage first, retire second.
 
+**DONE 2026-09-16 (branch `claude/refactor-probe-archive`; census in `docs/PROBE-TRIAGE.md`, PR #6 —
+that table is the PRE-MOVE census and was not edited).** Peter's condition was met in the order the
+triage proposed, one commit per step so the history shows guards landing before deletions:
+
+1. `23cbdf9` — the four header-only findings recorded (numbers, not prose) at
+   `pagination-rounds.md#render-provers`, `#fontfallback-refuted`, `snapshot-scrub-rounds.md#tr-refchrome`,
+   `panels-and-popovers.md#rescue-arms-count` (the last from a fresh `prove:rescuearms` run).
+2. `13de59c` — 8 unit-test files / 47 tests / ~0.5s, the 9 CONVERT rows + the scrub-constants pin;
+   15 mutants applied to the guarded code, 15 die.
+3. `ff0e9e4` — **71 files / 7,869 lines moved** to `docs/archive/probes/<original subpath>` (the
+   triage's 63 / 7,019 ARCHIVE minus `zoom.prove.mjs`, plus the 9 CONVERT sources); 32 `prove:*`
+   entries removed (49 remain); the void baseline 25 → 12; the runnability census floor 60 → 40 (the
+   one assertion changed, stated in the commit; every other assertion untouched).
+
+**Reclassified, with reason:** `textrender-probe/zoom.prove.mjs` ARCHIVE → stays. It is the named
+instrument of decision 3 (live breaks vs the break table at zoom≠1 after `8f5ae9d`) and the only thing
+that prints the divergence Peter has to rule on. It remains mute (exit 0) and on the void baseline.
+
+**The 11 unguarded claims — each with its guard or its stated acceptance:**
+
+| # | claim | guard now |
+|---:|---|---|
+| 1 | arith render pass: forced-gap line count 18/18, phone-size wrap parity, LayoutUnit + hyphen fixes | RECORDED `pagination-rounds.md#render-provers`. No unit guard: the engine is parked (`?arithLayout`) and both provers read a fixture derived from Peter's proposal, outside the repo |
+| 2 | back-ref chrome: single-line groups compose to 0.055px (TRUE); multi-line groups not composable (FALSE) | RECORDED `snapshot-scrub-rounds.md#tr-refchrome`; selectors guarded by `blockStyles.harvest.test.tsx` |
+| 3 | the certified-font Δ76 was not a font-loading problem | RECORDED `pagination-rounds.md#fontfallback-refuted` (cause: the mixed-family strut, already recorded beside it) |
+| 4 | which `.iw-nightable` rescue arms still match | RECORDED `panels-and-popovers.md#rescue-arms-count` (0/0 for the `[style*=…]` arms; 11/42/27/17 for the class arms); tokens held by `readerContrast.test.ts` |
+| 5 | registration judged by DRIFT IN PX on the real /snapshot pane | ACCEPTED, because the rule is unit-held (`snapshotAnchor.test.ts`) and the drift is a real-pane measurement no unit test can take; `snapsweep.prove.mjs` (KEEP) is the runnable neighbour if a drift cell is ever re-homed |
+| 6 | thumbnails hydrate from OPFS after a presenter dispose; the `realOpfsShim` string-slice | ACCEPTED, because no KEEP probe evals the shim (only its scrub-probe siblings, which moved with it, so the slices still resolve in the archive); the key contract is held by `snapThumbs.test.ts`; hydrate-after-dispose stays unmeasured |
+| 7 | `MAX_PER_FRAME=1`, `LAND_QUIET_MS=260`, `FREEZE_HOLD=400`, `RASTER_DPR_CAP=1`, the wheel-debt reversal | `src/routes/snapshotScrubDriver.test.ts` — declaration statements pinned (code, comments stripped); the real `onWheel` debt block executed: cell A reproduces, cell B fixed, trackpad safe. 5 mutants die |
+| 8 | live breaks vs the break table at zoom≠1 | `zoom.prove.mjs` KEPT (see above); table invariance held by `breakTable.test.ts`; the live/table relationship is decision 3, Peter's |
+| 9 | the on-device `?btDebug` script can go red | ACCEPTED, because it is a manual on-device instrument for the iOS OPFS branch CI cannot reach; minor |
+| 10 | images inside the reader's live iframe load; our CSP is not involved | ACCEPTED, because TASKS D5 is still open and the probe itself said it did not reproduce Peter's case — a guard for a symptom nobody has reproduced would be decoration |
+| 11 | stripped faces make raw canvas == DOM on WebKit | held by `scripts/fontStrip.verify.mjs` (KEEP, manual); its recipe is now written in `scripts/README.md` |
+
+**KEEP probes re-run after the move (serial, headless, this build):** `breaks` 0 `IDENTICAL BREAKS: true` ·
+`schema` 0 PASS · `midline` 0 `0/194` · `crossdevice` 2 VOID · `zoom` 0 (mute; prints the same divergence) ·
+`arith` 1 (red by design) · `pdfposthoc` 0 PASS · `toolbar` 1 `36/38` (the same two `reviewLit:false` cells)
+— byte-for-byte the verdicts in PR #6's sample-run table. Full gate: typecheck && 267 files / 3,208 tests
+&& build, GREEN.
+
+**Unguarded regardless of this decision, unchanged:** the cross-device canonical-pagination invariant
+(`crossdevice` VOIDs by design), the music pipeline (`music.prove.mjs` stranded), `sweepBreakTables`
+(only `snapsweep.prove.mjs`). Decisions 2 (the `?waveVideo` set) and 3 remain Peter's.
+
 ---
 
 ## What is NOT on this list, and why

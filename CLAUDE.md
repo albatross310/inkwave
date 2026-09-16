@@ -624,8 +624,10 @@ ProseMirror (`isInline && isAtom`), never a CSS class (a class list silently mis
 NodeView); a block with NO atoms takes the byte-identical old path, which is what keeps plain/
 headings/lists bit-for-bit unchanged. SCOPE: inline atoms only — a TOP-LEVEL atom (refList, block
 math) keeps its deliberate `atomLike` pseudo-block-per-line treatment. MEASURED in the real app:
-phantom lines citations 24 blocks/+29, math 23 blocks/+30 → **0** (`linecount.prove.mjs`); mid-line
-breaks **6/55 → 0/55** on the thesis-shaped fixture (`midline.prove.mjs`); `isolate.prove.mjs`
+phantom lines citations 24 blocks/+29, math 23 blocks/+30 → **0** (`linecount.prove.mjs`, retired
+2026-09-16 to `docs/archive/probes/textrender-probe/`; the rule is unit-held by
+`collectLines.nodeview.test.ts`); mid-line breaks **6/55 → 0/55** on the thesis-shaped fixture
+(`midline.prove.mjs`, still live: `pnpm prove:midline`); `isolate.prove.mjs` (retired with linecount)
 citations DIVERGE → **IDENTICAL**; desktop==phone breaks and scoped==full both unchanged. This also
 satisfies the long-documented co-requisite in `arithmeticLayout.ts` — but `mathEligible` is still
 passed FALSE deliberately; flipping it hands math paragraphs to the arithmetic engine and needs its
@@ -782,6 +784,13 @@ phase-synchronised editor water uncovers. Phone retains its separate keep-shell-
 - PROBE RULES: /snapshot needs a fallback-faithful static server; never `pkill` a shared
   `vite preview`; no windows over Peter's screen (`scripts/pw-headed.sh`). The wave-video probes need
   `scripts/wave-video/server.mjs` — the scrub-probe server has no `.mp4` MIME and no Range/206.
+  **A `.prove.mjs` is truth where it is KEEP and a guard nowhere** (2026-09-16): 71 one-shot probes
+  were retired to `docs/archive/probes/` AFTER their claims moved into unit tests or archive anchors
+  (`docs/archive/probes/README.md` maps every file → its guard; `docs/REFACTOR-QUEUE.md` §5 has the
+  11-claim table). A probe path cited in this file that no longer exists under `scripts/` resolves
+  one level down there. The 17 `scrub-probe/probe*.mjs` files are among them: the scrub constants
+  (`MAX_PER_FRAME`, `LAND_QUIET_MS`, `FREEZE_HOLD`, `RASTER_DPR_CAP`) and the wheel-debt reversal are
+  pinned by `src/routes/snapshotScrubDriver.test.ts` now, not by any probe.
 
 Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts).
 
