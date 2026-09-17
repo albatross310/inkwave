@@ -51,7 +51,9 @@ guards fail on the drop-up's path. If they do not, the consolidation bought noth
 ## 3. Split `TiptapEditor.tsx` (3,463 lines) by responsibility
 
 **What.** Save orchestration, the footer toolbar, the zoom handlers and the effect cluster are
-genuine seams.
+genuine seams. *(Corrected 2026-09-16 by seam 4 below: the zoom handlers are not in this file and
+never were — they are in `Scroll.tsx`; and "the effect cluster" fails this item's own test. The
+next seam in this file that passes it is the keyboard dock, sized in that entry.)*
 
 **The test for whether a split is good.** Can you name what each side is responsible for, in one
 phrase, without saying "part 1" or "the rest"? *"Save orchestration"* passes. *"TiptapEditor core"*
@@ -219,6 +221,62 @@ imports, the two interfaces and the return. Effects 55 → 53 + 2. Net **+132** 
   `save-failed`, the marker in 1 OPFS file). `scripts/tabdoc-probe/repro.mjs` on both — see the
   lane report.
 - **Still here:** the zoom handlers, the effect cluster, `recoverAndPurge` (stays regardless).
+
+**ASSESSED 2026-09-16 — seam 4: the zoom handlers. NOT SPLIT — the seam does not exist in this
+file.** The heading's list was written from a memory of where zoom lives; the map says otherwise.
+Every zoom-touching line in TiptapEditor.tsx (2,705 lines at lane I's head `a91a8be`), found by
+grep for `magnify|editorZoom|zoom-settled|onZoomStep|setZoom|wheel|pinch|gesture|--iw-editor-zoom|
+--iw-magnify|scaleFor|unscale|fit|zoom` and then read in context:
+
+| lines | what | class (lines) |
+|---|---|---|
+| L3, L32 | `import { useZoomScale }`, `import { subscribe as subscribeMagnify }` | imports (2) |
+| L265; L2347, L2378, L2389 | `const zoom = useZoomScale()` and its three JSX reads — counters BROWSER zoom (Ctrl+/−, DPR) so the footer pill keeps one physical size | not the hybrid zoom at all; already its own 42-line module, shared with `ReceiptPanel` and `SyncStatus` (4) |
+| L327 | `'wheel'` in the input-recency listener list | activity detection for `runWhenQuiet`, not zoom (1) |
+| L874–880 | the SCAS tick parks while `__iwZoomHold` is set (a decoration repaint rebuilds paragraph DOM and kills an active pinch) | a CONSUMER of the gesture hold, inside the tick's `setTimeout` closure (7) |
+| L1123–1124, L1129 | the keyboard detector ignores a visualViewport shrink when `vv.scale > 1.01` | a pinch GUARD inside the keyboard dock (3) |
+| L1616–1632 | `paperRight` re-read on `subscribeMagnify` (anchors the ⋮ options menu) | a CONSUMER of the magnify scale (17) |
+
+**34 lines, 0 handlers.** Nothing in this file sets `--iw-editor-zoom` or `--iw-magnify`, writes
+`__iwZoomHold`, listens to `wheel`/`touchmove`/`gesturechange` in order to zoom, or dispatches
+`inkwave:zoom-settled`. `git log -S` over this file's whole history for `__iwZoomHold = true`,
+`gesturechange` and `applyMagnifyFrame` returns no commit: the handlers were never here.
+- **Where they are, measured:** `Scroll.tsx` L355–1017 — the `editorZoom` state (L355),
+  `applyMagnifyFrame` (L485), `onWheel` (L635), the pinch arm/disarm (L707–710), the touch/gesture
+  listeners (L943–958), every `__iwZoomHold` write (L542, 596, 898, 937, 1017) and both
+  `inkwave:zoom-settled` dispatches (L266, L615) — about 660 lines; `magnify.ts` (127, the owner);
+  `zoomStep.ts` (42); `viewSettings.ts` (52); `PaginationExtension.ts` `onZoomStep` L1291–1354 and
+  the `zoom-settled` re-measure at L1988. Readers of the hold flag: `PaginationExtension` (4), this
+  file (1), `useSaveOrchestration` (the 60s latch guard), `storage/opfs.ts` (1). CLAUDE.md's
+  "Hybrid zoom" entry named `magnify.ts` as the one owner and `Scroll.tsx` for the touch handlers;
+  it now carries this map.
+- **The one-phrase test, applied to the 34 lines.** They are three consumers of two zoom signals
+  plus one unrelated hook, and each belongs to the mechanism it sits in — the SCAS tick, the
+  keyboard dock, the options-menu anchor. A hook holding them would be *"the places TiptapEditor
+  notices zoom"*: a grep result wearing a responsibility name, which is exactly what the test above
+  forbids. The move would also cost correctness for nothing: the SCAS deferral is four lines INSIDE
+  the tick's closure and re-arms the tick's own timer; the `vv.scale` guard is one line inside the
+  keyboard detector. So: **no split, no new file, effects 53 → 53, TiptapEditor.tsx 2,705 → 2,705.**
+- **If the queue still wants "the zoom handlers" extracted, the file is `Scroll.tsx`.** L355–1017
+  is one coherent block — one phrase: *turning wheel, trackpad and pinch input into the two zooms,
+  holding the painters for the gesture's length, and settling* — with the pure maths already out in
+  `magnify.ts`/`zoomStep.ts`, and `prove:zoom` / `prove:scrollzoom` as the in-browser control. That
+  is a different lane against a different file and is NOT item 3.
+- **The next real seam in THIS file, by the same test: the keyboard dock.** L1117–1366: `kbMaxRef`
+  and the touch-only visualViewport keyboard detector (L1122), the `__iwKeyboardUp` mirror (L1141),
+  the `createDock` effect (L1151, ~90 lines — the transform-slaved footer, its chase transition, the
+  settle-time caret reveals), the two footer-geometry ROs (L1242, L1263: `--iw-toolbar-h` and
+  `--iw-bar-budget`), the PM `scrollThreshold`/`scrollMargin` reserve (`lastPmReserveRef` L1293,
+  effect L1310), the menu focus guard (L1323) and the first-touch guard (L1344). 8 effects, 2 refs,
+  ~250 lines, with the maths already in `toolbarDock.ts` (148 lines, unit-tested against a stubbed
+  vv); `keyboardUp` (L411) is read by the JSX too, so it is the hook's return, not its private
+  state. One phrase: *keeping the footer band docked to the visual viewport while iOS moves it, and
+  the caret reserve the footer owes ProseMirror.* Two costs to weigh first, both from the entries
+  above: `touchTargets.test.ts` reads the pointerdown/touchmove guard TEXT in this file, so unlike
+  seams 1–3 a path-keyed guard WOULD move and must be re-pointed and re-proved; and the dock is
+  iOS-only behaviour no headless engine here can drive, so the in-browser control is
+  `toolbarDock.test.ts` plus Peter's phone — weaker than the controls seams 2 and 3 had.
+- **Still here:** the keyboard dock (above, unattempted), `recoverAndPurge` (stays regardless).
 
 ---
 

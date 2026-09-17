@@ -14,6 +14,14 @@ Why: `docs/archive/editor-surface.md`.
   · **Coordinate convention:** rects under the transform are VISUAL px — convert via `scaleFor(el)` /
   `unscale()`, NEVER ad-hoc reads. Pagination measures where magnify is forced to 1.
   · Phone zoom = pinch → the font-reflow pipeline; browser-native zoom is suppressed app-wide on phone.
+  **WHERE THE HANDLERS LIVE (mapped 2026-09-16, refactor queue item 3 seam 4):** ALL input handling
+  is in `Scroll.tsx` L355–1017 — wheel, trackpad, pinch, the `__iwZoomHold` writes and both
+  `inkwave:zoom-settled` dispatches; `magnify.ts` owns the scale, `zoomStep.ts`/`viewSettings.ts`
+  the steps and persistence, `PaginationExtension` the `zoom-step`/`zoom-settled` re-measure.
+  `TiptapEditor.tsx` holds NO zoom handler — 34 lines touch zoom and all are consumers (the SCAS
+  tick's hold deferral, the keyboard detector's `vv.scale` guard, the ⋮ menu's `paperRight` re-read
+  on magnify) plus `useZoomScale`, which counters BROWSER zoom and is not the hybrid zoom. Do not
+  go looking for a zoom seam in TiptapEditor.tsx; `docs/REFACTOR-QUEUE.md` item 3 has the map.
 - **THE TOOLBAR CONTRACT IS `editor/toolbarContract.ts` — one file, the only way in.** Register a
   button by adding to `SlotId` + `ALL_SLOTS` (+ `IMPLEMENTED_SLOTS` when it actually renders — a slot
   that cannot render must never paint a dead circle nor strand a stored id); own a second bar row by
