@@ -467,7 +467,8 @@ function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection, showTitl
 
       {reflection}
 
-      <div className="mt-1">
+      {/* No top margin under the sheet header (phone): it would double the header's own rule. */}
+      <div className={showTitle ? 'mt-1' : ''}>
         <NavRow accent glyph={<ClockGlyph running={running} />} label={running ? 'Work in progress' : 'Start / stop work'}
           desc={running ? 'Your block is running — pause, stop or summarise' : 'A focused block, with a gentle timer'}
           onClick={() => onNavigate('work')} />
