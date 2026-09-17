@@ -22,3 +22,14 @@ export function sentenceJustCompleted(before: string, inserted: string): boolean
 export function paragraphEndsSentence(paragraphText: string): boolean {
   return TERMINAL.test(paragraphText.trimEnd())
 }
+
+/**
+ * Does Enter complete a unit worth snapshotting? Peter, 2026-09-17: in sentence mode a sentence
+ * followed by a NEW LINE counts, and — because detection is fallible — so does an unpunctuated
+ * line: the writer chose to end it. Paragraph mode is unchanged (any non-empty paragraph). Only a
+ * bare Enter on an empty paragraph never counts, in either mode.
+ */
+export function enterCompletesUnit(mode: 'paragraph' | 'sentence', paragraphText: string): boolean {
+  if (paragraphText.trim().length === 0) return false
+  return mode === 'sentence' || mode === 'paragraph'
+}

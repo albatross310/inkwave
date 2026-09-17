@@ -45,7 +45,7 @@ import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
 import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary, type ManualSnapshotResult } from '../provenance/snapshots'
 import { summariseParagraph, summariseDiff } from '../provenance/summarise'
 import { EditBatcher } from '../provenance/editBatcher'
-import { sentenceJustCompleted } from '../provenance/sentenceEnd'
+import { sentenceJustCompleted, enterCompletesUnit } from '../provenance/sentenceEnd'
 import { snapshotEvery } from './snapshotSettings'
 import { ReplaceStep } from '@tiptap/pm/transform'
 import { ReceiptPanel } from '../components/ReceiptPanel'
@@ -1409,7 +1409,9 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
             paraIdx++
           })
           const completedText = completedRaw.trim()
-          if (completedText.length > 0) {
+          // Enter completes the unit in BOTH modes — in sentence mode a sentence + newline counts,
+          // and so does an unpunctuated line (the writer chose to end it). Empty never does.
+          if (enterCompletesUnit(sentenceMode ? 'sentence' : 'paragraph', completedText)) {
             completion = true
             takeAutoSnapshot(() => summariseParagraph(completedText))
           }

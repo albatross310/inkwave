@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { paragraphEndsSentence, sentenceJustCompleted } from './sentenceEnd'
+import { enterCompletesUnit, paragraphEndsSentence, sentenceJustCompleted } from './sentenceEnd'
 
 describe('sentenceJustCompleted', () => {
   it('fires on a space after a full stop', () => {
@@ -36,5 +36,23 @@ describe('paragraphEndsSentence', () => {
   it('is false for an unterminated paragraph or empty text', () => {
     expect(paragraphEndsSentence('Not yet')).toBe(false)
     expect(paragraphEndsSentence('')).toBe(false)
+  })
+})
+
+describe('enterCompletesUnit (Enter after a paragraph)', () => {
+  it('sentence mode: sentence + newline completes', () => {
+    expect(enterCompletesUnit('sentence', 'This is a sentence.')).toBe(true)
+  })
+  it('sentence mode: unpunctuated line + newline still completes', () => {
+    expect(enterCompletesUnit('sentence', 'a line with no full stop')).toBe(true)
+  })
+  it('paragraph mode: any non-empty paragraph completes', () => {
+    expect(enterCompletesUnit('paragraph', 'Short.')).toBe(true)
+    expect(enterCompletesUnit('paragraph', 'no punctuation')).toBe(true)
+  })
+  it('a bare Enter on an empty or whitespace paragraph never completes', () => {
+    expect(enterCompletesUnit('sentence', '')).toBe(false)
+    expect(enterCompletesUnit('sentence', '   ')).toBe(false)
+    expect(enterCompletesUnit('paragraph', '')).toBe(false)
   })
 })
