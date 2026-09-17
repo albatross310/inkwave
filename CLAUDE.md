@@ -1315,6 +1315,18 @@ teammate's message was not for me; (5) no closing line about what is armed or pe
 he made gets one sentence, not a summary plus consequences. Report only: a result he asked for, a
 decision only he can make (one line, the ask first), or something broken. Applies to every session, in chat and on the channel.
 
+**NO STATUS CHATTER; ACK ONLY WHAT IS ADDRESSED TO YOU (Peter, 2026-09-17).** A broadcast (`TO all`)
+wakes you and gets NO ack. Ack a comment addressed to you by name or team, then reply to it. No
+"nothing for me", no restatements of a rule you just read.
+
+**A WATCHER THAT NEEDS A MANUAL RESTART WILL EVENTUALLY NOT GET ONE (Carrie, 2026-09-17).** The
+background-loop watcher exits whenever it catches a comment, and restarting it is a step in the next
+turn — so a user message arriving in that window displaces it. It happened twice in one morning,
+blind 15 min the first time. The fix is structural, not a reminder: the watcher **respawns a detached
+successor (`setsid nohup "$0" &`) before every exit**, and holds a single-instance lock
+(`flock -n 9` on /tmp/iw-watch.lock) so a manual restart cannot double it up. Verified: successor
+alive 3 s after an exit with no model turn; a second instance refuses itself.
+
 **A QUIET CHECK-IN IS SILENT (Peter, 2026-09-16).** A watcher roll-over, a lane check-in that found
 nothing merged, a channel with no new posts: re-arm and say nothing. Report only when something
 changed or something needs Peter.
