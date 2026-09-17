@@ -319,7 +319,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // reveal. Uncovering mid-coast made iOS composite/rasterize the just-shown copy late = the
   // freeze-frame + gradient shift Peter saw. At rest the phone editor has no waves at all
   // (parchment), so the uncover is inert; the flag exists to hold `covered` through the coast.
-  const [waveRest, setWaveRest] = useState(false)
+  // ⚠ WARM loads (editor/loadWarmth.ts) never reach wave-rest: Edit.tsx drops the shell 850ms
+  // after reveal, mid-coast, so 'inkwave:wave-rest' is never dispatched — and a surface held
+  // `covered` forever is transparent with z-index 1, painted OVER the toolbar (Peter: "the
+  // toolbar's completely gone", 2026-09-17). Warm starts uncovered.
+  const [waveRest, setWaveRest] = useState(() => isWarmLoad())
   // wave-rest ALWAYS arrives on a live page (the rest handoff is a resolved-clock timer over
   // compositor-only playback); the 30s load watchdog (Scroll.tsx, 'inkwave:load-watchdog') is
   // the one backstop — it force-lifts `covered` too.
@@ -1672,7 +1676,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         const w = footerWrapRef.current
         dbg!.style.transform = `translateY(${vv.offsetTop}px)` // ride the visual viewport, not the layout one
         const se = document.scrollingElement
-        dbg!.textContent = `iH ${window.innerHeight} vvH ${Math.round(vv.height)} top ${Math.round(vv.offsetTop)} sY ${Math.round(scrollY)} maxY ${se ? se.scrollHeight - se.clientHeight : '-'}\nkb ${root.style.getPropertyValue('--iw-kb-offset')} tb ${root.style.getPropertyValue('--iw-toolbar-h')} foc ${!!document.activeElement?.closest?.('.ProseMirror')}\nwrap ${w ? Math.round(w.getBoundingClientRect().top) : '-'}..${w ? Math.round(w.getBoundingClientRect().bottom) : '-'} cb ${w ? getComputedStyle(w).bottom : '-'} tf ${w?.style.transform || '-'}\nhit ${w ? (document.elementFromPoint(195, w.getBoundingClientRect().top + 30)?.tagName ?? 'none') : '-'} pillOp ${footerRef.current ? getComputedStyle(footerRef.current).opacity : '-'} pill ${footerRef.current ? Math.round(footerRef.current.getBoundingClientRect().top) : '-'} dbgTop ${Math.round(dbg!.getBoundingClientRect().top)} pageTop ${Math.round(vv.pageTop)} bodyH ${document.body.getBoundingClientRect().height | 0}`
+        dbg!.textContent = `iH ${window.innerHeight} vvH ${Math.round(vv.height)} top ${Math.round(vv.offsetTop)} sY ${Math.round(scrollY)} maxY ${se ? se.scrollHeight - se.clientHeight : '-'}\nkb ${root.style.getPropertyValue('--iw-kb-offset')} tb ${root.style.getPropertyValue('--iw-toolbar-h')} foc ${!!document.activeElement?.closest?.('.ProseMirror')}\nwrap ${w ? Math.round(w.getBoundingClientRect().top) : '-'}..${w ? Math.round(w.getBoundingClientRect().bottom) : '-'} cb ${w ? getComputedStyle(w).bottom : '-'} tf ${w?.style.transform || '-'}\nhit ${w ? (document.elementFromPoint(195, w.getBoundingClientRect().top + 30)?.tagName ?? 'none') : '-'} pillOp ${footerRef.current ? getComputedStyle(footerRef.current).opacity : '-'} pill ${footerRef.current ? Math.round(footerRef.current.getBoundingClientRect().top) : '-'} dbgTop ${Math.round(dbg!.getBoundingClientRect().top)} pageTop ${Math.round(vv.pageTop)}\n${[...document.querySelectorAll('.inkwave-editor-surface')].map(e => `[${e.className.replace('inkwave-editor-surface', '').trim()} z=${getComputedStyle(e).zIndex} pos=${getComputedStyle(e).position}]`).join(' ')} wrapZ ${w ? getComputedStyle(w).zIndex : '-'} hitCls ${(document.elementFromPoint(195, (w?.getBoundingClientRect().top ?? 0) + 30)?.closest('.inkwave-editor-surface, .iw-toolbar-outline') as HTMLElement | null)?.className.slice(0, 40) ?? '-'}`
         dbgRaf = requestAnimationFrame(tickDbg)
       }
       tickDbg()
@@ -3211,13 +3215,13 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const renderDrawer = () => {
                   const available = overflowSlots(toolbarSlots)
                   return (
-                    <div className={`bg-white flex items-center z-[120] ${isTouch ? 'iw-toolbar-circles iw-phone-toolbar justify-between px-0 py-1.5' : `absolute bottom-full left-0 ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}`}
+                    <div className={`bg-white flex items-center z-[120] ${isTouch ? 'iw-toolbar-circles iw-phone-toolbar iw-drawer-row pt-1.5 pb-0' : `absolute bottom-full left-0 ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}`}
                       {...{ [PANEL_ATTR]: 'drawer' }}
                       // The drawer is a panel too. Phone: a second toolbar ROW (the pill grows; the same
                       // --iw-row-slots clamp sizes its circles so the two rows match). Desktop: anchored
                       // above the ▲, its own width, the shared sheet radius / shadow / border.
                       style={isTouch
-                        ? { ['--iw-row-slots' as string]: String(toolbarSlots.length) }
+                        ? { ['--iw-row-slots' as string]: String(toolbarSlots.length), ['--iw-drawer-cols' as string]: String(toolbarSlots.length + 1) }
                         : { border: PHONE_SHEET.border, borderRadius: PHONE_SHEET.radiusPx, boxShadow: PHONE_SHEET.shadow, marginBottom: PHONE_SHEET.gapPx }}
                       onMouseDown={e => e.stopPropagation()}>
                       {/* + add more opps */}
@@ -3563,7 +3567,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         >
           <div
             ref={footerRef}
-            className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
+            className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating || isTouch ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
             style={{
               // ── ⚠ ONE BUDGET, TWO CONSUMERS. `--iw-bar-budget` is the maximum width the toolbar
               // may occupy, and BOTH this box's max-width and the per-circle shrink clamp in
@@ -3646,7 +3650,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 mirrors whatever height results into --iw-toolbar-h + the PM scroll reserve, so
                 NEVER hardcode the pill height anywhere. */}
             {isTouch && showMainRow && (
-              <div style={{ overflow: 'hidden', maxHeight: toolbarPickerOpen ? 96 : 0, transition: 'max-height 220ms ease', borderBottom: toolbarPickerOpen ? PHONE_SHEET.border : '1px solid transparent' }}
+              <div style={{ overflow: 'hidden', maxHeight: toolbarPickerOpen ? 96 : 0, transition: 'max-height 220ms ease' }}
                 aria-hidden={!toolbarPickerOpen} {...(toolbarPickerOpen ? {} : { inert: '' as unknown as boolean })}>
                 {renderDrawer()}
               </div>

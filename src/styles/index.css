@@ -1071,6 +1071,26 @@
   /* Peter, 2026-09-17: "buttons bigger and clearer" — less slack (24px), a 52px cap, a 2px ring,
      a darker glyph, and 18px type in the circle. Both rows of the pill (main + ▲ drawer) share the
      rule and the same --iw-row-slots, so their circles line up column for column. */
+  .iw-phone-toolbar {
+    --iw-circle: clamp(38px, calc((100vw - 24px) / (var(--iw-row-slots, 6) + 2)), 52px);
+  }
+  /* HONEYCOMB (Peter, 2026-09-17): the ▲ drawer row is inset by half a main-row pitch on each side
+     — (width − circle) / (2 · circles-in-the-main-row) — so its circles sit over the GAPS of the
+     row below, and pulled down by ~a seventh of a circle so the rows interlock: centres 0.86·d
+     apart is true hexagonal packing; ~0.9·d here keeps the rings from touching. */
+  /* A GRID of (main-row circles − 1) equal cells, inset half a circle each side: cell width is
+     then exactly the main row's pitch and every cell centre is a gap centre below. Items fill left
+     to right; a cell with nothing in it stays blank (Peter: "leave empty spaces blank"). The
+     --iw-row-slots var is the same one the main row sizes from (toolbarContract.ts). */
+  .iw-phone-toolbar.iw-drawer-row {
+    --iw-drawer-cols: calc(var(--iw-row-slots, 6) + 1);
+    display: grid;
+    grid-template-columns: repeat(var(--iw-drawer-cols, 7), 1fr);
+    justify-items: center;
+    padding-left: calc(var(--iw-circle) / 2);
+    padding-right: calc(var(--iw-circle) / 2);
+    margin-bottom: calc(var(--iw-circle) * -0.16);
+  }
   .iw-phone-toolbar .min-w-\[44px\] {
     min-width: clamp(38px, calc((100vw - 24px) / (var(--iw-row-slots, 6) + 2)), 52px);
   }
