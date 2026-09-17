@@ -1033,8 +1033,14 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return () => window.removeEventListener('inkwave:doc-surrendered', onSurrendered as EventListener)
   }, [])
 
+  // The idle retract is a DESKTOP courtesy: the mouse re-arms it on every hover over the row.
+  // A phone has no hover, so nothing ever re-armed it and the row vanished 5s after S was
+  // tapped — while the S circle stayed dark under iOS's sticky :hover, so it read as "S is on
+  // but no row" (Peter, iPhone, 2026-09-17). On touch the row is owned by the tap contract
+  // instead: tap-away, another button, or S again (docs/rules/ios-webkit.md).
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
+    if (isTouchDevice()) return
     styleTimerRef.current = setTimeout(() => closeBarLayer('style'), 5000)
   }
   function clearStyleTimer() {
