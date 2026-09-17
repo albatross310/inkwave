@@ -26,6 +26,7 @@ import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
 import { PHONE_SHEET, PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 import { LEDGER_ROW_EVENT, isLabelSuppressed, setLabelSuppressed } from '../productivity/capture'
 import { CHIME_VOICES, chimeMuted, chimeVoiceId, previewChime, setChimeMuted, setChimeVoiceId } from '../productivity/chime'
 import { prodLedgerEnabled, setProdLedgerEnabled } from '../productivity/ledgerFlag'
@@ -356,7 +357,23 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
     >
       {/* The header: a back affordance on a sub-view + the view's name. This is the one nav chrome;
           the views below never draw their own. Home shows no header (its buttons ARE the surface). */}
-      {title !== null && (
+      {isPhone ? (
+        // Phone: the one header every sheet wears (small-caps title, ×); a sub-view adds ‹ before it.
+        <SheetHeader
+          onClose={onClose}
+          title={title === null ? 'Writing time' : (
+            <span className="inline-flex items-center gap-1">
+              <button type="button" onClick={() => setView('home')} aria-label="Back"
+                className="flex items-center justify-center rounded-full"
+                style={{ minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, margin: '-8px 0 -8px -14px', fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}
+              >
+                ‹
+              </button>
+              {title}
+            </span>
+          )}
+        />
+      ) : title !== null && (
         <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
           <button type="button" onClick={() => setView('home')} aria-label="Back"
             className="flex items-center justify-center rounded-full transition-colors hover:bg-stone-50"
@@ -371,6 +388,7 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
       <div className="overflow-y-auto">
         {view === 'home' && (
           <HomeView
+            showTitle={!isPhone}
             onNavigate={setView}
             onOpenGraphs={onOpenGraphs}
             onOpenReport={onOpenReport}
@@ -419,8 +437,10 @@ function NavRow({ glyph, label, desc, accent, onClick }: {
   )
 }
 
-function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection }: {
+function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection, showTitle = true }: {
   onNavigate: (v: NavView) => void
+  /** False on phone, where the sheet header carries the title. */
+  showTitle?: boolean
   onOpenGraphs?: () => void
   onOpenReport?: () => void
   reflection: React.ReactNode
@@ -433,8 +453,8 @@ function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection }: {
   return (
     <div className="pb-2">
       {/* A quiet header + the running-timer glance, so opening from a running block shows its state. */}
-      <div className="flex items-center justify-between px-4 pb-1 pt-4">
-        <span style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}>Your writing time</span>
+      {(showTitle || running) && <div className="flex items-center justify-between px-4 pb-1 pt-4">
+        {showTitle ? <span style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}>Your writing time</span> : <span />}
         {running && (
           <button type="button" onClick={() => onNavigate('work')}
             className="flex items-center gap-1.5 rounded-full px-3 transition-colors hover:opacity-80"
@@ -443,7 +463,7 @@ function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection }: {
             <TimeFace className="tabular-nums" style={{ fontSize: TYPE.label }} />
           </button>
         )}
-      </div>
+      </div>}
 
       {reflection}
 

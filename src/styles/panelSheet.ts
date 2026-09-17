@@ -33,6 +33,20 @@ export const PHONE_SHEET = {
   border: '1px solid var(--iw-nightable-border, #e7e5e4)',
 } as const
 
+/**
+ * The sheet's TYPE RAMP — four semantic steps, one ramp for every panel body, as CSS-variable
+ * strings. index.css sets the phone values on `.iw-phone-sheet` (17/15/13/11) and the desktop
+ * values on :root, so a panel says WHAT a run of text is and never picks a size. Use these for
+ * inline `fontSize`; Tailwind `text-xs` / `text-sm` / `text-[11px]` inside a sheet are remapped to
+ * the same steps by index.css, so legacy classes land on the ramp without a rewrite.
+ */
+export const SHEET_TYPE = {
+  body: 'var(--iw-sheet-body, 17px)',
+  small: 'var(--iw-sheet-small, 15px)',
+  meta: 'var(--iw-sheet-meta, 13px)',
+  label: 'var(--iw-sheet-label, 11px)',
+} as const
+
 /** Class on the sheet's outer box (index.css `.iw-phone-sheet`): scrolling, max-height, type. */
 export const PHONE_SHEET_CLASS = 'iw-phone-sheet'
 

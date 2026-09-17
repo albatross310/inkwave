@@ -93,7 +93,7 @@ import { musicEnabled } from '../music/flag'
 import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
 import { WorkSummaryAutoOpen } from '../components/WorkSummaryAutoOpen'
 import { PageMenu } from '../components/PageMenu'
-import { PHONE_SHEET } from '../styles/panelSheet'
+import { PHONE_SHEET, phoneSheetStyle } from '../styles/panelSheet'
 import { gappedPagesEnabled } from './pageView'
 import { setPaginationGappedMode } from './extensions/PaginationExtension'
 import { getLineHeight } from './lineHeight'
@@ -3546,10 +3546,15 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 {(() => {
                   const available = overflowSlots(toolbarSlots)
                   return (
-                    <div className={`absolute bottom-full left-0 mb-2 bg-white flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
+                    <div className={`bg-white flex items-center z-[120] ${isTouch ? 'justify-between px-1' : 'absolute bottom-full left-0'} ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
                       {...{ [PANEL_ATTR]: 'drawer' }}
-                      // The drawer is a panel too: the one radius / shadow / border every phone sheet wears.
-                      style={{ border: PHONE_SHEET.border, borderRadius: PHONE_SHEET.radiusPx, boxShadow: PHONE_SHEET.shadow }}
+                      // The drawer is a panel too. Phone: the shared sheet BOX (position, inset, bottom above
+                      // the pill + keyboard, radius, shadow, border — styles/panelSheet.ts), so it spans the
+                      // pill it sits on and follows it, instead of hugging its own contents beside the ▲.
+                      // Desktop: anchored above the ▲, its own width, the same radius / shadow / border.
+                      style={isTouch
+                        ? { ...phoneSheetStyle(), maxHeight: undefined, fontSize: undefined }
+                        : { border: PHONE_SHEET.border, borderRadius: PHONE_SHEET.radiusPx, boxShadow: PHONE_SHEET.shadow, marginBottom: PHONE_SHEET.gapPx }}
                       onMouseDown={e => e.stopPropagation()}>
                       {/* + add more opps */}
                       <div className="flex items-center">

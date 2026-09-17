@@ -4,7 +4,7 @@ import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
 import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill, useFooterCramped } from './sidePill'
 import { PANEL_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 
 // Module-level so its identity is stable: React re-invokes a callback ref (null, then el) whenever
@@ -246,7 +246,7 @@ export function ReceiptPanel({
               left: 0,
               background: 'rgb(var(--iw-ink-rgb) / 0.85)',
               color: '#fff',
-              fontSize: '0.75rem',
+              fontSize: SHEET_TYPE.small,
               padding: '4px 10px',
               borderRadius: 8,
               whiteSpace: 'nowrap',
@@ -275,7 +275,7 @@ export function ReceiptPanel({
                 onClick={handleSaveVersion}
                 disabled={saving}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50 font-medium disabled:opacity-50"
-                style={{ borderBottom: `1px solid rgb(var(--iw-ink-rgb) / 0.12)`, color: 'var(--iw-ink, #302438)', fontSize: '0.78rem' }}
+                style={{ borderBottom: `1px solid rgb(var(--iw-ink-rgb) / 0.12)`, color: 'var(--iw-ink, #302438)', fontSize: SHEET_TYPE.body }}
                 title="Save a named version of this document now"
               >
                 {saving ? '⊕ saving…' : '⊕ save version'}
@@ -283,7 +283,7 @@ export function ReceiptPanel({
             )}
 
             {typeof wordCount === 'number' && (
-              <div className="px-2.5 py-1.5 text-stone-500 tabular-nums" style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: '0.75rem' }}>
+              <div className="px-2.5 py-1.5 text-stone-500 tabular-nums" style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: SHEET_TYPE.small }}>
                 {wordCount} word{wordCount === 1 ? '' : 's'}
               </div>
             )}
@@ -292,7 +292,7 @@ export function ReceiptPanel({
                 type="button"
                 onClick={onVerifyChain}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50"
-                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: '0.75rem' }}
+                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: SHEET_TYPE.small }}
                 title="Verify the signed receipt chain against the published key"
               >
                 ✦ {chainStatus ? `chain: ${chainStatus}` : 'verify chain…'}
@@ -303,7 +303,7 @@ export function ReceiptPanel({
                 type="button"
                 onClick={onCheckBitcoin}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50"
-                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', color: 'var(--iw-light, #41425b)', fontSize: '0.75rem' }}
+                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', color: 'var(--iw-light, #41425b)', fontSize: SHEET_TYPE.small }}
               >
                 ⏳ check Bitcoin…
               </button>
@@ -331,7 +331,7 @@ export function ReceiptPanel({
                   title={s.summary ?? `bundle ${s.bundleHash}`}
                 >
                   {/* Row 1: v1s3 · Arvo. 30/06 · wordcount · OTS */}
-                  <div className="flex items-center gap-1.5 w-full" style={{ fontSize: '0.72rem' }}>
+                  <div className="flex items-center gap-1.5 w-full" style={{ fontSize: SHEET_TYPE.small }}>
                     <span style={{ color: 'var(--iw-ink, #302438)', fontWeight: 600 }}>{vLabel}</span>
                     <span style={{ color: 'var(--iw-light, #41425b)' }}>{period}</span>
                     <span className="text-stone-400">{s.wordCount}w</span>
@@ -341,7 +341,7 @@ export function ReceiptPanel({
                   <div
                     className="text-stone-400 w-full"
                     style={{
-                      fontSize: '0.68rem',
+                      fontSize: SHEET_TYPE.meta,
                       lineHeight: '1.3',
                       overflow: 'hidden',
                       display: '-webkit-box',

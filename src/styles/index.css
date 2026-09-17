@@ -1000,7 +1000,16 @@
      the aqua #9fd9c8, so pages "flashed blue". Parchment-tone html/body so unpainted areas read as
      paper. Device media query (same signal as isTouchDevice) because html/body have no .is-phone
      ancestor; the unlayered night-mode rules below still win there. */
-  @media (pointer: coarse) and (hover: none) {
+  /* Desktop values of the panel type ramp (styles/panelSheet.ts SHEET_TYPE); the phone block below
+   overrides them on .iw-phone-sheet. */
+:root {
+  --iw-sheet-body: 0.8rem;
+  --iw-sheet-small: 0.75rem;
+  --iw-sheet-meta: 0.7rem;
+  --iw-sheet-label: 11px;
+}
+
+@media (pointer: coarse) and (hover: none) {
     /* Suppress the browser's native zoom EVERYWHERE on phone (Peter, 2026-07-09): the app has its
        own pinch-zoom (editor font-reflow, PDF magnify) and Safari's page zoom fighting it was
        confusing. pan-x pan-y keeps native one-finger scrolling; pinch/double-tap zoom are blocked.
@@ -1074,7 +1083,24 @@
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     background: #fff;
+    /* The phone type ramp (styles/panelSheet.ts SHEET_TYPE reads these). ≥16px body: iOS zoom rule. */
+    font-size: 17px;
+    --iw-sheet-body: 17px;
+    --iw-sheet-small: 15px;
+    --iw-sheet-meta: 13px;
+    --iw-sheet-label: 11px;
   }
+  /* Legacy Tailwind sizes inside a sheet land on the ramp — the Sync, Snapshots and Citations
+     bodies were written for a 210px desktop pop-over in 0.68–0.78rem and read as fine print on a
+     phone next to the 17px Page / Menu / Guide sheets. One remap here, no per-panel rewrite. */
+  .iw-phone-sheet .text-sm { font-size: var(--iw-sheet-body); line-height: 1.4; }
+  .iw-phone-sheet .text-xs { font-size: var(--iw-sheet-small); line-height: 1.4; }
+  .iw-phone-sheet .text-\[11px\], .iw-phone-sheet .text-\[10px\] { font-size: var(--iw-sheet-meta); line-height: 1.4; }
+  /* One gutter for every sheet ROW (a direct child; pills and inputs deeper in keep their own):
+     SheetHeader's title sits at 16px, so rows do too. And every full-width row is a finger
+     target — the 44px floor, whatever padding it was written with. */
+  .iw-phone-sheet > .px-2\.5 { padding-left: 1rem; padding-right: 1rem; }
+  .iw-phone-sheet > button.w-full { min-height: 44px; }
 
   /* Footer chrome has one literal neutral outline. Glyphs may change colour for hover/open/error
      state, but their circles and the three sibling pills must remain the same grey. */

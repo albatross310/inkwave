@@ -10,7 +10,8 @@ import { importLegacyLibrary, legacyLibrarySize } from '../citations/library'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
@@ -830,21 +831,36 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
-        {/* Slim drag grip (fullscreen toggle lives beside the × in the Add row). */}
-        <div
-          className="flex items-center justify-center pt-2 pb-1"
-          style={{ cursor: fullscreen ? 'default' : 'grab' }}
-          onMouseDown={fullscreen ? undefined : onHeaderMouseDown}
-        >
-          {!fullscreen && <div className="w-9 h-1 rounded-full bg-stone-200" />}
-        </div>
+        {isTouchDevice() ? (
+          // Phone: the shared sheet header (title, ⛶, ×) — nothing to drag, so no grip.
+          <SheetHeader title="Citations" onClose={onClose}
+            right={
+              <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
+                className="flex items-center justify-center rounded-full"
+                style={{ minWidth: 44, minHeight: 44, margin: -8, fontSize: 18, lineHeight: 1, color: 'var(--iw-pill-fg, #78716c)' }}
+              >
+                {fullscreen ? '🗗' : '⛶'}
+              </button>
+            }
+          />
+        ) : (
+          /* Desktop: slim drag grip (fullscreen toggle lives beside the × in the Add row). */
+          <div
+            className="flex items-center justify-center pt-2 pb-1"
+            style={{ cursor: fullscreen ? 'default' : 'grab' }}
+            onMouseDown={fullscreen ? undefined : onHeaderMouseDown}
+          >
+            {!fullscreen && <div className="w-9 h-1 rounded-full bg-stone-200" />}
+          </div>
+        )}
 
         {/* Hidden input for embedding source PDFs (📎 on a library row triggers it) */}
         <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" className="hidden"
           onChange={e => void onPdfChosen(e)} />
 
-        {/* Extension promo — top of panel (dismissible) */}
-        {!extDismissed && (
+        {/* Extension promo — top of panel (dismissible). Desktop only: there is no Chrome/Firefox
+            extension on a phone, and on a 390px sheet the pitch ran to three lines above the list. */}
+        {!extDismissed && !isTouchDevice() && (
           <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between"
             style={{ background: 'var(--iw-subtle-bg, #fcfcfb)' }}>
             <span className="text-xs text-stone-500">Download the Inkwave citation extension for single-click import on any page, using Claude Sonnet</span>
@@ -882,11 +898,14 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             >
               {busy ? '…' : 'Add'}
             </button>
-            {/* Close — big ×, next to Add (the old titled header bar is gone). */}
+            {/* Desktop: ⛶ and a big × next to Add (the old titled header bar is gone). Phone has
+                both in the sheet header. */}
+            {!isTouchDevice() && <>
             <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
               className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-500 hover:text-[#302438] hover:border-stone-300 text-base leading-none flex items-center justify-center">{fullscreen ? '🗗' : '⛶'}</button>
             <button type="button" onClick={onClose} title="Close (Esc)"
               className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-500 hover:text-stone-600 hover:border-stone-300 text-2xl leading-none flex items-center justify-center">×</button>
+            </>}
           </div>
           {notice && (
             <div className="mt-1.5 text-[11px]" style={{ color: notice.kind === 'err' ? '#b91c1c' : notice.kind === 'warn' ? '#b45309' : '#15803d' }}>
@@ -957,7 +976,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               shipped inert). `citeClickOpensReader` and `importLegacyLibrary` were written, tested
               and then never given a control, so the first did nothing at all and the second left a
               writer's entire previous library unreachable after the per-document change. */}
-          <div className="flex items-center gap-3 flex-wrap px-1 pt-1" style={{ fontSize: '12px', color: 'var(--iw-pill-fg, #78716c)' }}>
+          <div className="flex items-center gap-3 flex-wrap px-1 pt-1" style={{ fontSize: SHEET_TYPE.small, color: 'var(--iw-pill-fg, #78716c)' }}>
             <label className="flex items-center gap-1.5 cursor-pointer" title="Clicking a citation opens its web page in the reader panel, instead of the PDF viewer">
               <input type="checkbox" checked={clickReads}
                 onChange={e => { setCiteClickOpensReader(e.target.checked); setClickReads(e.target.checked) }} />

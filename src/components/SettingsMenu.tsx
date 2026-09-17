@@ -119,8 +119,9 @@ export function SettingsMenu({ limitN, onLimitChange, open: openProp, onOpenChan
             onMouseDown={e => e.stopPropagation()}
           >
             <SheetHeader title="Settings" onClose={() => setOpen(false)} />
-            {/* Phone: two columns so every row fits the band above the toolbar (keyboard up or not). */}
-            <div className={twoCol || isPhone ? 'grid grid-cols-2 gap-x-1 items-center' : undefined}>
+            {/* Desktop with the keyboard up: two columns. Phone: ONE column — the sheet scrolls
+                inside its cap (index.css), and two columns at 390px wrapped every second label. */}
+            <div className={twoCol && !isPhone ? 'grid grid-cols-2 gap-x-1 items-center' : undefined}>
 
             {/* Night mode — dark writing surface */}
             <Row
