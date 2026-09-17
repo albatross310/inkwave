@@ -11,6 +11,10 @@ import {
   createDock,
   kbOffsetFor,
   dockedVisualTop,
+  keyboardHeightFor,
+  floatingBarAllowance,
+  ACCESSORY_MIN_PX,
+  SAFARI_FLOATING_BAR_PX,
   PARK_FRAMES,
   SETTLE_FRAMES,
   type DockGeom,
@@ -108,6 +112,45 @@ describe('keyboardLatched / liftFor — chrome is not a keyboard', () => {
     expect(kbOffsetFor({ ...RESTING, offsetTop: -120, height: 844 })).toBe(0)
     // Top elastic WITH the keyboard: the lift stays the REAL keyboard overlap.
     expect(kbOffsetFor({ ...RESTING, offsetTop: -120, height: 508 })).toBe(KEYBOARD_H)
+  })
+})
+
+describe('keyboardLatched — the accessory-only keyboard (hardware keyboard / minimised)', () => {
+  it('a ~70px strip latches while an editable is focused, and not otherwise', () => {
+    const strip = { ...RESTING, height: RESTING.innerHeight - 70 }
+    expect(keyboardLatched({ ...strip, focused: true }, false)).toBe(true)
+    expect(keyboardLatched(strip, false)).toBe(false)
+    expect(ACCESSORY_MIN_PX).toBeLessThan(70)
+  })
+  it('frame jitter under the accessory floor never latches even when focused', () => {
+    expect(keyboardLatched({ ...RESTING, height: RESTING.innerHeight - 20, focused: true }, false)).toBe(false)
+  })
+})
+
+describe('floatingBarAllowance — the iOS 26 Safari URL pill floats inside the visual viewport', () => {
+  const SAFARI_26 = 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1'
+  it('adds the pill allowance on iPhone Safari 26+ in the browser', () => {
+    expect(floatingBarAllowance(SAFARI_26, false)).toBe(SAFARI_FLOATING_BAR_PX)
+  })
+  it('adds nothing installed (no URL bar), on older Safari, on Chrome for iOS, or off iOS', () => {
+    expect(floatingBarAllowance(SAFARI_26, true)).toBe(0)
+    expect(floatingBarAllowance(SAFARI_26.replace('Version/26.0', 'Version/18.5'), false)).toBe(0)
+    expect(floatingBarAllowance(SAFARI_26.replace('Safari/604.1', 'CriOS/120 Safari/604.1'), false)).toBe(0)
+    expect(floatingBarAllowance('Mozilla/5.0 (Macintosh) Version/26.0 Safari/605.1.15', false)).toBe(0)
+  })
+  it('liftFor adds the allowance whenever the keyboard is latched — even panned to the page end', () => {
+    const g = { ...RESTING, height: RESTING.innerHeight - KEYBOARD_H }
+    expect(liftFor(g, true, 48)).toBe(KEYBOARD_H + 48)
+    expect(liftFor({ ...g, offsetTop: KEYBOARD_H }, true, 48)).toBe(48) // panned: overlap 0, pill still floats
+    expect(liftFor(g, false, 48)).toBe(0)
+  })
+  it('keyboardHeightFor is the pan-invariant reserve: the keyboard height while latched, else 0', () => {
+    const g = { ...RESTING, height: RESTING.innerHeight - KEYBOARD_H }
+    expect(keyboardHeightFor(g, true)).toBe(KEYBOARD_H)
+    expect(keyboardHeightFor({ ...g, offsetTop: KEYBOARD_H }, true)).toBe(KEYBOARD_H) // a pan changes nothing
+    expect(keyboardHeightFor(g, true, 48)).toBe(KEYBOARD_H + 48)
+    expect(keyboardHeightFor(g, false)).toBe(0)
+    expect(keyboardHeightFor({ ...g, scale: 2 }, true)).toBe(0)
   })
 })
 

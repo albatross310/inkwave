@@ -210,13 +210,14 @@ function Row({ label, checked, onChange }: { label: string; checked: boolean; on
   return (
     <label className="flex items-center justify-between px-4 py-2.5 cursor-pointer hover:bg-stone-50 transition-colors select-none">
       <span>{label}</span>
+      {/* Phone: a thumb-sized switch (46×28, Peter 2026-09-17 "buttons bigger and clearer"). */}
       <span
-        className="w-8 h-4 rounded-full flex items-center transition-colors relative"
-        style={{ background: checked ? 'var(--iw-toggle-on, #302438)' : 'var(--iw-toggle-off, #d1d5db)' }}
+        className="rounded-full flex items-center transition-colors relative shrink-0"
+        style={{ width: isPhone ? 46 : 32, height: isPhone ? 28 : 16, background: checked ? 'var(--iw-toggle-on, #302438)' : 'var(--iw-toggle-off, #d1d5db)' }}
       >
         <span
-          className="absolute w-3 h-3 bg-white rounded-full shadow-sm transition-transform"
-          style={{ left: 2, transform: checked ? 'translateX(16px)' : 'translateX(0)' }}
+          className="absolute bg-white rounded-full shadow-sm transition-transform"
+          style={{ left: 2, width: isPhone ? 24 : 12, height: isPhone ? 24 : 12, transform: checked ? `translateX(${isPhone ? 18 : 16}px)` : 'translateX(0)' }}
         />
         <input type="checkbox" className="sr-only" checked={checked} onChange={onChange} />
       </span>

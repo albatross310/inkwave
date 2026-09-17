@@ -18,6 +18,7 @@ import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
 import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
+import { clearWarm } from '../editor/loadWarmth'
 import { oneDriveFilename } from '../storage/onedrive'
 import { googleDriveConfigured, preloadGis } from '../storage/gdrive'
 import { AccountMenuItems } from './AccountControl'
@@ -191,6 +192,7 @@ export function OptionsMenu({
       setModal('changeunsaved')
       return
     }
+    clearWarm() // a different document: its first load is the full choreography again
     void createDocument('Untitled', emptyTiptapDoc())
   }
 

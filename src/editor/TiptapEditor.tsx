@@ -23,7 +23,8 @@ import { readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemo
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
-import { createDock, KEYBOARD_MIN_PX } from './toolbarDock'
+import { createDock, KEYBOARD_MIN_PX, floatingBarAllowance } from './toolbarDock'
+import { isWarmLoad } from './loadWarmth'
 import { moveSlot, nearestSlot, neighborShift, brokeHoldSlop } from './toolbarSlots'
 import {
   SlotId, BarLayerId, BAR_HANDOFF_MS,
@@ -1191,6 +1192,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         'data-placeholder': 'Begin writing…',
         'aria-label': doc.docType === 'email' ? 'Message body editor' : 'Document body editor',
         spellcheck: 'false',
+        // Peter, 2026-09-17: no iOS QuickType — autocorrect/prediction off hides the suggestion
+        // strip above the keyboard (the ▲▼✓ form-assistant bar is Safari's own and cannot be hidden
+        // by a page; only an installed home-screen app loses the URL pill).
+        autocorrect: 'off',
+        autocapitalize: 'off',
+        autocomplete: 'off',
       },
       handlePaste: (view, event) => {
         const images = clipboardImageFiles(event.clipboardData)
@@ -1585,6 +1592,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     let lastApplied = 0
     let clearTransTimer = 0
     let revealTimers: number[] = []
+    // iOS 26 Safari floats its collapsed URL pill INSIDE the visual viewport while the keyboard
+    // is up — over whatever sits flush on the vv bottom, i.e. our toolbar (Peter, 2026-09-17:
+    // "this localhost thing displays over the toolbar"). Lift by that much more while lifting.
+    const allowance = floatingBarAllowance(navigator.userAgent,
+      window.matchMedia?.('(display-mode: standalone)').matches || !!(navigator as unknown as { standalone?: boolean }).standalone)
     const dock = createDock({
       readGeom: () => {
         // Rubber-band detection: under elastic overscroll the vv geometry is garbage, so the dock
@@ -1598,13 +1610,16 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           height: vv.height,
           scale: vv.scale,
           overscroll: y < -1 || y > maxY + 1,
+          // The accessory-only keyboard latch (toolbarDock.ts ACCESSORY_MIN_PX).
+          focused: !!document.activeElement?.closest?.('.ProseMirror, input, textarea, [contenteditable="true"]'),
         }
       },
-      apply: (off) => {
+      apply: (off, kbH) => {
         vvSettledRef.current = false
         revealTimers.forEach(clearTimeout)
         revealTimers = []
         root.style.setProperty('--iw-kb-offset', `${off}px`)
+        root.style.setProperty('--iw-kb-height', `${kbH}px`) // the surface's bottom reserve (toolbarDock.ts keyboardHeightFor)
         const wrap = footerWrapRef.current
         if (wrap) {
           // KEYBOARD-SLIDE CHASE: iOS reports the keyboard's final geometry in one or two big
@@ -1613,8 +1628,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           // compositor tracking IS the mechanism.
           clearTimeout(clearTransTimer)
           const jump = Math.abs(off - lastApplied)
-          wrap.style.transition = jump > 60 ? 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1)' : ''
-          if (jump > 60) clearTransTimer = window.setTimeout(() => { wrap.style.transition = '' }, 300)
+          wrap.style.transition = jump > 40 ? 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1)' : ''
+          if (jump > 40) clearTransTimer = window.setTimeout(() => { wrap.style.transition = '' }, 300)
           wrap.style.transform = off ? `translate3d(0, ${-off}px, 0)` : ''
         }
         lastApplied = off
@@ -1635,9 +1650,31 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       },
       raf: (cb) => requestAnimationFrame(cb),
       caf: (id) => cancelAnimationFrame(id),
-    })
+    }, allowance)
     const kick = () => dock.kick()
     const check = () => dock.check()
+    // DEV readout (`?vvdebug`): the live geometry, on screen, for a device with no devtools.
+    let dbg: HTMLDivElement | null = null
+    let dbgRaf = 0
+    // Sticky (localStorage): Edit.tsx cleans the query before this mounts. `?vvdebug=0` clears.
+    const vvDebug = (() => { try {
+      if (/vvdebug=0/.test(location.search)) localStorage.removeItem('iw:vvdebug')
+      else if (/vvdebug/.test(location.search)) localStorage.setItem('iw:vvdebug', '1')
+      return localStorage.getItem('iw:vvdebug') === '1'
+    } catch { return false } })()
+    if (import.meta.env.DEV && vvDebug) {
+      dbg = document.createElement('div')
+      dbg.style.cssText = 'position:fixed;top:44px;left:4px;z-index:9999;background:#000c;color:#0f0;font:11px/1.3 monospace;padding:4px;pointer-events:none;white-space:pre'
+      document.body.appendChild(dbg)
+      const tickDbg = () => {
+        const w = footerWrapRef.current
+        dbg!.style.transform = `translateY(${vv.offsetTop}px)` // ride the visual viewport, not the layout one
+        const se = document.scrollingElement
+        dbg!.textContent = `iH ${window.innerHeight} vvH ${Math.round(vv.height)} top ${Math.round(vv.offsetTop)} sY ${Math.round(scrollY)} maxY ${se ? se.scrollHeight - se.clientHeight : '-'}\nkb ${root.style.getPropertyValue('--iw-kb-offset')} tb ${root.style.getPropertyValue('--iw-toolbar-h')} foc ${!!document.activeElement?.closest?.('.ProseMirror')}\nwrap ${w ? Math.round(w.getBoundingClientRect().top) : '-'}..${w ? Math.round(w.getBoundingClientRect().bottom) : '-'} cb ${w ? getComputedStyle(w).bottom : '-'} tf ${w?.style.transform || '-'}\nhit ${w ? (document.elementFromPoint(195, w.getBoundingClientRect().top + 30)?.tagName ?? 'none') : '-'} pillOp ${footerRef.current ? getComputedStyle(footerRef.current).opacity : '-'} pill ${footerRef.current ? Math.round(footerRef.current.getBoundingClientRect().top) : '-'} dbgTop ${Math.round(dbg!.getBoundingClientRect().top)} pageTop ${Math.round(vv.pageTop)} bodyH ${document.body.getBoundingClientRect().height | 0}`
+        dbgRaf = requestAnimationFrame(tickDbg)
+      }
+      tickDbg()
+    }
     vv.addEventListener('resize', kick)
     vv.addEventListener('scroll', kick)
     window.addEventListener('resize', kick)
@@ -1653,10 +1690,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       window.removeEventListener('resize', kick)
       window.removeEventListener('scroll', check)
       clearInterval(watchdog)
+      cancelAnimationFrame(dbgRaf); dbg?.remove()
       dock.stop()
       revealTimers.forEach(clearTimeout)
       clearTimeout(clearTransTimer)
       root.style.removeProperty('--iw-kb-offset')
+      root.style.removeProperty('--iw-kb-height')
       if (footerWrapRef.current) {
         footerWrapRef.current.style.transform = ''
         footerWrapRef.current.style.transition = ''
@@ -1871,7 +1910,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     let readyAnnounced = false
     let revealStarted = false
     let continueRequested = false
-    let waterRested = false
+    // WARM load (editor/loadWarmth.ts): the reveal need not wait for the coast to end.
+    let waterRested = isWarmLoad()
     let revealTimer: ReturnType<typeof setTimeout> | undefined
     let revealRaf = 0
     let revealed = false

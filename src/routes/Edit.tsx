@@ -22,7 +22,8 @@ import { StorageUnavailable } from '../components/StorageUnavailable'
 import { DocumentOpenElsewhere, SurrenderedBanner } from '../components/DocumentOpenElsewhere'
 import { duplicateEmailAsNew } from '../email/duplicateEmail'
 import { setOpenDocListenerReady, waitForStudioFileLaunch, STUDIO_FILE_ACTION_PARAM } from '../pwa/fileLaunch'
-import { LoadingTip } from '../components/LoadingTip'
+import { LoadingTip, LOADING_TIP_COUNTDOWN_MS } from '../components/LoadingTip'
+import { isWarmLoad, markWarm } from './../editor/loadWarmth'
 import { currentDocIds } from '../storage/currentDocs'
 import { seedRequested, seedFreshRequested, seededDocument } from '../dev/seedDocument'
 
@@ -109,11 +110,16 @@ export function Edit() {
   useLayoutEffect(() => { setShellPhone(isTouchDevice()) }, [])
   useEffect(() => {
     let t2 = 0
+    const warm = isWarmLoad()
     let revealedAt = 0 // when the editor's 0.8s paper fade STARTED (phone ordering guard below)
     let restSeen = false
     const onRevealed = () => {
       setTipUp(false)
       revealedAt = performance.now()
+      markWarm() // every later load in this tab skips the countdown and the wave-rest wait
+      // WARM (loadWarmth.ts): the reveal may interrupt the coast — drop the shell once the fade
+      // completes, without waiting for wave-rest.
+      if (isTouchDevice() && warm) { clearTimeout(t2); t2 = window.setTimeout(() => setShellUp('down'), 850); return }
       // ⚠ PHONE: ONE VISIBLE WATER UNTIL REST, and the shell must NOT fade — fading the only water
       // exposed the body parchment through the transparent covered editor MID-COAST (the iOS "goes
       // white"). The shell stays OPAQUE and the covered editor sits ABOVE it, so parchment + chrome
@@ -534,6 +540,7 @@ export function Edit() {
           {tipUp && (
             <LoadingTip
               ready={loadReady}
+              countdownMs={isWarmLoad() ? 0 : LOADING_TIP_COUNTDOWN_MS}
               onContinue={() => window.dispatchEvent(new Event('inkwave:continue-load'))}
             />
           )}

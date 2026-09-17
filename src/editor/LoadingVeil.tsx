@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Scroll, EmptyEditorSurface, isTouchDevice } from './Scroll'
-import { LoadingTip } from '../components/LoadingTip'
+import { LoadingTip, LOADING_TIP_COUNTDOWN_MS } from '../components/LoadingTip'
+import { isWarmLoad } from './loadWarmth'
 
 // ─── LoadingVeil — the wave loading choreography for secondary routes (Peter, 2026-07-09) ────
 // A route-level, full-screen wave shell (Edit.tsx's persistent loading shell, distilled): it
@@ -20,7 +21,9 @@ import { LoadingTip } from '../components/LoadingTip'
 export function LoadingVeil({ ready, zIndex = 300 }: { ready: boolean; zIndex?: number }) {
   const [phase, setPhase] = useState<'up' | 'fading' | 'down'>('up')
   const [continueRequested, setContinueRequested] = useState(false)
-  const [waterRested, setWaterRested] = useState(false)
+  // WARM (loadWarmth.ts — this tab already opened Inkwave): no countdown, no wait for wave-rest.
+  const warm = isWarmLoad()
+  const [waterRested, setWaterRested] = useState(warm)
   const coastStarted = useRef(false)
   const revealStarted = useRef(false)
 
@@ -68,7 +71,7 @@ export function LoadingVeil({ ready, zIndex = 300 }: { ready: boolean; zIndex?: 
       >
         <EmptyEditorSurface />
       </Scroll>
-      {phase === 'up' && <LoadingTip ready={ready} onContinue={() => setContinueRequested(true)} />}
+      {phase === 'up' && <LoadingTip ready={ready} countdownMs={warm ? 0 : LOADING_TIP_COUNTDOWN_MS} onContinue={() => setContinueRequested(true)} />}
     </div>
   )
 }

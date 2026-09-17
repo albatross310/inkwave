@@ -33,11 +33,12 @@ export function loadingTipFontSize(text: string): string {
  * `.iw-water-ready` opens the water gate. This avoids random server/client text (a hydration
  * mismatch) and avoids inserting anything imperatively into React's document before hydration.
  */
-export function LoadingTip({ ready, onContinue }: { ready: boolean; onContinue: () => void }) {
+export function LoadingTip({ ready, onContinue, countdownMs = LOADING_TIP_COUNTDOWN_MS }: { ready: boolean; onContinue: () => void; countdownMs?: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const chosenRef = useRef<number | null>(null)
   const continuingRef = useRef(false)
-  const [secondsRemaining, setSecondsRemaining] = useState(LOADING_TIP_COUNTDOWN_MS / 1000)
+  // 0 on a WARM load (editor/loadWarmth.ts): the page opens the instant it is ready.
+  const [secondsRemaining, setSecondsRemaining] = useState(Math.ceil(countdownMs / 1000))
   const [continuing, setContinuing] = useState(false)
 
   useEffect(() => {
