@@ -5,6 +5,9 @@ import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom, register
 // Module-level for a stable ref identity — see the matching note in ReceiptPanel.tsx.
 const registerRightPill = (el: HTMLButtonElement | null) => registerSidePill('right', el)
 import { relativeTime } from './relativeTime'
+import { PANEL_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
 // it never grows leftward into the text). The pill text is decided by the caller so it reads clearly
@@ -67,7 +70,9 @@ export function SyncStatus({
   return (
     <div
       className="fixed z-40 font-serif select-none flex flex-col items-end"
-      style={{
+      // Phone (hideTrigger: the ☁ lives in the ▲ drawer): the shared sheet above the toolbar
+      // (styles/panelSheet.ts) — the wrapper takes the sheet's position, the panel fills it.
+      style={hideTrigger ? { ...phoneSheetStyle(), border: 'none', boxShadow: 'none' } : {
         // Shift clear of the PDF panel (side dock → left of it; bottom dock → above it) so the pill
         // isn't covered, matching the toolbars.
         right: 'var(--iw-pdf-room, 0px)',
@@ -86,14 +91,19 @@ export function SyncStatus({
         transition: 'right 0.18s ease, bottom 0.18s ease',
       }}
     >
-      {/* Backdrop to dismiss panel (both hover and click-opened paths) */}
-      {open && (
-        <div className="fixed inset-0 z-30" aria-hidden="true" onMouseDown={() => setOpen(false)} />
+      {/* Desktop backdrop to dismiss (pointerdown — iOS withholds mousedown). None on phone: the
+          editor's outside-tap rule closes the sheet; a scrim over the footer would eat the next tap. */}
+      {open && !hideTrigger && (
+        <div className="fixed inset-0 z-30" aria-hidden="true" onPointerDown={() => setOpen(false)} />
       )}
 
       {/* Detail panel — opens UPWARD, fixed width, path wraps inside it. */}
       {open && (
-        <div className="iw-nightable relative z-40 mb-2 w-64 max-lg:w-[7.7rem] bg-white shadow-lg rounded-xl p-3 text-stone-600" style={{ border: `1px solid ${INK}40` }}>
+        <div {...{ [PANEL_ATTR]: 'sync' }}
+          className={`iw-nightable relative z-40 bg-white text-stone-600 ${hideTrigger ? `${PHONE_SHEET_CLASS} w-full` : 'mb-2 w-64 max-lg:w-[7.7rem] shadow-lg rounded-xl p-3'}`}
+          style={hideTrigger ? { border: phoneSheetStyle().border, borderRadius: phoneSheetStyle().borderRadius, boxShadow: phoneSheetStyle().boxShadow, maxHeight: 'inherit' } : { border: `1px solid ${INK}40` }}>
+          {hideTrigger && <SheetHeader title="Sync" onClose={() => setOpen(false)} />}
+          <div className={hideTrigger ? 'p-3' : 'contents'}>
           <div className="text-xs text-stone-400 mb-1.5">
             {synced && lastSync ? `synced ${relativeTime(lastSync)}` : 'not syncing yet — your work is still saved on this device'}
           </div>
@@ -140,6 +150,7 @@ export function SyncStatus({
                 ☁ Sync now
               </button>
             )}
+          </div>
           </div>
         </div>
       )}

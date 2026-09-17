@@ -13,6 +13,9 @@ import type { MediaAsset, MediaKind } from '../media/types'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { cameraSupported } from '../media/camera'
 import { CameraCapturePopup } from './CameraCapturePopup'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 
 const INK = 'var(--iw-ink, #302438)'
 
@@ -25,11 +28,16 @@ const KINDS: { kind: MediaKind; label: string; accept: string; glyph: string }[]
   { kind: 'video', label: 'Video', accept: 'video/*', glyph: '▷' },
 ]
 
-export function MediaMenu({ assets, onImported }: {
+export function MediaMenu({ assets, onImported, open: openProp, onOpenChange }: {
   assets: readonly MediaAsset[]
   onImported: (asset: MediaAsset) => void
+  /** Lifted open state (toolbarContract.ts: a slot is a trigger, never an owner). */
+  open?: boolean
+  onOpenChange?: (v: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
   const [busy, setBusy] = useState<MediaKind | null>(null)
   const [error, setError] = useState<string | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -101,8 +109,10 @@ export function MediaMenu({ assets, onImported }: {
       // iw-touch-guard is MANDATORY on a PORTALED drop-up (CLAUDE.md): a tap outside the
       // contenteditable blurs it on iOS → the keyboard retracts → the docked pill and this menu
       // slide to the screen bottom. iw-nightable or it renders white-on-white in night mode.
-      className={`iw-nightable iw-touch-guard fixed z-[120] bg-white rounded-2xl shadow-xl font-serif flex flex-col ${open ? '' : 'invisible pointer-events-none'}`}
-      style={{
+      {...{ [PANEL_ATTR]: 'media' }}
+      className={`iw-nightable iw-touch-guard fixed z-[120] bg-white shadow-xl font-serif flex flex-col ${isTouch ? PHONE_SHEET_CLASS : 'rounded-2xl'} ${open ? '' : 'invisible pointer-events-none'}`}
+      // Phone: the shared sheet above the toolbar (styles/panelSheet.ts). Desktop: centred over ❐.
+      style={isTouch ? phoneSheetStyle() : {
         left: pos.left, bottom: pos.bottom, transform: 'translateX(-50%)',
         border: `1px solid var(--iw-nightable-border, ${INK}bf)`,
         // Peter: "Every font proportionally up. It's okay if users have to scroll." Nothing here
@@ -110,6 +120,7 @@ export function MediaMenu({ assets, onImported }: {
         fontSize: 17, minWidth: 200, padding: 8,
       }}
     >
+      {isTouch && <SheetHeader title="Import" onClose={() => setOpen(false)} />}
       {KINDS.map(k => (
         <button
           key={k.kind}
@@ -140,7 +151,8 @@ export function MediaMenu({ assets, onImported }: {
         ref={btnRef}
         type="button"
         aria-pressed={open}
-        onClick={() => setOpen(o => !o)}
+        {...{ [PANEL_TRIGGER_ATTR]: 'media' }}
+        onClick={() => setOpen(!open)}
         className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
         title="Import a photo, audio or video"
       >

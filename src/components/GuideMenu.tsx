@@ -1,6 +1,10 @@
 // GuideMenu — ⓘ toolbar button; opens a wide 3-column shortcut reference.
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 import { Link } from 'react-router'
 import { STUDIO_FILE_SETUP_MAC } from '../pwa/studioFileSetup'
 
@@ -68,8 +72,13 @@ const ZOOM: Array<{ k: string; d: string }> = [
   { k: '⌘ + scroll/pinch', d: 'magnify the whole page and water' },
 ]
 
-export function GuideMenu() {
-  const [open, setOpen] = useState(false)
+const isPhone = isTouchDevice()
+
+/** `open`/`onOpenChange`: the lifted state (toolbarContract.ts — a slot is a trigger, never an owner). */
+export function GuideMenu({ open: openProp, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void } = {}) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -114,7 +123,8 @@ export function GuideMenu() {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen(o => !o)}
+        {...{ [PANEL_TRIGGER_ATTR]: 'guide' }}
+        onClick={() => setOpen(!open)}
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
         title="Guide"
       >
@@ -123,32 +133,31 @@ export function GuideMenu() {
 
       {open && createPortal(
         <>
-          {/* Transparent backdrop — click outside to dismiss. The panel itself is movable + resizable. */}
-          <div className="fixed inset-0 z-[99]" onMouseDown={() => setOpen(false)} />
+          {/* Desktop: transparent backdrop — click outside to dismiss; the panel is movable + resizable.
+              Phone: no scrim (it would cover the footer); the shared sheet + the editor's outside-tap rule. */}
+          {!isPhone && <div className="fixed inset-0 z-[99]" onPointerDown={() => setOpen(false)} />}
           <div
             ref={dialogRef}
             role="dialog"
             aria-label="Guide"
-            className="iw-nightable iw-touch-guard fixed z-[100]"
+            {...{ [PANEL_ATTR]: 'guide' }}
+            className={`iw-nightable iw-touch-guard fixed z-[100] font-serif ${isPhone ? PHONE_SHEET_CLASS : ''}`}
             onMouseDown={e => e.stopPropagation()}
-            style={{
+            style={isPhone ? phoneSheetStyle() : {
               ...(pos ? { left: pos.left, top: pos.top } : defaultAnchor()),
               width: 470, maxWidth: '92vw', height: 'calc(100vh - 92px)', maxHeight: 'calc(100vh - 92px)',
               resize: 'both', overflow: 'auto',
-              padding: '14px 20px 20px',
               background: 'white',
               boxShadow: '0 12px 48px rgba(0,0,0,0.16)',
               border: `1px solid ${INK}bf`,
               borderRadius: '14px',
             }}
           >
-            {/* Drag handle */}
-            <div onMouseDown={onHeaderDown}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', cursor: 'move', userSelect: 'none' }}>
-              <h2 style={{ fontSize: '1.1rem', fontFamily: 'serif', color: 'var(--iw-ink, #302438)', margin: 0 }}>Guide</h2>
-              <button type="button" aria-label="Close" onMouseDown={e => e.stopPropagation()} onClick={() => setOpen(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--iw-pill-fg, #78716c)', fontSize: '1.4rem', lineHeight: 1 }}>×</button>
+            {/* The shared header — on desktop also the drag handle. */}
+            <div onMouseDown={isPhone ? undefined : onHeaderDown} style={isPhone ? undefined : { cursor: 'move', userSelect: 'none' }}>
+              <SheetHeader title="Guide" onClose={() => setOpen(false)} />
             </div>
+            <div style={{ padding: '10px 20px 20px', flex: '1 1 auto', overflow: isPhone ? 'auto' : undefined }}>
 
             {/* One master column: keys right-aligned in a max-content column, descriptions left-aligned —
                 so the gap between them forms a straight vertical line through every section. */}
@@ -192,6 +201,7 @@ export function GuideMenu() {
                 See all tips and Windows setup →
               </Link>
             </section>
+            </div>
           </div>
         </>,
         document.body,

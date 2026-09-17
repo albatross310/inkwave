@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader, SheetSection, SheetPill } from './PanelSheet'
 import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight'
 import type { ParagraphStyleAttrs } from '../editor/extensions/ParagraphStyle'
 import {
@@ -32,8 +35,14 @@ const SPACING_PRESETS = [{ l: 'Low', v: 0.4 }, { l: 'Mid', v: 0.8 }, { l: 'High'
 const pxConv = { toCm: (px: number) => px / CM,          fromCm: (cm: number) => cm * CM }
 const emConv = { toCm: (em: number) => em * EM_BASE / CM, fromCm: (cm: number) => cm * CM / EM_BASE }
 
-export function PageMenu({ editor }: { editor?: Editor }) {
-  const [open, setOpen] = useState(false)
+// A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts): the open state is LIFTED to the editor's
+// one `openPanel` when `open`/`onOpenChange` are passed; the internal boolean is only the
+// uncontrolled fallback. On the phone this panel had NO way to close but its × — no scrim, and
+// Escape does not exist on a touch keyboard (Peter, 2026-09-17).
+export function PageMenu({ editor, open: openProp, onOpenChange }: { editor?: Editor; open?: boolean; onOpenChange?: (v: boolean) => void }) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
   const [, rerender] = useState(0)
   const btnRef = useRef<HTMLButtonElement>(null)
   // Capture editor focus before the panel open click causes blur.
@@ -54,9 +63,14 @@ export function PageMenu({ editor }: { editor?: Editor }) {
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
+  // Phone: the shared bottom sheet above the toolbar (styles/panelSheet.ts). Desktop: centred,
+  // movable, resizable (the drag handlers below are mouse-only and inert on touch).
   function menuStyle(): React.CSSProperties {
-    if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
-    return { position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+    if (isPhone) return phoneSheetStyle()
+    const pos = dragPos
+      ? { position: 'fixed' as const, top: dragPos.top, left: dragPos.left }
+      : { position: 'fixed' as const, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+    return { ...pos, width: 384, minWidth: 300, minHeight: 260, maxWidth: '96vw', maxHeight: '90vh', resize: 'both', overflow: 'auto', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }
   }
 
   function onHeaderMouseDown(e: React.MouseEvent) {
@@ -162,8 +176,9 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   return (
     <>
       <button ref={btnRef} type="button" aria-haspopup="dialog" aria-expanded={open}
+        {...{ [PANEL_TRIGGER_ATTR]: 'page' }}
         onMouseDown={() => { parFocusRef.current = Boolean(editor?.isFocused) }}
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen(!open)}
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif
           ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
         title="Page settings">
@@ -173,16 +188,15 @@ export function PageMenu({ editor }: { editor?: Editor }) {
       {open && createPortal(
         <>
           <div ref={panelRef} role="dialog" aria-label="Page settings"
-            className="iw-nightable iw-touch-guard z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-            style={{ ...menuStyle(), width: 384, minWidth: 300, minHeight: 260, maxWidth: '96vw', maxHeight: '90vh', resize: 'both', overflow: 'auto', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
+            {...{ [PANEL_ATTR]: 'page' }}
+            className={`iw-nightable iw-touch-guard z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col ${isPhone ? PHONE_SHEET_CLASS : ''}`}
+            style={menuStyle()}
             onMouseDown={e => e.stopPropagation()}>
 
-            {/* Header (drag to move) */}
-            <div className="flex items-center justify-between px-5 pt-3 pb-2 border-b border-stone-100"
-              style={{ cursor: 'grab' }} onMouseDown={onHeaderMouseDown}>
-              <span className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>Page</span>
-              <div className="flex items-center gap-2">
-                {parFocus && editor ? (
+            {/* Header — the shared sheet header; on desktop it is also the drag handle. */}
+            <div style={isPhone ? undefined : { cursor: 'grab' }} onMouseDown={isPhone ? undefined : onHeaderMouseDown}>
+              <SheetHeader title="Page" onClose={() => setOpen(false)} closeTitle="Close (Esc)"
+                right={parFocus && editor ? (
                   <>
                     <span className="text-[11px] italic" style={{ color: 'var(--iw-ink, #302438)' }}>↳ paragraph</span>
                     <button type="button" onMouseDown={e => e.preventDefault()} onClick={applyToAll}
@@ -193,13 +207,7 @@ export function PageMenu({ editor }: { editor?: Editor }) {
                   </>
                 ) : (
                   <span className="text-[11px] italic" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>changes apply to all text</span>
-                )}
-                <button type="button" onClick={() => setOpen(false)} onMouseDown={e => e.preventDefault()}
-                  className="ml-1 hover:text-stone-600 transition-colors leading-none"
-                  style={{ fontSize: 18, lineHeight: 1, color: 'var(--iw-pill-fg, #78716c)' }} title="Close (Esc)">
-                  ×
-                </button>
-              </div>
+                )} />
             </div>
 
             {/* ── Margins ── */}
@@ -317,26 +325,9 @@ export function PageMenu({ editor }: { editor?: Editor }) {
   )
 }
 
-function SectionHead({ label }: { label: string }) {
-  return (
-    <div className="px-5 pt-2.5 pb-1 text-[10px] uppercase tracking-widest" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{label}</div>
-  )
-}
-
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick}
-      onMouseDown={e => e.preventDefault()}
-      className="px-3 py-0.5 rounded-full text-xs transition-colors whitespace-nowrap"
-      style={{
-        background: active ? 'var(--iw-ink, #302438)' : 'transparent',
-        color: active ? 'var(--iw-on-ink, #ffffff)' : 'var(--iw-pill-fg, #78716c)',
-        border: `1px solid ${active ? 'var(--iw-ink, #302438)' : 'var(--iw-nightable-border, #d1d5db)'}`,
-      }}>
-      {label}
-    </button>
-  )
-}
+// The section label and the pill are the SHARED pieces (components/PanelSheet.tsx).
+const SectionHead = SheetSection
+const Chip = SheetPill
 
 const STEP = 0.2 // cm per arrow click
 

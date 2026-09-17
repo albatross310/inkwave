@@ -3,6 +3,9 @@ import type { SnapshotMeta } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
 import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill, useFooterCramped } from './sidePill'
+import { PANEL_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 
 // Module-level so its identity is stable: React re-invokes a callback ref (null, then el) whenever
 // its identity changes, and an inline arrow would re-register the pill on every render.
@@ -177,11 +180,16 @@ export function ReceiptPanel({
 
   return (
     <>
-      {panelOpen && <div className="fixed inset-0 z-30" aria-hidden="true" onMouseDown={() => setOpen(false)} />}
+      {/* Desktop scrim (pointerdown — iOS withholds mousedown). On phone (hideTrigger: the ◈ lives in
+          the ▲ drawer) there is none: the editor's outside-tap rule closes the sheet, and a scrim
+          over the footer would eat the tap meant for the next button. */}
+      {panelOpen && !hideTrigger && <div className="fixed inset-0 z-30" aria-hidden="true" onPointerDown={() => setOpen(false)} />}
 
       <div
-        className="fixed left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
-        style={{
+        className={`fixed z-40 font-serif text-sm select-none flex flex-col-reverse items-start ${hideTrigger ? '' : 'left-0'}`}
+        // Phone (hideTrigger): the shared sheet above the toolbar (styles/panelSheet.ts) — the
+        // wrapper takes the sheet's position and the panel below fills it.
+        style={hideTrigger ? { ...phoneSheetStyle(), border: 'none', boxShadow: 'none', color: 'var(--iw-ink, #302438)' } : {
           color: 'var(--iw-ink, #302438)',
           // MIDLINE-matched to the toolbar and to the sync pill opposite (2026-08-20) — this used to be
           // `28*zoom + 10`, a bottom-edge offset with a stray +10 that put this pill 10px above the
@@ -253,9 +261,13 @@ export function ReceiptPanel({
 
         {panelOpen && (
           <div
-            className="iw-nightable mb-1.5 bg-white overflow-auto"
-            style={{ border: `1px solid rgb(var(--iw-ink-rgb) / 0.4)`, borderRadius: 10, maxHeight: '55vh', width: 210 }}
+            {...{ [PANEL_ATTR]: 'receipt' }}
+            className={`iw-nightable bg-white overflow-auto ${hideTrigger ? `${PHONE_SHEET_CLASS} w-full` : 'mb-1.5'}`}
+            style={hideTrigger
+              ? { border: phoneSheetStyle().border, borderRadius: phoneSheetStyle().borderRadius, boxShadow: phoneSheetStyle().boxShadow, maxHeight: 'inherit' }
+              : { border: `1px solid rgb(var(--iw-ink-rgb) / 0.4)`, borderRadius: 10, maxHeight: '55vh', width: 210 }}
           >
+            {hideTrigger && <SheetHeader title="Snapshots" onClose={() => setOpen(false)} />}
             {/* Save version — stays open so the new entry appears in-place */}
             {onSaveVersion && (
               <button

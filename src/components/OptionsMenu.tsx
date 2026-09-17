@@ -15,6 +15,9 @@ import { withScasDefaults } from '../scas/state'
 import { emailEnabled } from '../email/flag'
 import { openInkwaveFile } from '../storage/openDoc'
 import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 import { oneDriveFilename } from '../storage/onedrive'
 import { googleDriveConfigured, preloadGis } from '../storage/gdrive'
 import { AccountMenuItems } from './AccountControl'
@@ -92,6 +95,8 @@ async function createDocument(
 }
 
 export function OptionsMenu({
+  open: openProp,
+  onOpenChange,
   paperRight,
   installPrompt,
   onExportBundle,
@@ -117,6 +122,9 @@ export function OptionsMenu({
   onWorkReport,
   onFileOpenError,
 }: {
+  /** Lifted open state (toolbarContract.ts: a slot is a trigger, never an owner). */
+  open?: boolean
+  onOpenChange?: (v: boolean) => void
   paperRight: number
   installPrompt?: any
   onExportBundle?: (stripPdfs?: 'all' | 'public', gzip?: boolean) => void
@@ -144,7 +152,10 @@ export function OptionsMenu({
   onFileOpenError?: (msg: string) => void
 }) {
   const navigate = useNavigate()
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const menuOpen = openProp ?? internalOpen
+  const setMenuOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
+  const isPhone = isTouchDevice()
   const [modal, setModal] = useState<ModalKey | null>(null)
   // The OPFS inspector is NOT a ModalKey: it is a full recovery panel with its own portal +
   // sizing, not one of the little drop-ups anchored over the kebab.
@@ -302,7 +313,7 @@ export function OptionsMenu({
     const bottom = br ? Math.round(window.innerHeight - br.top + PANEL_GAP) : 60
     // Phone: hug the right edge (the ⋮ button is the rightmost control; the old centre-clamp used
     // HALF of the WIDEST panel, which shoved the little menu toward mid-screen — Peter, 2026-07-09).
-    if (isTouchDevice()) return { position: 'fixed', bottom, right: EDGE_BUFFER }
+    if (isTouchDevice()) return phoneSheetStyle() // the shared sheet (styles/panelSheet.ts)
     const HALF = 150 // ~half the widest panel, for edge clamping
     const center = br ? br.left + br.width / 2 : (paperRight || window.innerWidth / 2)
     return {
@@ -312,7 +323,9 @@ export function OptionsMenu({
       transform: 'translateX(-50%)',
     }
   }
-  const menuStyle: CSSProperties = { ...(menuOpen ? panelAnchor() : {}), border: `1px solid ${INK}66`, borderRadius: '10px' }
+  const menuStyle: CSSProperties = isPhone
+    ? (menuOpen ? panelAnchor() : {})
+    : { ...(menuOpen ? panelAnchor() : {}), border: `1px solid ${INK}66`, borderRadius: '10px' }
 
   return (
     <div ref={rootRef} className="relative" onPointerDown={e => e.stopPropagation()}>
@@ -332,7 +345,8 @@ export function OptionsMenu({
       <input ref={fileInputRef} type="file" className="hidden" onChange={onOpenFile} />
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
-        onClick={() => setMenuOpen(o => !o)}
+        {...{ [PANEL_TRIGGER_ATTR]: 'options' }}
+        onClick={() => setMenuOpen(!menuOpen)}
         className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-stone-400 hover:text-[#302438] transition-colors"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -342,12 +356,17 @@ export function OptionsMenu({
 
       {menuOpen && createPortal(
         <>
-          {/* Backdrop — dismiss on outside click; sits below the menu in the portal layer */}
-          <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
+          {/* Desktop backdrop — dismiss on outside press (pointerdown, never mousedown: iOS withholds
+              it). None on phone: it would cover the footer and eat the tap meant for the next button;
+              the editor's one outside-tap rule closes the sheet instead. */}
+          {!isPhone && <div className="fixed inset-0 z-[55]" aria-hidden="true" onPointerDown={() => setMenuOpen(false)} />}
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable iw-touch-guard iw-no-print z-[60] w-[14.375rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
+          <div role="menu" {...{ [PANEL_ATTR]: 'options' }}
+            className={`iw-nightable iw-touch-guard iw-no-print z-[60] bg-white shadow-md text-[17px] text-stone-600 font-serif ${isPhone ? PHONE_SHEET_CLASS : 'w-[14.375rem] py-0.5 flex'}`} style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
+            {isPhone && <SheetHeader title="Menu" onClose={() => setMenuOpen(false)} />}
+            <div className={isPhone ? 'flex py-0.5' : 'contents'}>
             {/* LEFT column: Verify/About/Privacy/Print/Snapshots … ending with Sign in/Logout. */}
             <div className="flex-1 border-r border-stone-100">
               {items.map(it => (
@@ -370,6 +389,7 @@ export function OptionsMenu({
                   {it.label}
                 </button>
               ))}
+            </div>
             </div>
           </div>
         </>,
@@ -641,9 +661,9 @@ function Modal({ title, onClose, children, anchorStyle }: { title: string; onClo
   // trapped in the footer's pointer-events/stacking context). Positioned above the kebab (same anchor as
   // the menu) so it reads as one continuous panel.
   return createPortal(
-    <div className="fixed inset-0 z-[100]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[100]" onPointerDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
-      <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={e => e.stopPropagation()}
+      <div role="dialog" aria-modal="true" aria-label={title} onPointerDown={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
         className="iw-nightable bg-white w-[300px] max-w-[92vw] p-5 flex flex-col shadow-xl"
         style={{ ...anchorStyle, border: `1px solid ${INK}bf`, borderRadius: '14px' }}
       >

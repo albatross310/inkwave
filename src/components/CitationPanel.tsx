@@ -9,6 +9,8 @@ import { citeClickOpensReader, setCiteClickOpensReader } from './dockLayout'
 import { importLegacyLibrary, legacyLibrarySize } from '../citations/library'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
@@ -811,14 +813,21 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         />
       )}
       {/* Backdrop — in fullscreen it becomes the aquamarine wave surround (paper floats over it). */}
-      <div className={`fixed inset-0 z-[90] ${fullscreen ? 'inkwave-editor-surface' : ''}`} aria-hidden="true" onMouseDown={onClose} />
+      {/* Desktop / fullscreen backdrop (pointerdown — iOS withholds mousedown). The phone sheet has
+          none: the editor's outside-tap rule closes it, and a scrim over the footer would eat the
+          tap meant for the next toolbar button. */}
+      {(!isTouchDevice() || fullscreen) && <div className={`fixed inset-0 z-[90] ${fullscreen ? 'inkwave-editor-surface' : ''}`} aria-hidden="true" onPointerDown={onClose} />}
       <div
         ref={panelRef}
         role="dialog" aria-label="Citations"
-        className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
+        {...{ [PANEL_ATTR]: 'bib' }}
+        className={`iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col ${isTouchDevice() && !fullscreen ? PHONE_SHEET_CLASS : ''}`}
         style={fullscreen
           ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: isTouchDevice() ? '100vw' : 'min(864px, 96vw)', overflow: 'hidden', borderRadius: 0, ...(isTouchDevice() ? {} : { borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }) }
-          : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
+          : isTouchDevice()
+            // Phone: the shared sheet above the toolbar (styles/panelSheet.ts); the list scrolls inside.
+            ? { ...phoneSheetStyle(), height: 'calc(var(--iw-vv-h, 100dvh) * 0.72)', overflow: 'hidden' }
+            : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
         onMouseDown={e => e.stopPropagation()}
       >
         {/* Slim drag grip (fullscreen toggle lives beside the × in the Add row). */}

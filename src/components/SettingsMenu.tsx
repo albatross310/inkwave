@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
 import { flushPendingSave } from '../storage/opfs'
 
@@ -26,10 +30,17 @@ const PANEL_GAP = 14
 interface SettingsMenuProps {
   limitN: number | 'infinite'
   onLimitChange: (v: number | 'infinite') => void
+  /** Lifted open state (toolbarContract.ts: a slot is a trigger, never an owner). */
+  open?: boolean
+  onOpenChange?: (v: boolean) => void
 }
 
-export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
-  const [open, setOpen] = useState(false)
+const isPhone = isTouchDevice()
+
+export function SettingsMenu({ limitN, onLimitChange, open: openProp, onOpenChange }: SettingsMenuProps) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
   // Phone with the keyboard up: the panel must fit the REDUCED visual viewport above the
   // keyboard — render the rows in TWO columns (wider, half the height). Captured at open time
   // (__iwKeyboardUp is the editor's live flag; the toolbar focus guard keeps the keyboard up
@@ -42,7 +53,9 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    const onScroll = () => setOpen(false)
+    // Desktop only: a page scroll dismisses. On phone the sheet is pinned above the toolbar and
+    // scrolls INSIDE itself; the outside-tap rule (TiptapEditor) is what closes it.
+    const onScroll = () => { if (!isPhone) setOpen(false) }
     document.addEventListener('keydown', onKey)
     window.addEventListener('scroll', onScroll, { passive: true, capture: true })
     return () => { document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll, { capture: true } as EventListenerOptions) }
@@ -50,11 +63,13 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
 
   function toggle() {
     setTwoCol(!!(window as unknown as { __iwKeyboardUp?: boolean }).__iwKeyboardUp)
-    setOpen(o => !o)
+    setOpen(!open)
   }
 
-  // Centred above the button, with the shared PANEL_GAP — same model as the hamburger menu.
+  // Phone: the shared sheet (styles/panelSheet.ts). Desktop: centred above the button, with the
+  // shared PANEL_GAP — same model as the hamburger menu.
   function menuStyle(): React.CSSProperties {
+    if (isPhone) return phoneSheetStyle()
     const br = btnRef.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)' }
     const HALF = twoCol ? 184 : 104 // ~half the panel width, for edge clamping
@@ -78,6 +93,7 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
+        {...{ [PANEL_TRIGGER_ATTR]: 'settings' }}
         onClick={toggle}
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
         title="Settings"
@@ -91,17 +107,20 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
 
       {open && createPortal(
         <>
-          <div className="fixed inset-0 z-[90]" aria-hidden="true" onMouseDown={() => setOpen(false)} />
+          {/* Desktop scrim (pointerdown — iOS withholds mousedown under the touch guard). None on
+              phone: it would sit over the footer and eat the tap meant for the next button. */}
+          {!isPhone && <div className="fixed inset-0 z-[90]" aria-hidden="true" onPointerDown={() => setOpen(false)} />}
           <div
             role="dialog"
             aria-label="Settings"
-            className={`iw-nightable iw-touch-guard z-[91] ${twoCol ? 'w-[23rem] max-w-[94vw]' : 'w-52'} bg-white shadow-lg font-serif text-sm text-stone-600`}
-            style={{ ...menuStyle(), border: `1px solid ${INK}55`, borderRadius: 12 }}
+            {...{ [PANEL_ATTR]: 'settings' }}
+            className={`iw-nightable iw-touch-guard z-[91] ${isPhone ? PHONE_SHEET_CLASS : twoCol ? 'w-[23rem] max-w-[94vw]' : 'w-52'} bg-white shadow-lg font-serif text-sm text-stone-600`}
+            style={isPhone ? menuStyle() : { ...menuStyle(), border: `1px solid ${INK}55`, borderRadius: 12 }}
             onMouseDown={e => e.stopPropagation()}
           >
-            <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-stone-400">Settings</div>
-            {/* Keyboard-up phone: two columns so every row fits the shortened viewport. */}
-            <div className={twoCol ? 'grid grid-cols-2 gap-x-1 items-center' : undefined}>
+            <SheetHeader title="Settings" onClose={() => setOpen(false)} />
+            {/* Phone: two columns so every row fits the band above the toolbar (keyboard up or not). */}
+            <div className={twoCol || isPhone ? 'grid grid-cols-2 gap-x-1 items-center' : undefined}>
 
             {/* Night mode — dark writing surface */}
             <Row

@@ -5,6 +5,10 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 import type { Editor } from '@tiptap/core'
 import { getSymbols, deleteSymbol, setSymbol as saveSymbol, PRESETS, type MathSymbol } from '../editor/extensions/mathSymbols'
 
@@ -74,8 +78,13 @@ const ALIGN_OPTS = [
   { value: 'left',    label: '◁',  title: 'Block alignment — left'       },
 ] as const
 
-export function MathMenuButton({ editor }: { editor: Editor | null }) {
-  const [open, setOpen]           = useState(false)
+const isPhone = isTouchDevice()
+
+/** `open`/`onOpenChange`: the lifted state (toolbarContract.ts — a slot is a trigger, never an owner). */
+export function MathMenuButton({ editor, open: openProp, onOpenChange }: { editor: Editor | null; open?: boolean; onOpenChange?: (v: boolean) => void }) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = openProp ?? internalOpen
+  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
   const [view, setView]           = useState<'menu' | 'symbols' | 'info'>('menu')
   const [symbols, setSymbols]     = useState<MathSymbol[]>([])
   const [newKey, setNewKey]       = useState('')
@@ -102,7 +111,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
     if (!open) return
     // Close on PAGE scroll only from the short main menu; the info/symbols sub-views scroll internally, so
     // scrolling their lists must NOT dismiss the popup (that was the "panel hides when you scroll" bug).
-    const closeOnScroll = () => { if (view === 'menu') setOpen(false) }
+    const closeOnScroll = () => { if (view === 'menu' && !isPhone) setOpen(false) } // phone: the sheet is pinned; the outside tap closes it
     window.addEventListener('scroll', closeOnScroll, { passive: true, capture: true })
     return () => { window.removeEventListener('scroll', closeOnScroll, { capture: true } as EventListenerOptions) }
   }, [open, view])
@@ -147,6 +156,7 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
       <button
         ref={btnRef}
         type="button"
+        {...{ [PANEL_TRIGGER_ATTR]: 'math' }}
         onClick={() => (open ? setOpen(false) : openMenu())}
         onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
         className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
@@ -159,12 +169,15 @@ export function MathMenuButton({ editor }: { editor: Editor | null }) {
         <>
         {/* Backdrop — dismiss on outside press. Pressing ∑ again lands here too, so it CLOSES
             (the trigger's onClick never fires while open — exactly how SettingsMenu toggles). */}
-        <div className="fixed inset-0 z-[199]" aria-hidden="true" onMouseDown={() => setOpen(false)} />
+        {!isPhone && <div className="fixed inset-0 z-[199]" aria-hidden="true" onPointerDown={() => setOpen(false)} />}
         <div
-          className="iw-nightable iw-touch-guard"
+          {...{ [PANEL_ATTR]: 'math' }}
+          className={`iw-nightable iw-touch-guard ${isPhone ? `${PHONE_SHEET_CLASS} font-serif` : ''}`}
           onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
-          style={{ position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', background: 'white', border: '1px solid rgb(var(--iw-ink-rgb) / 0.75)', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '4px', zIndex: 200, minWidth: view === 'symbols' ? '280px' : '118px' }}
+          // Phone: the shared sheet above the toolbar (styles/panelSheet.ts). Desktop: a popover over Σ.
+          style={isPhone ? { ...phoneSheetStyle(), zIndex: 200 } : { position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', background: 'white', border: '1px solid rgb(var(--iw-ink-rgb) / 0.75)', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '4px', zIndex: 200, minWidth: view === 'symbols' ? '280px' : '118px' }}
         >
+          {isPhone && <SheetHeader title="Math" onClose={() => setOpen(false)} />}
           {view === 'menu' && (
             <>
               {MATH_ITEMS.map(item => btn(item.label, item.hint, () => { setOpen(false); if (editor) item.action(editor) }))}

@@ -1063,6 +1063,19 @@
     height: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
   }
 
+  /* ── THE PHONE PANEL SHEET (styles/panelSheet.ts owns the numbers; this is its box) ──────────
+     Every footer drop-up on phone is one of these: the JS style sets position/inset/bottom/max-
+     height from the live --iw-toolbar-h / --iw-kb-offset / --iw-vv-h vars; this class adds what
+     CSS does better — scrolling inside a capped height, the type floor, and momentum scroll. */
+  .iw-phone-sheet {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    background: #fff;
+  }
+
   /* Footer chrome has one literal neutral outline. Glyphs may change colour for hover/open/error
      state, but their circles and the three sibling pills must remain the same grey. */
   .iw-toolbar-outline,
@@ -2217,6 +2230,8 @@
      --iw-pill-fg      a muted label: a pill's text, a section heading, an unselected control.
      --iw-nightable-border  the outline of an inline-styled control. */
 :root { --iw-panel-fg: #4a4035; --iw-pill-fg: #78716c; --iw-nightable-border: #e7e5e4; }
+/* The phone panel sheet's shadow (styles/panelSheet.ts) — one token so every sheet lifts the same. */
+:root { --iw-sheet-shadow: 0 10px 40px rgba(28, 25, 23, 0.18); }
 /* ⚠ THE BORDER'S DAY VALUE IS THE PLURALITY OF ITS CALL SITES, NOT A FRESH CHOICE (2026-08-30).
    Declaring a day value for a token that was night-only is NOT a no-op: it kills every component
    fallback at once, and this token is passed 117 times with 20 DIFFERENT fallbacks. The first cut

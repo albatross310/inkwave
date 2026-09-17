@@ -23,13 +23,14 @@ import { readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemo
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
-import { createDock } from './toolbarDock'
+import { createDock, KEYBOARD_MIN_PX } from './toolbarDock'
 import { moveSlot, nearestSlot, neighborShift, brokeHoldSlop } from './toolbarSlots'
 import {
   SlotId, BarLayerId, BAR_HANDOFF_MS,
   overflowSlots, planBarToggle, readStoredRow, saveStoredRow,
   slotIndexForDigit, hotkeyHintFor,
   readToolbarConfig, resolveToolbarRow, mayPersistConfig, mergeRowIntoConfig,
+  type PanelId, planPanelToggle, tapClosesPanel, PANEL_ATTR, PANEL_TRIGGER_ATTR,
 } from './toolbarContract'
 import { subscribe as subscribeMagnify } from './magnify'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
@@ -92,6 +93,7 @@ import { musicEnabled } from '../music/flag'
 import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
 import { WorkSummaryAutoOpen } from '../components/WorkSummaryAutoOpen'
 import { PageMenu } from '../components/PageMenu'
+import { PHONE_SHEET } from '../styles/panelSheet'
 import { gappedPagesEnabled } from './pageView'
 import { setPaginationGappedMode } from './extensions/PaginationExtension'
 import { getLineHeight } from './lineHeight'
@@ -415,8 +417,24 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
   const [paperRight, setPaperRight] = useState(0)
-  // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
-  const [receiptOpen, setReceiptOpen] = useState(false)
+  // THE PANELS — ONE variable, holding ONE id (toolbarContract.ts, Population 3). P, ⚙, i, ❐, ⋮,
+  // Σ, ⁝, the ▲ drawer and its ◈ ☁ ‟ were each a private boolean, so on the phone a second tap
+  // opened a second surface over the first and nothing but × closed either (Peter, 2026-09-17).
+  // Now every trigger is a dumb toggle through `togglePanel`, "two open" is unrepresentable, and
+  // the outside-tap rule is ONE document listener (below) rather than a scrim per panel — a scrim
+  // over the footer would also swallow the tap meant for the NEXT button.
+  const [openPanel, setOpenPanel] = useState<PanelId | null>(null)
+  const togglePanel = useCallback((id: PanelId) => setOpenPanel(p => planPanelToggle(p, id)), [])
+  // The controlled-prop adapter: a panel's own × / item-select says "close ME", never "close
+  // whatever is open" — by the time it fires, another panel may already own the slot.
+  const setPanelOpen = useCallback((id: PanelId, v: boolean) => setOpenPanel(p => (v ? id : p === id ? null : p)), [])
+  const receiptOpen = openPanel === 'receipt'
+  const syncOpen = openPanel === 'sync'
+  const bibPanelOpen = openPanel === 'bib'
+  const toolbarPickerOpen = openPanel === 'drawer'
+  const ledgerOpen = openPanel === 'clock'
+  const openPanelRef = useRef(openPanel)
+  openPanelRef.current = openPanel
   // THE SECOND TOOLBAR LAYER — ONE variable, holding ONE id (see toolbarContract.ts). Peter's word
   // is "mutually exclusive": R and the music bar cannot both own the bar. This was two booleans =
   // four states, one of them illegal ("both open") and prevented only by the discipline of a
@@ -425,7 +443,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // member to BarLayerId and rendering on `activeBar === 'x'`.
   const [activeBar, setActiveBar] = useState<BarLayerId | null>(null)
   const reviewOpen = activeBar === 'review'   // review layer: sticky-note comments + track changes
-  const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
   // The free paste-back work report (§A7.1, Path 1) — now DEFAULT ON (`?prodReport=off` to disable).
   const [reportOpen, setReportOpen] = useState(false)
@@ -477,7 +494,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   }, [])
 
   // ── Citation / bibliography state ─────────────────────────────────────────
-  const [bibPanelOpen, setBibPanelOpen] = useState(false)
   const [bibPanelStartsNew, setBibPanelStartsNew] = useState(false)
   const bibBtnRef = useRef<HTMLButtonElement>(null)
   const [citationStyle, setCitationStyle] = useState(doc.citationStyle ?? 'apa')
@@ -486,7 +502,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   useEffect(() => {
     const onOpen = (event: Event) => {
       setBibPanelStartsNew(Boolean((event as CustomEvent<{ newReference?: boolean }>).detail?.newReference))
-      setBibPanelOpen(true)
+      setPanelOpen('bib', true)
     }
     window.addEventListener(OPEN_CITATION_PANEL_EVENT, onOpen)
     return () => window.removeEventListener(OPEN_CITATION_PANEL_EVENT, onOpen)
@@ -521,7 +537,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     const shared = p.get('url') || p.get('text') || ''
     if (/^https?:\/\//i.test(shared)) {
       setShareCapture(shared)
-      setBibPanelOpen(true)
+      setPanelOpen('bib', true)
       const clean = window.location.pathname + window.location.hash
       window.history.replaceState(null, '', clean)
     }
@@ -534,16 +550,14 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const [toolbarSlots, setToolbarSlots] = useState<SlotId[]>(
     () => resolveToolbarRow(toolbarRead, readStoredRow()),
   )
-  const [toolbarPickerOpen, setToolbarPickerOpen] = useState(false)
   // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts). The ledger drop-up's open state lives
   // HERE, not in the clock button: the row is SIX (Peter), so `clock` competes and sits in the ▲
   // overflow by default — its button is frequently unmounted. The slot and the countdown are two
   // access paths to ONE setter.
-  const [ledgerOpen, setLedgerOpen] = useState(false)
   // Stable opener — the countdown, the clock slot AND the end-of-session reflection watcher all set
   // ONE state (a slot is a trigger, never an owner). Stable so ReflectionAutoOpen's listener never
   // re-subscribes per render.
-  const openLedger = useCallback(() => setLedgerOpen(true), [])
+  const openLedger = useCallback(() => setPanelOpen('clock', true), [setPanelOpen])
   // The measured-charts panel (P1a-viz), opened FROM the clock drop-up. Its own lifted state — a
   // second surface, one owner — following the ReceiptPanel precedent Peter named.
   const [graphsOpen, setGraphsOpen] = useState(false)
@@ -814,7 +828,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       const next = [...toolbarSlots]
       next[st.targetIdx] = st.id
       updateSlots(next)
-      setToolbarPickerOpen(false)
+      setPanelOpen('drawer', false)
     }
   }
   const [popupDragActive, setPopupDragActive] = useState(false)
@@ -861,16 +875,28 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   })
   // ────────────────────────────────────────────────────────────────────────────
 
+  // RULE (a) OF THE PANEL CONTRACT: a pointerdown anywhere outside the open panel (and off its own
+  // trigger, so the click can toggle it shut) closes it — for EVERY panel, phone and desktop alike
+  // (the desktop scrims stay as belt-and-braces; on phone they are dropped, or they would eat the
+  // tap meant for the next toolbar button). pointerdown, never mousedown: iOS withholds the
+  // synthetic mouse event under the .iw-touch-guard touchmove preventDefault (docs/rules/ios-webkit.md).
+  // Capture phase: OptionsMenu stops pointerdown propagation at its root.
+  // The style + music rows retract on a tap outside the footer too. The REVIEW row deliberately
+  // does not: closing it silently switches track-changes off, and its comment notes are worked by
+  // tapping the paper.
   useEffect(() => {
-    if (!toolbarPickerOpen) return
-    function closeOnOutside(e: MouseEvent) {
-      if (toolbarPickerRef.current && !toolbarPickerRef.current.contains(e.target as Node)) {
-        setToolbarPickerOpen(false)
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null
+      const open = openPanelRef.current
+      if (open && tapClosesPanel(t, open)) setOpenPanel(null)
+      if (isTouchDevice() && t && !t.closest(`.iw-touch-guard, [${PANEL_ATTR}]`)) {
+        closeBarLayer('style')
+        closeBarLayer('music')
       }
     }
-    document.addEventListener('mousedown', closeOnOutside)
-    return () => document.removeEventListener('mousedown', closeOnOutside)
-  }, [toolbarPickerOpen])
+    document.addEventListener('pointerdown', onDown, { capture: true })
+    return () => document.removeEventListener('pointerdown', onDown, { capture: true } as EventListenerOptions)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
   const styleBarOpen = activeBar === 'style'
@@ -931,6 +957,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // only its hands — timing, sequence guard, idle timer. Adding a layer changes NOTHING here.
   function toggleBar(which: BarLayerId) {
     const seq = ++barSeqRef.current
+    setOpenPanel(null) // a bar button is "any other toolbar button" to an open panel (rule b)
     markBarsAnimating()
     const plan = planBarToggle(activeBar, which)
     const land = (id: BarLayerId | null) => {
@@ -1520,9 +1547,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     const vv = window.visualViewport
     if (!vv) return
     const onVV = () => {
+      // The phone sheets (styles/panelSheet.ts) cap their height to the VISIBLE band.
+      document.documentElement.style.setProperty('--iw-vv-h', `${Math.round(vv.height)}px`)
       if (vv.scale > 1.01) return // pinch-zoomed: the viewport shrink is zoom, not the keyboard
       kbMaxRef.current = Math.max(kbMaxRef.current, vv.height)
-      setKeyboardUp(vv.height < kbMaxRef.current - 150)
+      setKeyboardUp(vv.height < kbMaxRef.current - KEYBOARD_MIN_PX) // ONE threshold with the dock
     }
     const onOrient = () => { kbMaxRef.current = vv.height; setKeyboardUp(false) }
     onVV()
@@ -3022,11 +3051,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // the ▲ drop-up (wherever the id currently lives), so behaviour can't drift between homes.
   const renderSlotButton = (id: SlotId, inRow: boolean) => (
     <>
-      {id === 'guide' && <GuideMenu />}
-      {id === 'math' && <MathMenuButton editor={editor} />}
+      {id === 'guide' && <GuideMenu open={openPanel === 'guide'} onOpenChange={v => setPanelOpen('guide', v)} />}
+      {id === 'math' && <MathMenuButton editor={editor} open={openPanel === 'math'} onOpenChange={v => setPanelOpen('math', v)} />}
       {id === 'bib' && (
         <button ref={inRow ? bibBtnRef : undefined} type="button"
-          onClick={() => setBibPanelOpen(o => !o)}
+          {...{ [PANEL_TRIGGER_ATTR]: 'bib' }}
+          onClick={() => togglePanel('bib')}
           className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
           title="Bibliography / citations"
         >
@@ -3042,7 +3072,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
         </button>
       )}
-      {id === 'page' && <PageMenu editor={editor ?? undefined} />}
+      {id === 'page' && <PageMenu editor={editor ?? undefined} open={openPanel === 'page'} onOpenChange={v => setPanelOpen('page', v)} />}
       {id === 'style' && (
         <button
           type="button"
@@ -3055,16 +3085,18 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">S</span>
         </button>
       )}
-      {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />}
+      {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} open={openPanel === 'settings'} onOpenChange={v => setPanelOpen('settings', v)} />}
       {id === 'media' && (
         <MediaMenu
           assets={doc.media ?? []}
+          open={openPanel === 'media'}
+          onOpenChange={v => setPanelOpen('media', v)}
           // The bytes are already in OPFS; both picker/camera imports and clipboard pastes use this
           // one reference-commit path so no caller can forget the document save.
           onImported={rememberMediaAsset}
         />
       )}
-      {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => setLedgerOpen(o => !o)} />}
+      {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => togglePanel('clock')} />}
       {id === 'music' && (
         // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts): this opens the music BAR layer;
         // it does not own music. `data-iw-bar="music"` marks it so the row's onClickCapture leaves
@@ -3214,11 +3246,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
             }}
             // The charts live behind their own default-ON flag; offer the button only when it's on.
             // Opening the charts closes the drop-up (the charts are a full modal over the same surface).
-            onOpenGraphs={prodGraphsEnabled() ? () => { setLedgerOpen(false); setGraphsOpen(true) } : undefined}
+            onOpenGraphs={prodGraphsEnabled() ? () => { setPanelOpen('clock', false); setGraphsOpen(true) } : undefined}
             // Reporting — the AI work report (P1c). Same lift: offer only behind its flag, and opening
             // it closes the drop-up (a full modal over the same surface).
-            onOpenReport={reportFlag ? () => { setLedgerOpen(false); setReportOpen(true) } : undefined}
-            onClose={() => setLedgerOpen(false)}
+            onOpenReport={reportFlag ? () => { setPanelOpen('clock', false); setReportOpen(true) } : undefined}
+            onClose={() => setPanelOpen('clock', false)}
           />
         )}
         {graphsOpen && (
@@ -3244,7 +3276,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           wordCount={wordCount}
           compact={isTouch}
           open={receiptOpen}
-          onOpenChange={setReceiptOpen}
+          onOpenChange={v => setPanelOpen('receipt', v)}
           hideTrigger={isTouch || keyboardUp}
         />
 
@@ -3259,7 +3291,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         {!keyboardUp && (() => {
           // On mobile, ◈ and ☁ live inside the toolbar — hide the fixed-position triggers.
           // On desktop they stay as floating corner pills.
-          const syncProps = isTouch ? { open: syncOpen, onOpenChange: setSyncOpen, hideTrigger: true as const } : {}
+          const syncProps = isTouch ? { open: syncOpen, onOpenChange: (v: boolean) => setPanelOpen('sync', v), hideTrigger: true as const } : {}
           if (fileSaveAvailable()) {
             // Regular browser → local folder. Honest states so the writer is never misled into
             // thinking it's saving when it isn't:
@@ -3494,7 +3526,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
               <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
-                  onClick={() => { setToolbarPickerOpen(o => !o); closeBarLayer('style') }}
+                  {...{ [PANEL_TRIGGER_ATTR]: 'drawer' }}
+                  onClick={() => { togglePanel('drawer'); closeBarLayer('style') }}
                   className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
                   title="Customise toolbar"
                 >
@@ -3507,8 +3540,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 {(() => {
                   const available = overflowSlots(toolbarSlots)
                   return (
-                    <div className={`absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
-                      style={{ border: '1px solid rgb(var(--iw-ink-rgb) / 0.75)' }}
+                    <div className={`absolute bottom-full left-0 mb-2 bg-white flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
+                      {...{ [PANEL_ATTR]: 'drawer' }}
+                      // The drawer is a panel too: the one radius / shadow / border every phone sheet wears.
+                      style={{ border: PHONE_SHEET.border, borderRadius: PHONE_SHEET.radiusPx, boxShadow: PHONE_SHEET.shadow }}
                       onMouseDown={e => e.stopPropagation()}>
                       {/* + add more opps */}
                       <div className="flex items-center">
@@ -3535,7 +3570,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                         <>
                           <div className="w-px h-6 bg-stone-100 mx-1" />
                           <button type="button"
-                            onClick={() => { setReceiptOpen(o => !o); setToolbarPickerOpen(false) }}
+                            {...{ [PANEL_TRIGGER_ATTR]: 'receipt' }}
+                            onClick={() => togglePanel('receipt')}
                             className="flex items-center justify-center min-w-[44px] min-h-[44px]"
                             style={{ color: '#302438' }}
                             title="Provenance record — snapshots"
@@ -3549,7 +3585,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                         <>
                           <div className="w-px h-6 bg-stone-100 mx-1" />
                           <button type="button"
-                            onClick={() => { setSyncOpen(o => !o); setToolbarPickerOpen(false) }}
+                            {...{ [PANEL_TRIGGER_ATTR]: 'sync' }}
+                            onClick={() => togglePanel('sync')}
                             className="flex items-center justify-center min-w-[44px] min-h-[44px]"
                             style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
                             title="Sync status">
@@ -3565,7 +3602,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                           draggable={!isTouch}
                           onDragStart={() => { dragIdRef.current = id }}
                           onDragEnd={() => { dragIdRef.current = null }}
-                          onClick={() => setToolbarPickerOpen(false)}
+                          onClick={() => setPanelOpen('drawer', false)} // no-op once the item's own panel took the slot
                           {...(isTouch ? popupTouchHandlers(id) : {})}
                           style={isTouch ? { touchAction: 'none' } : undefined}
                         >
@@ -3594,7 +3631,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                     if (fromIdx >= 0) newSlots[fromIdx] = slotId  // swap: put old slot where new slot was
                     newSlots[slotIdx] = from as SlotId
                     updateSlots(newSlots)
-                    setToolbarPickerOpen(false)
+                    setPanelOpen('drawer', false)
                   }}
                   onDragEnd={() => { dragIdRef.current = null }}
                   {...(isTouch ? slotTouchHandlers(slotIdx) : {})}
@@ -3641,6 +3678,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 </div>
               ))}
               <OptionsMenu
+                open={openPanel === 'options'}
+                onOpenChange={v => setPanelOpen('options', v)}
                 paperRight={paperRight}
                 installPrompt={installPrompt}
                 onExportBundle={exportBundle}
@@ -3701,7 +3740,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               const updated = { ...docRef.current, citationStyle: s, updatedAt: new Date().toISOString() }
               commitDoc(updated)
             }}
-            onClose={() => { setBibPanelOpen(false); setBibPanelStartsNew(false) }}
+            onClose={() => { setPanelOpen('bib', false); setBibPanelStartsNew(false) }}
           />
         )}
       </div>

@@ -24,6 +24,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET, PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
 import { LEDGER_ROW_EVENT, isLabelSuppressed, setLabelSuppressed } from '../productivity/capture'
 import { CHIME_VOICES, chimeMuted, chimeVoiceId, previewChime, setChimeMuted, setChimeVoiceId } from '../productivity/chime'
 import { prodLedgerEnabled, setProdLedgerEnabled } from '../productivity/ledgerFlag'
@@ -211,6 +213,7 @@ export function ClockSlotButton({ open, onToggle }: { open: boolean; onToggle: (
       aria-pressed={open}
       // The drop-up finds its anchor by this attribute, so it works from the row OR from ▲.
       data-iw-ledger-btn=""
+      {...{ [PANEL_TRIGGER_ATTR]: 'clock' }}
       onClick={onToggle}
       className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open || running ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
       title={running ? 'Pomodoro running — your ledger' : 'Pomodoro & your ledger'}
@@ -316,8 +319,9 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
   }, [rows])
 
   const isPhone = isTouchDevice()
+  // Phone: the shared sheet above the toolbar (styles/panelSheet.ts).
   const style: React.CSSProperties = isPhone
-    ? { position: 'fixed', left: 8, right: 8, bottom: 68 }
+    ? phoneSheetStyle()
     : (() => {
         const br = anchor?.getBoundingClientRect()
         const centre = br ? br.left + br.width / 2 : window.innerWidth / 2
@@ -340,13 +344,14 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
       // iw-touch-guard: a portalled panel over the editor — taps must not blur the contenteditable
       // (iOS retracts the keyboard and the docked pill walks to the screen bottom).
       // iw-nightable: opts the whole panel into the themed surface.
-      className="iw-nightable iw-touch-guard iw-no-print z-[60] flex flex-col overflow-hidden bg-white font-serif"
-      style={{
+      {...{ [PANEL_ATTR]: 'clock' }}
+      className={`iw-nightable iw-touch-guard iw-no-print z-[60] flex flex-col overflow-hidden bg-white font-serif ${isPhone ? PHONE_SHEET_CLASS : ''}`}
+      style={isPhone ? style : {
         ...style,
         maxHeight: '72vh',
-        borderRadius: 14,
-        boxShadow: '0 10px 40px rgba(28,25,23,0.18)',
-        border: '1px solid var(--iw-nightable-border, #ece9e6)',
+        borderRadius: PHONE_SHEET.radiusPx,
+        boxShadow: PHONE_SHEET.shadow,
+        border: PHONE_SHEET.border,
       }}
     >
       {/* The header: a back affordance on a sub-view + the view's name. This is the one nav chrome;
