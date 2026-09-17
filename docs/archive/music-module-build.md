@@ -1592,3 +1592,80 @@ atone for.**
 stack of multi-megabyte page images — leaking these is how a review session that flips through pages ends
 up holding every page it ever showed.
 
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the "Music module" section.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+## Music module (`src/music/`, LIVE — default ON since 2026-07-19)
+
+Photo score + reflow + markup (§A1/§A2), the MusicXML path (§B), lesson capture (`src/music/lesson/`,
+`?lesson`, DEFAULT OFF). Reached from the toolbar's **♪ bar** as portalled panels over the open
+editor — `/music` the route is GONE; heavy canvas/OSMD chunks stay behind lazy imports, so the
+module being on costs the editor's load path nothing.
+
+**Build log and the full reasoning: `docs/archive/music-module-build.md`.**
+
+- **⚠ NO OMR, EVER.** The CV is barline/whitespace GEOMETRY only — row darkness, longest horizontal
+  run, longest vertical run. Nothing recognises a note and nothing may. The score is
+  **markup-only, never editable**; no field on `Piece` changes a note. Inkwave consumes
+  Sibelius/MuseScore/Dorico output; it does not compete with them.
+- **Barline pre-detection REFUSES a single stave, and the refusal IS the feature.** On a grand stave
+  the connector test is decisive; on a single stave the populations overlap and the only separating
+  cut exists because a synthetic barline is geometrically perfect — calibrating there would be
+  circular, and a real photographed barline would be rejected. **A hallucinated bar mis-anchors
+  every heatmap range, lesson note and recording pinned to it, and looks like a correct answer.**
+  `{singleStave:true}` exists ONLY as the test's known-negative.
+- **`groupStavesIntoSystems`' connector test is what keeps a grand stave whole** — engravers cramp
+  system spacing, so a gap-size heuristic slices a pianist's hands apart. `{connectorTest:false}`
+  exists ONLY as the test's known-negative; never turn it off in the app.
+- **`deskew`'s `repair` step is not polish** — a binary shear quantises each column to a whole row,
+  so without the 1px vertical dilation an EXACT skew estimate still detects 0 staves.
+- **`binarise` is LOCAL because a harsh shadow demands it**, not on principle — global Otsu does
+  just as well at moderate lighting. If the `harshShadow` known-negative stops firing, local has no
+  proven reason to be there.
+- **Anchors live in SOURCE-IMAGE space; the reflow is a pure view transform.** Marks written into
+  inserted gaps carry a `GapOffset`. Deskew happens at capture, ONCE, so image, anchors, layout and
+  bar regions share one coordinate space — two spaces for one page is the "two rules, one pane" bug.
+- **A Piece is an ORDINARY document** (`docType: 'music'`, `piece.id === doc.id`) — it gets edit
+  history, provenance hashing, session capture and cloud sync because it is a document, not because
+  anything in `src/music/` arranges it. Do not grow a parallel container. `piece` and `music` are
+  DIFFERENT fields and both are right: `music` is prose that QUOTES music, `piece` is a document that
+  IS music.
+- **`bar_index` (0-based ordinal) is the JOIN KEY; `bar_label` (as printed) is NEVER a key** — a
+  printed bar number is a STRING by MusicXML spec ('0' pickups, '8a' endings) and is NOT UNIQUE.
+  Both are optional because they are known at different times. **Carry what you know; resolve later;
+  never fabricate the key.** `BarAnchor` carries no region and **must not grow one**.
+- **A recolour KEEPS what it covered** (the heatmap record is over TIME, so `colourAt` is
+  latest-by-ts); **`erase` refuses across the author boundary and says so**; a backwards sweep is
+  NORMALISED; `heatmapHash` sorts by (ts,id) so array order cannot move it. The palette carries NO
+  severity ordering — a numeric level is the field a later change starts averaging.
+- **Rendered notation cannot use `var()`** — OSMD accepts only concrete hex, so `music/theme.ts`
+  RESOLVES tokens against the live DOM at draw time and a `data-theme` observer redraws. A score
+  container missing `iw-nightable` silently reads every day fallback and renders black on charcoal.
+- **The reflow GAP BAND is PAPER, not chrome** — it takes `--iw-score-gap` in both themes. A
+  photograph of a page has no night mode.
+- **ONE type ramp** (`music/typeScale.ts`, five semantic steps, every step ≥16px so the iOS
+  auto-zoom floor is unreachable by construction). Pick a step by what the text is FOR, not by size.
+- **§A5 practice recordings CANNOT SHIP without editing `vercel.json`'s `microphone=()`** — that
+  header is the lesson lane's deliberate firebreak and the single place the decision must be made.
+  Coordinate before touching it.
+- **Lesson STT is 'unverifiable', not on-device, and no copy may claim otherwise.**
+  `webkitSpeechRecognition` asks for on-device only opportunistically and falls back to Apple's
+  servers SILENTLY; the page cannot require, query or observe which happened. The transcript is
+  non-storable STRUCTURALLY (`#private` field, redacting `toJSON`, no field on `LessonRecord`).
+  Copy is SCOPED to the screen — "nothing on this screen can reach a microphone" — because the
+  app-wide claim expires when §A5 ships.
+- **⚠ THERE IS NO AT-REST ENCRYPTION IN THIS BUILD.** Both music specs say there is; verified in the
+  code, there is not (`storage/opfs.ts` writes plaintext JSON; no `crypto.subtle.encrypt` in src).
+  **Copy tracks the CODE, not the spec** — a plan is not a property. The shippable sentence is
+  "Stored on your device — we never hold it", which is true.
+- **`vercel.json` TAKES NO COMMENTS** — a `"//"` key is a hard schema reject that fails every deploy
+  **before the build starts**, and `pnpm build` never reads the file, so a clean local build passes
+  with the site broken. The error text from a failed deploy is the only evidence; rationale goes in
+  CLAUDE.md, where it costs nothing.
