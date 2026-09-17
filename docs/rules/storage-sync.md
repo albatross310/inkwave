@@ -5,6 +5,14 @@
 `storage/onedrive.ts`, `gdrive.ts`, `folder.ts` (File System Access, Chromium-only) all write the
 self-contained `.studio` and all obey the rules above. Why: `docs/archive/storage-and-sync.md`.
 
+- **The cloud mirrors do not re-read** — `syncToOneDrive` takes the array it is handed, so
+  `oneDriveWriteNow`'s local-read check is load-bearing. It lives in **`editor/useCloudSync.ts`**
+  (2026-09-15 — the cloud-sync orchestration moved there VERBATIM out of TiptapEditor.tsx; the
+  editor calls the hook and keeps the pill/pickers/⋮ JSX). `useCloudSync.test.tsx` drives the
+  refusal for all three mirrors (folder / OneDrive / Drive) with named tests, mutant-proved.
+  `useCloudSync.ts` holds the folder/OneDrive/Drive state, `mirrorIfActive` + the OneDrive throttle,
+  sign-in/pickers/openers, re-link on load and the other-device heartbeat — THE DATA-LOSS FAMILY's
+  mirror rules live here.
 - **Cache HITS may only compare TRUSTED tags** (fresh listing / live metadata GET) in `openCache.ts`.
 - **Background warm paths must NEVER call GIS `getDriveToken`** (its `requestAccessToken` opens a real
   popup even for `prompt:'none'`) — use `peekDriveToken()`.

@@ -1938,6 +1938,20 @@ margin; with it OFF the constant is untouched. The pagination extension measures
 now (gap widgets / break markers), so always wait for its first measure — the 1.2s cap covers any
 mode where it never fires.
 
+<a id="editor-cloud-sync"></a>
+### The cloud-sync orchestration is `useCloudSync.ts` (2026-09-15)
+
+Seam 2 of docs/REFACTOR-QUEUE.md item 3. The state, the three mirrors (`mirrorIfActive`), the
+OneDrive write throttle, the sign-in/picker/opener actions, re-link on load, the idle pre-merge and
+the other-device heartbeat moved VERBATIM to `src/editor/useCloudSync.ts`; TiptapEditor keeps the
+pill, the pickers, the ⋮ menu and the four provenance checkpoints that call the mirror. The hook is
+called where the sync STATE block stood (the tab-title effect and the unsynced notice read its
+flags), so its six effects run earlier than the block they came from — every one acts
+asynchronously; the queue entry has the per-effect argument. The archive-read rule below is
+unchanged: the mirrors read through `readSnapshotArchive` and refuse on `error`
+(`useCloudSync.test.tsx`, mutants m1–m3); `snapshotsForAction` stays in the editor and arrives as an
+input. Wiring the editor still owes the hook is pinned by `cloudSyncWiring.test.ts`.
+
 <a id="editor-archive-reads"></a>
 ### Every action that publishes or overwrites the record reads through one guard
 

@@ -116,7 +116,7 @@ area is not mine" is exactly the wrong inference. Forensics: `docs/archive/data-
   state, so PER TAB: every write unions against DISK inside the write chain, gated on a byte-SIZE
   comparison. **A failed re-read ABANDONS the write.** `deleteSnapshot` must ask for `allowShrink`,
   default false. **The cloud mirrors do not re-read** — `syncToOneDrive` takes the array it is handed,
-  so `oneDriveWriteNow`'s local-read check (TiptapEditor.tsx) is load-bearing.
+  so `oneDriveWriteNow`'s local-read check (`editor/useCloudSync.ts`) is load-bearing.
 - **Decide an open by ANCESTRY, never `updatedAt`** (`storage/openConflict.ts classifyOpen`): incoming
   hash in the local archive ⇒ `incoming-stale`, keep local; local in the incoming archive ⇒
   `incoming-newer`, adopt; neither, ambiguous, **or the local read failed** ⇒ `diverged`, open as a
