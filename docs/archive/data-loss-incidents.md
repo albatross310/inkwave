@@ -191,3 +191,79 @@ which no "short read" guard catches.
     in-process fake `LockManager` (`tabDoc.locks.test.ts`), the UI wiring
     (`DocumentOpenElsewhere.test.tsx`), and the ack-timeout race fix itself (a gated in-flight flush
     with `ackTimeoutMs < flush` proves the taker now reads after freeze).
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the "Cloud sync + writer-held files" / DATA-LOSS FAMILY entry, as it stood in CLAUDE.md before the trim. The rule bullets themselves stay in CLAUDE.md, near-verbatim.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+## Major systems added since the spine (2026-06 → 2026-07)
+
+- **Cloud sync + writer-held files.** `storage/onedrive.ts` (Graph API), `storage/gdrive.ts`,
+  `storage/folder.ts` (File System Access). All three write the self-contained `.studio` bundle, and
+  all three are governed by the data-loss rules immediately below — read those before touching any
+  write path.
+- **⚠ THE DATA-LOSS FAMILY — SIX INCIDENTS ON PETER'S REAL THESIS, ONE SHAPE. These rules are the
+  most load-bearing text in this file. The forensics are in `docs/archive/data-loss-incidents.md`;
+  read them before deciding a new code path is not an instance.**
+  **THE SHAPE: an unknown answered as if it were a known-empty.** Every rule below is that sentence
+  applied to one read.
+  - **A failed READ is not an empty archive.** `readSnapshotsFromDisk` returns `[]` ONLY on
+    `NotFoundError`; every other fault — including an unreadable payload — THROWS. Both catch arms
+    are load-bearing and mutation-proved: with only the open arm, collapsing the parse arm to
+    `return []` left the probe fully green.
+  - **A failed READ is not an absent document.** `opfs.ts readJson` returns null ONLY on
+    `NotFoundError` and throws `StorageReadError` otherwise (a corrupt JSON parse is a failure, not
+    an absence). `newDocument()` must be reachable ONLY from absence. On a read failure render
+    `StorageUnavailable` — never a blank page, which is what sends a writer to a backup file.
+  - **A failed VERIFICATION is not a forged snapshot.** It shows only that this build could not
+    verify it with this key, and the commonest cause is innocent. **Never delete provenance to make
+    a check go green.** Deletion must be writer-initiated (a `confirm()`-gated button), never a
+    background sweep — kept by `provenance/noAutoDelete.test.ts`, whose allow-list is exactly
+    `{provenance/snapshots.ts, routes/SnapshotView.tsx}` and must stay that short.
+  - **What we SIGN with is not what we ACCEPT.** `signingPublicKeys()` accepts any key we ever
+    signed with, so a production-signed document verifies on localhost; `bundle.ts` keeps the
+    single-key `signingPublicKeyHex()`. Guard each key attempt separately — `ed.verifyAsync` THROWS
+    on an unparseable key rather than returning false, and an unguarded loop rejects a receipt a
+    later key would have verified.
+  - **Snapshot history is GROW-ONLY.** Every write-back unions with the target's existing snapshots
+    first (`mergeSnapshots`); `restoreSnapshotsFromBundle` unions too.
+  - **A stale read is not a short read, and `mergeSnapshots` does not catch it.** `_snapCache` is
+    module state, so it is PER TAB. Every write unions against DISK inside the write chain, gated on
+    a byte-SIZE comparison so the single-tab path pays one metadata read and no gunzip. **A failed
+    re-read ABANDONS the write** — losing one new snapshot is recoverable, overwriting an archive we
+    could not read is not. `deleteSnapshot` must ask for `allowShrink`; it defaults false so a new
+    write path cannot silently acquire the power to truncate.
+  - **The cloud mirrors do not re-read.** `syncToOneDrive` takes the array it is handed, so
+    `oneDriveWriteNow`'s local-read check (TiptapEditor.tsx) is load-bearing.
+  - **Decide an open by ANCESTRY, never by `updatedAt`.** `storage/openConflict.ts classifyOpen`:
+    incoming hash in the local archive ⇒ `incoming-stale`, keep local (its snapshots still merge —
+    pure gain); local in the incoming archive ⇒ `incoming-newer`, adopt; neither, ambiguous, **or
+    the local read failed** ⇒ `diverged`, open as a SEPARATE document and overwrite nothing. This
+    path stamps `updatedAt: now`, so a stale file arrives looking brand new. **The two bugs compose:
+    a null-on-failure read makes `localHash` null ⇒ `incoming-newer` ⇒ blind overwrite**, so the
+    read rule above is load-bearing for this guard.
+  - **Document identity is PER TAB** (`storage/tabDoc.ts`), carried in sessionStorage, never the URL
+    — OneDrive sign-in returns to a bare `/` and any `?doc=` is gone. Precedence: `?doc=` ??
+    sessionStorage ?? fresh blank; the URL is a reflection, never load-bearing.
+  - **ONE LIVE TAB PER DOCUMENT**, via Web Locks, name from the ONE exported `DOC_LOCK_PREFIX` (the
+    OpfsInspector badge queries it; a private copy of that string would put the badge silently to
+    sleep). `claimDocLock` RETRIES past the reload unload-race, or a plain refresh intermittently
+    hands the writer a blank page. No Web Locks ⇒ never block the writer.
+  - **A collided untouched `Untitled` is replaced, not warned.** A duplicated tab inherits the
+    source tab's explicit identity, but if that held document is still exactly the canonical empty
+    paragraph, `Edit.tsx` mints a different blank id silently. The original remains held and
+    untouched. Title alone never bypasses the guard: an `Untitled` containing writing still gets
+    the full switch/copy/take-over screen.
+  - **An effect that takes a lock needs a cancellation token that also RELEASES it.** React's
+    StrictMode double-invoke is a real second claimant: skipping the stale `setState` alone still
+    leaks the lock.
+  - **A take-over is enforced at the bytes, not asserted.** The write freeze lives at the
+    `saveDocument` funnel; the holder flushes → freezes → ACKs, and the taker waits for that ack
+    before stealing. After an ack TIMEOUT, steal, then wait a brief grace for a LATE `surrendered` —
+    a live slow-flusher posts it once frozen, so the caller reads AFTER the freeze; a dead holder
+    never posts and the grace expires.
