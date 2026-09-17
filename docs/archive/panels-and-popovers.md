@@ -741,3 +741,93 @@ never governed that gesture anyway). Reel exclusivity now lives on the elements 
 browser reads at gesture start — so a drag beginning there can never become a page pan, while
 a pan beginning anywhere else scrolls natively. `overscroll-behavior: none` on the root scroller
 while open stops any leaked pan from rubber-banding / bouncing mid-cycle.
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the theming section — the rendered-notation traps, the component-test gotchas and the charts entry.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+## Theming / colour schemes (MANDATORY for every new panel — 2026-07-07)
+
+Night mode (and future colour schemes) is driven by ONE switch: `src/editor/theme.ts` sets
+`<html data-theme="night">` (applied pre-hydration in `entry.client.tsx`; toggled from Settings). All
+colours live as CSS custom properties in the **NIGHT MODE block at the bottom of `src/styles/index.css`**
+— never scatter per-component night overrides. Adding a new scheme later = one more `:root[data-theme="…"]`
+block; components don't change.
+
+**THE RULE — every floating panel/menu/modal MUST:**
+1. Put `iw-nightable` on its outer container (alongside its `bg-white`/`shadow` classes). That class opts
+   it into the themed surface: dolphin-grey background, light text, themed inputs/borders, dark hover
+   fills — all automatic. This is the single most important step; a panel without it renders white-on-
+   white in night mode.
+2. For any CUSTOM inline colour, use a theme **token var with a day fallback**, NOT a hard-coded hex:
+   - `var(--iw-ink, #302438)` — primary black-plum text/icons; exactly the day water's top-left
+   - `var(--iw-light, #41425b)` — reflective-indigo secondary accent from the same gradient
+   - `var(--iw-cite-color, #302438)` — citation/link colour (light blue in night)
+   - `var(--iw-pill-fg, #78716c)` — muted label/pill text
+   - `var(--iw-nightable-border, …)` — inline borders (light in night)
+   - `var(--iw-verified, #15803d)`, `var(--iw-newbtn-fg, …)`, `var(--iw-addbtn-*)` — specific accents
+   Define a NEW token in the night block when you need a new custom colour — don't inline a night hex.
+3. The `.iw-nightable` block already remaps Tailwind `text-stone*/gray*/neutral*`, `bg-white`,
+   `border-stone*`, `hover:bg-stone-50/100`, inputs/selects, and any `[class*="35283e"]`/`[class*="484965"]`
+   legacy arbitrary-purple class. New day UI must use the black-plum/indigo tokens above, not restore
+   the former bright university-purple palette. So plain Tailwind utility panels theme themselves
+   once they have `iw-nightable`.
+
+Panels already migrated: MediaMenu (`components/MediaMenu.tsx` — the toolbar's media-import slot:
+photo/audio/video; PORTALED, so it carries `iw-touch-guard` + `iw-nightable` itself rather than
+inheriting them), CitationPanel + EditDialog, ReceiptPanel, SyncStatus, footer toolbar,
+OptionsMenu (+ its export modal), SettingsMenu, PageMenu, LimitSelector, StyleBar popups, ReviewBar,
+VerifyModal, AccountControl, the Google-Drive/OneDrive pickers + openers, the PDF find bar,
+ProductivityReportModal, ProductivityPanel (`/productivity` the route is GONE since 2026-07-18 —
+panel-ified, opened from the clock drop-up), the ledger CLOCK DROP-UP restructured 2026-07-19 into a
+5-button nav shell (`components/ClockMenu.tsx` — the toolbar's clock slot; `/ledger` the route is
+gone; its READING indicator + POST-HOC ADD sections are inside it, screenshotted day+night by
+`scripts/pdfposthoc.prove.mjs`), OpfsInspector (`components/OpfsInspector.tsx` — the hamburger's "Storage" item: every
+document actually in OPFS, with orphan/this-tab/busy badges + Open/Download recovery),
+EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
+`?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
+MusicPanel + ScoreView (opened via the toolbar's ♪ bar as "Import a score" — the `/music` route and
+its `?musicXml=1` param are GONE since 2026-07-18; the music module itself is DEFAULT ON since
+2026-07-19), the music studio (`music/MusicStudio.tsx` — its footer toolbar + symbol drop-up carry `iw-touch-guard`,
+`music/ScorePage.tsx` gap bands + sticky notes, `music/HeatmapScreen.tsx` bar rows + its palette
+drop-up). When you add a panel, add it here too.
+
+**RENDERED NOTATION CANNOT USE var() — which is why it needs MORE care, not less (2026-07-17).**
+`src/music/theme.ts` + `ScoreView.tsx`: OpenSheetMusicDisplay GENERATES the notation SVG and its
+engraving rules accept only concrete `#rrggbb` strings, so the charts' trick (write `var(--iw-ink,
+#302438)` straight into a `fill` and let the night block remap it) is UNAVAILABLE — a `var()` handed
+to OSMD is written into the SVG verbatim and renders nothing. So the colours still live ONLY as
+tokens (`--iw-score-ink/cursor/paper/highlight/title`, defined in BOTH themes in index.css) and
+`theme.ts` RESOLVES them against the live DOM at draw time; a `data-theme` MutationObserver redraws
+the score on a theme switch, because a baked-in colour cannot restyle itself. TWO TRAPS: (1) the
+night palette is declared `:root[data-theme="night"] .iw-nightable { … }` — SCOPED to that class,
+NOT on :root — so a score container missing `iw-nightable` silently reads every day fallback and
+renders black on a charcoal page, with no error at all; (2) jsdom does NOT resolve custom properties
+from a stylesheet, so a "the night colour applies" unit test reports the DAY value in both themes and
+PASSES while proving nothing. `theme.test.ts` therefore checks three independent things: no bare hex
+in the TS, every token defined in both themes *with different values* (read off index.css itself, not
+off jsdom), and the resolver's own fallback logic. Whether the two palettes are LEGIBLE is unverified
+— that needs eyes on a browser.
+
+**Component tests are possible now (2026-07-17).** `vite.config.ts` drops the React Router plugin
+under vitest (`process.env.VITEST`): its HMR preamble check made every `render()` throw "React Router
+Vite plugin can't detect preamble", which is why this repo had 86 `.ts` test files and not one
+component test. Verified it changes nothing else — all 87 pre-existing files still pass. Two gotchas
+for the next one: `@testing-library/react` only auto-cleans with `globals: true` (this repo does not
+set it), so `afterEach(cleanup)` is MANDATORY or every test silently measures the previous test's
+still-mounted components (it inflated a re-render count from 2 to 4 here and read as a component
+bug); and in a `.tsx` file `vi.mock`'s factory is hoisted above vitest's OWN import, so `vi.hoisted`
+and `await import('vitest')` both fail — build the recorder inside the factory out of plain
+functions (see `ScoreView.test.tsx`).
+
+**Charts must theme too (2026-07-17).** `src/productivity/charts/` proves the pattern for SVG: every
+`fill`/`stroke` is a token with a day fallback (`var(--iw-ink, #302438)`), never a bare hex, so the
+night block remaps them for free — `judged.test.ts` asserts that structurally (a bare hex in
+SERIES_STYLE fails the build). Verified both themes render distinctly: panel bg #fff → #454e59,
+`--iw-ink` #302438 → #cbb8f2.
+

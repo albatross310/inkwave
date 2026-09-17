@@ -1091,3 +1091,196 @@ reliably explains a wall is still a button that never does the thing it is label
 `direct` is NOT dead code and is not decoration: `'self'` is in the CSP, so a PDF served from Inkwave's
 own origin genuinely fetches — and that is the case the browser probe exercises, since no probe can
 load an unpacked extension.
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the "Native citations", "PDF viewer + annotations" and "SAVE THIS PDF TO MY SOURCES" entries, the PDF-panel-rounds rule list, and the whole "THE READING SURFACES HAVE THEIR OWN NIGHT" section.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+- **Native citations** (replacing Zotero/BBT). `citations/` — `bibProvider` (reactive store),
+  real CSL formatting, `CitationNodeView` (in-text purple hooks; reactive via editor.on('update')
+  + queueMicrotask), `ReferenceListNodeView` (bibliography). Citation nav (click hook ↔ reference
+  back-refs by DOCUMENT page). `pmToText(doc, resolveCitations)` — **must stay byte-deterministic**
+  when resolveCitations=false (verify/bundle rely on it); SnapshotView passes true for display.
+- **PDF viewer + annotations.** `components/PdfViewer.tsx` — bundled pdf.js (self-hosted wasm/fonts
+  in `public/pdfjs/`), lazy per-page render, markup overlays (highlight/underline/strike/text notes
+  stored on `_iw.highlights`, NOT baked into the PDF), select-sentence→link-to-citation, cursor-
+  anchored zoom, supersampled canvas (≥2× for crispness). `PdfSidePanel` docks side/bottom.
+  PDFs stored as OneDrive **sidecars** (`<base>.<citekey>.pdf`, uploaded once) + OPFS; embedded in
+  local-folder saves. URL-linked PDFs + the `api/pdf.mjs?proxy=` relay were REMOVED 2026-07-08
+  (slow, often blocked, and the one PDF path through our server) — sources embed files only;
+  legacy `pdfUrl` metadata is inert. Haiku page-offset
+  detection (`citations/pageOffset.ts`). CSP (middleware.ts): `frame-src blob:`, `wasm-unsafe-eval`.
+- **"SAVE THIS PDF TO MY SOURCES" — the source panel, LIVE, default-on (2026-08-30).** Peter, while
+  browsing: *"also can we have a downloads"*. Read as the loop it serves — he reads papers to CITE
+  them — so a PDF at the panel's address becomes a SOURCE (`reader/savePdfSource.ts`), bytes into
+  the same OPFS store every other source PDF uses. The literal half is answered separately and was
+  a silent bug of its own: the live frame's `sandbox` was missing **`allow-downloads`**, so a
+  download link inside a framed page did nothing at all and only the browser's console said why.
+  - **⚠ THE WALL IS OUR OWN CSP, NOT CORS — measured, and it refuted the design.** The plan was
+    "try the extension, fall back to a direct fetch". `middleware.ts` sets `connect-src 'self'
+    <named hosts>`, so a cross-origin fetch is refused BY US before CORS is consulted. That header
+    stands — this origin holds the thesis and the signing session — so the FEATURE bends:
+    `pdfRouteFor` decides `extension | direct | none` BEFORE the card is drawn, and with no
+    extension a publisher's PDF draws **no save button at all**, states the wall, and offers the
+    extension. A button that reliably explains a wall is still a dead control.
+  - **`_iw.pdfName` IS the claim that bytes exist** (`hasPdf` is `!!pdfName`), so the write order is
+    the whole design: entry WITHOUT pdfName (to learn the key `freeCitekey` actually assigned) →
+    bytes under that key → only then pdfName. Fail in the middle and the writer has an honest
+    URL-only source, never an entry pointing at nothing.
+  - **A content-type header is not the authority; the `%PDF-` magic is.** A publisher's download
+    link that has become a login wall answers 200 `application/pdf` with HTML.
+  - **The extension gained `reader/file`, a SECOND message, not a flag on `reader/fetch`** — that
+    exchange is defined to return text (`decodeHtml` throws `not html`) and must stay incapable of
+    returning bytes. Bytes cross as base64 because `runtime.sendMessage` is JSON, not structured
+    clone; the page decodes with `base64ToBlob`, never a hand-rolled atob loop.
+  - The entry is saved with **author and year EMPTY**: a file tells us its address, not who wrote
+    it, and an invented attribution would look finished.
+  - Kept by `pdfAddress.test.ts` / `savePdfSource.test.ts` (write order mutation-proved 2/1/1) and
+    `SourceBrowser.pdf.test.tsx`; `pnpm prove:reader` audits the saved bytes **off OPFS directly**,
+    out of the app's own read path. ⚠ Its first cut asserted "/api/reader was never called" with a
+    READY extension — true whatever the panel did, because the fake answers no `reader/fetch` and
+    the fallback sits behind a 25s deadline. Mutation-proved worthless, then re-aimed.
+  - **The install card links to a VERSION-PINNED release asset** (`reader/extensionDownload.ts`,
+    one constant) with the Releases page beside it. Pinned by hand rather than derived from
+    `extension-src/package.json`: deriving makes a version bump a 404 immediately, pinning can only
+    go stale, and a stale zip still installs. A gate test asserts the two versions match, so
+    forgetting to update it is red at home rather than a 404 in front of a writer.
+- **The PDF panel's three measurement rounds are in `docs/archive/pdf-panel-rounds.md`** (zoom
+  snap-back, fit-to-panel, the reader view). **Their shared lesson is a rule, not a story: the fix
+  you can argue for is not the fix — reproduce the symptom against a control in the SAME build.**
+  All three rounds shipped a plausible mechanism that measurement later refuted.
+  - **A layout constant must never be scaled as though it were content.** The zoom snap-back was
+    `PDF_OVERSCROLL_PX` (180) keyed to the LIVE zoom, so the gutter appeared mid-gesture — during
+    the CSS-transform preview, whose whole premise is "no reflow" — and was then scaled by the
+    settle. The gutter follows the RENDERED zoom; the anchor is a fraction of the PAGE'S OWN BOX
+    applied as a scroll DELTA, so paddings, margins and gutters cancel because they are already
+    inside `page.left`. Re-apply the delta after React commits the gutter (probed load-bearing).
+  - **The error was independent of the cursor**, which is why it read as "flashes back centrally"
+    and why staring at the anchor arithmetic — which was correct — never found it.
+  - **`zoom === 1` NEVER means "the reader has not chosen a zoom".** Zoom is a multiplier on the fit
+    baseline, persisted per document, and a Mac trackpad pinch fires ctrl+wheel — the gesture can
+    land back on exactly 1. An early-return on it froze the page size and left dead background.
+  - **One fit rule, one accessor.** `computeTextFit` is THE fit; four hand-rolled copies had already
+    drifted, and the fullscreen path drifted first.
+  - **Marks anchor by TEXT, not by rectangle** (`src/reader/marks.ts`) — the reflowed reader re-sets
+    the page in its own font at its own width, so a rect addresses different words every visit.
+    Rect-only legacy marks stay rect-only and are drawn at normalised rectangles.
+  - **Markup lives on `_iw.highlights`, never baked into the PDF bytes.**
+  - **A helper that cannot see its subject must return null, never an empty list** — "no marks
+    painted" and "there is nothing to paint on" are different answers, the same distinction
+    `readJson` and `readSnapshotsFromDisk` exist to keep.
+  - Probe traps, all of which accused a working feature: `fetch('data:…')` is refused by the app's
+    own CSP (use `atob`); `getSelection().toString()` is EMPTY after mouseup because
+    `createFromSelection` clears it on SUCCESS; **Escape closes the panel rather than disarming the
+    tool**; a click at (5,5) lands on the editor, which is how a bottom-docked panel is designed to
+    close.
+  - HONEST GAPS: Chromium only (WebKit has no `navigator.storage` here, so the iOS worker write path
+    is untouched); the fixture is a born-digital text-layer PDF, so a SCANNED page takes an unprobed
+    branch; multi-column, RTL and footnote-heavy typesetting are not represented.
+
+### THE READING SURFACES HAVE THEIR OWN NIGHT — and the paper-never-inverts rule is RETIRED (2026-08-30)
+
+**LIVE, default-on.** The in-app source reader (`SourceBrowser.tsx`) and the PDF reader view
+(`PdfReaderView.tsx`). Peter, verbatim: *"the whole read mode on both pdfs and web pages needs a
+night mode too — but make sure the palette is slightly different from the main page and there's a
+dividing line between."*
+
+**THE RULE THAT WAS THERE — and why it was conflating two things.** The 2026-08-30 morning audit had
+established that the reading column is PAPER: it *dims but never inverts*, on the argument that a
+mark's colour is stored in the mark and shared with the PDF viewer, so a theme that reinterpreted it
+would make one highlight two colours on two devices. That argument protects a real invariant and it
+is still true — but it was being applied to two different things at once:
+
+* a mark's **IDENTITY** — its stored hex. Unchanged, in both themes. `#ffe066` is still `#ffe066`;
+  there is no per-theme remap of any mark fill anywhere.
+* the **CONTRAST PAIRING** it needs to stay readable — what ink sits ON it. That has always been a
+  function of the surface. It merely *looked* like a constant while the surface never changed.
+
+A highlight is an opaque **FILL** of a pale colour with text on top, so the ink on it is dark
+whatever the page behind is doing (`--iw-reader-on-mark`, whose DAY value is byte-equal to the day
+paper ink — so nothing about the day rendering moved). At night a highlighted run becomes an island
+of day inside the night page, which is what a highlighter looks like on paper. MEASURED, real
+browser, real mark placed through the real UI: fill `rgb(255,224,102)` in **both** themes, ink
+10.96:1 day / 12.31:1 night.
+
+**THE ONE GENUINE CASTING, and it is a STROKE not a fill.** The writer's own coloured text
+(`TEXT_COLORS` — maroon/navy/green/ink) is a stroke: its colour IS the readable element, and those
+inks were chosen for white paper. Maroon on the night reading page measures ~1.5:1, and **no choice
+of dark surface fixes it** (4.5:1 against that maroon needs a mid-tone page, which is not a night
+mode). So the three get tokens on exactly the footing `--iw-ink` has always had — dark by day, light
+by night — and `src/reader/markInk.ts` `readerInk()` maps stored → token for **display only**.
+Nothing is ever written back; an unknown colour passes through untouched; the output always carries
+the stored value as the `var()` fallback.
+
+**THE PALETTE.** Night reading paper is a WARM charcoal `#26241f` against the editor's own night
+page `--iw-paper: #2c2e35` (cool blue-grey) and the chrome's `#454e59`. Same value range, different
+temperature — so the panel reads as a *different document* at a glance rather than as more app,
+which is Peter's "slightly different from the main page". Measured page↔editor contrast 1.20:1:
+near enough to still read as a page, distinct enough not to be one wash.
+
+**FOUR REAL BUGS, all measured, none of which the contrast gate could see:**
+
+1. **`--iw-panel-bg` IS DECLARED NOWHERE IN THIS REPO**, and `SourceBrowser`'s markup bar read
+   `var(--iw-panel-bg, #faf8fc)`. So the bar painted its near-white fallback **byte-identically in
+   both themes** — a white slab glued to the bottom of a night reading column — and no amount of
+   work on the token block could ever have reached it. Only `PdfReaderView` had been migrated to
+   `--iw-reader-bar`; the web reader was left behind while the CSS comment claimed both were done.
+   **This failure is SILENT BY CONSTRUCTION: a `var()` with a fallback always renders something.**
+   That is Peter's *"the bottom bar's fonts are washed out"* — chrome rescues
+   (`[class*="text-stone"]` → `#dfe3e9` at ~1.2:1, `--iw-verified` → `#6ee7a0`) painting near-white
+   labels onto a near-white bar. KEPT by a sweep in `readerContrast.test.ts`: every `var(--iw-…)`
+   either reader reads must be DECLARED in index.css.
+2. **THE ENABLED BACK ARROW WAS THE LITERAL `#5c2d8a` ON THE NIGHT HEADER — 1.13:1, invisible** —
+   and **nothing had ever scored it**, because with a one-entry history both arrows are `disabled`
+   and WCAG 1.4.3 exempts a disabled control. The probe now NAVIGATES first, which is the only way
+   the exemption stops covering it. (Its *disabled* colour measured 5.67:1 — **brighter than the
+   enabled one beside it**. Backwards in both directions at once.)
+3. **THE DIVIDING LINE ALREADY EXISTED AND COULD NOT BE SEEN.** `dockLayout.ts` drew
+   `1px solid #5c2d8a33` — a 20%-alpha DARK purple, which over the night panel composites to very
+   nearly the panel itself. `PdfSidePanel` carried a second copy of the same literal. Both are the
+   token now. **`.iw-nightable { border-color: … !important }` beats an INLINE border**, so the
+   token needed `.iw-dock-panel` to win at night — measured: the panel read `rgb(92,102,114)` (the
+   chrome border) with `--iw-reader-divider: #7b8494` declared, i.e. the token was inert. A dock
+   panel MUST carry that class.
+4. **THE HIGHLIGHTER TOOL'S GLYPH `#8a6a04` died on the night control face (2.37:1)** — found by
+   the new unit guard, not by Peter. Cast through `readerInk` like the other strokes.
+
+**AND THE WASH HAD TO GO OPAQUE AT NIGHT.** `PdfReaderView`'s `wash()` faded a highlight to 55%
+alpha because *"a solid fill over body text is unreadable"* — true only while nothing set the ink ON
+the fill, which the source reader has always done. Over the night page that wash composites to
+`#9d8b46`, a muddy olive: it *passes contrast* against a dark ink and **it does not look yellow**,
+which is precisely the thing Peter asked us not to break. So the strength is a token
+(`--iw-reader-wash`: 55% day, 100% night) applied in CSS via `.iw-mark-fill`, with the opaque
+declaration as the `@supports` fallback so an engine without `color-mix` degrades to what the other
+reader already does rather than to no highlight at all.
+
+**WHICH SURFACE A CONTROL SITS ON IS THE WHOLE QUESTION**, and getting it wrong produced *both* of
+Peter's complaints simultaneously, in opposite directions. The reader panel is not one surface: its
+HEADER is chrome (`--iw-reader-chrome-fg`/`-dim`), while its ARTICLE, its MARKUP BAR and every
+control face in that bar are reader PAPER. Ask first, then take that surface's token. The error
+screens are the awkward case — they render inside a pane that is reader paper in reader mode and the
+chrome panel in live mode, decided by a prop — so they take the one ink measuring ≥4.5:1 on **both**.
+
+**GUARDS (the browser probe is the truth; it is not a guard).**
+`pnpm prove:nightaudit` now measures what the pixels ARE, not merely whether they clear a ratio —
+because **the walker ran 0 failures in BOTH themes on the build Peter complained about**. Contrast
+is the floor. It reads the surfaces back, navigates so the arrows are live, places a REAL highlight
+and reads its fill and ink, and checks the edge that actually faces the editor.
+`src/styles/readerContrast.test.ts` (32 tests, ~22ms, no browser) carries the pure half —
+**mutation-proved, 5 mutants, all die**: revert the paper (8 fail) · mark ink inherits the page (1) ·
+chrome-fg back to `--iw-ink` (1) · the undefined token returns (1) · inks not cast (1).
+`markInk.test.ts` (6) and the `dockLayout.test.ts` divider pair (mutant dies) complete it.
+⚠ The dangling-token sweep **STRIPS COMMENTS**, and its first cut fired on its own documentation —
+the fix's comment in SourceBrowser SAYS `var(--iw-panel-bg, …)` in order to forbid it. Judge what
+the code DOES, never prose about it; the pair (fires on a use, silent on a mention) is asserted.
+
+**WHAT NEEDS PETER'S EYES.** The casting of his coloured *text* is the one place a stored mark
+renders as a different colour by theme. It follows the app's own `--iw-ink` convention exactly and
+touches no highlight, note or textbox — but it is his call whether a maroon annotation reading as a
+light red at night is right, or whether that palette should instead be re-chosen to work on both.
+
