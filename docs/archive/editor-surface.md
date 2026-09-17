@@ -2165,3 +2165,315 @@ style/review rows and MUTUALLY EXCLUSIVE with them by the TYPE (`activeBar` hold
 toolbarContract.ts). This lane owns the SHELL; components/MusicBar.tsx is the clearly-labelled STUB
 the music lane fills. The review row stacks ABOVE the main toolbar like the style bar: the pill is
 bottom-anchored, so it grows upward and the main row never moves.
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the "Unsynced-work notice", "Media import", "Editor chrome", "Hybrid zoom" and "Review layer" entries; the footer-band / toolbar-contract / hotkeys / slots entries; and the "Load performance" and "Typing performance invariants" sections.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+- **Unsynced-work notice (2026-07-17, Peter's ask).** `editor/unsyncedWatch.ts` — PURE rule
+  (`shouldWarnUnsynced` + reducer), `components/UnsyncedNotice.tsx` is only its face. Fires after 5
+  minutes of unsynced WORK; never while sync is active; never again once waved away (the anti-nag
+  clause). Every input is **read, not awaited** (linked folder / OneDrive account / Drive flag), so
+  it is correct from cold. **THE CLOCK STARTS AT A DOC CHANGE THE WRITER CAUSED** — user input
+  (`keydown`/`paste`) ARMS it, the next real change starts it: a docChanged transaction alone began
+  the clock at PAGE LOAD (would nag someone who typed nothing), and `beforeinput` alone never fires
+  at all under ProseMirror (measured 0 events at document capture — a signal that never arrives
+  silently disables the feature). Both caught by `scripts/tabdoc-probe/unsynced.mjs` (5/5, threshold
+  shortened via `__iwUnsyncedWarnMs`); rule mutation-tested in `unsyncedWatch.test.ts`.
+
+- **Media import (2026-07-17, `src/media/`, LIVE — no flag).** Peter's "photo import button (which
+  has photo or audio or video)" — GENERAL, into any document, and the prerequisite for the music
+  lane's "turn this photo into a piece" and §A5's practice recordings. `mediaStore.ts` REUSES
+  `writeOpfsFile` + `blobToBase64`/`base64ToBlob` from `citations/pdfStore` rather than copying them
+  (a copy would re-acquire both bugs those primitives exist to fix — WebKit has NO createWritable and
+  savePdf threw on iOS until the worker shim; the hand-rolled btoa was a 20MB main-thread stall per
+  save). Bytes in OPFS `library/media/<id>.<ext>`; the document carries only `media?: MediaAsset[]` —
+  a .studio that inlined a 20MB video would re-break every load-performance rule the PDF precedent
+  exists to keep. **ONE importer** (`importMedia`): Peter's two paths (media import → music bar →
+  label it; music panel → import directly) CONVERGE on it, so the second is a CALLER of the first,
+  never a parallel road — the music lane has no file input, no OPFS write and no size rule of its own.
+  REFUSES rather than guesses: an unknown MIME is never stored as a photo (a file the writer could
+  never open again), an oversized file is NAMED not truncated (the email lane's rule), and a failed
+  write yields NO asset — a reference without bytes is the shape of every "the file is gone" bug here.
+  **⚠ A PHOTO LIVES IN A DOCUMENT; IT DOES NOT BECOME ONE** — this AGREES with the music lane ("§1
+  says the Piece IS a `.studio`") rather than competing: import makes an ASSET, and "turn this photo
+  into a piece" READS one to produce a `docType:'music'` document. Every inline image minting its own
+  .studio is the parallel-container mistake that lane just deleted.
+  **⚠ TWO OPEN RULINGS, Peter's, deliberately not guessed:** (1) media is NOT anchored — `bundleHash`
+  is v:1/v:2/v:3/v:4 and this adds no version, so it takes the PDF precedent (bytes unanchored), not
+  the music one (masters anchored by {id,contentHash}). Defensible while media is a reference the
+  prose does not depend on; NOT once a photo is part of the argument. (2) There is no `Image` node in
+  the schema and no `@tiptap/extension-image`, so a photo cannot yet be placed IN the prose — adding
+  one touches `pmToText` → `contentHash` → Bitcoin, i.e. ruling (1) again.
+- **Editor chrome.** `Scroll.tsx` — the fixed full-region scroll container is opt-in via the `fill`
+  prop (live editor only; SnapshotView reuses `<Scroll>` in-flow inside its split pane — do NOT make
+  it fixed there or it covers the diff panel). Solid styled scrollbar + inset `::before` so the fixed
+  waves don't bleed over it. `StyleBar.tsx` = the formatting bar (font/size/B/H/align/list/∀).
+- **Hybrid zoom (SHIPPED 2026-07-09).** TWO zooms, one owner module `src/editor/magnify.ts`:
+  Ctrl/⌘+wheel over the PAGE = font-reflow zoom (`--iw-editor-zoom`, `inkwave:editorZoom`); over the
+  WATER (or a page gap) = GPU transform-magnify of the whole page (`--iw-magnify` on a dedicated
+  `.iw-magnify-box` wrapper, top-left origin, NO transform at scale 1). Fit-to-width: when the window
+  is narrower than the page, the fit scale binds — never a partial page horizontally; it CAPS zoom-in
+  and user magnify can go far below (infinite zoom-out). The wrapper is sized to the page's VISUAL
+  dims (height set imperatively from a paper RO) so scroll range == visual content exactly.
+  **Coordinate convention:** getBoundingClientRect under the transform returns VISUAL px — convert
+  via `scaleFor(el)`/`unscale()` from magnify.ts, NEVER ad-hoc reads. Pagination measures in the
+  canonical window where magnify is forced to 1, so breaks are magnify-independent by construction.
+  Do NOT use CSS `zoom` on the parchment — it inflates clientWidth and breaks the paginator. Phone
+  zoom = pinch → the font-reflow pipeline (Scroll.tsx touch handlers); browser-native zoom is
+  suppressed app-wide on phone (universal `touch-action: pan-x pan-y` — NB touch-action does NOT
+  inherit, hence the `*` rule — + gesture*/two-finger-touchmove preventDefault + 16px input floor).
+- **Review layer — MERGED AND LIVE ON MASTER (probed 2026-07-17: `origin/feat/review` is an
+  ancestor of `origin/master`, ZERO commits ahead; ReviewBar.tsx and the R button ship on master).
+  This entry said "IN PROGRESS, unmerged" long after it landed** — a lane that refactors "under"
+  it on that basis is reasoning from archaeology. Peter's spec: live suggestion mode (track
+  changes on every keystroke, behind a toggle so normal typing is unaffected), comments as sticky
+  notes over the wave (not a panel), triggered from the **R** button in the footer toolbar, review
+  nav (←/→ + Alt+A accept / Alt+S discard), named annotation sets via a drop-up.
+
+- **THE FOOTER BAND IS THREE INDEPENDENT FIXED ELEMENTS, AND THEY COLLIDE (2026-08-21).** The
+  toolbar is CENTRED (`fixed left-0 right-0 flex justify-center`) while the sync pill (SyncStatus,
+  `right:0`) and the snaps pill (ReceiptPanel, `left:0`) are EDGE-anchored — nothing made them aware
+  of each other, and below ~650px of viewport width the toolbar simply grew into the sync pill.
+  **It is invisible above ~700px, which is why several "fixes" verified clean and were not**: Peter
+  runs a ~570px window (half-screen on a Retina Mac) and every check had been run at 900-2000px.
+  Sweep the WIDTH RANGE, not a point.
+  - **ONE BUDGET, TWO CONSUMERS.** `--iw-bar-budget` (written on the pill in TiptapEditor.tsx,
+    inherited by `.iw-desktop-toolbar`) caps the box AND drives the circle-shrink clamp. Capping only
+    the BOX leaves the circles at full size spilling past the rounded border ("the right button is
+    falling off"); capping neither lets the centred box reach the sync pill. Two constraints computed
+    from slightly different budgets is what produced a dead width-range where both were true at once.
+  - **CIRCLE SIZE IS COMPUTED FIRST; GAPS TAKE THE REMAINDER.** The reverse (sizing gaps from the
+    budget, circles from the leftovers) produced both complaints simultaneously — on a wide window
+    the gaps grew until the bar spanned the page, on a narrow one the circles collapsed to ~23px.
+  - **A COLLAPSED `max-height: 0` ROW STILL HAS A WIDTH**, and this was the real cause of the
+    proportions repeatedly drifting back. The pill is a flex COLUMN, so its width is the widest
+    child's max-content — and the hidden style bar is wider than the circle row, so it had been
+    sizing the pill (measured: 86px of dead pill past the last circle). `width: 0; min-width: 100%`
+    while collapsed drops its contribution without breaking its layout when it expands.
+  - `TOOLBAR_SIDE_RESERVE_PX` (TiptapEditor.tsx) reserves space per side for the edge pills; the
+    reserve is divided by the transform scale because max-width is a LAYOUT property while the
+    collision happens in PAINTED px (a 421px pill paints 471 at ×1.12).
+  - **THE TWO SIDE PILLS ARE ONE PAIR — `components/sidePill.ts` owns their height, font and offset.**
+    They are separate components that never reference each other, which is exactly how they drifted:
+    the right pill had been given a height tracking the TOOLBAR's (56px vs the left's 30.8px) and the
+    two sat on different `bottom` formulas. `sidePillBottom()` centres each on the toolbar's MIDLINE
+    — bottom-edge matching is wrong for boxes of different heights — reading the LIVE `--iw-toolbar-h`
+    so they re-centre for free when the style/review row opens. Verified midline delta ≤ 0.5px.
+  - **`🗀` HAS NO GLYPH ON macOS** and rendered as tofu (□) in the sync label. Peter moved from
+    Windows, where it renders. Check any decorative codepoint on both platforms.
+- **THE TOOLBAR CONTRACT IS `editor/toolbarContract.ts` (2026-07-17) — ONE file, and it is the
+  only way in.** Three lanes took toolbar real estate at once (prod-ledger's clock, music's bar,
+  the media import), which is this repo's "two implementations of one rule" wound pre-authorised.
+  So: a lane registers a button by adding a member to `SlotId` + `ALL_SLOTS` (+ `IMPLEMENTED_SLOTS`
+  when its button actually renders — ONE predicate covers both "no lane yet" (`media`) and "behind
+  a default-OFF flag" (`clock` → `prodLedgerEnabled`); a slot that cannot render must never paint a
+  dead circle, nor strand a stored id when a flag goes off), and
+  owns the second bar row by adding a member to `BarLayerId`. Nothing else. `migrateSlots` is
+  generational (KEEP what is valid in the writer's order, FILL from canonical order, never reset —
+  the old `parsed.length === 4` rule stranded every other shape); `planBarToggle` makes Peter's
+  "mutually exclusive" STRUCTURAL — the shipped two booleans were four states with one illegal,
+  prevented only by one hand-written function. **A SLOT IS A TRIGGER, NEVER AN OWNER**: the ◈
+  ReceiptPanel is the precedent Peter named for two access paths (its own button + the ▲ entry
+  write ONE lifted `receiptOpen`), and it is how the clock's slot and the top-right countdown stay
+  one implementation. 26 unit tests, all four mutants proved to die; `scripts/toolbar.prove.mjs`
+  drives the real app (row/drawer partition, curated order survives, S↔R exclusion, day+night).
+- **Toolbar hotkeys are POSITIONAL (2026-07-17): Alt+1…Alt+6 = the row, Alt+0 = the ▲ drawer,
+  Mod+, = Settings.** Peter's framing is that the binding IS the feature ("apps are like a learning
+  tool for learning how to do things on hotkeys"), so the hint teaches it: hold Alt on desktop and
+  each circle wears its number (`--iw-hotkey-hint-fg`; the badge sits ON `--iw-ink`, which is LIGHT
+  purple in night, so white would be unreadable — it punches out in the night surface instead).
+  Positional because "a toolbar is like your app homepage": Alt+3 means THE THIRD CIRCLE, so the
+  binding MOVING when you reorder is the design — position is identity on a homescreen.
+  **THE HOTKEY IS THE TAP**: it dispatches the slot's own button `.click()` rather than calling an
+  action, because every slot owns its open state privately — an action registry would be a SECOND
+  way to trigger each slot, and the two would drift the first time a slot changed what its tap
+  does. **NOT Alt+<letter>**: Firefox on Windows/Linux (PETER'S OWN BROWSER) binds Alt+F/E/V/S/B/T/H
+  to the menu bar; Alt+digit is unbound in both engines. ⚠ ReviewBar binds Alt+A/Alt+S/Alt+Arrows
+  and Alt+S is Firefox's History menu — an UNRESOLVED possible collision (its `preventDefault` may
+  or may not claim the key first); a Firefox probe of it was inconclusive because the review layer
+  never armed. Phone renders no hints and binds nothing — it has no Alt and loses nothing.
+- **Toolbar slots are ONE population (2026-07-12):** the 6 main-row circles + the ▲ drop-up
+  overflow (S style and ⚙ settings are slots too — CONFIRMED still true; only ▲/⋮ fixed).
+  Peter 2026-07-17: the row is SIX because "it fits well on phone" and phone/desktop must stay
+  continuous; the population grows freely because "it's only 1 extra click to access a button
+  behind the arrow" — ▲ is the app drawer, not a cupboard ("a toolbar is like your app homepage").
+  `inkwave-toolbar-slots` stores 6 (legacy 4 migrates by appending style,settings) — but it is now
+  only the writer's DEFAULT for their next new document: **the layout follows the .studio**
+  (`doc.toolbar`, `ToolbarConfig`) — **which was HALF TRUE until 2026-07-17 and read here as
+  fact.** `doc.toolbar` persisted in local OPFS, so on the authoring machine it looked like a
+  working feature; `ExportBundle.document` is an ALLOW-LIST and never named the field, so every
+  .studio ever emailed, synced or downloaded arrived with the layout STRIPPED. Both halves are wired
+  now (bundle.ts emits · openDoc.ts restores) and `storage/openDoc.toolbar.test.ts` drives the REAL
+  `openInkwaveFile` (drop the restore ⇒ 3 die). The entry below it claimed the feature; nothing
+  could see that the emailed file didn't have it. Chain: doc config → the writer's own last layout → the
+  first-run six (page, style, info, settings, media import, review — ALL SIX LIVE since the media lane
+  landed 2026-07-17; the `media`→`bib` fallthrough is retired). A received document brings its
+  author's layout, which is the feature; it can never hide ▲/⋮ or name a button this build lacks,
+  because every path resolves through `migrateSlots`. **NOT anchored — and that is PROVED now, not
+  asserted** (`editor/toolbarHash.test.ts`, the real createSnapshotIfChanged → gzip → bundle →
+  verifyBundle chain): two documents differing ONLY in their toolbar hash identically (content AND
+  bundle), rearranging mints NO snapshot, the snapshot record has no toolbar key, and a TAMPERED
+  toolbar STILL verifies — the inverse of every other tamper test here, deliberately: a recipient who
+  rearranges the buttons must not be told the writing was altered. It carries a KNOWN-POSITIVE (the
+  same comparison sees a one-word prose change) so "identical" is an observation, not a harness that
+  hashes nothing; the obvious mutant kills 6 of 9. Peter: "keep the toolbar config out of the hash.
+  It doesn't need to be in provenance."
+  **⚠ MIGRATION IS A RENDER RULE — KEEP IT OUT OF THE BYTES.** `migrateSlots` resolves against
+  `livePopulation()`, which is FLAG-SENSITIVE, so migrating on the way IN, OUT, or THROUGH deletes a
+  slot from the AUTHOR'S FILE the first time anyone opens it with a flag off (a `?prodLedger` writer's
+  `clock`, silently, forever). Three sites, three functions, one rule: `carryToolbarConfig` (verbatim
+  order, registered ids only) for in/out; `mergeRowIntoConfig` for the write-back after a drag —
+  it keeps only what the writer COULD NOT have chosen to drop, because the config stores the ROW and
+  drawer membership is DERIVED, so a LIVE slot missing from the new row was demoted deliberately and
+  must not resurrect (both directions mutation-proved). Migration answers "what can THIS build draw?";
+  a document answers "what did the author arrange?".
+  **ONE ROW SIZE:** index.css sized the phone circles at `(100vw − 45px) / 8` — a second copy of
+  ROW_SLOTS (+ ▲ + ⋮) in another language, which no lane changing ROW_SLOTS would open, on the one
+  device the number exists to fit. It now derives from `--iw-row-slots`; the guard reads index.css
+  ITSELF (jsdom does not resolve custom properties from a stylesheet — theme.test.ts's lesson).
+  **`scripts/toolbar.prove.mjs` IS LOAD-FLAKY AND FAILS TOWARD "THE FEATURE IS MISSING"** — under CPU
+  contention it reported `✗ the media-import button renders` + the Alt hints + the drawer remainder,
+  17/26, on UNTOUCHED master and on the branch IDENTICALLY; quiet, the branch is 30/30 three times.
+  It accuses a live feature of being absent (the pdfposthoc "a probe that fails by luck" disease) —
+  wait for the CONTENT, not the clock. Re-run it quiet before reading any verdict off it. Touch: hold-drag reorders the row
+  (insertion semantics, FLIP previews) and hold-drag a ▲ entry ONTO a row slot to swap it in;
+  desktop keeps HTML5 drag. During any drag the circle discs go opaque
+  (`--iw-slot-drag-bg`; night token in the nightable block) so the lifted circle passes OVER
+  neighbours.
+
+
+## Load performance (KEEP STARTUP FAST — hard-won, 2026-07-06)
+
+A big doc (thesis + embedded PDFs, ~20 MB `.studio`) was lagging ~10s on every load / hard refresh.
+Root causes were NOT file size — they were background work on the critical path. What was wrong + the
+rule that keeps it fast (measure with a `PerformanceObserver` `longtask` logger + `performance.now()`
+timers; the main thread only blocks ~1.5s now):
+
+- **Clerk loaded on every free-tier page.** Its dev-instance init (network handshake + hidden iframe +
+  token polling) churned for seconds. M6 auth is dormant, so `authEnabled()` now requires an explicit
+  sticky opt-in (`?auth`; `?auth=off` clears) and `entry.client` only mounts `ClerkProvider` then. Do
+  NOT mount auth for the free tier. See `src/auth/config.ts`.
+- **OTS sweep ran on every load (~10s).** `drainUnstamped` + `upgradePending` re-write the compressed
+  snapshot file PER snapshot and do serial calendar round-trips. Bitcoin confirms over HOURS, so this
+  must NOT run on load — it runs only when the ReceiptPanel OPENS (`onOpened` → `runOtsSweep`), only if
+  something is unstamped/pending, throttled once per 15 min (`inkwave:otsCheckedAt:<docId>`). New
+  snapshots still stamp on creation; "check Bitcoin" forces it.
+- **Multi-device heartbeat read+JSON-parsed the whole 20 MB file** on load AND every 45s. Now
+  `readLocalHeartbeat` compares the File's `lastModified` to our recorded last write — metadata only,
+  and (2026-07-08) `readRemoteHeartbeat` does the same via a Graph metadata GET (`getRemoteFileInfo`),
+  no content read.
+- **`blobToBase64` built a 20 MB string + `btoa` on the main thread** every save. Now native
+  `FileReader.readAsDataURL` (off-thread) + a per-PDF base64 cache keyed by `pdfVersion` (bumped on
+  save/delete), so unchanged PDFs are never re-encoded.
+- **The grow-only snapshot union re-read the whole file on every write-back.** Now once per session per
+  target (`needsWritebackMerge`/`markWritebackMerged` in `snapshots.ts`).
+- **DON'T lazy-defer the snapshot LIST.** Rapid snapshot scrubbing is a core moat, so `listSnapshots`
+  loads EAGERLY on doc open (deferring it made the first snapshot open lag). Only defer/gate the
+  genuinely-not-needed-for-first-frame work (OTS), never the list.
+
+Rule of thumb: nothing that reads/parses/encodes the whole `.studio` or hits the network per-snapshot
+may run synchronously on load. Stamp on creation, sweep on demand, cache encodes, read metadata not
+bodies.
+
+- **Canonical measure block-line cache (2026-07-11 — THE desktop "waves of lag" fix).** The
+  measure's per-line range.getClientRects walk over every block cost 1.5-4s on a 20k-word doc
+  (4×-throttled probe) at every 150ms desktop typing pause. collectLines now caches each block's
+  lines RELATIVE to its own top, keyed by PM NODE IDENTITY (WeakMap — persistent structures:
+  untouched block ⇒ same node ⇒ same canonical geometry); an edit re-measures only changed blocks
+  (measured: 133-277ms, ~15-20×). INVARIANTS: replace the WeakMap whenever the canonical CONTEXT
+  changes (fonts ready/loadingdone, page settings, bibliography hydration — clearLineCache sits
+  beside clearStepCache at those sites); never pass the cache for fluid 'scroll' paper (its
+  canonical width is the live width); cache reads/writes only on the gap-cleared measure.
+- **Editor mounts ONCE per load (2026-07-11 double-mount fix).** TiptapEditor must mount in a
+  default-lane render — React.lazy/Suspense retries render at TRANSITION priority (time-sliced),
+  and @tiptap/react's in-render editor creation + its 1ms scheduleDestroy timer race across the
+  slices: two ~950ms creations + the whole reveal chain doubled. Edit.tsx holds the eagerly-
+  imported module in STATE (no Suspense) — do not reintroduce lazy/Suspense around the editor.
+- **Keydown-synchronous typing (task #28, 2026-07-11).** editorProps.handleKeyDown dispatches
+  plain printable keys synchronously (handleTextInput someProp first — input rules identical to
+  the native path; storedMarks via tr.insertText). Flag 'inkwave:kdSync': unset = ON for
+  non-touch, OFF on touch (never intercept the virtual keyboard/autocorrect). Guards: no
+  modifiers, no composition, no open word-cycle, TextSelection only. Measured (4× throttle,
+  20k words): median keydown→paint 80ms → 48ms. perflog label: kd-sync.
+- **Enter-caret reveal (2026-07-11).** PM's scrollIntoView IGNORES CSS scroll-padding — Enter
+  scrolled the new empty line to the scroller's raw bottom edge, exactly behind the toolbar
+  reserve; the caret "appeared when you type" because the browser's native caret-reveal DOES
+  honour scroll-padding. The toolbar RO now mirrors the reserve into PM's scrollThreshold/
+  scrollMargin (view.setProps) — keep them in sync with any new floating bottom chrome.
+- **Twinkle wake needs SUSTAINED scroll (2026-07-11).** A parked dash field only wakes on two
+  scroll reports within 200ms — a single caret-reveal scroll nudge (typing at the page bottom)
+  must never wake the WAAPI field (it read as full-rate velocity and woke everything per wrapped
+  line).
+- **Desktop scroll: --wave-x must never invalidate the page subtree (2026-07-11 ablation).** The
+  per-frame sway write of the INHERITED custom prop on the surface recalced the whole 100-page
+  subtree: scroll frames p50 417ms → 50ms at 4× throttle once (a) `.iw-magnify-box`/`.scroll-paper`/
+  `.iw-wave-twinkles` pin `--wave-x: 0px` (constant ⇒ the engine's no-change pruning stops the
+  walk; @property inherits:false was cleaner but WebKit never re-resolves a pseudo's explicit
+  `--wave-x: inherit` — frozen sway) and (b) twinkle fields take LITERAL transforms per sway frame
+  (`swayFields`) instead of consuming the var (kept ~300 instance leaves in the invalidation set).
+  Dashes no longer respawn at all: both the old `toDataURL` redraw (~150ms/frame) and its later
+  lattice-relocation replacement are gone. A new var(--wave-x) consumer must not sit under the
+  firebreak roots.
+- **Zoom step-cache precompute waits for GENUINE idle (2026-07-11).** Each precompute step is a
+  full-document hypothetical reflow (~100-200ms of layout on a long doc); it used to start 350ms
+  after the mount measure — ~18 consecutive long frames exactly while the reveal/coast and the
+  writer's first scrolls ran (the post-open jank). PaginationExtension now also holds it while any
+  input (pointer/wheel/key/scroll, 1.5s) or reveal-chain event (open-begin/reveal-imminent/
+  editor-revealed, 3s) is recent. A cold cache stays CORRECT — onZoomStep measures a miss live.
+
+## Typing performance invariants (2026-07-11 ablation overhaul — measure before touching)
+
+Established by a CPU-throttled Playwright ablation matrix (4× Chromium desktop+phone emulation,
+2.5× cgroup-quota WebKit, 100-page synthetic .studio with citations + seeded SCAS state; cells:
+baseline / scasOff / gapped-off / both-off / review). Harness pattern: keydown→rAF latency +
+longtask observer + `inkwave:perflog=1`; doc injected via `inkwave:open-doc`. Findings + the rules
+that keep them fixed:
+
+- **`shouldRerenderOnTransaction: false` on useEditor must stay.** @tiptap/react's legacy default
+  re-rendered the entire TiptapEditor tree on EVERY transaction (keystroke, caret move, SCAS
+  repaint, pagination meta) — the largest single per-keystroke cost. Consequences: the render body
+  must NEVER read `editor.state`/`editor.isActive` — mirror what it needs into React state from an
+  editor-event subscription (`selectionEmpty`, `selIsAtomNode`). StyleBar force-updates for its
+  isActive states only while `barVisible`; ReviewBar/CommentNotes self-subscribe (mounted only in
+  review mode).
+- **The pagination measure must never do per-line hit-tests.** collectLines carries each line's
+  sample coords and resolves doc positions LAZILY (only the ~1 line per page a break lands on pays
+  `posAtCoords`); block boundaries come from ONE `posAtDOM` per top-level block (atoms keep the
+  old per-line orphan reset). The eager version was ~4,400 hit-tests per measure = 2.4s (desktop
+  4×) to 17–31s (phone emulation 4×) of main-thread freeze per measure — the phone "terrible"
+  report. Break positions are identical by construction (same sample formula, same snap/orphan/
+  refList decisions).
+- **The pagination ResizeObserver folds into the edit debounce on BOTH platforms** (rule (b) had
+  regressed to desktop-immediate): in UNGAPPED mode nothing pins the sheet height, so every
+  line-wrapping keystroke resized the sheet → immediate full canonical measure DURING typing —
+  which made gapped-OFF measurably WORSE than gapped-on (the ablation's surprise: Peter's "is it
+  gapped pages?" answer is "the measure, in both modes; ungapped was worse").
+- **SCAS scans ride the per-paragraph WeakMap cache** (`scas/controller.ts` scanCommitted): words
+  are position-free and per-paragraph pure (persistent PM nodes), the cursor's paragraph is never
+  cached, and the full-scan SEMANTICS (deletion pass sees whole-doc presence) is preserved — it's
+  assembled from cached arrays. Desktop stays a semantic full scan; don't undo the cache.
+- **All citation doc-walks go through the memoised per-doc citation index** (`citationNav.ts`
+  citationNodes): occurrencesAt/occurrenceCounts/occurrenceQuotes/citedPages. Before: 34 node
+  views × O(doc) walks per 350ms typing pause. Node-view rebuilds must NOT call `editor.getJSON()`
+  — `referenceListKeysFromDoc(editor.state.doc)` walks the PM doc directly.
+- **Word count runs only while the ◈ panel is open — both platforms** (ReceiptPanel is controlled
+  everywhere now); desktop was building the full doc string every 300ms of typing for a hidden
+  number.
+- **Residual (known, next target):** with SCAS decorations on, the steady-state keystroke cost is
+  now dominated by ProseMirror DecorationSet MAPPING/redraw — O(decorated words) per transaction
+  (CPU-profiled: forChild/posBeforeChild in the PM chunk). ~2,600 decorated words ⇒ ~22ms real per
+  keystroke on a 4×-throttled desktop. The fix is viewport-windowed decoration RENDERING (verdict
+  state stays doc-wide; only visible ranges get Decoration objects) — not attempted this round.
+- **Scroll-frame budget:** desktop scrolling of a long doc showed 300–900ms frames in ALL ablation
+  cells (phone was fine) — desktop-only per-scroll-frame work: the `--wave-x` sway write
+  (unregistered inherited custom property on the surface → subtree style invalidation) and the
+  waveTwinkle scroll-driven dash respawns (canvas PNG encodes). Owned by the wave/choreography
+  lane; attribute before optimising (probe pattern: stub `setProperty('--wave-x')` /
+  `toDataURL` in-page and compare frame times).
+
