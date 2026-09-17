@@ -449,3 +449,16 @@ describe('mergeRowIntoConfig — a drag must not delete what the drag could not 
     expect(after.row).toEqual(['clock', 'page'])
   })
 })
+
+// ─── Population 3: the panels — one id, three rules ──────────────────────────
+// planPanelToggle is pinned here; tapClosesPanel needs a DOM → editor/panelOwner.test.ts (jsdom).
+import { planPanelToggle } from './toolbarContract'
+
+describe('planPanelToggle — the panel exclusion rule', () => {
+  it('opens from nothing', () => { expect(planPanelToggle(null, 'page')).toBe('page') })
+  it('rule (c): the open panel’s own button closes it', () => { expect(planPanelToggle('page', 'page')).toBe(null) })
+  it('rule (b): another button swaps — the return type cannot hold two', () => {
+    expect(planPanelToggle('page', 'settings')).toBe('settings')
+    expect(planPanelToggle('drawer', 'receipt')).toBe('receipt')
+  })
+})
