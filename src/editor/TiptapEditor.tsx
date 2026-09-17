@@ -1679,10 +1679,24 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       syncPmScrollReserve(h)
       keepCaretRef.current() // rows opening/closing move the pill's top edge — keep the caret clear
     }
-    const ro = new ResizeObserver(write)
+    // ⚠ NOT per frame while a row animates (Peter, iPhone 12, 2026-09-17: "opening and closing S is
+    // laggy"). The S/R/♪ rows open with a 220ms max-height transition, so the RO fires every frame
+    // of it, and each write of a :root custom property re-styles EVERY element that reads it —
+    // measured: 31 style recalcs of a 3,361-word document per toggle (41ms in desktop Chromium; a
+    // multiple of that on a phone), against 4ms with the writes held. The reserve only has to be
+    // right once the pill has STOPPED moving, so while anything in the footer is mid-animation the
+    // write waits for the last resize plus a beat past the longest row transition, then lands once.
+    let settle = 0
+    const onResize = () => {
+      const animating = el.getAnimations({ subtree: true }).some((a) => a.playState === 'running')
+      window.clearTimeout(settle)
+      if (!animating) { write(); return }
+      settle = window.setTimeout(write, 260)
+    }
+    const ro = new ResizeObserver(onResize)
     ro.observe(el)
     write()
-    return () => { ro.disconnect(); root.style.removeProperty('--iw-toolbar-h') }
+    return () => { ro.disconnect(); window.clearTimeout(settle); root.style.removeProperty('--iw-toolbar-h') }
   }, [])
 
   // `--iw-side-reserve`: the painted px the WIDER side pill claims from its own edge, measured off
