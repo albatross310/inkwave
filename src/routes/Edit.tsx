@@ -24,6 +24,7 @@ import { duplicateEmailAsNew } from '../email/duplicateEmail'
 import { setOpenDocListenerReady, waitForStudioFileLaunch, STUDIO_FILE_ACTION_PARAM } from '../pwa/fileLaunch'
 import { LoadingTip } from '../components/LoadingTip'
 import { currentDocIds } from '../storage/currentDocs'
+import { seedRequested, seedFreshRequested, seededDocument } from '../dev/seedDocument'
 
 function newDocument(): InkwaveDocument {
   return withScasDefaults({
@@ -185,11 +186,16 @@ export function Edit() {
     async function init() {
       try {
         const openFresh = () => {
-          const fresh = newDocument()
+          // `?seed` (DEV only) fills the blank a fresh tab would have minted anyway with sample
+          // text, so a lane's localhost tab is testable at once. Absence path only — see seedDocument.ts.
+          const fresh = seedRequested() ? seededDocument() : newDocument()
           claimTabDoc(fresh.id)
           claimedId = null
           setDoc(fresh)
         }
+        // `?seed=fresh` (DEV only) skips the tab's remembered document outright — see seedDocument.ts.
+        // Nothing is read or written on its behalf; the previous document stays where it was.
+        if (seedFreshRequested()) { openFresh(); return }
         // An installed desktop PWA can be launched by double-clicking a `.studio` file. The OS
         // navigates to this one-shot action URL while LaunchQueue delivers the actual file on a
         // separate clock. Do not open Recent (or mint a blank) underneath it: wait briefly for the
@@ -262,6 +268,14 @@ export function Edit() {
             // it. The compiler now makes ignoring this case impossible to do by accident.
             if (r.kind === 'error') throw r.error
             if (r.kind === 'found') {
+              // `?seed` on a tab that already holds an UNTOUCHED blank: the blank protects no
+              // writing (same structural predicate as the duplicate-tab rule above), so give the
+              // tab a seeded page instead. A blank that contains anything is never replaced.
+              if (seedRequested() && isBlankUntitledDocument(r.doc)) {
+                releaseDocLock(storedId); claimedId = null
+                openFresh()
+                return
+              }
               claimTabDoc(r.doc.id) // pin to THIS tab (a `?doc=`/hint boot has not claimed it yet)
               claimedId = null // committed — the tab owns this for real now, not this closure's job
               setDoc(migrateDocument(r.doc))
@@ -318,6 +332,11 @@ export function Edit() {
             continue
           }
           if (r.kind === 'found') {
+            if (seedRequested() && isBlankUntitledDocument(r.doc)) { // as above: an untouched blank
+              releaseDocLock(id); claimedId = null
+              openFresh()
+              return
+            }
             // Heal an OPFS orphan's lightweight index while opening it; the document bytes remain
             // the source of truth and were already read successfully above.
             await upsertMeta({ id: r.doc.id, title: r.doc.title, updatedAt: r.doc.updatedAt })

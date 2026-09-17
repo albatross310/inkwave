@@ -18,8 +18,21 @@ const TAB_TITLES = [
 // declared stylesheet in the replacement head, so the editor cannot mount completely unstyled.
 import stylesheetHref from '../src/styles/index.css?url'
 
+// A lane dev server (scripts/follow-lanes.sh, VITE_LANE="A") gets its LETTER as the favicon, served
+// as a real PNG by vite.config.ts's /__lane-icon.png middleware. It must be a fresh <link> URL at
+// page load: Safari never repaints a tab icon swapped at runtime, so the earlier canvas/data-URI
+// approach showed the logo on every lane tab. Unset in production, so the real icon set stands.
+const LANE = import.meta.env.VITE_LANE
+const laneIconLinks = LANE
+  ? [
+      { rel: 'icon', type: 'image/png', href: `/__lane-icon.png?l=${LANE}` },
+      { rel: 'apple-touch-icon', href: `/__lane-icon.png?l=${LANE}` },
+    ]
+  : null
+
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheetHref },
+  ...(laneIconLinks ?? []),
   // NO SVG favicon: our logo SVG uses userSpaceOnUse gradients that Firefox can't rasterise at tab size —
   // and Firefox, having "preferred" the SVG, then shows its generic page icon WITHOUT falling back to the
   // PNGs. Rasterised PNG/ICO render reliably in every browser (a 128px PNG is crisp at tab size). The ?v
@@ -29,12 +42,14 @@ export const links: LinksFunction = () => [
   // TiptapEditor effect swapped the first icon link to an inline document-glyph SVG at editor mount,
   // which at tab size looks like Firefox's default page icon. The swap is removed (see TiptapEditor);
   // ?v=20 displaces the doc glyph any returning Firefox profile has stored against the page URL.
+  ...(laneIconLinks ? [] : [
   { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=20' },
   { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=20' },
   { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=20' },
   { rel: 'icon', href: '/favicon.ico?v=20', sizes: 'any' },
   { rel: 'shortcut icon', href: '/favicon.ico?v=20' },
   { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=20' },
+  ]),
   // Version the manifest URL when install metadata/assets change. Chromium and macOS otherwise
   // keep a previously installed Dock icon even when the bytes behind the old icon URL changed.
   { rel: 'manifest', href: '/manifest.webmanifest?v=studio-file-handler-2' },
@@ -109,7 +124,12 @@ export function HydrateFallback() {
 export default function App() {
   useEffect(() => {
     const pick = TAB_TITLES[Math.floor(Math.random() * TAB_TITLES.length)]
-    document.title = pick
+    // A lane's dev server (scripts/follow-lanes.sh) exports VITE_LANE="A" and the tab title is
+    // exactly that letter (Peter, 2026-09-16: "change the tab names to A, B, C, E") — four
+    // localhost tabs read A B C E, nothing else. Unset in production, so the real title stands.
+    // TiptapEditor's own title write honours the same variable, or it would overwrite this.
+    const lane = import.meta.env.VITE_LANE
+    document.title = lane || pick
   }, [])
   return <Outlet />
 }

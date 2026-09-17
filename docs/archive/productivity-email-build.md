@@ -1880,3 +1880,119 @@ to ground a per-day quality verdict against, so asking for one would invite exac
 judgement the daily gate refuses. Quality lives on the daily window, where the session→prose
 pairing makes it real. `character` is what answers Peter's "what the good days were, what the bad":
 it describes the day, never grades the writer.
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the "Productivity + email" section.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+## Productivity + email (`src/productivity/`, `src/email/`, LIVE except email send)
+
+Session capture → a per-month attested ledger → §A3.3 rollups → charts and an AI report the WRITER
+runs in their own AI and pastes back. Surface is the toolbar's **clock drop-up** (`ClockMenu.tsx`, a
+5-button nav shell); `/ledger` and `/productivity` the routes are GONE. Email compose is live behind
+`?email` (send blocked on Google verification).
+
+Spec: `docs/specs/Inkwave-Productivity-Email-BuildSpec-v0.2.md` — **cite the version**, since a spec
+edit silently re-points an unversioned § reference. **Build log:
+`docs/archive/productivity-email-build.md`** — read it before changing the heuristic, the fixtures,
+or the tone.
+
+- **`productivity/types.ts` is a CONTRACT** (`SessionRow`, snake_case because it is a CSV/wire
+  shape, not repo style — don't "tidy" it). `DocType` is declared ONCE in `types/document.ts`.
+- **An email is an ORDINARY document** (`docType: 'email'` + an `email` header block; the BODY is
+  `contentJson`). It gets history, hashing and session capture because it is a document. The email
+  layer sets `docType` and nothing else; the ledger owns resolution.
+- **Email presentation is local view state, never document state.** The W2 Focus/Studio switch moves
+  the SAME `EditorContent` between an isolated `ApplicationSurface` and contextual document paper.
+  It must not recreate the EditorView merely to change chrome: `setPaginationGappedMode` changes
+  full page gaps ↔ zero-size markers in place, while the stable fit-box wrapper preserves the child
+  subtree. The per-email choice lives only under `inkwave:applicationSurface:email:mode:<docId>`;
+  it is absent from snapshots, export bundles and provenance hashes. Historical email snapshots read
+  that local choice for presentation only. Spec: Productivity & Email v0.5, §D2.
+- **Duplicate-as-new is a new identity, never copied evidence.** `email/duplicateEmail.ts` copies the
+  current headers/body and ordinary editor configuration only after the source flushes successfully;
+  the new email gets a new document/session/SCAS identity and inherits no receipts, verdict state, or
+  green anchors. Today it opens as a separate one-subdoc draft. The future workspace must reuse this
+  constructor and place its result; it must not grow a second cloning path.
+- **Email save status distinguishes persistence from provider sync.** The bottom-right message says
+  `Saved locally …` only after the local save acknowledgement. `Last synced …` is reserved for a
+  future Gmail Draft revision Google has acknowledged. `EmailDraftSaveStatus` owns its own tiny
+  event/timer state so autosave does not re-render the full editor tree. “Snapshot this draft” is the
+  separate explicit provenance action; direct send snapshots automatically before transmission.
+- **Email owns no snapshot mechanism or snapshot state.** “Snapshot this draft”, global “save
+  version”, and Gmail's mandatory pre-send snapshot all use TiptapEditor's one
+  `createManualSnapshot` queue. It updates the ordinary ◈ history/counter, OTS state, mirrors and diff
+  summary. Do not restore an email `recordedAt` state or a second finalise/snapshot module.
+- **TYPING COST IS THE DESIGN.** Capture rides the existing `onTransaction` stream and reuses
+  `countSteps`: ~0.30µs/keystroke, flat from 200 to 40k words. Every O(doc) number is computed at
+  session CLOSE — a session boundary IS an inactivity gap, so the word count at the previous close
+  IS the next session's `words_start`. Idle is one 30s interval, never a per-input timer churn.
+- **The tick NEVER renders React.** `pomodoroStore` has two channels: state (rare, React may use it)
+  and the per-second tick (IMPERATIVE ONLY — `TimeFace`/`TimeRing` write `textContent`/
+  `strokeDashoffset`). A `setState` per second inside the editor's tree re-renders it every second
+  while someone is typing. The countdown overlay is PORTALLED to `document.body` with
+  `contain: layout style paint`, so its write cannot reach the page subtree by construction.
+- **Measured, estimated and judged are THREE provenances, and a series' style is a function of
+  `series.provenance`** with no style prop anywhere — so no caller can paint AI output as a measured
+  bar. Post-hoc ("remembered") minutes get SEPARATE COLUMNS so conflation is unrepresentable, at all
+  three split sites.
+- **`entered: 'timer' | 'post-hoc'` is explicit on every row — never absence-means-timer.** A
+  post-hoc block is TESTIMONY, not an `estimated` rule anyone can recompute; read it only through
+  `isPostHoc()`, which asks the positive question. Show "about 45m", never start–end times: printing
+  "13:15–14:00" dresses testimony as measurement.
+- **A guard on one implementation of a rule says nothing about the other.** `daySummary` in
+  `ClockMenu.tsx` is a SECOND implementation of "sum the day's minutes"; every guard was on
+  `aggregate.ts`, so the drop-up reported 45 remembered minutes to Peter as "focused minutes" with
+  the full suite green.
+- **Measured numbers never round-trip.** Out yes, back never: `judged.ts` REFUSES a judged table
+  carrying any measured column; `claims.ts` flags narrative numerals absent from the payload.
+- **You cannot judge writing from minutes and word counts.** `insight`/`quality` are asked for ONLY
+  when text was sent and REFUSED otherwise; `contentIncluded` defaults FALSE so a caller that
+  forgets it refuses a guess rather than accepts one.
+- **The payload is an ALLOW-LIST** (`report/compile.ts` NAMES every field that leaves). **Do not
+  reintroduce a deny-list** — it fails the opposite way, silently, and the last one had zero live
+  callers while `/privacy` cited it as the enforcing mechanism. Name new columns in compile.ts, and
+  keep `/privacy` naming the guard that is REAL.
+- **`place` is a word the writer TYPES. There is no geolocation anywhere.** Never write copy
+  implying otherwise.
+- **`sessions: []` at weekly/monthly**; opted-in notes travel as `note_digest` per local day. Rows at
+  monthly would put a SECOND copy of every measured number beside the day rollups, which is how a
+  narrative ends up contradicting the bars. One representation of measurement, always.
+- **The deep-vs-shallow heuristic is RATIO ONLY — no duration**, deviating from the spec's `e.g.`
+  because duration scored *worse than chance*. `unclear` is a first-class share, not a rendering
+  failure. **A synthetic fixture can prove a rule INSENSITIVE; it cannot CALIBRATE a cut-point** —
+  and check the classes overlap in the proxy the rule actually READS, not in one that happens to be
+  there.
+- **A defensive clamp on a quantity with a provable range is not safety — it is a silencer.**
+  `pearson()`'s `clamp(-1,1)` hid a formula with an axis dropped, past the whole suite. It now snaps
+  only floating-point hair and REFUSES anything grossly out of range.
+- **§A5 tone: honest first, funny second, kind third.** Do NOT restore the "kind, non-shaming" rule
+  — a test asserts it is gone. The surviving distinction is the whole thing: **productivity guilt is
+  a standard IMPOSED on the writer; accountability is a goal the writer SET.** So the ban is on the
+  SUBJECT and the STANDARD, not on vocabulary. Goals travel only on their own consent tick, so a
+  model sent none has nothing to hold him to; never default a goal to empty — empty and absent are
+  different states.
+- **A hedge does not launder an invented standard.** Daily may GUESS at causality if the guess
+  announces itself ("the break maybe helped"); it may not assert ("the break helped"), and it may
+  not suggest a standard the writer never set. The hedge must govern the CLAUSE it exempts.
+- **Time is ISO-8601 WITH the local offset — never a bare `Z`**, so the local day is recoverable.
+- **The ledger is its OWN file beside the `.studio`** and takes READ-MERGE-WRITE on EVERY write —
+  **do not copy the snapshot archive's once-per-session merge gate**; a month of rows is tens of KB
+  and the file's cheapness buys the stronger invariant. `RemoteRead` has NO `null` member: 'absent'
+  (safe to write) and 'error' (never write) are different words and the type enforces it.
+- **⚠ THERE IS NO AT-REST ENCRYPTION.** Spec §C2 says there is; the code writes plaintext JSON. Copy
+  tracks the CODE.
+- **§C1.4 copy guard is PRODUCT-WIDE** (`src/copy/claimMatchers.ts`, swept by `claims.test.ts`).
+  Matchers must be proved to FIRE on known-bad copy AND to stay silent on an honest control before
+  their verdict is read — "assert the bad phrase is absent" passes trivially on a broken matcher.
+- **A guard that reads PROSE as CODE attacks its own documentation.** Comments are STRIPPED before
+  every source scan in this repo, deliberately: these rules must NAME what they forbid in order to
+  forbid it, and the tempting fix is always to delete the sentence. **Judge what the code DOES** —
+  an import, a call, a header actually sent. Every such guard needs the pair proved: fires on a real
+  use, silent on a mention.
+

@@ -1,0 +1,9 @@
+# lane	branch	pr
+# One row per lane in flight. scripts/follow-lanes.sh reads this: lane letter → port 5180+index
+# (A=5181 … G=5187), and the tab title shows "<pr>/<lane>". Keep it current when a lane opens a PR.
+A	claude/refactor-breakrule	7
+B	claude/refactor-daysummary	8
+C	claude/refactor-editorsplit	9
+E	claude/refactor-jcs	10
+F	claude/refactor-api-handler	12
+M	claude/trim-claude-md	22
