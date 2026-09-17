@@ -1064,13 +1064,20 @@
      It was `8` here: a second copy of the row size, in CSS, where the one lane most likely to change
      ROW_SLOTS would never look. Peter's six is justified BY the phone fit, so the phone fit must be
      a function of it. The fallback keeps a stylesheet-only render honest at today's six. */
+  /* Peter, 2026-09-17: "buttons bigger and clearer" — less slack (24px), a 52px cap, a 2px ring,
+     a darker glyph, and 18px type in the circle. Both rows of the pill (main + ▲ drawer) share the
+     rule and the same --iw-row-slots, so their circles line up column for column. */
   .iw-phone-toolbar .min-w-\[44px\] {
-    min-width: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
+    min-width: clamp(38px, calc((100vw - 24px) / (var(--iw-row-slots, 6) + 2)), 52px);
   }
   .iw-phone-toolbar .w-9 {
-    width: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
-    height: clamp(36px, calc((100vw - 45px) / (var(--iw-row-slots, 6) + 2)), 48px);
+    width: clamp(38px, calc((100vw - 24px) / (var(--iw-row-slots, 6) + 2)), 52px);
+    height: clamp(38px, calc((100vw - 24px) / (var(--iw-row-slots, 6) + 2)), 52px);
+    border-width: 2px;
+    font-size: 18px;
   }
+  .iw-toolbar-outline.w-full .w-9 svg { width: 18px; height: 18px; }
+  .iw-toolbar-outline.w-full .text-stone-400 { color: #57534e; }
 
   /* ── THE PHONE PANEL SHEET (styles/panelSheet.ts owns the numbers; this is its box) ──────────
      Every footer drop-up on phone is one of these: the JS style sets position/inset/bottom/max-
@@ -1083,13 +1090,18 @@
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     background: #fff;
-    /* The phone type ramp (styles/panelSheet.ts SHEET_TYPE reads these). ≥16px body: iOS zoom rule. */
-    font-size: 17px;
-    --iw-sheet-body: 17px;
-    --iw-sheet-small: 15px;
-    --iw-sheet-meta: 13px;
-    --iw-sheet-label: 11px;
+    /* The phone type ramp (styles/panelSheet.ts SHEET_TYPE reads these). ≥16px body: iOS zoom rule.
+       SANS on phone (Peter, 2026-09-17: "fonts are too small and should be sans") — the serif is
+       the page's voice; the chrome reads at a glance in the system face, one step up the ramp. */
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 18px;
+    --iw-sheet-body: 18px;
+    --iw-sheet-small: 16px;
+    --iw-sheet-meta: 14px;
+    --iw-sheet-label: 12px;
   }
+  .iw-phone-sheet .font-serif, .iw-phone-sheet.font-serif { font-family: inherit; }
+  .iw-phone-sheet .text-\[17px\] { font-size: var(--iw-sheet-body); }
   /* Legacy Tailwind sizes inside a sheet land on the ramp — the Sync, Snapshots and Citations
      bodies were written for a 210px desktop pop-over in 0.68–0.78rem and read as fine print on a
      phone next to the 17px Page / Menu / Guide sheets. One remap here, no per-panel rewrite. */

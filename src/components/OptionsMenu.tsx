@@ -241,9 +241,9 @@ export function OptionsMenu({
   // Two columns (Peter, 2026-07-10): RIGHT = file ops ending with Export; LEFT = the rest, ending
   // with Sign in/Logout (AccountMenuItems renders after the left column).
   const fileItems: Array<{ label: string; run: () => void }> = [
-    { label: 'Change doc', run: changeToBlankDocument },
     { label: 'New doc', run: openNewInkwaveWindow },
     { label: 'New blank', run: openNewBlankInkwaveWindow },
+    { label: 'Change doc', run: changeToBlankDocument },
     // An email is created exactly like any other document (§B2.1) — same path, one extra field.
     // Flag-gated, so the menu is unchanged until `?email=1`.
     ...(emailEnabled() ? [{
@@ -262,14 +262,8 @@ export function OptionsMenu({
   const items: Array<{ label: string; run: () => void }> = [
     // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1).
     ...(onWorkReport ? [{ label: 'Report', run: onWorkReport }] : []),
-    { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
-    { label: 'About', run: () => navigate('/about') },
-    { label: 'Privacy', run: () => navigate('/privacy') },
-    { label: 'Print', run: () => onPrint?.() },
-    // Peter's "opfs button" (2026-07-17) — named for what a WRITER is looking for, not for the
-    // API. Every document this device is actually holding, including any the Recent list can't
-    // see, with Open + Download on each. See OpfsInspector.tsx.
-    { label: 'Storage', run: () => setInspector(true) },
+    // Order (Peter, 2026-09-17): the document's record first (Snapshots, Verify, Storage), then
+    // Print, then the two pages about the app.
     {
       label: 'Snapshots',
       run: () => {
@@ -293,6 +287,14 @@ export function OptionsMenu({
         })()
       },
     },
+    { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
+    // Peter's "opfs button" (2026-07-17) — named for what a WRITER is looking for, not for the
+    // API. Every document this device is actually holding, including any the Recent list can't
+    // see, with Open + Download on each. See OpfsInspector.tsx.
+    { label: 'Storage', run: () => setInspector(true) },
+    { label: 'Print', run: () => onPrint?.() },
+    { label: 'About', run: () => navigate('/about') },
+    { label: 'Privacy', run: () => navigate('/privacy') },
   ]
   if (installPrompt) {
     items.push({
@@ -366,13 +368,15 @@ export function OptionsMenu({
             className={`iw-nightable iw-touch-guard iw-no-print z-[60] bg-white shadow-md text-[17px] text-stone-600 font-serif ${isPhone ? PHONE_SHEET_CLASS : 'w-[14.375rem] py-0.5 flex'}`} style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {isPhone && <SheetHeader title="Menu" onClose={() => setMenuOpen(false)} />}
-            <div className={isPhone ? 'flex py-0.5' : 'contents'}>
-            {/* LEFT column: Verify/About/Privacy/Print/Snapshots … ending with Sign in/Logout. */}
-            <div className="flex-1 border-r border-stone-100">
+            <div className={isPhone ? 'flex items-stretch py-0.5' : 'contents'}>
+            {/* LEFT column: Snapshots/Verify/Storage/Print/About/Privacy … ending with Sign in/Logout.
+                Phone: both columns are flex columns whose rows STRETCH (flex-1) — the two columns are
+                always the same height whatever their counts (Peter, 2026-09-17). */}
+            <div className={`flex-1 border-r border-stone-100 ${isPhone ? 'flex flex-col' : ''}`}>
               {items.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className="w-full text-left pl-3 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors"
+                  className={`w-full text-left pl-4 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
                 >
                   {it.label}
                 </button>
@@ -380,11 +384,11 @@ export function OptionsMenu({
               <AccountMenuItems onClose={() => setMenuOpen(false)} />
             </div>
             {/* RIGHT column: file ops, ending with Export. */}
-            <div className="flex-1">
+            <div className={`flex-1 ${isPhone ? 'flex flex-col' : ''}`}>
               {fileItems.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className="w-full text-left pl-3 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors"
+                  className={`w-full text-left pl-4 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
                 >
                   {it.label}
                 </button>

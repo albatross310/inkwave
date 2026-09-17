@@ -93,7 +93,7 @@ import { musicEnabled } from '../music/flag'
 import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
 import { WorkSummaryAutoOpen } from '../components/WorkSummaryAutoOpen'
 import { PageMenu } from '../components/PageMenu'
-import { PHONE_SHEET, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET } from '../styles/panelSheet'
 import { gappedPagesEnabled } from './pageView'
 import { setPaginationGappedMode } from './extensions/PaginationExtension'
 import { getLineHeight } from './lineHeight'
@@ -1792,7 +1792,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       const t = e.target as Element | null
       // A reading surface inside a guarded panel is exempt (see the .iw-touch-guard CSS note):
       // this half preventDefaults touchmove, which cancels a drag-select as surely as the CSS does.
-      guarded = !!t?.closest?.('.iw-touch-guard') && !t.closest('[data-iw-selectable]')
+      // A phone sheet SCROLLS (index.css .iw-phone-sheet): a finger that starts inside one is a
+      // scroll, never a slide-onto-the-editor — the guard used to swallow its touchmove and the
+      // Guide / Settings bodies could not be scrolled at all (Peter, 2026-09-17).
+      guarded = !!t?.closest?.('.iw-touch-guard') && !t.closest('[data-iw-selectable]') && !t.closest('.iw-phone-sheet')
     }
     const move = (e: TouchEvent) => { if (guarded && e.cancelable) e.preventDefault() }
     const end = (e: TouchEvent) => { if (e.touches.length === 0) guarded = false }
@@ -3160,6 +3163,87 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       )}
     </>
   )
+  // The ▲ drawer's contents. Desktop: a pop-up anchored above the ▲. Phone: a SECOND ROW inside
+  // the toolbar pill itself (Peter, 2026-09-17: "the toolbar simply grows up to double height"),
+  // sized by the same --iw-row-slots clamp as the main row so both rows' circles match, no dividers.
+  const renderDrawer = () => {
+                  const available = overflowSlots(toolbarSlots)
+                  return (
+                    <div className={`bg-white flex items-center z-[120] ${isTouch ? 'iw-toolbar-circles iw-phone-toolbar justify-between px-0 py-1.5' : `absolute bottom-full left-0 ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}`}
+                      {...{ [PANEL_ATTR]: 'drawer' }}
+                      // The drawer is a panel too. Phone: a second toolbar ROW (the pill grows; the same
+                      // --iw-row-slots clamp sizes its circles so the two rows match). Desktop: anchored
+                      // above the ▲, its own width, the shared sheet radius / shadow / border.
+                      style={isTouch
+                        ? { ['--iw-row-slots' as string]: String(toolbarSlots.length) }
+                        : { border: PHONE_SHEET.border, borderRadius: PHONE_SHEET.radiusPx, boxShadow: PHONE_SHEET.shadow, marginBottom: PHONE_SHEET.gapPx }}
+                      onMouseDown={e => e.stopPropagation()}>
+                      {/* + add more opps */}
+                      <div className="flex items-center">
+                        <button type="button"
+                          onClick={() => setOppsOpen(o => !o)}
+                          className="flex items-center justify-center min-w-[44px] min-h-[44px] text-stone-400 hover:text-[#302438] transition-colors"
+                          title="More options coming">
+                          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-base leading-none">+</span>
+                        </button>
+                        {oppsOpen && createPortal(
+                          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 font-serif" onMouseDown={() => setOppsOpen(false)}>
+                            <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
+                            <div className="relative iw-nightable bg-white rounded-2xl shadow-xl px-12 py-10 text-center" style={{ border: `1px solid ${INK}bf` }} onMouseDown={e => e.stopPropagation()}>
+                              <p className="text-2xl" style={{ color: INK }}>New features coming soon</p>
+                              <p className="mt-6 text-stone-400 italic">~ The Developer</p>
+                            </div>
+                          </div>,
+                          document.body,
+                        )}
+                      </div>
+                      {/* Phone-only: ◈ provenance/snapshots — moved here from the main row
+                          (Peter 2026-07-11: fewer circles, more breathing room). */}
+                      {isTouch && (
+                        <>
+                          <button type="button"
+                            {...{ [PANEL_TRIGGER_ATTR]: 'receipt' }}
+                            onClick={() => togglePanel('receipt')}
+                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                            style={{ color: '#302438' }}
+                            title="Provenance record — snapshots"
+                          >
+                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.75)] text-sm">◈</span>
+                          </button>
+                        </>
+                      )}
+                      {/* Phone-only: ☁ sync in the popup (hideable from main toolbar) */}
+                      {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
+                        <>
+                          <button type="button"
+                            {...{ [PANEL_TRIGGER_ATTR]: 'sync' }}
+                            onClick={() => togglePanel('sync')}
+                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                            style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
+                            title="Sync status">
+                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.5)] text-base">☁</span>
+                          </button>
+                        </>
+                      )}
+                      {/* divider if there are available slots */}
+                      {!isTouch && available.length > 0 && <div className="w-px h-6 bg-stone-100 mx-1" />}
+                      {available.map(id => (
+                        <div key={id}
+                          className="iw-slot"
+                          draggable={!isTouch}
+                          onDragStart={() => { dragIdRef.current = id }}
+                          onDragEnd={() => { dragIdRef.current = null }}
+                          onClick={() => setPanelOpen('drawer', false)} // no-op once the item's own panel took the slot
+                          {...(isTouch ? popupTouchHandlers(id) : {})}
+                          style={isTouch ? { touchAction: 'none' } : undefined}
+                        >
+                          {renderSlotButton(id, false)}
+                        </div>
+                      ))}
+                    </div>
+                  )
+  }
+
   return (
     <ComplianceContext.Provider value={compliance}>
       {/* Phone reveal chrome choreography — see chromeDone above (.iw-chrome-hold / .iw-chrome-in). */}
@@ -3452,7 +3536,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 maxWidth: 'var(--iw-bar-budget)',
               }),
               border: '1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.75))',
-              borderRadius: isTouch ? '15px 15px 0 0' : '15px',
+              borderRadius: isTouch ? '22px 22px 0 0' : '15px',
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
               transition: 'opacity 160ms ease',
@@ -3519,6 +3603,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 --iw-row-slots and caps each button's 44px min-WIDTH at the same size; the footer RO
                 mirrors whatever height results into --iw-toolbar-h + the PM scroll reserve, so
                 NEVER hardcode the pill height anywhere. */}
+            {isTouch && showMainRow && (
+              <div style={{ overflow: 'hidden', maxHeight: toolbarPickerOpen ? 96 : 0, transition: 'max-height 220ms ease', borderBottom: toolbarPickerOpen ? PHONE_SHEET.border : '1px solid transparent' }}
+                aria-hidden={!toolbarPickerOpen} {...(toolbarPickerOpen ? {} : { inert: '' as unknown as boolean })}>
+                {renderDrawer()}
+              </div>
+            )}
             {showMainRow && (
             <div className={`iw-toolbar-circles flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
               // ⚠ ONE ROW SIZE, DERIVED FROM THE ROW ITSELF (R2). index.css once divided by a
@@ -3557,86 +3647,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                     </svg>
                   </span>
                 </button>
-                {(() => {
-                  const available = overflowSlots(toolbarSlots)
-                  return (
-                    <div className={`bg-white flex items-center z-[120] ${isTouch ? 'justify-between px-1' : 'absolute bottom-full left-0'} ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
-                      {...{ [PANEL_ATTR]: 'drawer' }}
-                      // The drawer is a panel too. Phone: the shared sheet BOX (position, inset, bottom above
-                      // the pill + keyboard, radius, shadow, border — styles/panelSheet.ts), so it spans the
-                      // pill it sits on and follows it, instead of hugging its own contents beside the ▲.
-                      // Desktop: anchored above the ▲, its own width, the same radius / shadow / border.
-                      style={isTouch
-                        ? { ...phoneSheetStyle(), maxHeight: undefined, fontSize: undefined }
-                        : { border: PHONE_SHEET.border, borderRadius: PHONE_SHEET.radiusPx, boxShadow: PHONE_SHEET.shadow, marginBottom: PHONE_SHEET.gapPx }}
-                      onMouseDown={e => e.stopPropagation()}>
-                      {/* + add more opps */}
-                      <div className="flex items-center">
-                        <button type="button"
-                          onClick={() => setOppsOpen(o => !o)}
-                          className="flex items-center justify-center min-w-[44px] min-h-[44px] text-stone-400 hover:text-[#302438] transition-colors"
-                          title="More options coming">
-                          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-base leading-none">+</span>
-                        </button>
-                        {oppsOpen && createPortal(
-                          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 font-serif" onMouseDown={() => setOppsOpen(false)}>
-                            <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
-                            <div className="relative iw-nightable bg-white rounded-2xl shadow-xl px-12 py-10 text-center" style={{ border: `1px solid ${INK}bf` }} onMouseDown={e => e.stopPropagation()}>
-                              <p className="text-2xl" style={{ color: INK }}>New features coming soon</p>
-                              <p className="mt-6 text-stone-400 italic">~ The Developer</p>
-                            </div>
-                          </div>,
-                          document.body,
-                        )}
-                      </div>
-                      {/* Phone-only: ◈ provenance/snapshots — moved here from the main row
-                          (Peter 2026-07-11: fewer circles, more breathing room). */}
-                      {isTouch && (
-                        <>
-                          <div className="w-px h-6 bg-stone-100 mx-1" />
-                          <button type="button"
-                            {...{ [PANEL_TRIGGER_ATTR]: 'receipt' }}
-                            onClick={() => togglePanel('receipt')}
-                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
-                            style={{ color: '#302438' }}
-                            title="Provenance record — snapshots"
-                          >
-                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.75)] text-sm">◈</span>
-                          </button>
-                        </>
-                      )}
-                      {/* Phone-only: ☁ sync in the popup (hideable from main toolbar) */}
-                      {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
-                        <>
-                          <div className="w-px h-6 bg-stone-100 mx-1" />
-                          <button type="button"
-                            {...{ [PANEL_TRIGGER_ATTR]: 'sync' }}
-                            onClick={() => togglePanel('sync')}
-                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
-                            style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
-                            title="Sync status">
-                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.5)] text-base">☁</span>
-                          </button>
-                        </>
-                      )}
-                      {/* divider if there are available slots */}
-                      {available.length > 0 && <div className="w-px h-6 bg-stone-100 mx-1" />}
-                      {available.map(id => (
-                        <div key={id}
-                          className="iw-slot"
-                          draggable={!isTouch}
-                          onDragStart={() => { dragIdRef.current = id }}
-                          onDragEnd={() => { dragIdRef.current = null }}
-                          onClick={() => setPanelOpen('drawer', false)} // no-op once the item's own panel took the slot
-                          {...(isTouch ? popupTouchHandlers(id) : {})}
-                          style={isTouch ? { touchAction: 'none' } : undefined}
-                        >
-                          {renderSlotButton(id, false)}
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}</div>
+                {!isTouch && renderDrawer()}</div>
               {/* Customisable slots — desktop: HTML5 drag between slots or from the ▲ popup;
                   phone: touch-hold a circle to arm, drag sideways, neighbours FLIP-slide out of
                   the way (slotDragView preview), release to drop (see slotTouchHandlers above). */}

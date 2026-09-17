@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
 import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
-import { SheetHeader } from './PanelSheet'
+import { SheetHeader, SheetSection } from './PanelSheet'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
 import { flushPendingSave } from '../storage/opfs'
 
@@ -123,95 +123,60 @@ export function SettingsMenu({ limitN, onLimitChange, open: openProp, onOpenChan
                 inside its cap (index.css), and two columns at 390px wrapped every second label. */}
             <div className={twoCol && !isPhone ? 'grid grid-cols-2 gap-x-1 items-center' : undefined}>
 
-            {/* Night mode — dark writing surface */}
-            <Row
-              label="Night mode"
-              checked={nightModeEnabled()}
-              onChange={() => { setNightMode(!nightModeEnabled()); rerender(n => n + 1) }}
-            />
+            {/* Peter, 2026-09-17: grouped — how the page LOOKS, then how the WRITING behaves, then the
+                two AI opt-ins (off by default; the first off→on shows the consent dialog). */}
+            {isPhone && <SheetSection label="Page" />}
+            <Row label="Night mode" checked={nightModeEnabled()}
+              onChange={() => { setNightMode(!nightModeEnabled()); rerender(n => n + 1) }} />
+            <Row label="Gapped pages" checked={gappedPagesEnabled()}
+              onChange={() => { setGappedPages(!gappedPagesEnabled()); void flushThenReload() }} />
+            <Row label="Watermark" checked={watermarkEnabled()}
+              onChange={() => { setWatermark(!watermarkEnabled()); rerender(n => n + 1) }} />
 
-            {/* Vocab limit */}
+            {isPhone && <SheetSection label="Writing" />}
             <div className="flex items-center justify-between px-4 py-2.5">
               <span>Vocab limit</span>
               <LimitSelector value={limitN} onChange={onLimitChange} />
             </div>
-
-            {/* Gapped pages */}
-            <Row
-              label="Gapped pages"
-              checked={gappedPagesEnabled()}
-              onChange={() => { setGappedPages(!gappedPagesEnabled()); void flushThenReload() }}
-            />
-
-            {/* Old word display */}
-            <div className="flex items-center justify-between px-4 py-2.5">
-              <span>Old word</span>
-              <button
-                type="button"
-                onClick={() => { cycleCrossoutMode(); rerender(n => n + 1) }}
-                className="text-xs px-2 py-0.5 rounded-full hover:bg-stone-100 transition-colors tabular-nums"
-                style={{ color: INK, border: `1px solid ${INK}44` }}
-                title="Cycle old-word display style"
-              >
-                {crossoutMode()}
-              </button>
-            </div>
-
-            {/* Watermark */}
-            <Row
-              label="Watermark"
-              checked={watermarkEnabled()}
-              onChange={() => { setWatermark(!watermarkEnabled()); rerender(n => n + 1) }}
-            />
-
-            {/* AI opt-ins — off by default; the first off→on shows the consent dialog. */}
-            <Row
-              label="AI summaries"
-              checked={aiSummariesEnabled()}
-              onChange={() => {
-                if (!aiSummariesEnabled() && !aiConsentGiven('summaries')) { setConsentFor('summaries'); return }
-                setAiSummaries(!aiSummariesEnabled()); rerender(n => n + 1)
-              }}
-            />
-            <Row
-              label="URL citation lookup"
-              checked={urlLookupEnabled()}
-              onChange={() => {
-                if (!urlLookupEnabled() && !aiConsentGiven('url')) { setConsentFor('url'); return }
-                setUrlLookup(!urlLookupEnabled()); rerender(n => n + 1)
-              }}
-            />
-
-            {/* Debug: highlight all (dev only) */}
-            {import.meta.env.DEV && (
-              <Row
-                label="Debug: highlight all"
-                checked={typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:debugHighlightAll') === '1'}
-                onChange={() => { try { const on = localStorage.getItem('inkwave:debugHighlightAll') === '1'; localStorage.setItem('inkwave:debugHighlightAll', on ? '0' : '1') } catch { /* private */ } void flushThenReload() }}
-              />
-            )}
-
             {/* SCAS suggestions — OFF by default; an explicit choice is remembered. Live toggle
                 (no reload): only the highlight decorations are suppressed; the SCAS engine keeps running. */}
-            <Row
-              label="SCAS suggestions"
-              checked={scasSuggestionsEnabled()}
+            <Row label="SCAS suggestions" checked={scasSuggestionsEnabled()}
               onChange={() => {
                 setScasSuggestionsEnabled(!scasSuggestionsEnabled())
                 window.dispatchEvent(new Event('inkwave:scas-display-changed'))
                 rerender(n => n + 1) // update this toggle's checked state
-              }}
-            />
-
-            {/* SCAS testing mode — highlights all exclusion-set words, not just the ones in your text */}
-            <Row
-              label="SCAS test mode"
+              }} />
+            {/* Old word display */}
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span>Old word</span>
+              <button type="button"
+                onClick={() => { cycleCrossoutMode(); rerender(n => n + 1) }}
+                className="text-xs px-2 py-0.5 rounded-full hover:bg-stone-100 transition-colors tabular-nums"
+                style={{ color: INK, border: `1px solid ${INK}44` }}
+                title="Cycle old-word display style">
+                {crossoutMode()}
+              </button>
+            </div>
+            {/* SCAS testing mode — highlights all exclusion-set words, not just the ones in your text
+                (this is also the dev "highlight all" switch: one key, one row). */}
+            <Row label="SCAS test mode"
               checked={typeof localStorage !== 'undefined' && localStorage.getItem('inkwave:debugHighlightAll') === '1'}
               onChange={() => {
                 try { localStorage.setItem('inkwave:debugHighlightAll', localStorage.getItem('inkwave:debugHighlightAll') === '1' ? '0' : '1') } catch { /* private mode */ }
                 void flushThenReload()
-              }}
-            />
+              }} />
+
+            {isPhone && <SheetSection label="AI" />}
+            <Row label="AI summaries" checked={aiSummariesEnabled()}
+              onChange={() => {
+                if (!aiSummariesEnabled() && !aiConsentGiven('summaries')) { setConsentFor('summaries'); return }
+                setAiSummaries(!aiSummariesEnabled()); rerender(n => n + 1)
+              }} />
+            <Row label="URL citation lookup" checked={urlLookupEnabled()}
+              onChange={() => {
+                if (!urlLookupEnabled() && !aiConsentGiven('url')) { setConsentFor('url'); return }
+                setUrlLookup(!urlLookupEnabled()); rerender(n => n + 1)
+              }} />
 
             </div>
 
