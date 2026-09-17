@@ -92,8 +92,10 @@ screenshots.** Absolute. His product decisions are not that boundary; the specs 
 ## ⚠ THE DATA-LOSS FAMILY — universal, and the most load-bearing rules here
 
 Six incidents on Peter's real thesis, one shape: **an unknown answered as if it were a known-empty.**
-Every rule is that applied to one read, and any write path can be an instance. Forensics:
-`docs/archive/data-loss-incidents.md`; the rest: `docs/rules/storage-sync.md`.
+Every rule is that applied to one read, and any write path can be an instance. **These bullets are
+deliberately duplicated in `docs/rules/storage-sync.md`** — they bind sessions that never intended to
+touch storage (any write path, any effect that takes a lock, any code that opens a document), so "that
+area is not mine" is exactly the wrong inference. Forensics: `docs/archive/data-loss-incidents.md`.
 
 - **A failed READ is not an empty archive.** `readSnapshotsFromDisk` returns `[]` ONLY on
   `NotFoundError`; every other fault, including an unreadable payload, THROWS.
@@ -120,10 +122,23 @@ Every rule is that applied to one read, and any write path can be an instance. F
   `incoming-newer`, adopt; neither, ambiguous, **or the local read failed** ⇒ `diverged`, open as a
   SEPARATE document and overwrite nothing. (A null-on-failure read makes `localHash` null ⇒
   `incoming-newer` ⇒ blind overwrite: the read rule above is load-bearing here.)
-- **Document identity is PER TAB** (`storage/tabDoc.ts`, sessionStorage, never the URL); **ONE LIVE TAB
-  PER DOCUMENT** via Web Locks named from the ONE exported `DOC_LOCK_PREFIX`; **an effect that takes a
-  lock needs a cancellation token that also RELEASES it**; **a take-over is enforced at the bytes**
-  (the freeze at the `saveDocument` funnel), not asserted. Full text: `docs/rules/storage-sync.md`.
+- **Document identity is PER TAB** (`storage/tabDoc.ts`), carried in sessionStorage, never the URL —
+  OneDrive sign-in returns to a bare `/` and any `?doc=` is gone. Precedence: `?doc=` ??
+  sessionStorage ?? fresh blank; the URL is a reflection, never load-bearing.
+- **ONE LIVE TAB PER DOCUMENT**, via Web Locks, name from the ONE exported `DOC_LOCK_PREFIX` (the
+  OpfsInspector badge queries it; a private copy of that string puts the badge silently to sleep).
+  `claimDocLock` RETRIES past the reload unload-race, or a plain refresh intermittently hands the
+  writer a blank page. No Web Locks ⇒ never block the writer.
+- **A collided untouched `Untitled` is replaced, not warned.** A duplicated tab inherits the source
+  tab's explicit identity; if that document is still exactly the canonical empty paragraph, `Edit.tsx`
+  mints a different blank id silently. Title alone never bypasses the guard — an `Untitled` containing
+  writing still gets the full switch/copy/take-over screen.
+- **An effect that takes a lock needs a cancellation token that also RELEASES it.** React's StrictMode
+  double-invoke is a real second claimant: skipping the stale `setState` alone still leaks the lock.
+- **A take-over is enforced at the bytes, not asserted.** The write freeze lives at the `saveDocument`
+  funnel: the holder flushes → freezes → ACKs, and the taker waits for that ack before stealing. After
+  an ack TIMEOUT, steal, then wait a brief grace for a LATE `surrendered` — a live slow-flusher posts
+  it once frozen; a dead holder never posts and the grace expires.
 - **A helper that cannot see its subject must return null, never an empty list** — "nothing there" and
   "could not look" are different answers, everywhere in this codebase.
 - **Never paste browser screenshots or visual captures into chat** unless Peter asks; report text
