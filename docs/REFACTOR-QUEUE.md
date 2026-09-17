@@ -136,7 +136,44 @@ that prints the divergence Peter has to rule on. It remains mute (exit 0) and on
 
 **Unguarded regardless of this decision, unchanged:** the cross-device canonical-pagination invariant
 (`crossdevice` VOIDs by design), the music pipeline (`music.prove.mjs` stranded), `sweepBreakTables`
-(only `snapsweep.prove.mjs`). Decisions 2 (the `?waveVideo` set) and 3 remain Peter's.
+(only `snapsweep.prove.mjs`). Decision 2 (the `?waveVideo` set) is executed below; decision 3 remains
+Peter's.
+
+**Decision 2 — DONE 2026-09-16 (branch `claude/refactor-drop-wavevideo`, on top of the probe archive).**
+Peter's ruling: drop `?waveVideo` and its probes TOGETHER; zero change to the live water.
+
+- **Deleted, 33 files:** `src/editor/waveVideo.ts` (516 lines) + `waveVideo.test.ts` (16 tests);
+  the six KEEP·dark probes (`barrier`, `loopgate`, `master`, `reveal`, `tilescale`, `twoload` — 911
+  lines) + `generate.mjs` (204); the 24 `public/wave/*.mp4` rungs (3 rungs × day/night × AV1/H.264 ×
+  loop/brake, **6,490,531 bytes**). Text: **+60 / −1,988** across 50 files.
+- **Edited, the video branch removed and nothing else:** `app/entry.client.tsx` (flag sync,
+  `armWaveVideoWait`, the gate's pre-fetch, the warm-path loader; it now CLEARS a stale
+  `inkwave:waveVideo` key once, so a device that once tried the flag holds nothing that reads as a
+  switch), `src/editor/TiptapEditor.tsx` (the reveal's loop-gate: `setTimeout(markReady, 1200)` and
+  `Promise.all([fontsReady, paginationReady])` — byte-equivalent to the flag-off path, and without it
+  a stale key would have held the reveal for 8.2s), `src/styles/index.css` (the veil + white-wait
+  blocks, 65 lines; `.iw-wave-anim` count in the built CSS 16 → 16), `public/sw.js` (`handleWave` and
+  the `/wave/` Range/206 branch), `package.json` (7 `prove:*` → 1), `probeVoidBaseline.json` (12 → 10),
+  `colourBaseline.json` (total 628 → 622, the file's own row).
+- **Moved, not deleted — they serve the LIVE water:** `markskew.prove.mjs` (the triage's plain KEEP:
+  it measures the CSS water's mark skew), `server.mjs` and `autoserve.mjs` (the four `wave-desk`
+  probes import them) → `scripts/wave-desk/`; imports re-pointed; `.mp4` MIME, `media-src` and the
+  `/wave/` immutable-cache branch dropped from the server. This is the one departure from "delete
+  `scripts/wave-video/**` whole": deleting them would have broken `composited`/`markphase`/
+  `reloadgate`/`scrollscene`, which are the live water's only browser instruments.
+- **CSP:** `middleware.ts` never had a `media-src` — nothing to remove. `vercel.json` untouched.
+- **Kept:** every rule bullet in CLAUDE.md's wave section (each was a live bug and each is about the
+  CSS water's own hand-offs); `docs/archive/wave-system-rounds.md` (one closing line added);
+  `docs/archive/editor-surface.md`'s wave-video sections; the "wave-video lesson" asides in
+  `scrubRaster.ts`, `snapThumbs.ts`, `ScrubDebugOverlay.tsx`, `snapshotPalette.test.ts`.
+- **Live-water proof, same box, base vs branch:** `waveTwinkleLifecycle` + `waterPalette` 15/15,
+  verbose output byte-identical; headless Chromium ×3 loads of `/` on each static build:
+  `__iwWaterGate.reason === 'complete'` 6/6, `.iw-wave-anim` observed 6/6, 2 surfaces / 2 twinkle
+  hosts / 390 twinkle leaves on both, 0 `<video>` elements, 0 console messages mentioning video, the
+  one pre-existing hydration warning identical on both. Built chunk set differs by exactly
+  `waveVideo.js`; `iw-wave-video` in built CSS/JS 8/16 → 0/0.
+- **Gate:** typecheck && 267 files / 3,194 tests (base 268 / 3,210 — the 16 `pickRung` tests are the
+  whole difference) && build, GREEN; `probesRunnable` census 49 → 43 wired (floor 40 untouched).
 
 ---
 

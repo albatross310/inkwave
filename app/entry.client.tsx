@@ -21,7 +21,7 @@ if (import.meta.hot) import.meta.hot.dispose(stopWindowCycling)
 // ?auth sticky pattern in auth/config): `?<flag>` sets it sticky ON ('1'), `?<flag>=off` sets it
 // OFF ('0'). Runs before the app reads any flag. `=off` must WRITE '0' (not remove the key) —
 // arithLayout/renderFill now default ON (they read `!== '0'`), so clearing would re-enable them.
-// e.g. `/?renderFill=off` to opt out of phone render-fill, `/?waveVideo` to try the water video.
+// e.g. `/?renderFill=off` to opt out of phone render-fill.
 ;(() => {
   try {
     const params = new URLSearchParams(location.search)
@@ -43,17 +43,13 @@ if (import.meta.hot) import.meta.hot.dispose(stopWindowCycling)
     // sync still owns the sticky `=off`/`=demo` writes so a URL param can never be missed.)
     // The feature could not be turned on because the code that reads the switch is behind the switch.
     // Cost is a URLSearchParams read already being done on this line — not a load-path regression.
-    for (const f of ['arithLayout', 'renderFill', 'waveVideo', 'textRender', 'btDebug', 'snapBreaks',
+    for (const f of ['arithLayout', 'renderFill', 'textRender', 'btDebug', 'snapBreaks',
                      'prodGraphs', 'prodReport', 'prodLedger', 'music', 'musicXml']) {
       const v = params.get(f)
       if (v === 'off') localStorage.setItem(`inkwave:${f}`, '0')
       // `?prodGraphs=demo` / `?prodReport=demo` / `?music=demo` — on, PLUS a LABELLED synthetic
       // fixture ledger, so the panel is reviewable before real capture exists. Never silent.
       else if (v === 'demo') { localStorage.setItem(`inkwave:${f}`, '1'); localStorage.setItem(`inkwave:${f}Demo`, '1') }
-      // `?waveVideo=debug` — same as on, PLUS the on-device diagnostic overlay (no console needed:
-      // Peter tests on an iPhone 8 with no Mac/Web Inspector, and our AV1→H.264→CSS fallback chain
-      // is otherwise SILENT and looks identical to the CSS water he's judging).
-      else if (v === 'debug') localStorage.setItem(`inkwave:${f}`, 'debug')
       // `?btDebug=race` — the KNOWN-NEGATIVE: build the tables WITHOUT waiting for the async
       // library hydration, reproducing the exact race Peter's iPhone found (capa@0 baked at build,
       // capa@20 after the reload ⇒ every lookup misses forever). It must FAIL.
@@ -125,28 +121,6 @@ async function bootstrap() {
   })
 }
 void bootstrap()
-
-// ─── Blank white until the wave video comes up (Peter, 2026-07-17) ────────────────────────────
-// "we have to just have blank white screen until the video comes up and play the video every time".
-// The CSS water paints from the PRERENDERED `.iw-wave-anim` class (that is the design — it runs
-// from first paint), so with the video flag on a load shows CSS water and then swaps to the video:
-// two waters in one load. `.iw-wave-video-wait` holds the surface white until waveVideo.ts either
-// becomes master or bails.
-//
-// A CLASS ON <html>, exactly like `.iw-water-ready` below and `data-theme` — NOT a node append.
-// Appending anything into React's tree before hydration is the #418 catastrophe this file's other
-// comments document at length; a root className is the shape this app already ships twice.
-//
-// THE TIMEOUT IS NOT THE "papered-over one-shot signal" this codebase warns about — it is an
-// independent liveness backstop for a failure waveVideo.ts CANNOT report, because it IS the
-// failure of that module to load at all (a chunk 404, an offline SW miss, a parse error). That
-// module's own exits are covered by its `endWait()`. What must never happen is a permanent white
-// screen, and the module that would clear it is precisely the one that may be missing. 4s > its
-// 2.5s decode budget, so on any load where waveVideo is alive this never fires.
-function armWaveVideoWait(): void {
-  document.documentElement.classList.add('iw-wave-video-wait')
-  setTimeout(() => document.documentElement.classList.remove('iw-wave-video-wait'), 4000)
-}
 
 // ─── Atomic water reveal ───
 // The water (shared gradient + wave tiles + ALL twinkle instances) is gated behind .iw-water-ready
@@ -236,14 +210,6 @@ function armWaveVideoWait(): void {
       const twinkles = !host || (window as unknown as { __iwTwinklesReady?: boolean }).__iwTwinklesReady
         ? Promise.resolve()
         : new Promise<void>((res) => window.addEventListener('inkwave:twinkles-ready', () => res(), { once: true }))
-      // The WAVE VIDEO (flag `inkwave:waveVideo`) starts its fetch+decode NOW so the clip is ready
-      // the moment the gate opens — but it is NOT a gate condition and must NOT be awaited here:
-      // it inserts its <video> into the React-rendered `.iw-wave-twinkles` host and therefore waits
-      // for this gate itself (post-gate = post-hydration, or React reconciles the element away).
-      // Awaiting it here would deadlock. See src/editor/waveVideo.ts.
-      let videoFlag = false
-      try { const v = localStorage.getItem('inkwave:waveVideo'); videoFlag = v === '1' || v === 'debug' } catch { /* private mode */ }
-      if (videoFlag) { armWaveVideoWait(); void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo()).catch(() => {}) }
       const t = setTimeout(() => {
         console.error(`[inkwave] atomic water gate exceeded ${WATER_GATE_TIMEOUT_MS / 1000}s; releasing incomplete water`)
         ready('timeout')
@@ -253,17 +219,10 @@ function armWaveVideoWait(): void {
   }
 }
 
-// ─── Wave video (EXPERIMENTAL — localStorage `inkwave:waveVideo` = '1') ───
-// Fresh loads fold the video INTO the gate above (atomic). The WARM/bfcache path skips that gate
-// (already stamped), so start it here too — prepareWaveVideo is idempotent (started guard) and
-// attaches post-gate. See src/editor/waveVideo.ts.
-try {
-  const wv = localStorage.getItem('inkwave:waveVideo')
-  if ((wv === '1' || wv === 'debug') && document.documentElement.classList.contains('iw-water-ready')) {
-    armWaveVideoWait() // the warm path skips the gate above, so it must arm the white itself
-    void import('../src/editor/waveVideo').then((m) => m.prepareWaveVideo())
-  }
-} catch { /* private mode */ }
+// The retired `inkwave:waveVideo` flag (the wave video, removed 2026-09-16 — decision 2 in
+// docs/REFACTOR-QUEUE.md): a device that once opened `?waveVideo` still holds the key, and nothing
+// reads it any more. Clear it so a stale value can never be mistaken for a live switch.
+try { localStorage.removeItem('inkwave:waveVideo') } catch { /* private mode */ }
 
 // Suppress iOS Safari's native pinch zoom app-wide on phones: the proprietary gesture* events are
 // the only reliable hook (Safari ignores user-scalable=no in-browser). Our own pinch handlers use

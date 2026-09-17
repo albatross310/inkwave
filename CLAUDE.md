@@ -153,8 +153,10 @@ area is not mine" is exactly the wrong inference. Forensics: `docs/archive/data-
 - **STOP FLAGGING EVERYTHING — a finished, tested feature SHIPS LIVE, no flag.** A flag is the EXCEPTION
   and must earn itself: only for work genuinely not ready, with a plan to graduate, and the report says
   WHY it is not live and WHAT closes the gap. **Graduating ≠ flipping a switch on a stub.** Still gated:
-  `?waveVideo` (unresolved desync), `?arithLayout` (**DO NOT GRADUATE** — `docs/rules/pagination.md`),
-  `?email` send (Google verification), `?lesson`.
+  `?arithLayout` (**DO NOT GRADUATE** — `docs/rules/pagination.md`), `?email` send (Google
+  verification), `?lesson`. ~~The wave video (`?waveVideo`, unresolved desync)~~ **REMOVED 2026-09-16**
+  (decision 2, `docs/REFACTOR-QUEUE.md`) — a flag that cannot graduate is not a scaffold, it is a
+  second water nobody sees; its rules stay in `docs/rules/wave.md`.
 - **NAME THE FEATURE, EVERY TIME.** Open every finding with (a) the FEATURE in Peter's words, not the
   module's ("the fast snapshot scrubbing", not "`buildRenderModel`"), and (b) **the blast radius — is
   this live, or behind a default-OFF flag?** Same in agent briefs.

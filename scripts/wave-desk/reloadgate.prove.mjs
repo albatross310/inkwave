@@ -2,7 +2,7 @@
 // A fresh context per load cannot see cache, storage, or play-pending state retained by the tab,
 // so this deliberately navigates once and then reloads that exact page repeatedly.
 import { chromium, webkit } from '@playwright/test'
-import { autoWaveBase } from '../wave-video/autoserve.mjs'
+import { autoWaveBase } from './autoserve.mjs'
 
 const LOADS = Number(process.env.LOADS || 5)
 const ENGINE = process.env.PROBE_ENGINE || 'chromium'

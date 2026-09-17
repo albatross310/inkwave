@@ -4,7 +4,7 @@
 //   3. an editor-zoom gesture (including its anchor scroll correction) does not re-phase marks.
 // Numbers only; no screenshots. Uses the production build through the faithful local wave server.
 import { chromium, webkit } from '@playwright/test'
-import { autoWaveBase } from '../wave-video/autoserve.mjs'
+import { autoWaveBase } from './autoserve.mjs'
 
 const ENGINE = process.env.PROBE_ENGINE || 'chromium'
 const browserType = ({ chromium, webkit })[ENGINE]

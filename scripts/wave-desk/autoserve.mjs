@@ -1,16 +1,15 @@
-// SELF-SERVING WAVE PROBES — the wave-video/wave-desk half of `textrender-probe/serve.mjs`.
+// SELF-SERVING WAVE PROBES — the wave-desk half of `textrender-probe/serve.mjs`.
 //
 // ⚠ WHY THIS EXISTS (2026-08-30). The wave probes were written to be run against a server you had
-// already started by hand (`node scripts/wave-video/server.mjs build/client 4311`), and they say so
+// already started by hand (`node scripts/wave-desk/server.mjs build/client 4311`), and they say so
 // in their headers. When 52 unreachable probes were wired into `package.json` so they could be run
 // at all, that turned into `pnpm prove:composited` dying at `page.goto` with
 // **ERR_CONNECTION_REFUSED** — an error that reads as a broken APP, not as a missing harness.
 // Wiring without migration converts "unrunnable" into "accuses the product", which is the direction
 // this repo keeps paying for.
 //
-// It must be THIS server, not the scrub-probe one: that one has no `.mp4` MIME and no Range/206, so
-// a probe run against it would fail to decode the video and report the video path broken — proving
-// something false about the feature rather than about the transport. See server.mjs's own header.
+// It must be THIS server, not the scrub-probe one: that one answers 200-only, and WebKit's media
+// and font fetches use Range/206. See server.mjs's own header.
 //
 // PROBE_PORT (or an explicit --port) still wins, so an existing workflow and a deliberately-reused
 // server both keep working. Otherwise: an OS-assigned port, which cannot collide by construction —

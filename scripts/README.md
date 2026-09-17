@@ -133,23 +133,17 @@ belongs to.
 
 ## `scripts/wave-desk/`
 
+The LIVE CSS/SVG water's probes and their server. (The wave video's own probes under
+`scripts/wave-video/` were removed with the feature on 2026-09-16 — docs/REFACTOR-QUEUE.md decision 2;
+`markskew`, `server.mjs` and `autoserve.mjs` moved here because they measure or serve the live water.)
+
 | script | run as | what it does |
 |---|---|---|
+| `autoserve.mjs` | manual | SELF-SERVING WAVE PROBES — the wave-desk half of `textrender-probe/serve.mjs`. |
 | `composited.prove.mjs` | `pnpm prove:composited` | Peter, live on desktop Chrome (2026-07-17): "the opening animation is still css in chrome and |
 | `markphase.prove.mjs` | `pnpm prove:markphase` | Peter, desktop, 2026-07-17: "I suspect the problem is with the little short lines as on both FF |
-
-## `scripts/wave-video/`
-
-| script | run as | what it does |
-|---|---|---|
-| `autoserve.mjs` | manual | SELF-SERVING WAVE PROBES — the wave-video/wave-desk half of `textrender-probe/serve.mjs`. |
-| `barrier.prove.mjs` | `pnpm prove:barrier` | Round 2 of Peter's iPhone bug (2026-07-17). The wave video may not touch the DOM before React |
-| `generate.mjs` | manual | Renders the REAL app's load water — gradient + drifting wave lines + the STATIC single-band wave |
-| `loopgate.prove.mjs` | `pnpm prove:loopgate` | "we have to just have blank white screen until the video comes up and play the video every time" |
-| `markskew.prove.mjs` | `pnpm prove:markskew` | "the little short lines… often appear out of sync with the waves") ───────────────────────────── |
-| `master.prove.mjs` | `pnpm prove:master` | Peter, live desktop, 2026-07-17: "After I signed in just now the wave background completely went |
-| `reveal.prove.mjs` | `pnpm prove:reveal` | Peter's live iPhone-8 bug (2026-07-16): "The video works but it never loads." The video half is |
-| `server.mjs` | manual | Fallback-faithful static server for the WAVE VIDEO probes. Same contract as |
-| `tilescale.prove.mjs` | `pnpm prove:tilescale` | Peter, live desktop 2026-07-17: "the video resolution and size of the waves does not match that |
-| `twoload.prove.mjs` | `pnpm prove:twoload` | Peter, iPhone 8, 2026-07-17: "The first time the video ran, from then on just the CSS." |
+| `markskew.prove.mjs` | `pnpm prove:markskew` | "the little short lines… often appear out of sync with the waves") — skew = (field startTime − wave startTime) mod 1944, with a known-negative. |
+| `reloadgate.prove.mjs` | `pnpm prove:reloadgate` | Same-tab reloads open the atomic water gate `complete` (never on the retired 1.5s cap); twinkles-ready and water-ready land together. |
+| `scrollscene.prove.mjs` | `pnpm prove:scrollscene` | Rest scene: genuine scroll updates mark opacity; `scrollTop mod 2240` reproduces the same scene; an editor-zoom gesture does not re-phase marks. |
+| `server.mjs` | manual | Fallback-faithful static server for the wave-desk probes (build/client + SPA fallback + prod-like CSP + Range/206). |
 

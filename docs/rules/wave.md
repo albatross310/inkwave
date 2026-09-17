@@ -5,6 +5,13 @@
 Rounds, the wave-video ladder, the refuted desync hypothesis: `docs/archive/wave-system-rounds.md`.
 **EVERY RULE BELOW WAS A LIVE BUG.**
 
+**The wave video itself was REMOVED 2026-09-16** (Peter's ruling, decision 2 in
+`docs/REFACTOR-QUEUE.md`): `?waveVideo` never graduated (unresolved desync), and `waveVideo.ts`, the
+`public/wave/*.mp4` rungs, the SW's `/wave/` Range path and its six probes went together. The rules
+below that name the video (`iw-wave-video-on`, `pickRung`, the tile rung) are kept as written — each
+was a live bug, and each is about the CSS water's own hand-offs too; read them as the lesson's
+origin, not as a description of shipped code.
+
 - **`--iw-water-gradient` is the single background source** (CSS `165deg`; `#302438` → `#41425b` 18%
   → `#3b606a` 88% → `#3b6f75`), with one warm-ivory `#f3edcf` for marks, specks and sparkles. No
   per-surface gradient copies. Wave SVGs carry no vertical colour gradient — weight and opacity give
@@ -85,6 +92,6 @@ Rounds, the wave-video ladder, the refuted desync hypothesis: `docs/archive/wave
   GPU-less headless box cannot see. **The next wave round starts HERE, not from "all green"**; the
   clock hypothesis is REFUTED. Next tool is on-device capture.
 - PROBE RULES: `/snapshot` needs a fallback-faithful static server; never `pkill` a shared
-  `vite preview`; no windows over Peter's screen (`scripts/pw-headed.sh`); wave-video probes need
-  `scripts/wave-video/server.mjs` (the scrub server has no `.mp4` MIME and no Range/206).
+  `vite preview`; no windows over Peter's screen (`scripts/pw-headed.sh`); the wave-desk probes need
+  `scripts/wave-desk/server.mjs` (via `autoserve.mjs`) — the scrub-probe server has no Range/206.
 

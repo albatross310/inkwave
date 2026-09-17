@@ -57,13 +57,7 @@
     "prove:markphase": "node scripts/wave-desk/markphase.prove.mjs",
     "prove:reloadgate": "node scripts/wave-desk/reloadgate.prove.mjs",
     "prove:scrollscene": "node scripts/wave-desk/scrollscene.prove.mjs",
-    "prove:barrier": "node scripts/wave-video/barrier.prove.mjs",
-    "prove:loopgate": "node scripts/wave-video/loopgate.prove.mjs",
-    "prove:markskew": "node scripts/wave-video/markskew.prove.mjs",
-    "prove:master": "node scripts/wave-video/master.prove.mjs",
-    "prove:reveal": "node scripts/wave-video/reveal.prove.mjs",
-    "prove:tilescale": "node scripts/wave-video/tilescale.prove.mjs",
-    "prove:twoload": "node scripts/wave-video/twoload.prove.mjs"
+    "prove:markskew": "node scripts/wave-desk/markskew.prove.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^5.13.0",

@@ -8,7 +8,5 @@
   "scripts/textrender-probe/breaks.prove.mjs",
   "scripts/textrender-probe/opfs.prove.mjs",
   "scripts/textrender-probe/zoom.prove.mjs",
-  "scripts/wave-desk/markphase.prove.mjs",
-  "scripts/wave-video/barrier.prove.mjs",
-  "scripts/wave-video/reveal.prove.mjs"
+  "scripts/wave-desk/markphase.prove.mjs"
 ]
