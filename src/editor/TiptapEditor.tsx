@@ -1664,7 +1664,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     } catch { return false } })()
     if (import.meta.env.DEV && vvDebug) {
       dbg = document.createElement('div')
-      dbg.style.cssText = 'position:fixed;top:44px;left:4px;z-index:9999;background:#000c;color:#0f0;font:11px/1.3 monospace;padding:4px;pointer-events:none;white-space:pre'
+      dbg.style.cssText = 'position:fixed;top:44px;left:4px;z-index:9999;background:var(--iw-ink);color:var(--iw-toggle-off);font:11px/1.3 monospace;padding:4px;pointer-events:none;white-space:pre'
       document.body.appendChild(dbg)
       const tickDbg = () => {
         const w = footerWrapRef.current
