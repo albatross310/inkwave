@@ -1518,7 +1518,12 @@ same frame instead of popping in a beat late (image decode is async even from ca
 *2026-09-15: the toolbar slot customisation — the row/▲ state, both touch-hold drags, the write-back
 and the Alt hotkeys (`#editor-alt-hints`, `#editor-hotkey-tap`, `#editor-slot-drag`) — now lives in
 `src/editor/useToolbarSlots.ts`, moved verbatim with its comments and these pointers intact. The
-footer JSX (`#editor-row-slots`) stays in TiptapEditor.tsx.*
+footer JSX (`#editor-row-slots`) stays in TiptapEditor.tsx. 2026-09-16: save orchestration —
+`commitDoc` (`#editor-commit-doc`), `ensureDocFresh`, the snapshot queue, `snapshotsForAction`
+(`#editor-archive-reads`), the manual-snapshot funnel, the OTS sweep, export/save and the save-failed
+toast — lives in `src/editor/useSaveOrchestration.ts`, likewise moved verbatim with these pointers
+intact; the autosave beat (`#editor-docchanged-gate`), the paragraph trigger (`#editor-enter`), the
+word-nudge effect and `recoverAndPurge` (`#editor-no-auto-delete`) stay in TiptapEditor.tsx.*
 
 <a id="editor-lazy-chunks"></a>
 ### Lazy must stay lazy, and a flag must be read INLINE
@@ -1949,8 +1954,34 @@ called where the sync STATE block stood (the tab-title effect and the unsynced n
 flags), so its six effects run earlier than the block they came from — every one acts
 asynchronously; the queue entry has the per-effect argument. The archive-read rule below is
 unchanged: the mirrors read through `readSnapshotArchive` and refuse on `error`
-(`useCloudSync.test.tsx`, mutants m1–m3); `snapshotsForAction` stays in the editor and arrives as an
-input. Wiring the editor still owes the hook is pinned by `cloudSyncWiring.test.ts`.
+(`useCloudSync.test.tsx`, mutants m1–m3); `snapshotsForAction` arrives as an input (from the editor
+on 2026-09-15; since seam 3 below, from a hoisted delegate to `useSaveOrchestration`). Wiring the
+editor still owes the hook is pinned by `cloudSyncWiring.test.ts`.
+
+### Save orchestration is `useSaveOrchestration.ts` (2026-09-16)
+
+Seam 3 of docs/REFACTOR-QUEUE.md item 3 — the path from an edit to the record on disk. `commitDoc`
+(`#editor-commit-doc`), `ensureDocFresh` and `docStaleRef` (the lazy half of the docChanged gate),
+the snapshot state + `snapQueueRef` + `enqueueSnapshotWork`, the eager snapshot-list load,
+`createManualSnapshot` / `saveVersion` / `checkBitcoin` / `runOtsSweep`, `snapshotsForAction`
+(the guard below), `exportBundle`, `saveRecord` and the silent-save-failure listener moved VERBATIM
+to `src/editor/useSaveOrchestration.ts` (262 lines; the only edits are the eager-load effect's
+`doc.id` → `docId`). TiptapEditor keeps what DECIDES when the record changes: the autosave beat
+inside `onUpdate` (`#editor-docchanged-gate`), the paragraph trigger (`#editor-enter`), the
+word-nudge effect and the period signer, plus `recoverAndPurge` (`#editor-no-auto-delete`, Peter's
+rule) — all consumers of the queue, handed `enqueueSnapshotWork` / `setSnapshots` /
+`snapshotsForAction` back.
+
+THE TWO-WAY COUPLING WITH THE CLOUD HOOK is resolved by hoisting, as the unmoved code already did:
+`useCloudSync` is called first and handed two one-line function DECLARATIONS (`ensureDocFresh`,
+`snapshotsForAction`) that delegate to the save hook, which is called after it (it takes the cloud
+hook's `mirrorIfActive`, `saveToFile` and the three last-sync setters). Neither hook calls the
+other's functions during render. The save hook is called after `fileOpenError`'s state and before
+`useToolbarSlots` / `useEditor` (which read `commitDoc`, `setSnapshots`, `docStaleRef` from it), so
+`editorRef`'s declaration moved up beside it and its two effects run at sequence positions 22–23
+rather than ~34 and ~53 — both act asynchronously (listeners + a 10s interval; a promise `.then`).
+Behaviour: `useSaveOrchestration.test.tsx` (28, eight mutants; m1 — the guard answering `[]` on a
+failed read — dies in three named tests). Wiring the editor still owes: `saveOrchestrationWiring.test.ts`.
 
 <a id="editor-archive-reads"></a>
 ### Every action that publishes or overwrites the record reads through one guard

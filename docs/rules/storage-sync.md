@@ -52,6 +52,14 @@ Named in CLAUDE.md's DATA-LOSS FAMILY in short form; the full rules are here. Fo
   StrictMode double-invoke is a real second claimant, and skipping the stale `setState` alone still
   leaks the lock.
 - **A take-over is enforced at the bytes, not asserted.** The write freeze lives at the `saveDocument`
-  funnel: the holder flushes → freezes → ACKs, and the taker waits for that ack before stealing. After
+  funnel (storage/opfs.ts). Everything that REACHES that funnel from the editor — the one `commitDoc`
+  path, the lazy `ensureDocFresh` rebuild the autosave beat consumes, the single snapshot queue and
+  the `snapshotsForAction` read guard every publishing action shares — lives in
+  **`editor/useSaveOrchestration.ts`** (2026-09-16, seam 3: moved VERBATIM out of TiptapEditor.tsx,
+  which keeps the autosave beat inside `onUpdate`, the paragraph and word-nudge triggers, and
+  `recoverAndPurge`). `useSaveOrchestration.test.tsx` drives the read-failure abort as a named test
+  with a mutant. `useSaveOrchestration.ts` also holds the manual-snapshot funnel, the OTS sweep,
+  export/save and the save-failed toast — THE DATA-LOSS FAMILY's front door. The holder flushes →
+  freezes → ACKs, and the taker waits for that ack before stealing. After
   an ack TIMEOUT, steal, then wait a brief grace for a LATE `surrendered` — a live slow-flusher posts
   it once frozen; a dead holder never posts and the grace expires.

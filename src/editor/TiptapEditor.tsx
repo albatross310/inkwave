@@ -11,7 +11,7 @@ import { buildEditorExtensions } from './extensions/editorExtensions'
 import type { InkwaveDocument } from '../types/document'
 import { scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
-import { SCAS_HINT_META, getGreenAnchors } from './extensions/RedHighlightExtension'
+import { SCAS_HINT_META } from './extensions/RedHighlightExtension'
 import { applyCrossoutMode } from './crossout'
 import { exportPdfToNewTab } from './exportPdf'
 import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
@@ -41,22 +41,21 @@ import { GuideMenu } from '../components/GuideMenu'
 import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
-import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary, type ManualSnapshotResult } from '../provenance/snapshots'
+import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, stampSnapshot, patchSnapshotSummary, patchSnapshotDiffSummary } from '../provenance/snapshots'
 import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
 import type { ApplicationSurfaceMode } from '../components/ApplicationSurface'
 import { readApplicationSurfaceMode, writeApplicationSurfaceMode } from '../components/applicationSurfaceMode'
 import { emailEnabled } from '../email/flag'
-import { titleForDocument } from './docTitle'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { prodLedgerEnabled } from '../productivity/ledgerFlag'
 import { getCapture } from '../productivity/capture'
-import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
+import { bundleFilename, pmToText } from '../provenance/bundle'
 import { fileSaveAvailable } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, oneDrivePath, oneDriveFilename } from '../storage/onedrive'
+import { oneDriveConfigured, oneDrivePath, oneDriveFilename } from '../storage/onedrive'
 import { googleDriveConfigured, gDriveFilename } from '../storage/gdrive'
 import { SyncStatus } from '../components/SyncStatus'
 import { sideReserve, sidePillElements, subscribeSidePills, SIDE_RESERVE_FALLBACK_PX, TOOLBAR_SIDE_GAP_PX } from '../components/sidePill'
@@ -103,17 +102,16 @@ import { bibProvider } from '../citations/bibProvider'
 import { startExtensionChannel } from '../citations/extensionChannel'
 import { setCitationStyle as setCitationStyleBus } from '../citations/citationsBus'
 import { OPEN_CITATION_PANEL_EVENT } from '../citations/panelOpen'
-import { embedBibliography } from '../citations/resolve'
 import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
 import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
 import { GoogleDriveFileOpener } from '../components/GoogleDriveFileOpener'
-import { markDocumentDirty, markRecognisedSave } from '../storage/docSource'
 import { useCloudSync } from './useCloudSync'
+import { useSaveOrchestration } from './useSaveOrchestration'
 import { reportOpenError, takeOpenError } from '../storage/openError'
 import { contentHash } from '../provenance/hash'
 import { verifyChain, signingPublicKeys } from '../provenance/receipts'
-import type { Snapshot, SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../types/document'
+import type { Snapshot, SignedReceipt, WordNudgeEvent } from '../types/document'
 
 // No wall-clock resample timer — S_v rotation and receipt signing happen on word nudge only.
 // This keeps the green/red word set stable between nudges and avoids spurious receipts.
@@ -137,22 +135,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   useEffect(() => {
     docRef.current = doc
   }, [doc])
-
-  // ── ⚠ ONE COMMIT PATH FOR A DOCUMENT MUTATION (R2) ────────────────────────────────────────────
-  // Every mutation does the same three things in the same order: docRef, onDocChange, scheduleSave.
-  // Written longhand at ten call sites, omitting the third is SILENT — the edit appears on screen
-  // and only the DISK is stale, so the work is lost at the next reload rather than at the mistake.
-  // NB `ensureDocFresh` deliberately does NOT use this: it CACHES a lazily-built document and is not
-  // a mutation. → docs/archive/editor-surface.md#editor-commit-doc
-  const commitDoc = (updated: InkwaveDocument) => {
-    markDocumentDirty(updated.id)
-    setLastFileSave(null)
-    setLastSync(null)
-    setLastGdriveSync(null)
-    docRef.current = updated
-    onDocChange(updated)
-    scheduleSave(updated)
-  }
 
 
   // ── WHERE YOU WERE, ACROSS A HARD REFRESH ─────────────────────────────────────────────────────
@@ -224,18 +206,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const prevParaCountRef = useRef(0)
   const shortParaBufferRef = useRef<string[]>([])
 
-  // Snapshots (the provenance record). Loaded per document; appended when a resolved kick changes
-  // the content. createSnapshotIfChanged is serialised through a promise chain so rapid kicks can't
-  // race the OPFS read-modify-write. MEMORY DIET: React state holds SnapshotMeta ONLY — a full
-  // Snapshot embeds its whole contentJson (+ receipts), so hundreds of snapshots on a thesis-scale
-  // doc would keep hundreds of MB resident here. Heavy consumers (export, verify, mirrors, diff
-  // summaries) fetch full snapshots via listSnapshots() at action time (cached, cheap).
-  const [snapshots, setSnapshots] = useState<SnapshotMeta[]>([])
-  const snapshotsRef = useRef<SnapshotMeta[]>([])
-  // Keep ref in sync so async snapshot-queue closures can read the latest list without stale closure.
-  snapshotsRef.current = snapshots
-  const snapQueueRef = useRef<Promise<void>>(Promise.resolve())
-
   // Live-composition signing session (M3). The runner holds the server-issued S_v + the receipt
   // chain; null while opening or when the service is unreachable (then the controller falls back to
   // locally-derived S_v — composition degrades visibly rather than blocking writing).
@@ -247,6 +217,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const cadenceTapRef = useRef<CadenceTap | null>(null)
   const [receipts, setReceipts] = useState<SignedReceipt[]>([])
   const [chainStatus, setChainStatus] = useState<string | null>(null)
+  // The two save functions the cloud hook is handed. They live in `useSaveOrchestration` (called
+  // below, once this hook's mirror and setters exist); these are hoisted delegates so the cloud hook
+  // can hold them now and call them later — never during render.
+  function ensureDocFresh(): InkwaveDocument { return save.ensureDocFresh() }
+  function snapshotsForAction(action: string): Promise<Snapshot[] | null> { return save.snapshotsForAction(action) }
+
   // ── CLOUD SYNC + WRITER-HELD FILES — the orchestration lives in `useCloudSync.ts` (2026-09-15,
   //    seam 2 of docs/REFACTOR-QUEUE.md item 3). Called HERE, where its state block stood, because
   //    the tab-title effect below and the unsynced notice read `fileName` / `needsReconnect` /
@@ -326,8 +302,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return () => clearTimeout(t)
   }, [settled])
   // Console-snappy typing (see onTransaction): keystrokes do no O(doc) work. These carry the
-  // deferred-tick + lazy-doc-build machinery.
-  const docStaleRef = useRef(false)           // docRef.contentJson lags the editor until ensureDocFresh
+  // deferred-tick machinery (the lazy-doc-build half, `docStaleRef`, comes from useSaveOrchestration).
   const scasTickTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // ENGINE kill-switch (diagnostic/benchmark), DISTINCT from the user's display toggle. `inkwave:
   // scasOff` (Settings "SCAS suggestions") only hides the red words — the engine keeps running so the
@@ -439,6 +414,26 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // ten-minute install banner is gone; brief tutorial copy now lives in the loading-tip rotation.
   const [installPrompt, setInstallPrompt] = useState<any>(null)
   const [fileOpenError, setFileOpenError] = useState<import('../storage/openError').OpenNotice | null>(null)
+
+  // ── SAVE ORCHESTRATION — the path from an edit to the record on disk lives in
+  //    `useSaveOrchestration.ts` (2026-09-16, seam 3 of docs/REFACTOR-QUEUE.md item 3): the one
+  //    commit path, the lazy rebuild, the snapshot queue + its guarded archive read, the save-failed
+  //    toast and the eager snapshot-list load. Called HERE — after `useCloudSync` (it takes that
+  //    hook's mirror + the three last-sync setters) and before `useToolbarSlots` and `useEditor`
+  //    (which read `commitDoc` / `setSnapshots` / `docStaleRef` from it). Its two effects therefore
+  //    run earlier in this component's sequence than the positions they left; both act
+  //    asynchronously (see the hook's header). `ensureDocFresh` and `snapshotsForAction` are the two
+  //    function DECLARATIONS above the cloud hook: hoisted delegates, so the cloud hook can hold them
+  //    before this hook has run — the same hoisting the unmoved declarations relied on.
+  const editorRef = useRef<ReturnType<typeof useEditor>>(null)
+  const save = useSaveOrchestration({
+    docRef, docId: doc.id, onDocChange, editorRef, scasRef, sessionRef, setFileOpenError,
+    setLastFileSave, setLastSync, setLastGdriveSync, mirrorIfActive, saveToFile,
+  })
+  const {
+    commitDoc, docStaleRef, snapshots, setSnapshots, enqueueSnapshotWork,
+    createManualSnapshot, saveVersion, checkBitcoin, runOtsSweep, exportBundle, saveRecord,
+  } = save
   // Open failures happen while the initiating editor is UNMOUNTED (open-begin hides the doc), so
   // the message parks in storage/openError and the instance that mounts after the restore shows it.
   useEffect(() => {
@@ -607,52 +602,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     setTimeout(() => { if (barSeqRef.current === seq) land(plan.open) }, BAR_HANDOFF_MS)
   }
 
-  // SILENT-SAVE-FAILURE GUARD (2026-07-10: two hours of edits died silently — the save-failed
-  // event had NO listeners). Any autosave failure now shows the visible error toast, and a
-  // watchdog flags a save gap: edits pending + no successful save for 60s = something is stuck
-  // (e.g. a latched __iwZoomHold) — surface it loudly instead of losing work.
-  useEffect(() => {
-    let privateNoticeShown = false
-    const onFail = (e: Event) => {
-      const msg = String((e as CustomEvent).detail?.error ?? 'unknown error')
-      // OPFS refused at the door (SecurityError from getDirectory) = this WINDOW can't store
-      // files at all — Firefox private browsing, not a stuck save. A reload won't help and the
-      // red re-arming banner is just noise (Peter, 2026-07-11): calmer copy, once per session,
-      // dismiss is final.
-      if (/security ?error|getDirectory/i.test(msg)) {
-        if (privateNoticeShown) return
-        privateNoticeShown = true
-        // With OneDrive signed in the work IS being stored (cloud, from memory) — no banner at
-        // all then; the notice is only for a private window with nowhere to put the writing.
-        void oneDriveAccount().then((acct) => {
-          if (acct) { console.info('inkwave: local storage unavailable (private window) — cloud sync is carrying saves'); return }
-          setFileOpenError({ message: 'This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.', kind: 'error' })
-        }).catch(() => {
-          setFileOpenError({ message: 'This window can’t store files on this device (private browsing?). Your work lives in memory only — keep cloud sync on, or export before closing the tab.', kind: 'error' })
-        })
-        return
-      }
-      setFileOpenError({ message: `SAVING IS FAILING — your changes are NOT being stored on this device (${msg}). Copy recent work somewhere safe, then reload.`, kind: 'error' })
-    }
-    window.addEventListener('inkwave:save-failed', onFail)
-    let lastSaved = performance.now()
-    const onSaved = () => { lastSaved = performance.now() }
-    window.addEventListener('inkwave:doc-saved', onSaved)
-    const watchdog = setInterval(() => {
-      const hold = (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold
-      if (hold) {
-        // a zoom gesture can't plausibly last 60s — clear the stuck flag so deferrals resume
-        const w = window as unknown as { __iwZoomHoldSince?: number; __iwZoomHold?: boolean }
-        if (!w.__iwZoomHoldSince) w.__iwZoomHoldSince = performance.now()
-        else if (performance.now() - w.__iwZoomHoldSince > 60_000) { w.__iwZoomHold = false; w.__iwZoomHoldSince = 0 }
-      } else {
-        (window as unknown as { __iwZoomHoldSince?: number }).__iwZoomHoldSince = 0
-      }
-      void lastSaved // (gap detection rides onSaved; the toast on failure is the primary signal)
-    }, 10_000)
-    return () => { window.removeEventListener('inkwave:save-failed', onFail); window.removeEventListener('inkwave:doc-saved', onSaved); clearInterval(watchdog) }
-  }, [])
-
   // SINGLE-OPEN: another window on this device took this document over. The write freeze
   // (storage/opfs.ts) already stops the bytes; making the editor non-editable stops the writer typing
   // into a document that no longer accepts their edits — the confusing "I typed and it vanished" case
@@ -706,8 +655,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     emailDocument ? readApplicationSurfaceMode('email', doc.id) : 'isolated',
   )
   const isolatedEmail = emailDocument && emailSurfaceMode === 'isolated'
-
-  const editorRef = useRef<ReturnType<typeof useEditor>>(null)
 
   function rememberMediaAsset(asset: MediaAsset) {
     const current = ensureDocFresh()
@@ -1720,42 +1667,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Rebuild docRef from the live editor if a keystroke left it stale (the lazy half of the
-  // console-snappy rule). Called at every point that consumes the document: the autosave beat,
-  // ALL snapshot work (via enqueueSnapshotWork), period signing, and mirrors — so provenance
-  // always hashes the exact current content; between those points docRef may lag by ≤200ms.
-  function ensureDocFresh(): InkwaveDocument {
-    if (!docStaleRef.current) return docRef.current
-    const e = editorRef.current
-    if (!e || e.isDestroyed) return docRef.current
-    docStaleRef.current = false
-    const base: InkwaveDocument = {
-      ...docRef.current,
-      contentJson: e.getJSON(),
-      updatedAt: new Date().toISOString(),
-      // First block only — reading the title from e.getText() walked the ENTIRE doc for one line.
-      // The email-vs-body precedence lives in docTitle.ts, with the reasoning and its tests.
-      title: titleForDocument(docRef.current, e.state.doc.firstChild?.textContent ?? ''),
-      scasState: scasRef.current?.state ?? docRef.current.scasState,
-      scasGreenAnchors: getGreenAnchors(e.state),
-    }
-    const { doc: updated } = embedBibliography(base)
-    markDocumentDirty(updated.id)
-    setLastFileSave(null)
-    setLastSync(null)
-    setLastGdriveSync(null)
-    docRef.current = updated
-    return updated
-  }
-
-  // Serialise all snapshot-file mutations through one promise chain (avoids OPFS read-modify-write
-  // races between snapshot creation, OTS stamping, and upgrades). Freshness guard: every snapshot
-  // consumes docRef, so the queue itself guarantees the lazy doc build has run first.
-  function enqueueSnapshotWork(work: () => Promise<void>) {
-    snapQueueRef.current = snapQueueRef.current
-      .then(async () => { ensureDocFresh(); await work() })
-      .catch((err) => { console.warn('[inkwave] snapshot work failed:', err) })
-  }
   // ⚠ THE CLOCK STARTS AT REAL WORK — a document change the WRITER caused. Both halves are needed
   // and both were PROBED: a docChanged transaction ALONE starts it at PAGE LOAD (the editor fires
   // them then), and `beforeinput` alone never fires at all under ProseMirror — a signal that never
@@ -1769,39 +1680,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     dom.addEventListener('paste', arm)
     return () => { dom.removeEventListener('keydown', arm); dom.removeEventListener('paste', arm) }
   }, [editor])
-
-  // ⚠ R1: a failed read must never REPLACE a good list with an empty one — the panel would then
-  // assert, in the UI, the exact lie the storage layer no longer tells.
-  const refreshSnapshots = async (docId: string) => {
-    const r = await readSnapshotArchive(docId)
-    if (r.kind === 'error') { console.warn('[inkwave] snapshot list refresh skipped — archive unreadable:', r.error); return }
-    setSnapshots(r.snapshots.map(toSnapshotMeta))
-  }
-
-  // ⚠ THE SNAPSHOT LIST LOADS EAGERLY — rapid scrubbing is a core feature, so the reviewer never
-  // waits — while the OTS Bitcoin re-check MUST NOT run here (per-snapshot rewrites + serial
-  // calendar round-trips, ~10s of startup lag); it runs throttled when the receipts panel opens.
-  // ⚠ R1: a failed read here would render "no snapshots yet" over a full archive — the storage
-  // bug's own claim, made by the UI, as the writer opens his thesis. Say it plainly instead.
-  // → docs/archive/editor-surface.md#editor-archive-reads
-  useEffect(() => {
-    const docId = doc.id
-    let cancelled = false
-    void readSnapshotArchive(docId).then((r) => {
-      if (cancelled) return
-      if (r.kind === 'error') {
-        console.error('[inkwave] could not load the snapshot list:', r.error)
-        reportOpenError(
-          "Inkwave couldn't read this document's history just now, so the snapshot list is " +
-          'incomplete. Your history is still on this device and nothing has been changed — reload ' +
-          'to try again.',
-        )
-        return
-      }
-      setSnapshots(r.snapshots.map(toSnapshotMeta))
-    })
-    return () => { cancelled = true }
-  }, [doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Snapshot trigger: on a resolved kick, snapshot if the content hash changed (M1), then anchor it
   // to Bitcoin via OpenTimestamps (M2 → pending in seconds). Ordinary typing / pastes resolve no
@@ -1861,123 +1739,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       if (docRef.current.id === base.id) await createManualSnapshot()
     })()
   }, [editor, doc.id]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ONE global manual-snapshot funnel. The ordinary "save version" control and an email's
-  // "Snapshot this draft" both come here, so the archive, live counter, OTS state, mirrors and diff
-  // summary can never drift into application-specific implementations. When `source` is supplied it
-  // is the exact frozen message also sent to Gmail; later typing stays live and is never overwritten.
-  function createManualSnapshot(source?: InkwaveDocument): Promise<ManualSnapshotResult> {
-    const action = snapQueueRef.current.then(async (): Promise<ManualSnapshotResult> => {
-      const snapshotDoc = source ?? ensureDocFresh()
-      if (snapshotDoc.id !== docRef.current.id) {
-        return { snapshot: null, stamped: false, reason: 'The active document changed before it could be snapshotted' }
-      }
-      // Guarded for the same reason as the word-nudge path: a "Save version" that silently did
-      // nothing is the worst possible answer at the moment the writer is deliberately marking work.
-      const before = await snapshotsForAction('this version')
-      if (!before) return { snapshot: null, stamped: false, reason: 'Snapshot history is temporarily unavailable' }
-      const prevSnap = before[before.length - 1] ?? null
-      const snap = await createSnapshotIfChanged(snapshotDoc, 'manual', sessionRef.current?.receipts ?? [], undefined, true)
-      if (!snap) return { snapshot: null, stamped: false, reason: 'Provenance snapshots are unavailable on this browser' }
-      setSnapshots((prev) => [...prev, toSnapshotMeta(snap)])
-      const stamped = await stampSnapshot(snap.documentId, snap.id)
-      if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? toSnapshotMeta(stamped) : s)))
-      mirrorIfActive()
-      // Background diff summary (Haiku, fire-and-forget)
-      if (prevSnap) void summariseDiff(pmToText(prevSnap.contentJson), pmToText(snap.contentJson)).then(async (ds) => {
-        if (!ds) return
-        await patchSnapshotDiffSummary(snap.documentId, snap.id, ds)
-        setSnapshots((prev) => prev.map((s) => s.id === snap.id ? { ...s, diffSummary: ds } : s))
-      })
-      const final = stamped ?? snap
-      return {
-        snapshot: final,
-        stamped: final.ots.status === 'pending' || final.ots.status === 'confirmed',
-        reason: stamped ? undefined : 'Snapshot created locally; timestamping will retry later',
-      }
-    })
-    snapQueueRef.current = action
-      .then(() => undefined)
-      .catch((error) => { console.warn('[inkwave] snapshot work failed:', error) })
-    return action.catch((error) => ({
-      snapshot: null,
-      stamped: false,
-      reason: error instanceof Error ? error.message : 'Could not create the snapshot',
-    }))
-  }
-
-  function saveVersion() {
-    void createManualSnapshot()
-  }
-
-  // Manual "check Bitcoin" — upgrade pending proofs toward confirmation (also runs on load).
-  function checkBitcoin() {
-    const docId = docRef.current.id
-    enqueueSnapshotWork(async () => { await upgradePending(docId); await refreshSnapshots(docId) })
-  }
-
-  // Background OTS sweep — stamp any unstamped backlog + upgrade pending proofs toward Bitcoin
-  // confirmation. Runs when the receipts panel OPENS (not on load — that was the startup lag), and
-  // only when there's actually something to do, at most once per 15 min per doc (confirmations take
-  // hours). The panel's "check Bitcoin" button still forces an immediate upgrade any time.
-  function runOtsSweep() {
-    const docId = docRef.current.id
-    const needsOts = snapshotsRef.current.some((sn) => sn.ots?.status === 'unstamped' || sn.ots?.status === 'pending')
-    if (!needsOts) return
-    const OTS_KEY = `inkwave:otsCheckedAt:${docId}`
-    let lastOts = 0
-    try { lastOts = Number(localStorage.getItem(OTS_KEY)) || 0 } catch { /* private mode */ }
-    if (Date.now() - lastOts < 15 * 60 * 1000) return
-    enqueueSnapshotWork(async () => {
-      await drainUnstamped(docId)
-      await upgradePending(docId)
-      await refreshSnapshots(docId)
-      try { localStorage.setItem(OTS_KEY, String(Date.now())) } catch { /* private mode */ }
-    })
-  }
-
-  // ⚠ THE ARCHIVE READ FOR ANY ACTION THAT PUBLISHES OR OVERWRITES THE RECORD (R1). `listSnapshots`
-  // THROWS rather than answering `[]`, because `[]` meant "no history" and every one of these
-  // actions would then export or write an empty history over the real one — but a throw reaching a
-  // click handler is just a button that does nothing. So each action reads through here and is
-  // CANCELLED with a message. Cancelling is the safe direction: an export, a sync and a mirror are
-  // all re-runnable; a .studio the writer believes holds his proof is not. An established
-  // emptiness is NOT a failed read, so a genuinely new document still gets `[]`.
-  // → docs/archive/editor-surface.md#editor-archive-reads
-  async function snapshotsForAction(action: string): Promise<Snapshot[] | null> {
-    const r = await readSnapshotArchive(docRef.current.id)
-    if (r.kind === 'error') {
-      console.error(`[inkwave] ${action}: could not read the snapshot archive — cancelled:`, r.error)
-      reportOpenError(
-        `Inkwave couldn't read this document's history just now, so ${action} was cancelled rather ` +
-        `than risk writing an incomplete record over it. Your writing and your history are safe on ` +
-        `this device — try again in a moment.`,
-      )
-      return null
-    }
-    return r.snapshots
-  }
-
-  // Export the self-verifying bundle (content + snapshots + receipts + key ref) for /verify (M4).
-  // Uses the async variant so embedded source PDFs travel inside the .studio file.
-  async function exportBundle(stripPdfs?: 'all' | 'public', gzip?: boolean) {
-    // Full snapshots fetched AT ACTION TIME (cached read) — state holds metadata only.
-    const snaps = await snapshotsForAction('the export')
-    if (!snaps) return // a bundle exported from a failed read is a FALSE receipt — never ship one
-    const bundle = await buildExportBundleWithPdfs(docRef.current, snaps, stripPdfs)
-    const base = bundleFilename(docRef.current)
-    const name = stripPdfs === 'all' ? base.replace(/\.studio$/, '.no-pdfs.studio') : base
-    if (gzip) await downloadBundleGz(bundle, name + '.gz')
-    else downloadBundle(bundle, name)
-    markRecognisedSave(docRef.current.id, 'download')
-  }
-
-  // Primary "Save" — works on every browser. Chromium (Chrome/Edge/Brave) mirrors to a granted
-  // folder via File System Access; Firefox/Safari (no folder API) download the record instead.
-  function saveRecord() {
-    if (fileSaveAvailable()) void saveToFile()
-    else exportBundle()
-  }
 
   // Print / Export PDF — the print stylesheet renders just the writing; the browser dialog lets the
   // writer pick a printer or "Save as PDF". Set the title so the PDF gets a sensible filename.
