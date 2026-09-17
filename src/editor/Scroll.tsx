@@ -1347,6 +1347,22 @@ export function Scroll({
   // mounts synchronously into this stable host before the atomic gate opens; no art decode, runtime
   // RNG, or server feed exists. Intro objects have one finite opacity window. The overlapping desktop
   // scroll population is driven later by absolute scrollTop; phone has no marks once water rests.
+  // ⚠ THE UNCOVER IS A CROSS-FADE, NOT A CUT (Peter's "flick", 60fps strip 2026-09-17). Phone: at
+  // wave-rest `covered` drops, and with it the surface's z-raise over the shell — so the paper
+  // faded in UNDERNEATH the still-opaque shell, and the shell's unmount 850ms later was a hard
+  // water→paper cut. `iw-uncovering` keeps the z-raise for the fade and lets the background
+  // colour transition in over the shell's held water (index.css).
+  const [uncovering, setUncovering] = useState(false)
+  const wasCovered = useRef(covered)
+  useEffect(() => {
+    if (wasCovered.current && !covered && phone) {
+      setUncovering(true)
+      const t = window.setTimeout(() => setUncovering(false), 900)
+      wasCovered.current = covered
+      return () => window.clearTimeout(t)
+    }
+    wasCovered.current = covered
+  }, [covered, phone])
   const twinkleRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const host = twinkleRef.current
@@ -1371,7 +1387,7 @@ export function Scroll({
   }, [fill, phone, waveMode, covered, loadingTwinkles])
 
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}`}
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}${uncovering ? ' iw-uncovering' : ''}`}
       style={{
         '--iw-editor-zoom': editorZoom,
         // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the

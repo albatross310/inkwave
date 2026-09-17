@@ -534,7 +534,11 @@ export function Edit() {
       )}
       {shellUp !== 'down' && (
         <>
-          <Scroll phone={shellPhone} fill revealed={false} loadingTwinkles={tipUp}>
+          {/* ⚠ loadingTwinkles = the SHELL'S life, not the tip's. On phone the water at rest exists
+              only as the twinkle hold (Scroll.tsx holdingAtRest); tying it to `tipUp` dropped the
+              hold at reveal — the water popped to bare parchment ONE FRAME before the paper began
+              its fade (Peter's "flick", 60fps strip 2026-09-17). The hold must outlive the fade. */}
+          <Scroll phone={shellPhone} fill revealed={false} loadingTwinkles>
             <EmptyEditorSurface />
           </Scroll>
           {tipUp && (

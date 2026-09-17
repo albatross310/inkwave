@@ -67,7 +67,7 @@ export function LoadingVeil({ ready, zIndex = 300 }: { ready: boolean; zIndex?: 
         fill
         revealed={false}
         fadingOut={phase === 'fading'}
-        loadingTwinkles={phase === 'up'}
+        loadingTwinkles // through 'fading' too — the hold IS the still water (see Edit.tsx)
       >
         <EmptyEditorSurface />
       </Scroll>
