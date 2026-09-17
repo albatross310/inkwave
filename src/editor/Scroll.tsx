@@ -1352,17 +1352,20 @@ export function Scroll({
   // faded in UNDERNEATH the still-opaque shell, and the shell's unmount 850ms later was a hard
   // water→paper cut. `iw-uncovering` keeps the z-raise for the fade and lets the background
   // colour transition in over the shell's held water (index.css).
+  // Two effects, deliberately: StrictMode replays an effect (run → cleanup → run), and a single
+  // effect that both flipped the ref and armed the timer lost the timer to its own cleanup while
+  // the ref said "already handled" — the surface stayed z-raised over the toolbar forever.
   const [uncovering, setUncovering] = useState(false)
   const wasCovered = useRef(covered)
   useEffect(() => {
-    if (wasCovered.current && !covered && phone) {
-      setUncovering(true)
-      const t = window.setTimeout(() => setUncovering(false), 900)
-      wasCovered.current = covered
-      return () => window.clearTimeout(t)
-    }
+    if (wasCovered.current && !covered && phone) setUncovering(true)
     wasCovered.current = covered
   }, [covered, phone])
+  useEffect(() => {
+    if (!uncovering) return
+    const t = window.setTimeout(() => setUncovering(false), 900)
+    return () => window.clearTimeout(t)
+  }, [uncovering])
   const twinkleRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const host = twinkleRef.current
