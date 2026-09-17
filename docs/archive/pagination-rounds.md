@@ -1667,3 +1667,185 @@ already been squashed.
 Same shape as the PDF zoom anchor fixed earlier that day: the arithmetic was right and applied one
 layout too early. Assert it again now that the document is its real height, and once more next frame
 for the paint that follows.
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the "Canonical pagination" section (incl. the inline-atom mid-line-break round), the scoped-measure / lazy-full-refresh round, the math-certified fonts round and the ?arithLayout DO-NOT-GRADUATE entry.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+## Canonical pagination (2026-07-09 — the load-bearing invariant)
+
+Page breaks are CANONICAL: measured in a forced context (paper mm width from `editor/pageModel.ts`,
+desktop side margins, `--iw-editor-zoom:1`, `--iw-magnify:1`, font 1.125rem — defeats the phone
+×1.25 rule) inside `PaginationExtension.recompute()`'s single-rAF no-paint window
+(`editor/canonicalMeasure.ts` does capture→force→restore-exactly), then applied as DOCUMENT-POSITION
+break widgets. Same text on page N at every zoom, on phone (which "calculates relative to A4") and
+in print. Consequences: live zoom/width changes ONLY repaint panels (`zoom-settled` → stable-set
+no-op re-measure + `paint()`); window resize doesn't re-measure breaks at all; phone gap GEOMETRY is
+compact fixed 32px (`PHONE_PAGE_MARGIN` — canonical fill-margins don't match phone-reflowed text
+heights). Hard-won bugs, do not reintroduce: (a) a child's useLayoutEffect runs BEFORE the parent's
+ref attaches on fresh mounts (PageGuides went dark; StrictMode masks it in dev — resolve elements
+from your OWN refs); (b) the ResizeObserver must FOLD into the edit debounce, not measure next frame
+(it fired the triple-reflow measure one frame after every line-wrapping keystroke); (c) Tiptap's
+`update` fires on EVERY updateState incl. unrelated React re-renders — gate reschedules on doc
+identity; (d) 'scroll' paper must still measure font-canonically. Citation-label hydration reflows
+invisibly to inputSig → bibProvider.subscribe drives a debounced re-measure.
+
+**INLINE-ATOM NODEVIEWS COLLAPSE TO ONE RECT (2026-07-17 — the mid-line break fix).** Peter: "even if
+the paras do split, there's space left on the last line." Root cause: `collectLines` built its line
+list from `range.selectNodeContents(block).getClientRects()`, which DESCENDS INTO NodeView subtrees —
+so an inline atom's internal boxes each contributed a rect. The citation NodeView's ⤵ biblink button
+(`display:inline-flex`, ~6px below the text line, i.e. past the **3px** same-line dedup) survived as a
+PHANTOM LINE whose posAtCoords sample sits MID-LINE, so a break attributed to it opened a page gap in
+the middle of a rendered line. Inline math has the identical artifact (KaTeX sub/superscript +
+fraction spans). THE RULE: an inline ATOM has no internal break opportunity — the parent line can only
+break AROUND it — so it contributes EXACTLY ONE rect, its own bounding box. Atomhood comes from
+ProseMirror (`isInline && isAtom`), never a CSS class (a class list silently misses the next
+NodeView); a block with NO atoms takes the byte-identical old path, which is what keeps plain/
+headings/lists bit-for-bit unchanged. SCOPE: inline atoms only — a TOP-LEVEL atom (refList, block
+math) keeps its deliberate `atomLike` pseudo-block-per-line treatment. MEASURED in the real app:
+phantom lines citations 24 blocks/+29, math 23 blocks/+30 → **0** (`linecount.prove.mjs`); mid-line
+breaks **6/55 → 0/55** on the thesis-shaped fixture (`midline.prove.mjs`); `isolate.prove.mjs`
+citations DIVERGE → **IDENTICAL**; desktop==phone breaks and scoped==full both unchanged. This also
+satisfies the long-documented co-requisite in `arithmeticLayout.ts` — but `mathEligible` is still
+passed FALSE deliberately; flipping it hands math paragraphs to the arithmetic engine and needs its
+own proof. THREE INSTRUMENT TRAPS THIS ROUND (all live, all in the probe README): (1) the page-gap
+widget is a `display:block` span that FORCES a line break at its own position, so auditing the GAPPED
+DOM for mid-line breaks is VACUOUS — it reported a confident 0/104 on a document full of them; hide
+the gaps and ask the NATURAL wrapping (`gapsLeftFlow` guards it). (2) The verdict is unreadable where
+the RENDERING is non-canonical — the phone renders 22.5px/350px, so canonical breaks land mid-line in
+its own reflow BY DESIGN (`renderingIsCanonical` guards it). (3) A mid-line RATE cannot see a rare
+NodeView: math showed 0 mid-line breaks even unfixed because no break happened to land on a phantom —
+measure the artifact per block, not the coincidence.
+
+
+- **SCOPED CANONICAL MEASURE + LAZY FULL REFRESH (2026-07-12, round-6 — supersedes round-5's
+  measurement-host recompute, which Peter's live thesis falsified: host clones cannot replicate
+  NodeViews (math shadow DOM, citation labels) and cv-rendered blocks measure ~9px off even on
+  plain text).** EXACT NEAR THE WRITER, DEFERRED FAR AWAY — never approximated: the scoped
+  measure (PaginationExtension `computeScoped`) runs in the REAL forced canonical context — live
+  DOM, live NodeViews, real posAtCoords — but reads ONLY the changed blocks (+ the block below,
+  for the advance); unchanged blocks reuse cached block-relative lines at the previous measure's
+  tops (bit-identical above the edit, one telescoped delta below); gap widgets in/next to the
+  region are cleared by a REGION-SCOPED decoration dispatch (same natural-wrapping rule as the
+  full clear); unresolved break-line positions use the identical posAtCoords sample, baked per
+  (node, line). NO content-visibility tricks in measures — the round-6 storms showed cv-rendered
+  geometry diverges. `canonicalIsLive()`: on desktop at defaults (no phone rules, zoom 1,
+  magnify 1) the live layout IS canonical, so the force — and BOTH its full-document reflows —
+  is skipped for scoped AND full measures. A FULL measure re-verifies lazily after every scoped
+  one (idle-gated ~2.5s, sig-guard = visually quiet) and refreshes the incremental base.
+  PRINT FLOOR (Peter: "render it all properly at time of print"): 'inkwave:measure-now' /
+  'beforeprint' run a SYNCHRONOUS full measure + paint; printDoc() and exportPdf() dispatch it
+  explicitly (exportPdfToNewTab clones the live body — its widgets must be exact). Snapshot
+  staticPagination runs its own canonical pipeline (never lazy); citationNav page labels read
+  live widgets (≤2.5s self-healing drift — accepted). PROOF: 'inkwave:pagCheck=1' runs BOTH
+  paths per measure and compares signatures — round-6 storms: 23/23 plain-paragraph synthetic
+  AND 27/27 on Peter's real citation-heavy Honours doc ×6 (13k words, 174 citation nodes, lists,
+  rules, refList). Measured (4× throttle, 20k words): desktop scoped 6-33ms (was 133-277 full);
+  phone scoped 311-526ms — the two reflows are the price of exactness there (was 636-1364 full;
+  round-5's 18-81ms was wrong on real docs). perflog: page-measure-scoped / page-measure.
+  ROUND-7 (2026-07-12): after a scoped success where the full measure is cheap (canonicalIsLive
+  desktop), the lazy re-verify runs FAST (450ms, input-gated) so any deferred far-field break
+  correction — incl. mid-paragraph splits — lands ~0.5s after the pause (Peter's bar: "paras
+  split over pages even if they render 0.2s late; the cursor line moves instantly"). Mid-block
+  splits themselves were verified live: page-exceeding paragraphs split at load and stay split
+  through edits (mid-split probe on the Honours fixture); scoped==full sig equality already
+  covers split placement. `window.__iwPagInc.reasons` counts scoped-bail causes for on-device
+  diagnosis (the first edit after any open bails once — open-flow normalization widens the diff).
+- **MATH-CERTIFIED FONTS (2026-07-12, round-7 — groundwork for the arithmetic layout engine).**
+  Peter's directive: replace fonts that defeat exact math layout rather than carry DOM fallbacks.
+  The prover (scratchpad font-calib.mjs): canvas measureText vs DOM parity across family ×
+  {400,700} × {normal,italic} × 7 sizes (8pt-72pt + canonical 18px) — advance widths (Δ≤0.05px),
+  greedy-wrap break indices at 500px, mixed-run tallest-line-box rule. CERTIFIED + SHIPPED:
+  15 families (Peter's palette budget), grouped in the picker (Identity/Serif/Display/Slab/Sans/
+  Mono): IM Fell DW Pica + EB Garamond (identity — both pass: the math engine is viable),
+  'Times' = TeX GYRE TERMES and 'Arial' = TeX GYRE HEROS (certified CLONES, GUST licence,
+  fetched via the DIRECT list in fetch-fonts.mjs — display labels are decoupled from css stacks;
+  NB 'Times'/'Arial' are Monotype trademarks: the safe commercial pattern is the clone's own name
+  — one-line change in StyleBar FONTS), Crimson Pro, Spectral, Lora (the Cambria-warmth stand-in
+  — Caladea failed twice; system Cambria is DEFINITIVELY unshippable: canonical breaks must be
+  identical cross-device and a system font can't be), Gelasio, Gentium Plus (classical languages),
+  Cormorant Garamond + Fraunces (display), Bitter (slab), Carlito (Calibri twin — also the
+  closest shipped cousin to Aptos, which is licence-locked; Open Sans certified as the nearest
+  open face in spirit if ever wanted), Atkinson Hyperlegible (a11y), JetBrains Mono. ALSO
+  CERTIFIED but cut for palette budget: Cardo, Noto Sans, Noto Serif, Open Sans, Fira Code,
+  Nimbus Roman. ⚠️ **THE "FAILED" LIST BELOW IS RETRACTED — RE-CERTIFIED 2026-07-16, ALL 13 PASS.**
+  r7 measured canvas vs a PLAIN span with ligatures ON **on both sides** — but prosemirror-view's
+  injected sheet sets `font-variant-ligatures:none; font-feature-settings:"liga" 0` on .ProseMirror,
+  so the editor renders liga OFF and canvas measureText applies ligatures BY DEFAULT. Those 13 faces
+  diverge (Δ3–45px) ONLY when ligatures are applied — a divergence that CANNOT OCCUR in production.
+  Re-measured in the real context (real .ProseMirror + `textRendering:'optimizeSpeed'` +
+  `fontKerning:'normal'` on the canvas): **every family Δ0.0000, wrap 8/8**. r7 named the cause
+  ("hinting/ligature divergence") but blamed the wrong half — ligatures, not hinting; kerning was
+  ruled out. What licenses the retraction: a LEGACY A/B re-measures each family in r7's own context
+  and reproduces its verdict set 33/33, so ligature shaping is the only variable. The 15 shipped
+  fonts ALL still pass — nothing to revert; this is purely additive.
+  FORMERLY-"FAILED", NOW CERTIFIED (not yet shipped — palette is Peter's call): Tinos, Arimo,
+  Caladea (the Cambria-warmth slot), Vollkorn, Libre Baskerville, PT Serif, Source Serif 4,
+  Alegreya, Baskervville, Libre Caslon Text, Quattrocento, STIX Two Text, Inter (700).
+  **BASKERVILLE GENRE IS BACK**: all four candidates certify — the genre was abandoned on the
+  flawed grid, not on the fonts. Before shipping any of these: the certification is CHROMIUM-ONLY
+  (as r7's was) and the canonical-break invariant is CROSS-DEVICE ⇒ a WebKit pass first; and
+  Tinos/Arimo/Caladea are Times/Arial/Cambria metric clones (same trademark caveat as TeX Gyre).
+  Re-run: `node scripts/fontCertify.fetch.mjs && node scripts/fontCertify.prove.mjs <port>`.
+  TWO TRAPS THIS EXPOSED, for any future font/measure work: (1) canvas-vs-DOM parity MUST be
+  measured inside a real .ProseMirror (white-space:break-spaces + liga off) — a plain-div harness
+  certifies a fiction the editor never uses; **AND THE SAME TRAP KILLS THE RUNTIME GATE, SILENTLY**
+  (2026-07-16): `canvasShapingMatchesEditor`'s own probe span had BOTH halves wrong — it set the CSS
+  `font:` SHORTHAND (which RESETS font-variant-ligatures to normal, so the probe shaped WITH
+  ligatures inside a liga-off editor), and being a direct child of .ProseMirror it inherited the
+  zoom-window's `content-visibility:auto` and, parked off-screen, was SKIPPED — measuring 177px
+  against a true 1186px. The gate therefore returned FALSE always, so `inkwave:arithLayout` did
+  NOTHING in production from the ligature-strip round (f75eef5) until it was fixed. THE GENERAL
+  LESSON — a self-check that measures in a fiction does not fail loudly, it silently DISABLES the
+  feature it guards, and the feature's absence looks exactly like the feature being unnecessary. Any
+  gate of the form "measure X, compare to Y, disable if they differ" must be probed for its OWN
+  correctness (assert the gate PASSES on a known-good input) before its verdict is trusted; (2) `document.fonts.check()` returns TRUE for a family
+  with NO @font-face (the system fallback counts), so an unfetched font silently measures the
+  fallback against itself and "agrees" at 0.000 — detect real load by comparing against the
+  monospace fallback. Nimbus Roman remains UNTESTED (CTAN 404) — reported NOT-LOADED, never certified.
+  The old
+  system-font entries (Times/Cambria/Georgia/Palatino/Baskerville/system-ui) are GONE from the
+  StyleBar (device-dependent metrics = uncertifiable + they already broke cross-device canonical
+  breaks for marked runs); legacy docs still render — each new css stack keeps the old system
+  stack as its fallback tail, and old marks' own stacks resolve exactly as before. Only the
+  identity serifs PRELOAD (fetch-fonts.mjs PRELOAD_FAMILIES); the rest load on demand and the
+  pagination re-measures on 'loadingdone'. THE MATH LAYOUT ENGINE ITSELF is the designed
+  follow-up: per-run canvas advances + greedy breaking feeding computeBreaks as a third
+  acquisition path, DOM full measure as idle verifier, pagCheck as prover, gated on
+  document.fonts.ready + certified fonts only.
+- **⚠ `?arithLayout` — DO NOT GRADUATE. The engine no longer agrees with live pagination, and the
+  "0 divergences" below it is STALE (measured 2026-08-30).** The reflow-free canvas-advance engine
+  was parked 2026-07-15, unparked in rationale 2026-07-18 (`96b0edb`) on `prove:arith` reporting
+  **0 divergences across 4k/6k/8k (15/23/31 breaks)**. That number was true when written and is
+  false now: HEAD measures **every break divergent — 17/17, 25/25, 34/34**.
+  - **NOT a platform difference, and not a regression in anything a writer sees.** Bisected on ONE
+    machine, same fonts, with the probe file itself unchanged since it landed: clean through
+    `68ff277`, red from **`8f5ae9d` (2026-08-28, "page breaks no longer cut a line in half at any
+    zoom")** onward. The **arith side is byte-unchanged** across the whole range (15/23/31 both
+    before and after); it is the **DOM side that moved**, to 17/25/34.
+  - **WHY, and it is structural rather than a bug in either half.** `8f5ae9d` snaps a break to the
+    block boundary when `!liveIsCanonical` (`shouldSnapToBlock`), so no line is cut at a non-1 font
+    zoom. Whole-doc arith is gated to `!canonicalIsLive`, and `arith.prove.mjs` therefore *sets*
+    `inkwave:editorZoom = 1.2` to reach the engine at all. **The two gates are exact complements:
+    the engine only ever runs in the condition the new snap rule governs**, so it is now guaranteed
+    to disagree on every break. Canonical rendering is byte-unchanged (`prove:breaks` green), which
+    is why live pagination and print are unaffected.
+  - **THE REAL BLOCKER IS NOW `arithmeticLayout.ts`, NOT WebKit.** It does not implement
+    `shouldSnapToBlock`. Graduating on a WebKit pass alone would ship an engine that cuts lines in
+    half at every zoom — reintroducing verbatim the bug Peter reported on 2026-08-28. The WebKit
+    cross-device pass and the scoped-arith typing A/B are still required, just no longer first.
+  - **IT WAS RED FOR TWO DAYS AND THE GATE SAID GREEN**, because `prove:arith` was one of 52
+    `.prove.mjs` files not wired into `package.json` (fixed 2026-08-30). This is the file's own
+    headline — "a proof that ran once is indistinguishable from one that never ran" — happening to
+    the very entry that claims it.
+- Phone surface touch listeners: touchstart must stay PASSIVE (a non-passive one adds main-thread
+  wait to EVERY tap/scroll start); the pinch's non-passive touchmove is attached only while two
+  fingers are down (armed inside the second finger's touchstart — early enough to preventDefault
+  the first move). Pinch suppression = that preventDefault + gesture events + touch-action.
+- iPadOS masquerades as macOS (detect via maxTouchPoints); GIS popups need pre-loaded clients so
+  requestAccessToken runs inside the tap's transient activation.
