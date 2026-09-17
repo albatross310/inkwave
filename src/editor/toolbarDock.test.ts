@@ -5,6 +5,9 @@
 // EVERY frame. Peter's device remains the final arbiter of the real thing.
 import { describe, it, expect } from 'vitest'
 import {
+  KEYBOARD_MIN_PX,
+  keyboardLatched,
+  liftFor,
   createDock,
   kbOffsetFor,
   dockedVisualTop,
@@ -82,6 +85,24 @@ describe('kbOffsetFor', () => {
   it('rounds to whole px (iOS reports fractional heights mid-slide)', () => {
     expect(kbOffsetFor({ ...RESTING, height: 507.6 })).toBe(336)
   })
+})
+
+describe('keyboardLatched / liftFor — chrome is not a keyboard', () => {
+  it('a sub-keyboard gap (Safari URL-bar collapse/expand transients) never lifts', () => {
+    const bar = { ...RESTING, innerHeight: 780, height: 700 } // 80px = the bar, mid-animation
+    expect(keyboardLatched(bar, false)).toBe(false)
+    expect(liftFor(bar, false)).toBe(0)
+  })
+  it('latches at the threshold and then tracks the whole way back down (smooth dismiss)', () => {
+    expect(keyboardLatched({ ...RESTING, height: 844 - KEYBOARD_MIN_PX }, false)).toBe(true)
+    expect(keyboardLatched({ ...RESTING, height: 844 - 40 }, true)).toBe(true)   // dismiss slide
+    expect(liftFor({ ...RESTING, height: 844 - 40 }, true)).toBe(40)
+    expect(keyboardLatched({ ...RESTING, height: 844 }, true)).toBe(false)       // gone
+  })
+  it('a keyboard-up PAN keeps the latch (offsetTop moves, the height gap does not)', () => {
+    expect(keyboardLatched({ ...RESTING, height: 508, offsetTop: 300 }, true)).toBe(true)
+    expect(liftFor({ ...RESTING, height: 508, offsetTop: 300 }, true)).toBe(36)
+  })
   it('ignores NEGATIVE offsetTop (pull-to-refresh rubber-band is not keyboard space)', () => {
     // Top elastic with no keyboard: must stay docked at 0, not ride up by the elastic amount.
     expect(kbOffsetFor({ ...RESTING, offsetTop: -120, height: 844 })).toBe(0)
@@ -122,7 +143,8 @@ describe('createDock', () => {
     dock.kick() // initial state: applies 0
     // iOS fires ONE sparse resize early in the slide; the follow loop must do the rest.
     for (let f = 1; f <= 12; f++) {
-      h.geom.height = 844 - Math.round((KEYBOARD_H * f) / 12)
+      // iOS's first reported step is already keyboard-sized (see KEYBOARD_MIN_PX).
+      h.geom.height = 844 - Math.max(KEYBOARD_MIN_PX, Math.round((KEYBOARD_H * f) / 12))
       if (f === 1) dock.kick()
       h.frame()
       expectFlush(h)
@@ -187,11 +209,12 @@ describe('createDock', () => {
       expectFlush(h)
     }
     expect(h.lastApplied()).toBe(0)
-    // Expand where the vv shrinks a frame BEFORE innerHeight catches up: transiently lifted,
-    // then settles back to 0 — never stuck.
+    // Expand where the vv shrinks a frame BEFORE innerHeight catches up: the 64px gap is URL-bar
+    // chrome, not a keyboard — the bar must NOT lift (it once did, with a 250ms ease, and dropped
+    // back a frame later: the visible bounce on every scroll direction change).
     h.geom.height = 780
     dock.kick()
-    expect(h.lastApplied()).toBe(64)
+    expect(h.lastApplied()).toBe(0)
     h.geom.innerHeight = 780
     h.frame()
     expect(h.lastApplied()).toBe(0)
@@ -254,7 +277,8 @@ describe('createDock', () => {
     dock.kick()
     h.frames(SETTLE_FRAMES)
     for (let f = 1; f <= 12; f++) {
-      h.geom.height = 844 - Math.round((KEYBOARD_H * f) / 12)
+      // iOS's first reported step is already keyboard-sized (see KEYBOARD_MIN_PX).
+      h.geom.height = 844 - Math.max(KEYBOARD_MIN_PX, Math.round((KEYBOARD_H * f) / 12))
       if (f === 1) dock.kick()
       h.frame()
       expect(dock.isSettled()).toBe(false) // keepCaret must stay out of iOS's own pan

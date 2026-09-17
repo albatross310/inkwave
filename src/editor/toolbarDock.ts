@@ -49,6 +49,39 @@ export function kbOffsetFor(g: DockGeom): number {
 }
 
 /**
+ * The smallest visual-viewport shrink that counts as a KEYBOARD. Below this it is browser chrome
+ * (Safari's collapsing bottom URL bar, ~50-80px on an iPhone), which position:fixed already
+ * tracks natively. One number, shared with the editor's `keyboardUp` detection, so the dock and
+ * the keyboard flag can never disagree about whether a keyboard is up.
+ */
+export const KEYBOARD_MIN_PX = 150
+
+/**
+ * ⚠ THE LIFT IS FOR THE KEYBOARD ONLY — the root cause of the toolbar "doing funny things" while
+ * scrolling (Peter, iPhone, 2026-09-17). Safari's collapsing bottom URL bar ALSO changes
+ * innerHeight and vv.height, by ~50-80px and NOT in the same frame: on a scroll-up the bar
+ * expands, vv.height shrinks first and innerHeight catches up a frame or two later, so the raw
+ * overlap read as a 60-80px "keyboard" for those frames. The dock lifted the bar (with the 250ms
+ * ease, being a >60px jump) and dropped it again on every scroll direction change, and
+ * `--iw-kb-offset` briefly padded the surface by the same amount, jolting the scroll under the
+ * finger. A fixed element already rides Safari's bar perfectly; only a keyboard (which never
+ * resizes the layout viewport on iOS) needs the transform.
+ *
+ * A LATCH, not a bare threshold: the keyboard is recognised once the un-panned height gap reaches
+ * KEYBOARD_MIN_PX (panning changes offsetTop, never the gap), and then tracked all the way back
+ * down so the dismiss slide stays smooth to 0 rather than snapping at the threshold.
+ */
+export function keyboardLatched(g: DockGeom, was: boolean): boolean {
+  const gap = g.innerHeight - g.height
+  return was ? gap > 0 : gap >= KEYBOARD_MIN_PX
+}
+
+/** The lift to apply: the real overlap while a keyboard is latched, otherwise 0. */
+export function liftFor(g: DockGeom | null, latched: boolean): number {
+  return g && latched ? kbOffsetFor(g) : 0
+}
+
+/**
  * Where a toolbar of height `toolbarH`, lifted by kbOffsetFor(g), lands on the
  * SCREEN (visual-viewport coordinates). Test invariant: === g.height - toolbarH
  * (flush on the vv bottom) whenever the offset isn't clamped/pinned.
@@ -94,10 +127,11 @@ export function createDock(host: DockHost): Dock {
   let lastOff = -1 // sentinel: the first step always applies (clears stale state)
   let stable = 0
   let settled = true
+  let keyboard = false // the latch — see keyboardLatched
 
   const measure = () => {
     const g = host.readGeom()
-    return g ? kbOffsetFor(g) : 0
+    return liftFor(g, g ? keyboardLatched(g, keyboard) : false)
   }
 
   const step = () => {
@@ -108,7 +142,8 @@ export function createDock(host: DockHost): Dock {
       stable = 0
       return
     }
-    const off = g ? kbOffsetFor(g) : 0
+    if (g) keyboard = keyboardLatched(g, keyboard)
+    const off = liftFor(g, keyboard)
     if (off !== lastOff) {
       lastOff = off
       stable = 0
