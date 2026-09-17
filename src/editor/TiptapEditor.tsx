@@ -1656,11 +1656,13 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     // DEV readout (`?vvdebug`): the live geometry, on screen, for a device with no devtools.
     let dbg: HTMLDivElement | null = null
     let dbgRaf = 0
-    // Sticky (localStorage): Edit.tsx cleans the query before this mounts. `?vvdebug=0` clears.
+    // Per-TAB sticky (sessionStorage): Edit.tsx cleans the query before this mounts, and a tab
+    // Peter is writing in must never inherit a readout from one I was measuring in. `?vvdebug=0` clears.
     const vvDebug = (() => { try {
-      if (/vvdebug=0/.test(location.search)) localStorage.removeItem('iw:vvdebug')
-      else if (/vvdebug/.test(location.search)) localStorage.setItem('iw:vvdebug', '1')
-      return localStorage.getItem('iw:vvdebug') === '1'
+      localStorage.removeItem('iw:vvdebug') // the first cut was device-sticky; retire it everywhere
+      if (/vvdebug=0/.test(location.search)) sessionStorage.removeItem('iw:vvdebug')
+      else if (/vvdebug/.test(location.search)) sessionStorage.setItem('iw:vvdebug', '1')
+      return sessionStorage.getItem('iw:vvdebug') === '1'
     } catch { return false } })()
     if (import.meta.env.DEV && vvDebug) {
       dbg = document.createElement('div')
