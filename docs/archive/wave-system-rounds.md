@@ -423,3 +423,160 @@ and shared-field skew stayed 0.00px.
 
 **The wave video was removed 2026-09-16** (Peter's ruling — decision 2 in `docs/REFACTOR-QUEUE.md`,
 branch `claude/refactor-drop-wavevideo`). The rounds above are history; nothing else here changed.
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the "Wave / water system" section.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+## Wave / water system (REBUILT 2026-07-11 — Peter's strip-down)
+
+Muted indigo→teal gradient, two 140px SVG wave tiles drifting at 72px/s, one immutable scene of
+glitters and wave-marks, and an S-curve slow-down at reveal. The day palette is deliberately more
+serious than the former saturated cyan: `--iw-water-gradient` is the single background source,
+angled at CSS `165deg` (75° downward declension from the left-to-right horizontal),
+(`#302438` → reflective indigo `#41425b` by 18% → blue-teal `#3b606a` by 88% → `#3b6f75`), with one
+flat warm-ivory `#f3edcf` shared by wave marks, specks and sparkles. The wave SVGs contain no vertical
+colour gradient; line weight and opacity alone provide depth. The early indigo reflection keeps the surface glossy, while
+holding the blue-teal arrival until 88% lets the indigo influence extend roughly a third farther into
+the teal. Before the atomic water reveal, day mode paints pure white (not parchment or a partial
+gradient). Keep every day-water consumer on the shared token; do not reintroduce per-surface gradient
+copies. **The load animation is precomputed and
+playback is COMPOSITOR-ONLY — no per-frame JS, so main-thread starvation cannot touch it.** Exactly
+two control events cross from the app into it: START (implicit, the prerendered `.iw-wave-anim`
+class) and SETTLE (`inkwave:reveal-imminent`).
+
+The atomic gate must not release healthy water on a short wall-clock cap. Warm same-tab reloads can
+take longer than 1.5s to hydrate and mount the twinkle field; the former 1.5s escape hatch therefore
+painted gradient/waves first and late specks second. The only fallback is now a loud 30s failure
+backstop, and `window.__iwWaterGate.reason` records `complete`, `no-surface`, or `timeout` for probes.
+
+The marks are one immutable, checked-in scene (`waveSceneData.ts`), generated offline by the fixed-seed
+`scripts/generate-wave-scene.mjs`. Runtime randomness, canvas rasterisation, asynchronous art decode,
+server-fed instructions, respawn and duplicate blink/rest populations are forbidden. The generator
+enforces ≥180px horizontal separation per wave band; every dash stores the exact local wave tangent.
+The browser mounts the whole table synchronously before the atomic gate opens. A dash's generated x/y
+is its CENTRE: render it with `translate(-50%, -50%)` before its rotation. Treating x as CSS `left`
+puts the rendered centre half a dash-width away from the sampled tangent and visibly detaches it.
+Every dash's centre is also a generated `10–20px` BELOW the thick wave (`offsetY`, positive screen-y),
+fixed-seed and stored per mark. A uniform gap looks mechanical; an on-wave or negative offset is a
+regression.
+
+Intro objects have exactly one finite opacity window and never reappear. Every object owns opacity
+only; the two group fields own all spatial motion and use the SAME named CSS drift + additive coast
+animations as the two wave tiles. Sibling start-time adoption and the forward coast anchor therefore
+include waves and fields together. Never add a parent/field opacity transition: initial reveal is
+atomic, but every later appearance/disappearance is independent.
+
+The immutable 1800ms intro schedule plays through `WAVE_MARK_PLAYBACK_RATE = 2` (900ms effective).
+That knob scales mark opacity only. Never apply it to the fields or wave drift: replacement can be
+faster while every mark remains locked to its wave.
+
+The pre-gate CSS keeps all spatial animations paint-hidden and paused at currentTime 0 rather than
+`display:none`. `waveTwinkle.alignFieldClocks` binds each field once to its matching pseudo and
+reasserts after both pending CSS animations resolve; this closes WebKit's provisional-startTime
+rewrite without any per-frame correction. Do not remove either the paused-at-zero gate or the
+resolved-clock reassertion.
+
+The overlapping rest population is a pure spatial loop: `scrollTop mod 2240px`. That fixed period is
+deliberately independent of time, velocity, viewport, page geometry and editor zoom. Scroll.tsx calls
+`setScrollScene` only for genuine user/PDF scroll; zoom-held correction scrolls do not reach it.
+Returning to the same absolute scrollTop must reproduce the same state. Resize clips the fixed 2800px
+×1680px scene; it must not regenerate or horizontally centre it. The field starts at `-280px`, an
+exact two-tile offset from the viewport origin. Centring changes the 140px phase with viewport width
+and makes a correct stored tangent visibly non-parallel to the painted SVG.
+
+**DESKTOP SHELL → EDITOR IS AN ATOMIC WATER-OWNERSHIP SWAP, NEVER A CROSS-FADE.** The editor's paper
+may fade in, but two translucent copies of the waves/marks may not be visible together: they change
+brightness as they composite. Hiding the second copy while fading the first is equally wrong — the
+marks disappear with the shell and return when it unmounts. `inkwave:editor-revealed` is dispatched
+in the same task as `setSettled(true)`, so Edit.tsx drops the shell in that batched commit while the
+phase-synchronised editor water uncovers. Phone retains its separate keep-shell-until-rest rule.
+
+**The rebuild's rounds, the wave-video ladder, and the refuted desync hypothesis are in
+`docs/archive/wave-system-rounds.md`. EVERY RULE BELOW WAS A LIVE BUG** — none is preference.
+
+- **NOTHING MAY WRITE TO THE DOM BEFORE HYDRATION.** `hydrateRoot(document)` makes React own every
+  node, so an imperative pre-hydration append triggers React #418/#423 and React then **REPLACES the
+  `<html>` ELEMENT** — losing `.iw-water-ready` and `data-theme`, which puts every wave layer at
+  `display:none` for the whole session. Wait behind the `hydrated()` barrier.
+- **Only ever wait on a signal that ALWAYS arrives, and make it ASKABLE.** A one-shot async signal
+  fails two ways — it never fires, or it already fired before you subscribed — and a bare
+  `addEventListener` loses to both, silently and forever. Check the state and subscribe in ONE
+  synchronous block (`__iwHydrated`, `libraryReady()`). Do NOT paper over it with a timeout.
+- **Correctness of a feature must not depend on another feature succeeding.** Historically the
+  video keyed its barrier on the runtime particle pool's event and hung forever when that pool
+  never announced. The current fixed mark scene still exposes the event for the atomic water gate,
+  but unrelated systems must continue to use the guaranteed hydration beacon.
+- **A `reason`/status field that only some code paths write is a field that LIES.** Discriminate a
+  hang from a stall by which fields are POPULATED, not by the status string.
+- **Sentinel values must not be able to masquerade as measurements.** `last = -1` made the first
+  tick satisfy "advancing" for a video at `currentTime` 0; require `readyState >= 2` AND a real
+  delta.
+- **Never hold `document.documentElement`** — resolve it at every use and observe `document` itself
+  (never replaced) for the swap, or a guard re-stamps a DETACHED element forever.
+- **Ask the LAYOUT ENGINE whether something painted** (box/display/visibility/opacity), never the
+  decoder. Every field can be green on a build that never rendered a frame.
+- **An alarm that fires on the healthy path trains the one person whose eyes are ground truth to
+  distrust the instrument.** A completed hand-off must not look like a video that never ran.
+- **`iw-wave-video-on` is a promise that something ELSE is drawing the water**, so it must be
+  DERIVED from a live element, never latched — when a re-render tore the `<video>` out, the class
+  stayed and nothing drew the water.
+- **Any on-device overlay whose screenshots may cross a deploy must print `__BUILD_COMMIT__`.**
+- **The tile must be 140 CSS px at every viewport.** `object-fit: cover` scales it with the
+  viewport and breaks the hand-off to the CSS water; the element is sized to the chosen rung's
+  DESIGN box with `fill` and the viewport crops. `pickRung` returns the SMALLEST rung of the right
+  device class that COVERS the viewport, never one that must be stretched, and NEVER a rung a phone
+  would have to decode past H.264 Level 4.0.
+- **Brakes are born CSS-PAUSED and started at a FORWARD anchor** (`t_a = currentTime + 150ms`).
+  Engines resolve pending CSS animations at STYLE time, so a brake started now shows
+  `brake(commit-lag)` — a backward step ∝ lag². The drift is never stopped; the brake composites
+  over it.
+- **A surface mounting mid-load ADOPTS the reference surface's drift `startTime`, and must RETRY
+  until that surface commits.** A `sibling != null` check that runs too early skips adoption
+  forever, and the two drifts then resolve 10-25px apart permanently — which throws every mark off
+  its own crest, because the marks share one clock.
+- **Re-assert an adopted `startTime` at each animation's `ready`**: a write to a play-pending CSS
+  animation is CLOBBERED when the pending start resolves.
+- **Never create-then-re-clock mark tracks on VISIBLE water** — gate creation on `clockReady()`; a
+  late mass re-clock is a whole-field teleport.
+- **`--wave-x` must never invalidate the page subtree.** Firebreak it to `0px` on
+  `.iw-magnify-box` / `.scroll-paper` / `.iw-wave-twinkles` and give twinkle fields LITERAL
+  transforms via `swayFields()`. Without this, desktop scroll frames were p50 417ms; with it, 50ms.
+- **In-flow surfaces get PANE-SCOPED water and it must stay UNPROMOTED** (`will-change: auto`,
+  `transform: none`). They are content-tall, so promotion gave every keep-alive layer a ~90-megapixel
+  raster; hidden layers paint no water at all, and /snapshot writes no `--wave-x` sway.
+- **ONE backstop only: the 30s load watchdog.** It must never fire on a healthy load. Per-stage caps
+  are gone *because* playback cannot be starved.
+- **A twinkle field wakes only on SUSTAINED scroll** (two reports within 200ms) — a single
+  caret-reveal nudge must not read as full-rate velocity.
+- **Dashes never respawn when they blink** — reappearance is opacity-only at the same permanent
+  wave-relative position. The retired raster respawn cost ~150ms/frame; its lattice replacement
+  preserved phase but still broke object continuity and has now also been removed.
+- **NAMED OPEN QUESTION — a known-redundant write on the sway path, deliberately NOT removed
+  (2026-08-30).** `writeWave()` sets `--wave-x` and calls `swayFields()` on every rAF of every
+  scroll. During a ZOOM HOLD the value is provably unchanged — the base is rebased equal-and-opposite
+  precisely so the sway holds still — so those frames write an identical string to the surface var
+  and re-write literal transforms across ~300 twinkle leaves for no pixel change. Skipping identical
+  writes looks free and was not taken, because a field that MOUNTS during the skipped window would
+  never receive its transform, and this box has no GPU to tell a real fix from a new residual.
+  **WHAT WOULD LICENSE IT:** an on-device capture showing (a) no dropped transform on a field
+  created mid-gesture, and (b) a measured frame-time win — or, better, making `swayFields` idempotent
+  for new leaves so the skip cannot strand one. Until then this is a documented cost, not a bug.
+  The residuals below came from exactly this kind of unproved guess; do not close it by reasoning.
+- KNOWN RESIDUALS (Peter, live, build `72783da`): no consistent tick, but occasional blue flash and
+  white lines briefly lagging their wave, worst on phone then Chrome. Probes pass 9/9 — this class
+  is real-device raster scheduling that a GPU-less headless box structurally cannot see. **The next
+  wave round starts HERE, not from "all green"**, and the clock hypothesis is already REFUTED
+  (measured 0.00px on 4/5 loads; WAAPI and CSS share `document.timeline`). Next tool is on-device
+  capture, not another headless probe.
+- PROBE RULES: /snapshot needs a fallback-faithful static server; never `pkill` a shared
+  `vite preview`; no windows over Peter's screen (`scripts/pw-headed.sh`). The wave-video probes need
+  `scripts/wave-video/server.mjs` — the scrub-probe server has no `.mp4` MIME and no Range/206.
+
+Build marker: Settings footer + console show `__BUILD_COMMIT__` (vite.config.ts).
+

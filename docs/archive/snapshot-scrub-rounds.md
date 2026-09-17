@@ -1931,3 +1931,84 @@ account of which instrument lied, and how it was caught, is here.
 > the serialised form, which is schema-independent by construction and is also exactly what a
 > snapshot's contentJson IS. Compared with a key-stable serialiser so attr enumeration order
 > can never masquerade as a difference.
+
+
+---
+
+## Moved out of CLAUDE.md, 2026-09-17 (the trim)
+
+Source: the "Snapshot review" entry.
+
+What follows is the removed text **verbatim**. The operative rules were compressed back into
+CLAUDE.md, which points here; this file keeps the reasoning, the measurements and the incidents.
+- **Snapshot review** (`routes/SnapshotView.tsx`, `/snapshot`) — split diff (annotated doc + hunk
+  panel), minimap, swipe/shift-wheel/trackpad scrubbing, per-version summaries (Haiku, opt-in).
+  **The scrub is the moat and it is heavily tuned. THE RULES ARE BELOW; the 15 rounds of measurement
+  that produced them — including every refuted hypothesis — are in
+  `docs/archive/snapshot-scrub-rounds.md`. Read the round that owns your area before proposing an
+  alternative: it has usually already been measured and lost.**
+  - **Grow-only snapshots and byte-deterministic `pmToText` apply here as everywhere.** The doc pane
+    passes `resolveCitations: true` for display only; verify/bundle depend on the `false` form.
+  - **Never make `<Scroll>` `fill` on this route.** It is in-flow inside the split pane; fixed there
+    covers the diff panel.
+  - **Hidden keep-alive layers use `opacity: 0.001` — never `0`, `visibility` or `display`.** A
+    truly-hidden layer loses its compositor backing store and the next flip stalls ~500ms.
+  - **A `DocLayer` binds the shared refs in a CHILD layout effect.** Child effects flush before the
+    parent's, which is what makes every `[snapshot.id]`-keyed effect read the right scroller.
+  - **`DocLayer.run()` must clear its deferred warm timer** or activation between warm-mount and
+    its +150ms pagination paginates the layer twice.
+  - **Detect rapid scrubbing from the INPUT EVENT's own `timeStamp`, never from `goTo` spacing.**
+    `goTo` runs after the previous step's synchronous render, so spacing misses rapid streams
+    exactly when flips render slowly.
+  - **Clear `liveSnapId` ONLY in the catch-up effect once `urlSnapId` matches.** `navigate()` lands
+    as a transition; clearing it alongside renders one frame with the old URL and ping-pongs.
+  - **A plain flick steps exactly ONE version.** The multi-snap position scrubber arms only after
+    a ~280ms mostly-still hold, checked at decisive-move time, not at touchstart.
+  - **Slide LEFT = next version, slide RIGHT = previous.** Multi-touch bails to the pinch — keep
+    that guard.
+  - **`MAX_PER_FRAME = 1`.** At 2 the driver silently drops the intermediate version when it falls
+    behind, which is the bug the flipbook exists to fix.
+  - **`LAND_QUIET_MS = 260`** (a mouse-wheel notch gap is ~150-250ms; at 120 the driver "lands" a
+    full React render per notch, which is the felt lag) **and `FREEZE_HOLD = 400`.**
+  - **`RASTER_DPR_CAP = 1`.** The bitmap only shows while flipping; DPR1 quarters the per-swap
+    texture upload and quadruples cache depth, which is what keeps real intermediate versions
+    resident instead of stale-nearest.
+  - **`show()` blits into ONE persistent per-pane canvas.** Attaching a fresh `<canvas>` per step
+    re-layerises and re-uploads a full texture every step.
+  - **Lay offscreen replica capture hosts IN FLOW and mirror the real host's `position`.** An
+    absolutely-positioned host rasterises outside the crop, returns blank, is silently dropped by
+    blank-detect, and stalls the sweep on that version forever.
+  - **`getAnchorTop(scroller, snapId)` resolves the anchor in the TARGET VERSION'S OWN layout** —
+    EXACT text match → surviving NEIGHBOUR (`provenance/anchorMap.ts`) → ratio, never the top.
+    Priming a warm layer with the active pane's raw `scrollTop` registers every baked frame to an
+    offset while the active pane alone is content-anchored: two rules, one pane.
+  - **Judge registration by DRIFT IN PX, not by the `registered` line-open metric** — wrapping alone
+    decides whether the anchor sits mid-line, so that metric cannot reach 1.0 and its shortfall is
+    not a bug to chase.
+  - **A doc-pane thumbnail is a picture at a scrollTop**, so its signature carries `|a1`; bitmaps
+    baked under an older anchoring rule must never hydrate into an anchored library.
+  - **Thumbnails NEVER travel with the `.studio`.** They are a local OPFS cache, regenerable; a
+    fresh device warms as used.
+  - **No component of a persisted cache signature may be a counter since page load.** Use
+    content-derived state (`bibSignature()`), memoised BY the epoch — an epoch is a proxy for
+    "something changed", not a description of what the state IS, and only the latter survives a
+    reload.
+  - **Anything putting the bibliography in a persisted key must `await libraryReady()`** — the
+    library hydrates asynchronously, and a builder that runs first bakes an empty-library key that
+    misses forever, silently.
+  - **Header +N/−N badges read `peekOpsBetween` (CACHE-ONLY) and BLANK with `visibility` on a
+    miss.** Showing another version's number mid-fling is worse than showing none.
+  - **Feature flags resolve ONCE per load into localStorage; a DEBUG flag lives in sessionStorage.**
+    Local-first nav rewrites the URL every scrub step, so a flag re-read from the URL dies exactly
+    when the feature starts being used — and a persistent debug flag outlives its session and shows
+    a diagnostic overlay forever.
+  - **The doc pane renders RICH formatted pages for every version** (`RichDiffView`, default ON
+    since `ef96306`). A run is a SLICE of an op, never a new op: it must emit the same
+    `diff-add`/`diff-del` classes and the same `data-opidx`, because hover, click-to-jump,
+    highlight injection and `computeDiffPagesFor` all key on exactly those.
+  - **`staticPagination` re-runs the editor's canonical break pipeline** — the break rule exists in
+    three copies (`PaginationExtension.computeBreaks`, `arithmeticLayout.paginate`,
+    `staticPagination.computeBreakPicks`) and a retired widow/orphan rule was once fixed in two and
+    missed in the third, putting the pane +2 pages out on plain prose. **Change one, check all
+    three**, and compare break POSITIONS, not page counts — equal counts hide divergent offsets.
+
