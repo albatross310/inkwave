@@ -156,7 +156,10 @@ area is not mine" is exactly the wrong inference. Forensics: `docs/archive/data-
   and must earn itself: only for work genuinely not ready, with a plan to graduate, and the report says
   WHY it is not live and WHAT closes the gap. **Graduating ≠ flipping a switch on a stub.** Still gated:
   `?waveVideo` (unresolved desync), `?arithLayout` (**DO NOT GRADUATE** — `docs/rules/pagination.md`),
-  `?email` send (Google verification), `?lesson`.
+  `?email` send (Google verification), `?auth` (Clerk init cost AND the unbuilt Tablet tier). **`?lesson`
+  is not on this list because there is no lesson layer** — it was removed whole (`877c2a1`), having never
+  been wired: nothing imported `LessonPanel` and `lessonEnabled()` had no non-test caller. A flag over
+  an unwired layer hid nothing, so graduating it would have shipped no surface.
 - **NAME THE FEATURE, EVERY TIME.** Open every finding with (a) the FEATURE in Peter's words, not the
   module's ("the fast snapshot scrubbing", not "`buildRenderModel`"), and (b) **the blast radius — is
   this live, or behind a default-OFF flag?** Same in agent briefs.
