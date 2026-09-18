@@ -12,6 +12,10 @@ Narrative: docs/archive/working-model.md. -->
   FIXED port — **A=5181, B=5182, C=5183, D=5184, E=5185, F=5186, G=5187** — pulling every 5s and
   opening `http://localhost:<port>/?seed`. The single-branch `scripts/follow-branch.sh` serves 5173
   with no lane.
+- **A lane worktree is THROWAWAY; a session's own worktree is NOT.** `follow-lanes.sh` re-checks-out
+  `../inkwave-lane-<L>` on every poll, so anything uncommitted there is lost without a warning — never
+  work in one. Each session works in `~/iw-<name>` and syncs it first (CLAUDE.md's git section carries
+  the standing rule); `~/inkwave` stays on master and is nobody's desk.
 - **The tab title and favicon are the BARE LANE LETTER** (`VITE_LANE`, unset in prod) so Peter flicks
   between tabs by letter; the PR number lives in `lanes.tsv` and the start-up table, not the tab.
 - **The favicon must be a REAL URL** — `scripts/laneIcon.mjs` bakes a PNG served at

@@ -90,6 +90,20 @@ THE VERSION** when an anchor is load-bearing. Build history and code map:
   reassigning it — **a block on capability is not fixed by moving the item between
   sessions**, and reassignment makes it look staffed.
 
+- **ONE CHECKOUT PER SESSION, AND YOU SYNC IT BEFORE YOU TOUCH ANYTHING ELSE.** The layout on the
+  Mac: `~/inkwave` is **master only** — never checked out to a branch, never edited, no dev server; it
+  exists to be the `.git` the worktrees hang off. `~/iw-<name>` is that session's own worktree, which
+  it OWNS (`git -C ~/inkwave worktree add ~/iw-<name> -b <name>/<focus> origin/master`), and
+  `~/inkwave-lane-<L>` belongs to `follow-lanes.sh`. **First thing every session, in your own
+  worktree, before any other work:** `git status -sb`; if the tree is dirty, COMMIT AND PUSH IT
+  first; then `git fetch origin master && git rebase origin/master`. Push again before you stop.
+  ⚠ **AN UNPUSHED WORKING TREE IS AN EMPTY ANSWER TO EVERYONE ELSE** — it is the data-loss shape
+  applied to the repository: a teammate reading origin cannot tell "nobody wrote that" from "it is on
+  a disk I cannot see", and answers the second as the first. On 2026-09-18 Peter's `~/inkwave` was
+  found on `feat/gmail-send`, a branch that existed **nowhere on origin**, its working tree 209
+  tracked files and ~16k lines from master with ~300 untracked paths on top — and every obvious
+  recovery (`pull --rebase`, a reset, a checkout) was enough to destroy it. A shared checkout nobody
+  owns is how that happens; a checkout with one name on it is the fix.
 - **BACKTICKS IN `git commit -m` ARE COMMAND SUBSTITUTION** — use `-F <file>` with a heredoc for any
   message containing code identifiers.
 - **`/root/dev/iw-master` IS A SHARED CHECKOUT.** 1. **`git status -sb` before every commit or push** —
