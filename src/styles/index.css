@@ -1156,12 +1156,15 @@
    centre, offset by --iw-tail-x so it keeps pointing at the trigger when the box is edge-clamped.
    A popup must NOT be overflow:hidden (the tail hangs outside its box); scroll an inner div. */
 .iw-desktop-popup { font-size: 14px; overflow: visible; }
-.iw-desktop-popup::before, .iw-desktop-popup::after {
-  content: ''; position: absolute; top: 100%; left: var(--iw-tail-x, 50%); transform: translateX(-50%);
-  border-left: 10px solid transparent; border-right: 10px solid transparent; pointer-events: none;
+/* The tail is a real curved speech-bubble tail (Peter, 2026-09-18: "real curved bezier speech-bubble
+   tails (SVG)"): one inline SVG — the filled shape covers the popup's bottom border under it, the
+   stroked path draws only the two curves — 26×12, rooted at --iw-tail-x. Night re-colours it below. */
+.iw-desktop-popup::after {
+  content: ''; position: absolute; top: calc(100% - 1px); left: var(--iw-tail-x, 50%); transform: translateX(-50%);
+  width: 26px; height: 12px; pointer-events: none; background-repeat: no-repeat; background-size: 26px 12px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 12'%3E%3Cpath d='M0 0C7 0 10.5 4 13 12C15.5 4 19 0 26 0Z' fill='%23fff'/%3E%3Cpath d='M0 0C7 0 10.5 4 13 12C15.5 4 19 0 26 0' fill='none' stroke='%23e7e5e4' stroke-width='1'/%3E%3C/svg%3E");
 }
-.iw-desktop-popup::before { border-top: 10px solid var(--iw-nightable-border, #e7e5e4); }
-.iw-desktop-popup::after { border-top: 9px solid var(--iw-nightable-bg, #fff); margin-top: -1px; }
+:root[data-theme="night"] .iw-desktop-popup::after { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 12'%3E%3Cpath d='M0 0C7 0 10.5 4 13 12C15.5 4 19 0 26 0Z' fill='%23454e59'/%3E%3Cpath d='M0 0C7 0 10.5 4 13 12C15.5 4 19 0 26 0' fill='none' stroke='%237c8794' stroke-width='1'/%3E%3C/svg%3E"); }
 .iw-desktop-panel { font-size: 15px; }
 .iw-desktop-bar { font-size: 14px; }
 .iw-desktop-popup .text-sm, .iw-desktop-bar .text-sm { font-size: 14px; }
