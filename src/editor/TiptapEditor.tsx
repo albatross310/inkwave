@@ -436,7 +436,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const receiptOpen = openPanel === 'receipt'
   const syncOpen = openPanel === 'sync'
   const bibPanelOpen = openPanel === 'bib'
-  const toolbarPickerOpen = openPanel === 'drawer'
   const ledgerOpen = openPanel === 'clock'
   const openPanelRef = useRef(openPanel)
   openPanelRef.current = openPanel
@@ -555,6 +554,13 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const [toolbarSlots, setToolbarSlots] = useState<SlotId[]>(
     () => resolveToolbarRow(toolbarRead, readStoredRow()),
   )
+  // Phone (Peter, 2026-09-17): an app opened FROM the drawer row keeps the row open until that app
+  // closes — a panel whose trigger is not on the main row was reached through the drawer, and so
+  // was the music bar when ♪ lives there. `openPanel` still holds ONE id; this is only the LOOK.
+  const drawerHeld = isTouchDevice() && (
+    (openPanel !== null && openPanel !== 'drawer' && !(toolbarSlots as readonly string[]).includes(openPanel))
+    || (activeBar === 'music' && !toolbarSlots.includes('music')))
+  const toolbarPickerOpen = openPanel === 'drawer' || drawerHeld
   // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts). The ledger drop-up's open state lives
   // HERE, not in the clock button: the row is SIX (Peter), so `clock` competes and sits in the ▲
   // overflow by default — its button is frequently unmounted. The slot and the countdown are two
@@ -3279,7 +3285,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                           draggable={!isTouch}
                           onDragStart={() => { dragIdRef.current = id }}
                           onDragEnd={() => { dragIdRef.current = null }}
-                          onClick={() => setPanelOpen('drawer', false)} // no-op once the item's own panel took the slot
+                          onClick={() => { if (!isTouch) setPanelOpen('drawer', false) }} // desktop only: phone keeps the row (drawerHeld)
                           {...(isTouch ? popupTouchHandlers(id) : {})}
                           style={isTouch ? { touchAction: 'none' } : undefined}
                         >

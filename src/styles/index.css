@@ -1101,6 +1101,12 @@
     font-size: 18px;
   }
   .iw-toolbar-outline.w-full .w-9 svg { width: 18px; height: 18px; }
+  /* The rows stacked above the main row (style / review / music bars) read in the sheet's sans on
+     phone; the circle glyphs (P S i R) stay serif — they are the brand marks. */
+  .iw-toolbar-outline.w-full > div:not(.iw-toolbar-circles),
+  .iw-toolbar-outline.w-full > div:not(.iw-toolbar-circles) .font-serif {
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
   .iw-toolbar-outline.w-full .text-stone-400 { color: #57534e; }
 
   /* ── THE PHONE PANEL SHEET (styles/panelSheet.ts owns the numbers; this is its box) ──────────
