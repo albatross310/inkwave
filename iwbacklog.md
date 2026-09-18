@@ -116,11 +116,34 @@ _(nothing claimed)_
   hybrid one-axis editor zoom, snapshot "biggest change" scrub, transform-magnify
   below fit, and the userSpaceOnUse-gradient favicon Firefox cannot rasterise.
   The work may have been redone since; nobody has checked.
-- **Two `CLAUDE.md` files, one in Inkwave and one in MnemonicEcologies, and it is
-  confusing which a session is reading.** Peter, 18 Sep 21:20. They serve different
-  repos but share a name, a voice and several rules (the roster, the channel format,
-  Brisbane time), so a session that has read one can believe it has read the other.
-  Worth deciding what is genuinely shared and where the shared part should live.
+- **Deduplicate the two `CLAUDE.md` files — do NOT merge them.** Peter, 18 Sep
+  21:20 and 22:10: *"we probably shouldn't even merge the claude.mds. what happens
+  if we don't merge them?"* Answer: nothing breaks. Both load as separate blocks
+  with **no precedence and no reliable order**, so a rule that exists in both and
+  disagrees produces no error — both sit in context and the session picks. A stale
+  copy is then indistinguishable from a live one, which is the unknown-answered-as-
+  known shape again. So the job is not merging, it is removing the overlap: each
+  file says only what is true of its own repo, and anything genuinely shared lives
+  in ONE place the other points at. Overlapping today: the roster, the channel
+  format, Brisbane time, the voice rules. Note `trim-claude-md` (PR 22) is already
+  working this seam — whoever takes this should read it first rather than race it.
+  A session also does not necessarily load an attached repo's `CLAUDE.md` at all
+  (it loads when the repo is registered as a root), so start by checking what a
+  two-repo session actually has, rather than assuming.
+- **Finish sorting what lives in which repo.** Peter, 18 Sep 22:05: *"literally
+  nothing except the startup system context related to inkwave should be in
+  here."* MnemonicEcologies is the team's context plus the site; Inkwave's
+  material belongs in Inkwave. Done so far: the site moved to `website/` and the
+  deployment is confined to it (the repo is private, the deploy is not, and
+  `/CLAUDE.md`, `/noticeboard.md` and `/thesis/notes/*.md` were being served — all
+  404 now), and the twelve toolbar screenshots moved to `docs/shots/` here. Left
+  deliberately: `docs/archive/memory-2026-09-18/` stays WHOLE even though four of
+  its files are Inkwave's — it is a verbatim snapshot of a deleted memory store,
+  kept so the fold into the live files can be checked against the original, and
+  fragmenting it destroys the only thing it is for. Also left:
+  `scripts/login-inkwave-sim.sh`, which is genuinely Inkwave's but is wired into a
+  launchd plist on the Mac by that path — moving it breaks the hook silently, so it
+  wants doing with Max, not from a container.
 - **`T + B` and `P` are undefined in the glossary.** Both came from Peter's
   replies to the desktop toolbar review. Max to confirm the expansions —
   unconfirmed guesses stay out, per `docs/rules/glossary.md`.
