@@ -426,15 +426,15 @@ export function OptionsMenu({
             </div>
           )}
           {modal === 'noprov' && (
-            <div className="iw-nightable iw-no-print fixed z-[70] bg-white shadow-md rounded-xl border px-5 py-4 font-serif text-stone-600"
-              style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#30243844' }}>
+            <div className="iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600"
+              style={{ ...anchorAbove(btnRef.current?.getBoundingClientRect(), 'menu'), left: '50%', ...desktopSheetStyle() }}>
               No snaps or provenance info yet recorded.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>
           )}
           {modal === 'provunread' && (
-            <div className="iw-nightable iw-no-print fixed z-[70] bg-white shadow-md rounded-xl border px-5 py-4 font-serif text-stone-600"
-              style={{ bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#30243844' }}>
+            <div className="iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600"
+              style={{ ...anchorAbove(btnRef.current?.getBoundingClientRect(), 'menu'), left: '50%', ...desktopSheetStyle() }}>
               Couldn't read this document's history just now — it hasn't been lost. Try again in a moment.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>

@@ -16,6 +16,7 @@
 // literal white — `--iw-ink` is LIGHT purple in night, where white text vanishes.
 
 import { useEffect, useRef, useState } from 'react'
+import { desktopSheetStyle } from '../styles/panelSheet'
 import { createPortal } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import { captureFrame, frameToFile, openCamera, stopStream } from '../media/camera'
@@ -123,12 +124,12 @@ export function CameraCapturePopup({
   const panel = (
     <div
       ref={panelRef}
-      className="iw-nightable iw-touch-guard fixed z-[130] bg-white rounded-2xl shadow-xl font-serif flex flex-col"
+      className="iw-nightable iw-touch-guard fixed z-[130] bg-white font-serif flex flex-col"
       style={{
+        ...desktopSheetStyle(),
         left: anchor.left,
         bottom: anchor.bottom,
         transform: 'translateX(-50%)',
-        border: `1px solid var(--iw-nightable-border, ${INK}bf)`,
         fontSize: TYPE.label,
         width: 320,
         maxWidth: 'calc(100vw - 24px)',
