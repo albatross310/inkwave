@@ -1,6 +1,10 @@
 # lane	branch	pr
 # One row per lane in flight. scripts/follow-lanes.sh reads this: lane letter → port 5180+index
-# (A=5181 … G=5187), and the tab title shows "<pr>/<lane>". Keep it current when a lane opens a PR.
+# (A=5181 … Z=5206), and the tab title shows "<pr>/<lane>". Keep it current when a lane opens a PR.
+# A LANE WHOSE PR HAS MERGED IS NOT IN FLIGHT — take its row out. Left in, follow-lanes.sh holds a
+# port and a tab open on a branch nobody is changing, and Peter reviews work that shipped days ago.
+# A DOCS-ONLY LANE GETS NO ROW EITHER — #19 (zoomseam) changes no source file, so its tab would
+# render master and tell Peter nothing. Read those on GitHub.
 A	claude/refactor-breakrule	7
 B	claude/refactor-daysummary	8
 C	claude/refactor-editorsplit	9
@@ -11,4 +15,3 @@ H	claude/refactor-dead-exports	17
 I	claude/refactor-saveorch	18
 K	claude/refactor-probe-archive	20
 L	claude/refactor-drop-wavevideo	21
-M	claude/trim-claude-md	22

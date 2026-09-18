@@ -12,12 +12,21 @@ Narrative: docs/archive/working-model.md. -->
   FIXED port — **A=5181, B=5182, C=5183, D=5184, E=5185, F=5186, G=5187** — pulling every 5s and
   opening `http://localhost:<port>/?seed`. The single-branch `scripts/follow-branch.sh` serves 5173
   with no lane.
+- **A lane worktree is THROWAWAY; a session's own worktree is NOT.** `follow-lanes.sh` re-checks-out
+  `../inkwave-lane-<L>` on every poll, so anything uncommitted there is lost without a warning — never
+  work in one. Each session works in `~/iw-<name>` and syncs it first (CLAUDE.md's git section carries
+  the standing rule); `~/inkwave` stays on master and is nobody's desk.
 - **The tab title and favicon are the BARE LANE LETTER** (`VITE_LANE`, unset in prod) so Peter flicks
   between tabs by letter; the PR number lives in `lanes.tsv` and the start-up table, not the tab.
 - **The favicon must be a REAL URL** — `scripts/laneIcon.mjs` bakes a PNG served at
-  `/__lane-icon.png?l=A`, and `root.tsx`'s `links()` points at it when `VITE_LANE` is set. **Safari
-  never repaints a tab icon swapped at runtime**; a fresh `<link>` href at page load is the only thing
-  it honours.
+  `/__lane-icon.png?l=A`, and `root.tsx`'s `links()` points at it **in DEV generally**, not only when
+  `VITE_LANE` is set: no lane means the main dev server, which wears `iω` on an inverted ground so a
+  localhost tab is never mistaken for live iwzero.me. **Safari never repaints a tab icon swapped at
+  runtime**; a fresh `<link>` href at page load is the only thing it honours. Dev also serves its own
+  `/__lane-manifest.webmanifest`, so an installed localhost PWA carries the lane in its Dock name.
+- **A new lane letter needs a GLYPH** — `FONT` covers A–Z; it covered A–L while `lanes.tsv` already
+  had lane M, and M rendered a blank square. `src/dev/devIcon.test.ts` holds every letter in
+  `lanes.tsv` against the font, so the table can never again name a lane the icon cannot draw.
 - `?seed` is DEV-only (`src/dev/seedDocument.ts`), reachable only from the absence path, never Peter's
   prose. `?seed=fresh` always mints a NEW seeded document for the tab — plain `?seed` leaves an
   existing one alone, which is how a tab ends up showing stale sample text.
@@ -53,3 +62,39 @@ Narrative: docs/archive/working-model.md. -->
   agent dies; preserve agent worktrees until their work is merged.
 - Merges run serially into master through the full gate; Peter tests live on iPhone + desktop and
   reports in batches.
+
+## Review — the tiers, and what each one owns
+
+**Lane agent writes → reviewer session proves it green and rule-clean → Peter decides whether it
+ships.** The rest of this section is that sentence, argued.
+
+**Lanes buy THROUGHPUT, not quality.** Running six at once makes the writing faster; it does nothing
+for the one thing that was already the bottleneck — Peter reading the result. Adding lanes without
+adding review just lengthens the queue, which is how thirteen branches reached 2–3 months old while
+every one of them was finished code. The review tier is what turns throughput into shipped work.
+
+- **THE TIERS.** A lane agent does the work. **A reviewer session (Max by default — local, so it can
+  actually look at the thing in Safari) owns CORRECTNESS**: it runs the gate itself, diffs
+  `$(git merge-base HEAD origin/master)..HEAD`, reads the area file for what the PR touches, and
+  either sends it back or passes it. **Peter owns WHETHER IT SHOULD EXIST** — taste, priority, is this
+  the product. Nothing reaches him that is not already green and rule-clean, so his question narrows
+  to ship or don't.
+- **THE TWO QUESTIONS ARE NOT INTERCHANGEABLE, and only one of them delegates.** An agent reviewing an
+  agent catches bugs, missing tests, a violated rule, a guard that guards nothing. It cannot tell you
+  the feature should not have been built. **A wrong feature reviewed perfectly is still wasted**, so
+  the tier reviews BRIEFS as well as diffs: the cheapest send-back is the one before the work.
+- **⚠ THE REVIEWER MUST BE ADVERSARIAL BY BRIEF, BECAUSE AGENTS AGREE TOO READILY.** Two sessions
+  reaching the same wrong conclusion confidently is the failure mode, and it reads exactly like
+  agreement. So the reviewer **RUNS the gate rather than reading that it passed**, reproduces the
+  behaviour it is told about, and is asked what would make CI reject this — never asked whether the
+  work looks good. A review that only reads the diff is not the tier; it is a second opinion with no
+  evidence behind it.
+- **MULTIPLE LANES ARE ALSO A REVIEW MECHANISM, cheaply.** Two lanes over adjacent code collide at the
+  merge, and the conflict is information: it says two sessions had different models of the same file.
+  Resolve it by deciding which model is right, not by taking one side to make the merge go away — a
+  conflict resolved without that question is a review thrown out.
+- **TWO AGENTS ON ONE LANE is supported and routine** (Max and Lambert work this way). Git refuses the
+  same branch in two worktrees of ONE clone, so the second works `--detach` and pushes to the branch,
+  or they are on different machines. **Each `pull --rebase` before every push** or the second one is
+  rejected. It scales to two; past that the push races cost more than the parallelism buys. Split by
+  FILE, or have one write while the other reviews.

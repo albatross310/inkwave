@@ -1,6 +1,6 @@
 // ─── The Piece — the music module's shared data model (build-spec §1) ─────────
 //
-// ⚠️ THIS FILE IS A CONTRACT — the photo path (§A1/§A2), the MusicXML path (§B) and lesson capture
+// ⚠️ THIS FILE IS A CONTRACT — the photo path (§A1/§A2) and the MusicXML path (§B)
 // (§A3) all build against it. ADD to it; never redefine a field's meaning in place.
 // snake_case is deliberate: this is a DOCUMENT/WIRE shape the spec writes that way (as
 // `productivity/types.ts` is). Don't "tidy" it to camelCase.
@@ -283,35 +283,6 @@ export interface HeatmapEntry {
   ts: string                // ISO-8601 with offset
 }
 
-// ─── Lesson capture (§1, §A3 — ANOTHER LANE; contract declared now) ──────────
-
-/**
- * ⚠️ THERE IS NO `transcript` FIELD ON `Piece` AND THERE MUST NEVER BE ONE (§1/§A3: only the
- * student's own distilled snippets are stored). A live transcript lives in session memory and dies
- * with the session — that non-storability is the whole reassurance that lets a teacher be recorded.
- *
- * DECLARED ONCE — HERE, IN THE CONTRACT — AND IMPORTED BY `lesson/types.ts`, never the reverse.
- * → docs/archive/music-module-build.md#lesson-note-ownership
- */
-export interface LessonNote {
-  id: string
-  /** The STUDENT's own selection/paraphrase — never a verbatim capture. See the warning above. */
-  snippet: string
-  /** §1: "anchor(optional → bar)" — usually a `BarAnchor`, which is why that variant exists. */
-  anchor?: Anchor
-  created_at: string
-}
-
-/** §A3b: the teacher's dictated recap can attach "for next week" items. Storable BY DESIGN — the
- *  teacher chose to leave it, unlike the raw transcript. */
-export interface Assignment {
-  kind: 'youtube' | 'note'
-  ref: string               // URL for youtube; the text itself for a note
-  due: 'next_week'          // §1 names exactly this one value; widen only with Peter's call
-  /** Where on the score it belongs, when the teacher pinned it to one. */
-  anchor?: Anchor
-}
-
 // ─── Reference tracks + sync (§1, §A4 — LATER, step 3) ───────────────────────
 
 /**
@@ -467,8 +438,6 @@ export interface Piece {
   reference_tracks: ReferenceTrack[]
   annotations: Annotation[]
   heatmap: HeatmapEntry[]
-  lesson_notes: LessonNote[]
-  assignments: Assignment[]
   recordings: Recording[]
   practice: Practice
   provenance: PieceProvenance
@@ -504,8 +473,6 @@ export function newPiece(init: { id: string; title: string; source: PieceSource 
     reference_tracks: [],
     annotations: [],
     heatmap: [],
-    lesson_notes: [],
-    assignments: [],
     recordings: [],
     practice: { tasks: [], sessions: [], schedule: { planned: {}, shared_with_teacher: false } },
     provenance: { hashes: {}, ots_anchors: [] },

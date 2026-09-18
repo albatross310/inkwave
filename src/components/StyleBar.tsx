@@ -9,6 +9,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { useLongPress } from './useLongPress'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
+import { DESKTOP_POPUP_CLASS, desktopPopupStyle } from '../styles/panelSheet'
 
 const INK = '#302438'
 const BASE_SIZE = 18       // editor root px (matches .ProseMirror { font-size: 1.125rem })
@@ -82,31 +83,43 @@ export const FONTS = [
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]
 
+// HOUSE DEFAULTS (Peter, 2026-09-18): what a plain click applies when the writer has picked nothing
+// yet this session and the document itself gives no lead — Carlito 12pt, yellow highlight, bright
+// red text, left alignment. Font and size first ask the DOCUMENT: the most common font / size by
+// characters (unmarked text counts as the editor's base face), so a click re-applies the document's
+// own voice; only an empty document falls back to the house.
+const HOUSE_FONT_CSS = FONTS.find(f => f.label === 'Carlito')!.css
+const HOUSE_SIZE_PT = 12
+const BASE_FONT_CSS = FONTS[0].css
+
 const HIGHLIGHT_COLORS = [
-  { label: 'Red',    color: '#fca5a5' },
-  { label: 'Coral',  color: '#fda4af' },
-  { label: 'Orange', color: '#fed7aa' },
-  { label: 'Peach',  color: '#fde68a' },
-  { label: 'Yellow', color: '#fef08a' },
-  { label: 'Green',  color: '#bbf7d0' },
-  { label: 'Sage',   color: '#d1fae5' },
-  { label: 'Teal',   color: '#99f6e4' },
-  { label: 'Blue',   color: '#bae6fd' },
-  { label: 'Indigo', color: '#a5b4fc' },
-  { label: 'Pink',   color: '#fbcfe8' },
-  { label: 'Clear',  color: null },
+  { label: 'red',    color: '#fca5a5' },
+  { label: 'coral',  color: '#fda4af' },
+  { label: 'orange', color: '#fed7aa' },
+  { label: 'peach',  color: '#fde68a' },
+  { label: 'yellow', color: '#fef08a' },
+  { label: 'green',  color: '#bbf7d0' },
+  { label: 'sage',   color: '#d1fae5' },
+  { label: 'teal',   color: '#99f6e4' },
+  { label: 'blue',   color: '#bae6fd' },
+  { label: 'indigo', color: '#a5b4fc' },
+  { label: 'pink',   color: '#fbcfe8' },
+  { label: 'clear',  color: null },
 ]
 
 // Text colours — a small tasteful set fitting the calm identity (deep, ink-like tones).
 const TEXT_COLORS: Array<{ label: string; color: string | null }> = [
-  { label: 'Default', color: null },
-  { label: 'Ink',     color: '#302438' },
-  { label: 'Black',   color: '#1a1a1a' },
-  { label: 'Blue',    color: '#1e3a8a' },
-  { label: 'Red',     color: '#991b1b' },
-  { label: 'Green',   color: '#166534' },
-  { label: 'Brown',   color: '#78350f' },
+  { label: 'default', color: null },
+  { label: 'ink',     color: '#302438' },
+  { label: 'black',   color: '#1a1a1a' },
+  { label: 'blue',    color: '#1e3a8a' },
+  // Bright red (Peter, 2026-09-18: the house default colour is "bright red"); the old #991b1b was maroon.
+  { label: 'red',     color: '#dc2626' },
+  { label: 'green',   color: '#166534' },
+  { label: 'brown',   color: '#78350f' },
 ]
+const HOUSE_HL_COLOR = HIGHLIGHT_COLORS.find(c => c.label === 'yellow')!.color
+const HOUSE_TXT_COLOR = TEXT_COLORS.find(c => c.label === 'red')!.color
 
 type CharFmt = 'bold' | 'italic' | 'underline' | 'strike'
 type ListType = 'bulletList' | 'decimal' | 'lower-roman' | 'lower-alpha' | 'upper-roman' | 'taskList'
@@ -121,20 +134,20 @@ const CHAR_FMT_STYLES: Record<CharFmt, React.CSSProperties> = {
   strike: { textDecoration: 'line-through' },
 }
 const CHAR_FMT_NAMES: Record<CharFmt, string> = {
-  bold: 'Bold', italic: 'Italic', underline: 'Underline', strike: 'Strikethrough',
+  bold: 'bold', italic: 'italic', underline: 'underline', strike: 'strikethrough',
 }
 const ALIGN_LABELS: Record<Align, string> = {
-  left: 'Left', center: 'Centre', right: 'Right', justify: 'Justify',
+  left: 'left', center: 'centre', right: 'right', justify: 'justify',
 }
 const LIST_TYPE_LABELS: Record<ListType, string> = {
   bulletList: '•', decimal: '1.', 'lower-roman': 'i.', 'lower-alpha': 'a.', 'upper-roman': 'I.', taskList: '☐',
 }
 const INDENT_ITEMS: Array<{ action: IndentAction; label: string; preview: string }> = [
-  { action: 'line+', label: 'Indent line',        preview: '⇥' },
-  { action: 'line-', label: 'Unindent line',      preview: '⇤' },
-  { action: 'para+', label: 'First-line indent',  preview: '¶⇥' },
-  { action: 'para-', label: 'Remove first-line',  preview: '¶⇤' },
-  { action: 'clear', label: 'Clear line format',  preview: '⌫' },
+  { action: 'line+', label: 'indent line',        preview: '⇥' },
+  { action: 'line-', label: 'unindent line',      preview: '⇤' },
+  { action: 'para+', label: 'first-line indent',  preview: '¶⇥' },
+  { action: 'para-', label: 'remove first-line',  preview: '¶⇤' },
+  { action: 'clear', label: 'clear line format',  preview: '⌫' },
 ]
 
 
@@ -167,8 +180,25 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   const [lastFont,     setLastFont]     = useState<string | null>(null)
   const [lastSize,     setLastSize]     = useState<number | null>(null)
   const [lastFmt,      setLastFmt]      = useState<CharFmt>('bold')
-  const [lastHlColor,  setLastHlColor]  = useState<string | null>(null)
-  const [lastTxtColor, setLastTxtColor] = useState<string | null>(null)
+  const [lastHlColor,  setLastHlColor]  = useState<string | null>(HOUSE_HL_COLOR)
+  const [lastTxtColor, setLastTxtColor] = useState<string | null>(HOUSE_TXT_COLOR)
+
+  // The document's most common font and size (by character count). Walked at click time only.
+  const docMode = (): { font: string | null; sizePt: number | null } => {
+    const fonts = new Map<string, number>(); const sizes = new Map<number, number>()
+    editor.state.doc.descendants(node => {
+      if (!node.isText) return
+      const ts = node.marks.find(m => m.type.name === 'textStyle')?.attrs as { fontFamily?: string; fontSize?: string } | undefined
+      const font = ts?.fontFamily ?? BASE_FONT_CSS
+      const raw = ts?.fontSize ?? ''
+      const px = raw.endsWith('em') ? parseFloat(raw) * BASE_SIZE : parseInt(raw, 10) || BASE_SIZE
+      const pt = Math.round(px / PT_TO_PX)
+      const n = node.text?.length ?? 0
+      fonts.set(font, (fonts.get(font) ?? 0) + n); sizes.set(pt, (sizes.get(pt) ?? 0) + n)
+    })
+    const top = <K,>(m: Map<K, number>): K | null => { let best: K | null = null, bn = 0; m.forEach((n, k) => { if (n > bn) { bn = n; best = k } }); return best }
+    return { font: top(fonts), sizePt: top(sizes) }
+  }
   const [lastListType, setLastListType] = useState<ListType>('bulletList')
   const [lastAlign,    setLastAlign]    = useState<Align>('left')
   const [lastIndent,   setLastIndent]   = useState<IndentAction>('line+')
@@ -234,6 +264,12 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   const curHlColor = (editor.getAttributes('highlight') as { color?: string }).color ?? null
   const curTxtColor = (ts as { color?: string }).color ?? null
   const listActive = editor.isActive('bulletList') || editor.isActive('orderedList') || editor.isActive('taskList')
+  // Button faces: the first three letters of the SELECTION's value (Peter, 2026-09-18: "show first
+  // three letters of the selection, not A"), falling back to what a click would apply.
+  const face = (list: ReadonlyArray<{ label: string; color: string | null }>, color: string | null) =>
+    (list.find(c => c.color === color)?.label ?? list[0].label).slice(0, 3)
+  const hlFace = face(HIGHLIGHT_COLORS, curHlColor ?? lastHlColor)
+  const txtFace = face(TEXT_COLORS, curTxtColor ?? lastTxtColor)
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const setFont = (css: string) => { ping(); setLastFont(css); editor.chain().focus().setFontFamily(css).run(); setFontOpen(false) }
@@ -379,25 +415,59 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   // back to opening the menu when there is nothing remembered yet, because a click that silently
   // does nothing is the thing being fixed.
   const fontPress   = useLongPress(
-    () => { if (lastFont !== null) setFont(lastFont); else { closeAll(); setFontOpen(true) } },
-    () => { closeAll(); setFontOpen(true) },
+    () => setFont(lastFont ?? docMode().font ?? HOUSE_FONT_CSS),
+    () => { closeAll(); holdOpenRef.current = true; setFontOpen(true) },
   )
   const sizePress   = useLongPress(
-    () => { if (lastSize !== null) setSize(lastSize); else { closeAll(); setSizeOpen(true) } },
-    () => { closeAll(); setSizeOpen(true) },
+    () => setSize(lastSize ?? docMode().sizePt ?? HOUSE_SIZE_PT),
+    () => { closeAll(); holdOpenRef.current = true; setSizeOpen(true) },
   )
-  const fmtPress    = useLongPress(() => applyFmt(lastFmt),          () => { closeAll(); setFmtOpen(true) })
+  const fmtPress    = useLongPress(() => applyFmt(lastFmt),          () => { closeAll(); holdOpenRef.current = true; setFmtOpen(true) })
   const hlPress     = useLongPress(
-    () => { if (lastHlColor !== null) applyHighlight(lastHlColor); else { closeAll(); setHlOpen(true) } },
-    () => { closeAll(); setHlOpen(true) },
+    () => applyHighlight(lastHlColor ?? HOUSE_HL_COLOR),
+    () => { closeAll(); holdOpenRef.current = true; setHlOpen(true) },
   )
   const colorPress  = useLongPress(
-    () => { if (lastTxtColor !== null) applyTextColor(lastTxtColor); else { closeAll(); setColorOpen(true) } },
-    () => { closeAll(); setColorOpen(true) },
+    () => applyTextColor(lastTxtColor ?? HOUSE_TXT_COLOR),
+    () => { closeAll(); holdOpenRef.current = true; setColorOpen(true) },
   )
-  const listPress   = useLongPress(() => applyListType(lastListType), () => { closeAll(); setListOpen(true) })
-  const alignPress  = useLongPress(() => applyAlign(lastAlign),       () => { closeAll(); setAlignOpen(true) })
-  const indentPress = useLongPress(() => applyIndent(lastIndent),     () => { closeAll(); setIndentOpen(true) })
+  const listPress   = useLongPress(() => applyListType(lastListType), () => { closeAll(); holdOpenRef.current = true; setListOpen(true) })
+  const alignPress  = useLongPress(() => applyAlign(lastAlign),       () => { closeAll(); holdOpenRef.current = true; setAlignOpen(true) })
+  const indentPress = useLongPress(() => applyIndent(lastIndent),     () => { closeAll(); holdOpenRef.current = true; setIndentOpen(true) })
+
+  // THE PRESS CONTRACT (Peter, 2026-09-18), the same on every button here:
+  //   click            → applies the button's current default;
+  //   click-and-hold   → opens the popup; release ON an item selects it (the item's onPointerUp),
+  //                      release OUTSIDE closes only the popup — the style bar stays — and release
+  //                      on the button itself leaves the popup open for a click;
+  //   click while open → closes only the popup (no apply).
+  // `holdOpenRef` marks a popup opened by THIS press so the release rule applies once, and
+  // `wasOpenAtDown` remembers, per press, whether the click began with the popup already up.
+  const holdOpenRef = useRef(false)
+  const wasOpenAtDownRef = useRef(false)
+  const press = (p: ReturnType<typeof useLongPress>, isOpen: boolean) => ({
+    ...p,
+    onPointerDown: (e: React.PointerEvent) => { wasOpenAtDownRef.current = isOpen; holdOpenRef.current = false; p.onPointerDown(e) },
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (wasOpenAtDownRef.current) { wasOpenAtDownRef.current = false; closeAll(); return }
+      p.onClick()
+    },
+  })
+  useEffect(() => {
+    if (!anyOpen) return
+    const onUp = (e: PointerEvent) => {
+      if (!holdOpenRef.current) return
+      holdOpenRef.current = false
+      // By the point: the popup's full-screen scrim is the event target when the release lands
+      // back on the button, so the target alone would read every in-place release as "outside".
+      const under = document.elementsFromPoint(e.clientX, e.clientY)
+      if (under.some(el => el.closest('[data-iw-stylepop], [data-iw-styletrigger]'))) return
+      closeAll()
+    }
+    document.addEventListener('pointerup', onUp)
+    return () => document.removeEventListener('pointerup', onUp)
+  }, [anyOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function above(ref: React.RefObject<HTMLElement | null>): React.CSSProperties {
     const br = ref.current?.getBoundingClientRect()
@@ -406,6 +476,12 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
     return { position: 'fixed', bottom: Math.max(8, Math.round(vh - br.top + 8)), left: Math.max(8, Math.round(br.left)) }
   }
   const box = (w: number): React.CSSProperties => ({ border: `1px solid ${INK}55`, borderRadius: 12, width: w })
+  // Desktop: every picker is the shared DESKTOP POPUP (styles/panelSheet.ts) — fixed above its
+  // button at ONE height (gap + tail, the same for all eight, "a bit more" than before), the SVG
+  // tail on the button, content-sized so there is no slack on the right. Phone: the old boxes.
+  const pop = (ref: React.RefObject<HTMLElement | null>, w: number): React.CSSProperties =>
+    phone ? { ...above(ref), ...box(w) } : { ...desktopPopupStyle(ref.current?.getBoundingClientRect(), w), minWidth: 0, width: 'max-content' }
+  const popClass = `z-[99] iw-touch-guard iw-nightable bg-white shadow-xl ${phone ? '' : DESKTOP_POPUP_CLASS}`
 
   // Font panel is MULTI-COLUMN (Peter, 2026-07-16): 2 columns on desktop, 3 on phone — 17 families
   // in one column was a long scroll. Group headers span the full row (gridColumn 1/-1) so they stay
@@ -419,7 +495,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
     const vw = window.innerWidth
     const left = Math.min(typeof pos.left === 'number' ? pos.left : 8, Math.max(8, vw - FONT_PANEL_W - 8))
     return {
-      ...pos, ...box(FONT_PANEL_W), left,
+      ...(phone ? { ...pos, ...box(FONT_PANEL_W), left } : pop(fontBtnRef, FONT_PANEL_W)),
       display: 'grid', gridTemplateColumns: `repeat(${FONT_COLS}, minmax(0, 1fr))`, alignItems: 'start',
     }
   }
@@ -436,20 +512,21 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
 
   return (
     <div
-      className={`flex items-center ${phone ? 'justify-between' : 'gap-1'} text-sm text-stone-500 font-serif w-full`}
+      // Both platforms spread across the row: the bar takes the toolbar's width and the controls
+      // fit it (desktop gap = the main row's --iw-bar-gap, index.css .iw-desktop-bar).
+      className="flex items-center justify-between text-sm text-stone-500 font-serif w-full"
       onMouseDown={e => { if (!(e.target as Element).closest('input')) e.preventDefault() }}
       onMouseEnter={() => onActivity?.()}
     >
       {/* Font — opens on click-and-hold only */}
-      <button ref={fontBtnRef} type="button" {...fontPress}
-        onClick={e => { e.stopPropagation(); fontPress.onClick() }}
+      <button ref={fontBtnRef} type="button" data-iw-styletrigger="" {...press(fontPress, fontOpen)}
         className={fontClass}
         title="Font (hold to change)">
-        {curFont.slice(0, 3)}
+        {curFont.slice(0, 3).toLowerCase()}
       </button>
       {fontOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={fontPanelStyle()}
+        <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={fontPanelStyle()}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {FONTS.map((f, i) => (<Fragment key={f.label}>
             {(i === 0 || FONTS[i - 1].group !== f.group) && (
@@ -470,15 +547,14 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       )}
 
       {/* Size — opens on click-and-hold only */}
-      <button ref={sizeBtnRef} type="button" {...sizePress}
-        onClick={e => { e.stopPropagation(); sizePress.onClick() }}
+      <button ref={sizeBtnRef} type="button" data-iw-styletrigger="" {...press(sizePress, sizeOpen)}
         className={sizeClass}
         title="Font size (hold to change)">
         <span className="text-xs select-none">{curSize}</span>
       </button>
       {sizeOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setSizeOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5 overflow-y-auto" style={{ ...above(sizeBtnRef), ...box(64), maxHeight: 280 }}
+        <div data-iw-stylepop="" className={`${popClass} py-1.5 overflow-y-auto`} style={{ ...pop(sizeBtnRef, 64), width: 64, maxHeight: 280 }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {FONT_SIZES.map(sz => (
             <button key={sz} type="button"
@@ -493,8 +569,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       )}
 
       {/* B — tap=last fmt, hold=picker */}
-      <button ref={fmtBtnRef} type="button" {...fmtPress}
-        onClick={e => { e.stopPropagation(); fmtPress.onClick() }}
+      <button ref={fmtBtnRef} type="button" data-iw-styletrigger="" {...press(fmtPress, fmtOpen)}
         className={pill(fmtOpen)}
         style={{ ...CHAR_FMT_STYLES[lastFmt], textAlign: 'center', fontSize: '0.82rem' }}
         title="Character formatting (hold for options)">
@@ -502,7 +577,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {fmtOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFmtOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1" style={{ ...above(fmtBtnRef), ...box(140) }}
+        <div data-iw-stylepop="" className={`${popClass} py-1`} style={pop(fmtBtnRef, 140)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {(['bold', 'italic', 'underline', 'strike'] as CharFmt[]).map(fmt => (
             <button key={fmt} type="button"
@@ -518,17 +593,16 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       )}
 
       {/* H — tap=last colour (toggles off on same-colour text), hold=picker */}
-      <button ref={hlBtnRef} type="button" {...hlPress}
-        onClick={e => { e.stopPropagation(); hlPress.onClick() }}
+      <button ref={hlBtnRef} type="button" data-iw-styletrigger="" {...press(hlPress, hlOpen)}
         className={pill(hlOpen, !!lastHlColor)}
-        style={{ textAlign: 'center', fontSize: '0.82rem',
+        style={{ textAlign: 'center', fontSize: '0.7rem',
           background: lastHlColor ?? undefined, color: (hlOpen || lastHlColor) ? (hlOpen ? INK : '#374151') : '#6b7280' }}
         title="Highlight (hold for colours; same colour again removes it)">
-        H
+        {hlFace}
       </button>
       {hlOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setHlOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl p-2" style={{ ...above(hlBtnRef), ...box(156) }}
+        <div data-iw-stylepop="" className={`${popClass} p-2`} style={pop(hlBtnRef, 156)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           <div className="grid grid-cols-3 gap-1.5">
             {HIGHLIGHT_COLORS.map(h => (
@@ -545,17 +619,16 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       )}
 
       {/* T (text colour) — tap=last colour, hold=palette */}
-      <button ref={colorBtnRef} type="button" {...colorPress}
-        onClick={e => { e.stopPropagation(); colorPress.onClick() }}
+      <button ref={colorBtnRef} type="button" data-iw-styletrigger="" {...press(colorPress, colorOpen)}
         className={pill(colorOpen)}
-        style={{ textAlign: 'center', fontSize: '0.82rem', fontWeight: 600,
+        style={{ textAlign: 'center', fontSize: '0.7rem', fontWeight: 600,
           color: lastTxtColor ?? 'var(--iw-ink, #302438)' }}
         title="Text colour (hold for palette)">
-        T
+        {txtFace}
       </button>
       {colorOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setColorOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(colorBtnRef), ...box(136) }}
+        <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={pop(colorBtnRef, 136)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {TEXT_COLORS.map(c => (
             <button key={c.label} type="button"
@@ -573,16 +646,15 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       )}
 
       {/* A — tap=last align, hold=picker */}
-      <button ref={alignBtnRef} type="button" {...alignPress}
-        onClick={e => { e.stopPropagation(); alignPress.onClick() }}
+      <button ref={alignBtnRef} type="button" data-iw-styletrigger="" {...press(alignPress, alignOpen)}
         className={pill(alignOpen) + ' font-serif'}
-        style={{ textAlign: 'center', fontSize: '0.82rem' }}
+        style={{ textAlign: 'center', fontSize: '0.7rem' }}
         title="Alignment (hold for options)">
-        A
+        {curAlign.slice(0, 3)}
       </button>
       {alignOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setAlignOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(alignBtnRef), ...box(110) }}
+        <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={pop(alignBtnRef, 110)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {(['left', 'center', 'right', 'justify'] as Align[]).map(a => (
             <button key={a} type="button"
@@ -598,8 +670,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       )}
 
       {/* L — tap=last list, hold=picker */}
-      <button ref={listBtnRef} type="button" {...listPress}
-        onClick={e => { e.stopPropagation(); listPress.onClick() }}
+      <button ref={listBtnRef} type="button" data-iw-styletrigger="" {...press(listPress, listOpen)}
         className={pill(listOpen, listActive)}
         style={{ textAlign: 'center', fontSize: '0.82rem' }}
         title="Lists (hold for types)">
@@ -607,15 +678,15 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {listOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setListOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(listBtnRef), ...box(148) }}
+        <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={pop(listBtnRef, 148)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {([
-            { type: 'bulletList'  as ListType, label: 'Bullets',  preview: '•' },
-            { type: 'taskList'    as ListType, label: 'Checkboxes', preview: '☐' },
-            { type: 'decimal'     as ListType, label: 'Numbered', preview: '1.' },
-            { type: 'lower-roman' as ListType, label: 'Roman',    preview: 'i.' },
-            { type: 'lower-alpha' as ListType, label: 'Alphabet',  preview: 'a.' },
-            { type: 'upper-roman' as ListType, label: 'Roman caps', preview: 'I.' },
+            { type: 'bulletList'  as ListType, label: 'bullets',  preview: '•' },
+            { type: 'taskList'    as ListType, label: 'checkboxes', preview: '☐' },
+            { type: 'decimal'     as ListType, label: 'numbered', preview: '1.' },
+            { type: 'lower-roman' as ListType, label: 'roman',    preview: 'i.' },
+            { type: 'lower-alpha' as ListType, label: 'alphabet',  preview: 'a.' },
+            { type: 'upper-roman' as ListType, label: 'roman caps', preview: 'I.' },
           ]).map(item => {
             const active = item.type === 'taskList'
               ? editor.isActive('taskList')
@@ -640,8 +711,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
 
       {/* ⇥ (indent) — tap=last indent action, hold=picker. Replaces the old ⌫¶ button; its
           clear-line-formatting escape hatch lives on as the drop-up's last row. */}
-      <button ref={indentBtnRef} type="button" {...indentPress}
-        onClick={e => { e.stopPropagation(); indentPress.onClick() }}
+      <button ref={indentBtnRef} type="button" data-iw-styletrigger="" {...press(indentPress, indentOpen)}
         className={pill(indentOpen)}
         style={{ textAlign: 'center', fontSize: '0.82rem' }}
         title="Indent (hold for options)">
@@ -649,7 +719,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {indentOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setIndentOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(indentBtnRef), ...box(168) }}
+        <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={pop(indentBtnRef, 168)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {INDENT_ITEMS.map(item => (
             <button key={item.action} type="button"

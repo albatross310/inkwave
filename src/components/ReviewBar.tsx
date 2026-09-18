@@ -141,7 +141,7 @@ export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }
   // Rendered INLINE as the second row of the main toolbar (merged rectangle). No portal, no fixed pill.
   return (
     <div
-      className={`flex items-center ${phone ? 'gap-1.5 px-2' : 'gap-2 px-3'} py-1.5 border-t border-stone-200 iw-nightable`}
+      className={`flex items-center ${phone ? 'gap-1.5 px-2 py-1.5 border-t border-stone-200' : 'gap-2 w-full'} iw-nightable`}
       onMouseDown={(e) => e.stopPropagation()}
     >
       {/* Set (drop-up) — the trigger truncates long layer names so the nav cluster always fits */}

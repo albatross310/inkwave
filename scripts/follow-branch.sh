@@ -6,7 +6,7 @@
 #   scripts/follow-branch.sh <branch> [interval-seconds]
 #
 # Env (all optional; scripts/follow-lanes.sh sets them per lane):
-#   LANE=A      lane letter → worktree ../inkwave-lane-A and port 5180+index (A=5181 … G=5187)
+#   LANE=A      lane letter → worktree ../inkwave-lane-A and port 5180+index (A=5181 … Z=5206)
 #   PR=7        PR number (printed in the table only; the tab title is the bare lane letter)
 #   PORT=5181   explicit port (overrides the LANE-derived one; default 5173)
 #   SEED=1      open http://localhost:<port>/?seed once the server answers (dev-only sample text)
@@ -21,9 +21,12 @@ ROOT="$(git rev-parse --show-toplevel)"
 
 LANE="${LANE:-}"
 if [ -n "$LANE" ]; then
-  LETTERS=ABCDEFGHIJKLMNOP
+  # A–Z, matching scripts/follow-lanes.sh's port formula (5181 + letter - 'A'). It was A–J while
+  # lanes.tsv already carried lane M, so `follow-lanes.sh` computed M's port and then this refused
+  # to start it — the lane was in the table and unopenable.
+  LETTERS=ABCDEFGHIJKLMNOPQRSTUVWXYZ
   idx="${LETTERS%%$LANE*}"; idx="${#idx}"
-  [ "$idx" -lt "${#LETTERS}" ] || { echo "LANE must be one of A–P"; exit 1; }
+  [ "$idx" -lt "${#LETTERS}" ] || { echo "LANE must be a single letter A–Z"; exit 1; }
   PORT="${PORT:-$((5181 + idx))}"
   WT="$ROOT/../inkwave-lane-$LANE"
   export VITE_LANE="$LANE"

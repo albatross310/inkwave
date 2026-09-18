@@ -34,9 +34,8 @@ import { EmailSnapshotSurface } from '../components/EmailSnapshotSurface'
 import { readApplicationSurfaceMode } from '../components/applicationSurfaceMode'
 import type { ApplicationSurfaceMode } from '../components/ApplicationSurface'
 import type { SurfacePresentation } from '../editor/surfacePresentation'
-import { textRenderEnabled } from '../editor/textRenderFlag'
 import { createScrubPresenter, paneCentreSig, type ScrubPresenter } from '../editor/scrubRaster'
-import { snapThumbsDebug, snapThumbsEnabled } from '../editor/snapThumbs'
+import { snapThumbsDebug } from '../editor/snapThumbs'
 // THE BREAK-TABLE SWEEP. Imported ONLY here — /snapshot has no editor, so this whole path cannot
 // run while Peter types, by construction rather than by measurement (snapshotBreaks.ts header).
 import { sweepBreakTables, snapBreaksEnabled, type SweepResult } from '../editor/snapshotBreaks'
@@ -272,47 +271,14 @@ function FullDiffView({
       </div>
     )
   }
-  // Rich pages for every version (default ON); below is the legacy flat transcript, kept only for
-  // the sticky `?textRender=off`.
-  // ⚠ Gate the canvas renderer and this DOM landing on the SAME flag (R2) — a rich frame settling
-  // onto a flat pane is round 11's two-rules-one-pane drift.
+  // Rich pages for EVERY version. The legacy flat `pre-wrap` transcript and its `?textRender=off`
+  // escape hatch came off on 2026-09-18 — there is one pane renderer now.
+  // ⚠ The canvas renderer and this DOM landing must stay the SAME renderer (R2) — a rich frame
+  // settling onto a flat pane is round 11’s two-rules-one-pane drift.
   // → docs/archive/snapshot-scrub-rounds.md#sv-rich-pane
-  if (textRenderEnabled()) {
-    return (
-      <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
-        {wrapSnapshot(<RichDiffView doc={snapshot.contentJson} ops={ops} hooks={{ onOpClick, onHoverOp }} />)}
-      </div>
-    )
-  }
-  const hover = onHoverOp
-    ? { onMouseEnter: (i: number) => onHoverOp(i), onMouseLeave: () => onHoverOp(null) }
-    : null
-  const spans = ops.map((op, i) => {
-    if (op.type === 'same') return <span key={i} data-opidx={String(i)}>{op.text}</span>
-    const { lead, core, trail } = splitEdges(op.text)
-    if (!core) return <span key={i} data-opidx={String(i)}>{op.text}</span> // whitespace/returns → plain, no highlight
-    const cls = op.type === 'del' ? 'diff-del' : 'diff-add'
-    const style: React.CSSProperties = op.type === 'del'
-      ? { color: DEL_FG, textDecoration: 'line-through', background: DEL_BG }
-      : { background: ADD_BG, color: ADD_FG }
-    // Outer span carries no highlight; the INNER core span holds the class + data-opidx so lead/trail
-    // whitespace (esp. returns) never gets outlined/filled.
-    return (
-      <span key={i}>
-        {lead}
-        <span className={cls} data-opidx={String(i)} style={style}
-          onClick={onOpClick ? () => onOpClick(i) : undefined}
-          onMouseEnter={hover ? () => hover.onMouseEnter(i) : undefined}
-          onMouseLeave={hover ? () => hover.onMouseLeave() : undefined}
-          title={onOpClick ? 'Jump to this change in diff panel' : undefined}
-        >{core}</span>
-        {trail}
-      </span>
-    )
-  })
   return (
-    <div className="tiptap-editor ProseMirror" style={{ whiteSpace: 'pre-wrap' }}>
-      {wrapSnapshot(spans)}
+    <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
+      {wrapSnapshot(<RichDiffView doc={snapshot.contentJson} ops={ops} hooks={{ onOpClick, onHoverOp }} />)}
     </div>
   )
 }
@@ -1138,7 +1104,7 @@ function SplitDiffView({
     return () => { for (const e of evs) window.removeEventListener(e, mark) }
   }, [])
   useEffect(() => {
-    if (!snapThumbsEnabled() || allSnaps.length < 2) return
+    if (allSnaps.length < 2) return
     let stopped = false, timer = 0, waited = 0
     // Ids whose bake never completed within the wait budget (a pane that can't rasterise in this
     // layout, a WebKit foreignObject failure). Without this the outward scan re-picks the same
@@ -1188,7 +1154,7 @@ function SplitDiffView({
   // warm ±1 neighbour whose onWarmReady fired before it was the sweep target) — that layer's geo
   // is in warmGeoRef but no fresh event will arrive for it.
   useEffect(() => {
-    if (!sweepId || !snapThumbsEnabled()) { setSweepReady(null); return }
+    if (!sweepId) { setSweepReady(null); return }
     let tries = 0, timer = 0
     const look = () => {
       const g = warmGeoRef.current.get(sweepId)
@@ -1219,7 +1185,7 @@ function SplitDiffView({
   // Replicas mounted → queue their captures. Same idle pump, same quiet gate, same LRU budget as
   // every other capture; the bake rides queueCapture's existing path (see scrubRaster.bakeThumb).
   useEffect(() => {
-    if (!sweepReady || !sweepBox || !snapThumbsEnabled()) return
+    if (!sweepReady || !sweepBox) return
     const id = sweepReady.id
     // 450ms: the replica's own layout + MinimapPanel's deferred 350ms re-measure (its diff ticks
     // land on the second pass). Capturing earlier baked a half-drawn minimap.
@@ -2369,7 +2335,7 @@ function SplitDiffView({
   // 0.001 (the DocLayer keep-alive rule, NOT display:none/visibility): a truly-hidden subtree has
   // no boxes to measure and nothing to rasterise.
   const sweepReplicas = (() => {
-    if (!snapThumbsEnabled() || !sweepReady || !sweepBox || sweepReady.id !== sweepId) return null
+    if (!sweepReady || !sweepBox || sweepReady.id !== sweepId) return null
     const si = allSnaps.findIndex((s) => s.id === sweepReady.id)
     if (si < 0) return null
     const sSnap = allSnaps[si], sPrev = si > 0 ? allSnaps[si - 1] : null

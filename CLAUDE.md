@@ -7,28 +7,31 @@ forensics, build history) lives in `docs/archive/<area>.md`.
 **Read your own row below, and the area file for what you are about to change — nothing else.** What
 you read is re-sent on every later turn of your session, so reading an area you are not touching costs
 Peter tokens all day. That is the point of the split.
+Your role is given by your name:
+Saul Gen -- Saul
+Quinn Gen -- Quinn
+_Carrie PL -- Carrie
+etc.
 
-**A rule must keep NAMING what it forbids.** Source scans here strip comments deliberately, so a rule
-can name a forbidden API without a guard firing on its own documentation. Never paraphrase an
-identifier, header or API into a vague gesture.
+Please read the below Roster summary, read only your entry in the Roster, then read the rest of claude.md.
 
 ## The roster — who we are, and what each of us reads
 
 | Session | Tokens | Role | Reads |
 | --- | --- | --- | --- |
-| Carrie | carrie, carriec | Inkwave lead, cloud — lanes, merges, PRs, the localhost tabs | this file · `docs/rules/lanes.md` |
-| Max | max, maxc | Mac — Safari, localhost, device testing, Peter's prefs | this file · `docs/rules/ios-webkit.md` |
-| Nigel | nigel, nigelc | paced refactor queue, cloud | this file · `docs/rules/testing.md` · the area file for the lane in hand |
-| Quinn | quinn, quinnc | General lead, Mac | this file |
-| Saul | saul, saulc | General, cloud | this file |
+| Carrie | carrie | Inkwave lead, cloud — lanes, merges, PRs, the localhost tabs | this file · `docs/rules/lanes.md` |
+| Max | max | Mac — Safari, localhost, device testing, Peter's prefs | this file · `docs/rules/ios-webkit.md` |
+| Lambert | Lambert, lambertc | Mac -- senior developer, phone testing, works in tandem with Max often on the same branch |
+| Nigel | nigel | paced refactor queue, other long-running projects cloud
+| Quinn | quinn | General lead, Mac | this file |
+| Saul | saul | General, cloud | this file |
 | lane agent | — | one subsystem at a time | this file · the area file for that subsystem |
 | triage | — | the channel only | this file · `docs/rules/team-channel.md` — **no area file** |
 
 Group tokens: `iw`/`iwc` = Carrie, Max, Nigel · `gen`/`genc` = Quinn, Saul · `locals`/`localsc` = Max,
 Quinn · `clouds`/`cloudsc` = Carrie, Saul, Nigel · `all`/`allc` = everyone. Suffix `c` = Claude,
 `k` = Kimi, `x` = Codex; bare forms mean everyone online; matching is case-insensitive.
-
-**This table is THE ROSTER. Recruiting a team member is one row here, and every watcher derives its
+**The above table is THE ROSTER. Recruiting a team member is one row here, and every watcher derives its
 roster from this table rather than keeping its own list** — a private copy in a regex goes stale
 silently, and a new member is then addressable in the docs and invisible to every watcher.
 
@@ -43,13 +46,20 @@ ledger, clock, charts, AI report, email · `reader-pdf.md` PDF viewer, source re
 `testing.md` guards, probes, refactors · `lanes.md` · `team-channel.md`. **Touching any write path?**
 The data-loss rules below are universal; read them, then `storage-sync.md`.
 
-## What this is
+## The backlog — `iwbacklog.md` in the repo root
 
-**Inkwave Scroll v0.1**, the free tier: a calm writing environment for short academic/philosophical
-writing. Solo dev: Peter (Brisbane). The mechanic is **SCAS** — words in a rotating exclusion set glow
-red and can be swapped for thesaurus synonyms, turning friction into an interpretable authorship trace
-without surveillance. **Free Scroll tier only**; the paid **Tablet** tier (Clay/Stone states,
-weathering, hollow clocks, sentence glyphs) is Phase 2+ and **must not be built here**.
+**Peter's own queue of bugs and wants, in a file he edits directly on GitHub.** Read it when you
+finish a piece of work and have nothing queued — **"I am free" is the trigger, never a timer**, since
+nothing in it is urgent by construction. Answer an item in the file, in a commit, with one of
+`yes` / `no` / `later` plus your name and a Brisbane time; **a `no` MUST name who it goes to next**,
+or it is a silent drop that looks like a decision. Two forwards without a `yes` and it returns to
+Peter. `yes` alone means ASAP — say `yes · eta 19 Sep 14:00` (that exact form; a poller reads it) if
+you mean later, and use `later` only for parked, since **a `later` is never chased**. Naming a second
+session in your own line is an ASK, not their agreement, and **the first name owns it**. **Do not read it as standing context** — it is pointed at rather than inlined precisely so a
+growing backlog does not ride in every session's window all day. Never delete or reword one of his
+lines, and never delete someone's `no`; close by moving the item to `## Done` with the PR.
+
+## Stack
 
 Vite + React 18 + TS + Tailwind 3 + Tiptap (ProseMirror) + OPFS/IndexedDB, React Router v7 framework
 mode (`ssr: false`, `/` and `/about` prerendered), Vercel. Package manager is **pnpm**, never npm:
@@ -57,9 +67,6 @@ mode (`ssr: false`, `/` and `/about` prerendered), Vercel. Package manager is **
 (`…/Projects/Inkflow Studio/`); in-repo specs in `docs/specs/` are checkable — **check them, and CITE
 THE VERSION** when an anchor is load-bearing. Build history and code map:
 `docs/archive/build-progress.md`.
-
-**Peter's prose — thesis, essays, real documents — NEVER enters the repo, fixtures, logs or
-screenshots.** Absolute. His product decisions are not that boundary; the specs are committed.
 
 ## The gate, git and shipping
 
@@ -72,6 +79,33 @@ screenshots.** Absolute. His product decisions are not that boundary; the specs 
 
   Nothing between the links: no `echo`, no pipe, no `set -e`. Typecheck may carry pre-existing
   TS7016/TS2550 in test files; ALL tests must pass; push = production deploy.
+- **BLOCKED BY A PERMISSION? HAND PETER THE WHOLE SCRIPT AND WAIT.** Not a description of
+  what to run, not a menu path, not "two clicks on the Branches page" — **the complete,
+  untruncated, copy-and-paste commands**, with the directory to run them in, what they will
+  print, and how to undo them. He is a strategist, not a developer: a command he has to
+  finish writing himself is a command that does not get run, and the work silently stalls
+  while looking handed over. Prefer a CHECKED-IN SCRIPT with a dry run by default
+  (`scripts/prune-merged.sh`, then `--yes`) over a one-off paste, so the next instance of
+  the same block costs nobody anything. Then STOP and wait for his reply rather than
+  reassigning it — **a block on capability is not fixed by moving the item between
+  sessions**, and reassignment makes it look staffed.
+
+- **ONE CHECKOUT PER SESSION, AND YOU SYNC IT BEFORE YOU TOUCH ANYTHING ELSE.** The layout on the
+  Mac: `~/inkwave` is **master only** — never checked out to a branch, never edited, no dev server; it
+  exists to be the `.git` the worktrees hang off. `~/iw-<name>` is that session's own worktree, which
+  it OWNS (`git -C ~/inkwave worktree add ~/iw-<name> -b <name>/<focus> origin/master`); **a session
+  that genuinely needs more than one suffixes a LETTER — `~/iw-maxA`, `~/iw-maxB`** — never a word,
+  a topic or a date, so the owner is still the first thing the name says. `~/inkwave-lane-<L>`
+  belongs to `follow-lanes.sh`. **First thing every session, in your own
+  worktree, before any other work:** `git status -sb`; if the tree is dirty, COMMIT AND PUSH IT
+  first; then `git fetch origin master && git rebase origin/master`. Push again before you stop.
+  ⚠ **AN UNPUSHED WORKING TREE IS AN EMPTY ANSWER TO EVERYONE ELSE** — it is the data-loss shape
+  applied to the repository: a teammate reading origin cannot tell "nobody wrote that" from "it is on
+  a disk I cannot see", and answers the second as the first. On 2026-09-18 Peter's `~/inkwave` was
+  found on `feat/gmail-send`, a branch that existed **nowhere on origin**, its working tree 209
+  tracked files and ~16k lines from master with ~300 untracked paths on top — and every obvious
+  recovery (`pull --rebase`, a reset, a checkout) was enough to destroy it. A shared checkout nobody
+  owns is how that happens; a checkout with one name on it is the fix.
 - **BACKTICKS IN `git commit -m` ARE COMMAND SUBSTITUTION** — use `-F <file>` with a heredoc for any
   message containing code identifiers.
 - **`/root/dev/iw-master` IS A SHARED CHECKOUT.** 1. **`git status -sb` before every commit or push** —
@@ -154,7 +188,10 @@ area is not mine" is exactly the wrong inference. Forensics: `docs/archive/data-
   and must earn itself: only for work genuinely not ready, with a plan to graduate, and the report says
   WHY it is not live and WHAT closes the gap. **Graduating ≠ flipping a switch on a stub.** Still gated:
   `?waveVideo` (unresolved desync), `?arithLayout` (**DO NOT GRADUATE** — `docs/rules/pagination.md`),
-  `?email` send (Google verification), `?lesson`.
+  `?email` send (Google verification), `?auth` (Clerk init cost AND the unbuilt Tablet tier). **`?lesson`
+  is not on this list because there is no lesson layer** — it was removed whole (`877c2a1`), having never
+  been wired: nothing imported `LessonPanel` and `lessonEnabled()` had no non-test caller. A flag over
+  an unwired layer hid nothing, so graduating it would have shipped no surface.
 - **NAME THE FEATURE, EVERY TIME.** Open every finding with (a) the FEATURE in Peter's words, not the
   module's ("the fast snapshot scrubbing", not "`buildRenderModel`"), and (b) **the blast radius — is
   this live, or behind a default-OFF flag?** Same in agent briefs.
@@ -215,9 +252,28 @@ rituals: `docs/rules/team-channel.md`.
   predicts behaviour, a correction where the old understanding was confidently wrong. NOT facts looked
   up, decisions or status. **A day that produced nothing gets an empty entry saying so.**
 
-## Style
+## UI taxonomy and style (desktop and phone) — the rules every surface obeys
 
-Match the surrounding code: terse purposeful comments explaining *why*, section dividers
-(`// ─── … ───`), single-responsibility modules. Calm visual identity: ink/purple (`#302438` /
-`#41425b`), parchment/cream, serif body (IM Fell DW Pica / EB Garamond). Commit messages:
-`feat:` / `fix:` / `refactor:` prefixes, present tense.
+Detail and the measurements: `docs/rules/toolbar.md` (chrome, popups, zoom) and `docs/rules/panels.md`
+(panels). The words below are the vocabulary; use them in code, comments and channel posts.
+
+- **Four surfaces, one module: `src/styles/panelSheet.ts`.** SHEET (phone: rises from the toolbar),
+  POPUP (desktop: small, fixed above its trigger, tail on the button — `desktopPopupStyle`), PANEL
+  (desktop: big, centred on the writing, sized from `--iw-paper-w` so it follows page zoom —
+  `desktopPanelStyle`), BAR (a second row INSIDE the toolbar pill: style / review / music — same width
+  as the main row, controls shrink to fit). Nothing floats outside the pill; the pill never shifts.
+- **The ▲ row is the honeycomb on both platforms**: a second row inside the pill, one cell per gap of
+  the main row, blank cells blank and droppable; the row stays open while an app launched from it is
+  open. Bars close the ▲ row and vice versa.
+- **The press contract, every style button**: click applies the button's current default; click-and-
+  hold opens the popup; release on an item selects; release outside closes only the popup (the bar
+  stays); a click while the popup is up closes only the popup. Defaults: the document's most common
+  font/size, else the house — Carlito 12pt, yellow highlight, bright red text, left.
+- **Faces and labels**: font/size/colour/alignment buttons wear the first three letters of the
+  selection's value; no capital first letters on button or menu-row names; shortcut keys are sans
+  lower-case with spaces around symbols (`alt + =`); body copy of panels stays serif.
+- **Lines are hairlines**: the pill outline, the circles, bar and popup borders hold ONE DEVICE PIXEL
+  under cmd +/- (`--iw-hairline-k`, index.css HAIRLINES). The chrome follows browser zoom like the
+  page does — never counter-zoom it again.
+- **Speech-bubble tails are the SVG in `.iw-desktop-popup::after`**, not CSS triangles; popups are
+  `overflow: visible` (scroll an inner div).
