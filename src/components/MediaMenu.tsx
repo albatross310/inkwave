@@ -23,9 +23,9 @@ const INK = 'var(--iw-ink, #302438)'
 // be fewer taps and worse: on iOS the picker's source (camera / photo library / files) follows the
 // accept list, so a single any-file input sends a writer photographing a page into the file browser.
 const KINDS: { kind: MediaKind; label: string; accept: string; glyph: string }[] = [
-  { kind: 'photo', label: 'Photo', accept: 'image/*', glyph: '❐' },
-  { kind: 'audio', label: 'Audio', accept: 'audio/*', glyph: '♪' },
-  { kind: 'video', label: 'Video', accept: 'video/*', glyph: '▷' },
+  { kind: 'photo', label: 'photo', accept: 'image/*', glyph: '❐' },
+  { kind: 'audio', label: 'audio', accept: 'audio/*', glyph: '♪' },
+  { kind: 'video', label: 'video', accept: 'video/*', glyph: '▷' },
 ]
 
 export function MediaMenu({ assets, onImported, open: openProp, onOpenChange }: {
@@ -116,7 +116,7 @@ export function MediaMenu({ assets, onImported, open: openProp, onOpenChange }: 
       // "attachments is too wide" — it wore the 340px menu width for three short rows.
       style={isTouch ? phoneSheetStyle() : { ...desktopPopupStyle(btnRef.current?.getBoundingClientRect()), padding: 8 }}
     >
-      {isTouch && <SheetHeader title="Import" onClose={() => setOpen(false)} />}
+      {isTouch && <SheetHeader title="import" onClose={() => setOpen(false)} />}
       {KINDS.map(k => (
         <button
           key={k.kind}
@@ -127,16 +127,17 @@ export function MediaMenu({ assets, onImported, open: openProp, onOpenChange }: 
           style={{ color: INK, minHeight: 44 }}
         >
           <span style={{ width: 22, textAlign: 'center', fontSize: 18 }}>{k.glyph}</span>
-          <span>{busy === k.kind ? 'Importing…' : k.label}</span>
+          <span>{busy === k.kind ? 'importing…' : k.label}</span>
         </button>
       ))}
-      <div className="px-3 pt-1.5 pb-0.5" style={{ fontSize: 16, color: 'var(--iw-pill-fg, #78716c)' }}>
+      {/* Footer: sans, and just the limit (Peter, 2026-09-18: drop "kept on this device"). */}
+      <div className="px-3 pt-1.5 pb-0.5 font-sans" style={{ fontSize: 13, color: 'var(--iw-pill-fg, #78716c)' }}>
         {error
           // The failure is the writer's to see, not the console's — the storage rule from 15 July.
           ? <span style={{ color: '#b45309' }}>{error}</span>
           : assets.length > 0
             ? `${assets.length} file${assets.length === 1 ? '' : 's'} in this document`
-            : `Up to ${mb(MEDIA_LIMIT_BYTES)}, kept on this device`}
+            : `up to ${mb(MEDIA_LIMIT_BYTES)}`}
       </div>
     </div>
   )

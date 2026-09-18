@@ -243,31 +243,31 @@ export function OptionsMenu({
   // Two columns (Peter, 2026-07-10): RIGHT = file ops ending with Export; LEFT = the rest, ending
   // with Sign in/Logout (AccountMenuItems renders after the left column).
   const fileItems: Array<{ label: string; run: () => void }> = [
-    { label: 'New doc', run: openNewInkwaveWindow },
-    { label: 'New blank', run: openNewBlankInkwaveWindow },
-    { label: 'Change doc', run: changeToBlankDocument },
+    { label: 'new doc', run: openNewInkwaveWindow },
+    { label: 'new blank', run: openNewBlankInkwaveWindow },
+    { label: 'change doc', run: changeToBlankDocument },
     // An email is created exactly like any other document (§B2.1) — same path, one extra field.
     // Flag-gated, so the menu is unchanged until `?email=1`.
     ...(emailEnabled() ? [{
-      label: 'New email',
+      label: 'new email',
       run: () => void createDocument('Untitled email', emptyTiptapDoc(), uuidv4(), {
         docType: 'email' as const,
         email: { to: [], cc: [], bcc: [], subject: '' },
       }),
     }] : []),
-    { label: 'Open…', run: () => setModal('upload') },
-    { label: 'Recent', run: () => setModal('recent') },
-    { label: 'Save…', run: () => setModal('save') },
-    { label: 'Save as…', run: () => setModal('savecopy') },
-    { label: 'Export…', run: () => setModal('export') },
+    { label: 'open…', run: () => setModal('upload') },
+    { label: 'recent', run: () => setModal('recent') },
+    { label: 'save…', run: () => setModal('save') },
+    { label: 'save as…', run: () => setModal('savecopy') },
+    { label: 'export…', run: () => setModal('export') },
   ]
   const items: Array<{ label: string; run: () => void }> = [
     // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1).
-    ...(onWorkReport ? [{ label: 'Report', run: onWorkReport }] : []),
+    ...(onWorkReport ? [{ label: 'report', run: onWorkReport }] : []),
     // Order (Peter, 2026-09-17): the document's record first (Snapshots, Verify, Storage), then
     // Print, then the two pages about the app.
     {
-      label: 'Snapshots',
+      label: 'snapshots',
       run: () => {
         // Open the snapshot view at the MOST RECENT snapshot of the active doc.
         void (async () => {
@@ -289,18 +289,18 @@ export function OptionsMenu({
         })()
       },
     },
-    { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
+    { label: 'verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
     // Peter's "opfs button" (2026-07-17) — named for what a WRITER is looking for, not for the
     // API. Every document this device is actually holding, including any the Recent list can't
     // see, with Open + Download on each. See OpfsInspector.tsx.
-    { label: 'Storage', run: () => setInspector(true) },
-    { label: 'Print', run: () => onPrint?.() },
-    { label: 'About', run: () => navigate('/about') },
-    { label: 'Privacy', run: () => navigate('/privacy') },
+    { label: 'storage', run: () => setInspector(true) },
+    { label: 'print', run: () => onPrint?.() },
+    { label: 'about', run: () => navigate('/about') },
+    { label: 'privacy', run: () => navigate('/privacy') },
   ]
   if (installPrompt) {
     items.push({
-      label: 'Install app…',
+      label: 'install app…',
       run: async () => {
         installPrompt.prompt()
         const { outcome } = await (installPrompt as any).userChoice

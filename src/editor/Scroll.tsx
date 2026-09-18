@@ -203,7 +203,11 @@ export function Scroll({
     write()
     const ro = new ResizeObserver(write)
     ro.observe(el)
-    return () => ro.disconnect()
+    // The GPU magnify is a TRANSFORM — the paper's layout box never changes, so ResizeObserver
+    // stays silent while the painted width does change. Subscribe to the magnify owner too, so
+    // the panels follow the water zoom (Peter, 2026-09-18: "panels also follow the wave/GPU zoom").
+    const unsub = subscribeMagnify(write)
+    return () => { ro.disconnect(); unsub() }
   }, [loadingTwinkles])
   // Hybrid zoom (desktop live editor only): the paper sits inside a size-compensated wrapper that
   // the magnify transform scales. paperRef is optional (the loading shell passes none) — keep a

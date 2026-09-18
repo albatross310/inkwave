@@ -93,7 +93,7 @@ describe('theming (CLAUDE.md — a panel without iw-nightable is white-on-white 
 
 describe('the entry point exists', () => {
   it('the hamburger (OptionsMenu) has a Storage item that opens the inspector', () => {
-    expect(MENU).toMatch(/label: 'Storage', run: \(\) => setInspector\(true\)/)
+    expect(MENU).toMatch(/label: 'storage', run: \(\) => setInspector\(true\)/)
     expect(MENU).toMatch(/<OpfsInspector onClose=/)
   })
 })

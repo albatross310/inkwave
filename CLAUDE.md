@@ -7,28 +7,31 @@ forensics, build history) lives in `docs/archive/<area>.md`.
 **Read your own row below, and the area file for what you are about to change — nothing else.** What
 you read is re-sent on every later turn of your session, so reading an area you are not touching costs
 Peter tokens all day. That is the point of the split.
+Your role is given by your name:
+Saul Gen -- Saul
+Quinn Gen -- Quinn
+_Carrie PL -- Carrie
+etc.
 
-**A rule must keep NAMING what it forbids.** Source scans here strip comments deliberately, so a rule
-can name a forbidden API without a guard firing on its own documentation. Never paraphrase an
-identifier, header or API into a vague gesture.
+Please read the below Roster summary, read only your entry in the Roster, then read the rest of claude.md.
 
 ## The roster — who we are, and what each of us reads
 
 | Session | Tokens | Role | Reads |
 | --- | --- | --- | --- |
-| Carrie | carrie, carriec | Inkwave lead, cloud — lanes, merges, PRs, the localhost tabs | this file · `docs/rules/lanes.md` |
-| Max | max, maxc | Mac — Safari, localhost, device testing, Peter's prefs | this file · `docs/rules/ios-webkit.md` |
-| Nigel | nigel, nigelc | paced refactor queue, cloud | this file · `docs/rules/testing.md` · the area file for the lane in hand |
-| Quinn | quinn, quinnc | General lead, Mac | this file |
-| Saul | saul, saulc | General, cloud | this file |
+| Carrie | carrie | Inkwave lead, cloud — lanes, merges, PRs, the localhost tabs | this file · `docs/rules/lanes.md` |
+| Max | max | Mac — Safari, localhost, device testing, Peter's prefs | this file · `docs/rules/ios-webkit.md` |
+| Lambert | Lambert, lambertc | Mac -- senior developer, phone testing, works in tandem with Max often on the same branch |
+| Nigel | nigel | paced refactor queue, other long-running projects cloud
+| Quinn | quinn | General lead, Mac | this file |
+| Saul | saul | General, cloud | this file |
 | lane agent | — | one subsystem at a time | this file · the area file for that subsystem |
 | triage | — | the channel only | this file · `docs/rules/team-channel.md` — **no area file** |
 
 Group tokens: `iw`/`iwc` = Carrie, Max, Nigel · `gen`/`genc` = Quinn, Saul · `locals`/`localsc` = Max,
 Quinn · `clouds`/`cloudsc` = Carrie, Saul, Nigel · `all`/`allc` = everyone. Suffix `c` = Claude,
 `k` = Kimi, `x` = Codex; bare forms mean everyone online; matching is case-insensitive.
-
-**This table is THE ROSTER. Recruiting a team member is one row here, and every watcher derives its
+**The above table is THE ROSTER. Recruiting a team member is one row here, and every watcher derives its
 roster from this table rather than keeping its own list** — a private copy in a regex goes stale
 silently, and a new member is then addressable in the docs and invisible to every watcher.
 
@@ -43,13 +46,7 @@ ledger, clock, charts, AI report, email · `reader-pdf.md` PDF viewer, source re
 `testing.md` guards, probes, refactors · `lanes.md` · `team-channel.md`. **Touching any write path?**
 The data-loss rules below are universal; read them, then `storage-sync.md`.
 
-## What this is
-
-**Inkwave Scroll v0.1**, the free tier: a calm writing environment for short academic/philosophical
-writing. Solo dev: Peter (Brisbane). The mechanic is **SCAS** — words in a rotating exclusion set glow
-red and can be swapped for thesaurus synonyms, turning friction into an interpretable authorship trace
-without surveillance. **Free Scroll tier only**; the paid **Tablet** tier (Clay/Stone states,
-weathering, hollow clocks, sentence glyphs) is Phase 2+ and **must not be built here**.
+## Stack
 
 Vite + React 18 + TS + Tailwind 3 + Tiptap (ProseMirror) + OPFS/IndexedDB, React Router v7 framework
 mode (`ssr: false`, `/` and `/about` prerendered), Vercel. Package manager is **pnpm**, never npm:
@@ -57,9 +54,6 @@ mode (`ssr: false`, `/` and `/about` prerendered), Vercel. Package manager is **
 (`…/Projects/Inkflow Studio/`); in-repo specs in `docs/specs/` are checkable — **check them, and CITE
 THE VERSION** when an anchor is load-bearing. Build history and code map:
 `docs/archive/build-progress.md`.
-
-**Peter's prose — thesis, essays, real documents — NEVER enters the repo, fixtures, logs or
-screenshots.** Absolute. His product decisions are not that boundary; the specs are committed.
 
 ## The gate, git and shipping
 
@@ -215,9 +209,28 @@ rituals: `docs/rules/team-channel.md`.
   predicts behaviour, a correction where the old understanding was confidently wrong. NOT facts looked
   up, decisions or status. **A day that produced nothing gets an empty entry saying so.**
 
-## Style
+## UI taxonomy and style (desktop and phone) — the rules every surface obeys
 
-Match the surrounding code: terse purposeful comments explaining *why*, section dividers
-(`// ─── … ───`), single-responsibility modules. Calm visual identity: ink/purple (`#302438` /
-`#41425b`), parchment/cream, serif body (IM Fell DW Pica / EB Garamond). Commit messages:
-`feat:` / `fix:` / `refactor:` prefixes, present tense.
+Detail and the measurements: `docs/rules/toolbar.md` (chrome, popups, zoom) and `docs/rules/panels.md`
+(panels). The words below are the vocabulary; use them in code, comments and channel posts.
+
+- **Four surfaces, one module: `src/styles/panelSheet.ts`.** SHEET (phone: rises from the toolbar),
+  POPUP (desktop: small, fixed above its trigger, tail on the button — `desktopPopupStyle`), PANEL
+  (desktop: big, centred on the writing, sized from `--iw-paper-w` so it follows page zoom —
+  `desktopPanelStyle`), BAR (a second row INSIDE the toolbar pill: style / review / music — same width
+  as the main row, controls shrink to fit). Nothing floats outside the pill; the pill never shifts.
+- **The ▲ row is the honeycomb on both platforms**: a second row inside the pill, one cell per gap of
+  the main row, blank cells blank and droppable; the row stays open while an app launched from it is
+  open. Bars close the ▲ row and vice versa.
+- **The press contract, every style button**: click applies the button's current default; click-and-
+  hold opens the popup; release on an item selects; release outside closes only the popup (the bar
+  stays); a click while the popup is up closes only the popup. Defaults: the document's most common
+  font/size, else the house — Carlito 12pt, yellow highlight, bright red text, left.
+- **Faces and labels**: font/size/colour/alignment buttons wear the first three letters of the
+  selection's value; no capital first letters on button or menu-row names; shortcut keys are sans
+  lower-case with spaces around symbols (`alt + =`); body copy of panels stays serif.
+- **Lines are hairlines**: the pill outline, the circles, bar and popup borders hold ONE DEVICE PIXEL
+  under cmd +/- (`--iw-hairline-k`, index.css HAIRLINES). The chrome follows browser zoom like the
+  page does — never counter-zoom it again.
+- **Speech-bubble tails are the SVG in `.iw-desktop-popup::after`**, not CSS triangles; popups are
+  `overflow: visible` (scroll an inner div).

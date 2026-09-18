@@ -116,7 +116,8 @@ export function phoneSheetStyle(): CSSProperties {
 export const DESKTOP_POPUP = {
   /** Air between the tail's tip and the trigger's top edge. */
   gapPx: 10,
-  tailPx: 9,
+  /** The SVG tail's height (index.css .iw-desktop-popup::after). */
+  tailPx: 12,
   minWidthPx: 200,
   maxWidthPx: 340,
   fontPx: 14,
