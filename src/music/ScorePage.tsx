@@ -18,7 +18,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { buildLayout, gapAt, type Layout } from './reflow'
 import { routeLeader, type Obstacle } from './leader'
 import { isoWithOffset, type Annotation, type AnnotationContent, type Piece, type PiecePage } from './types'
-import { TOUCH_MIN, TYPE } from './typeScale'
+import { TOUCH_MIN, TYPE, TYPE_PX } from './typeScale'
 
 export type Tool = 'pan' | 'freehand' | 'highlight' | 'text' | 'sticky' | 'symbol' | 'leader' | 'erase'
 
@@ -363,7 +363,7 @@ export function ScorePage({
               style={{
                 left: `${a.content ? p.x * 100 : 0}%`, top: p.y * pageH,
                 transform: 'translate(-50%,-50%)', color: a.content.colour,
-                fontSize: Math.max(TYPE.meta, a.content.size * (width || 600)), fontStyle: 'italic', fontWeight: 700,
+                fontSize: Math.max(TYPE_PX.meta, a.content.size * (width || 600)), fontStyle: 'italic', fontWeight: 700,
               }}
             >
               {SYMBOL_GLYPHS[a.content.symbol] ?? a.content.symbol}

@@ -367,7 +367,7 @@ export function OptionsMenu({
               {items.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className={`w-full text-left pl-4 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
+                  className={`w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
                 >
                   {it.label}
                 </button>
@@ -379,7 +379,7 @@ export function OptionsMenu({
               {fileItems.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className={`w-full text-left pl-4 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
+                  className={`w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
                 >
                   {it.label}
                 </button>

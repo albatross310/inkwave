@@ -42,7 +42,8 @@ import { prodReportDemo } from '../productivity/flag'
 // focused control under 16px, so every INPUT must land ≥16px. `FS.body` (1em = 18px) and above
 // are the only sizes used on inputs; the smallest size here (0.62em ≈ 11px) is chart tick labels,
 // which are not focusable. Scrolling is explicitly acceptable, so nothing is shrunk to fit.
-const PANEL_ROOT_PX = 18
+// The panel's root size: the ramp's body step (phone 20 / desktop 15); every FS step is an em of it.
+const PANEL_ROOT_PX = 'var(--iw-t-body, 18px)'
 const FS = {
   tick: '0.62em',    // chart day numbers — never focusable
   meta: '0.8em',     // muted secondary/help text

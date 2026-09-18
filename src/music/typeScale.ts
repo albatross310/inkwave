@@ -33,30 +33,36 @@
 // music-stand distance — which is the actual reading distance for this module.
 
 /** The ramp. px. Every step ≥16 (the iOS floor). */
+// Two ramps, one name. On a phone these are the 30/24/20/18/16 steps (the 16px floor is iOS's own:
+// anything smaller auto-zooms). On a desktop the same steps resolve to the panel ramp that every
+// sheet wears (index.css `:root` — 22/18/15/13/12), because a pop-up beside a 15px Settings panel
+// read as a billboard at phone sizes (Peter, 2026-09-18: "prod fonts too big, music too big").
+// Each step is a CSS var with the PHONE value as its fallback, so a bare render still gets a size.
+export const TYPE_PX = {
+  title: 30,
+  heading: 24,
+  body: 20,
+  label: 18,
+  meta: 16,
+} as const
+
 export const TYPE = {
   /** The piece title. One per screen. */
-  title: 30,
+  title: `var(--iw-t-title, ${TYPE_PX.title}px)`,
   /** A screen or section heading. */
-  heading: 24,
+  heading: `var(--iw-t-heading, ${TYPE_PX.heading}px)`,
   /** Ordinary prose, and anything the student types INTO. */
-  body: 20,
+  body: `var(--iw-t-body, ${TYPE_PX.body}px)`,
   /** Buttons, tabs, field labels, captions. */
-  label: 18,
+  label: `var(--iw-t-label, ${TYPE_PX.label}px)`,
   /** The smallest thing on screen: timestamps, badges, counts. The floor. */
-  meta: 16,
+  meta: `var(--iw-t-meta, ${TYPE_PX.meta}px)`,
 } as const
 
 export type TypeStep = keyof typeof TYPE
 
-/** `style={{ fontSize: TYPE.label }}` is fine; this is for the common label+colour pair. */
-export function type_(step: TypeStep, colour?: string): { fontSize: number; color?: string } {
+export function type_(step: TypeStep, colour?: string): { fontSize: string; color?: string } {
   return colour ? { fontSize: TYPE[step], color: colour } : { fontSize: TYPE[step] }
 }
 
-/**
- * Minimum touch target, px. Apple's HIG floor, and the size a Pencil sweep needs to be grabbable.
- *
- * Here rather than in a component because it moves WITH the ramp: a control sized to its text must
- * not end up smaller than a fingertip when the text step changes.
- */
 export const TOUCH_MIN = 44

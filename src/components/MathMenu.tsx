@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle, SHEET_TYPE } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import type { Editor } from '@tiptap/core'
 import { getSymbols, deleteSymbol, setSymbol as saveSymbol, PRESETS, type MathSymbol } from '../editor/extensions/mathSymbols'
@@ -173,7 +173,9 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
         {!isPhone && <div className="fixed inset-0 z-[199]" aria-hidden="true" onPointerDown={() => setOpen(false)} />}
         <div
           {...{ [PANEL_ATTR]: 'math' }}
-          className={`iw-nightable iw-touch-guard ${isPhone ? `${PHONE_SHEET_CLASS} font-serif` : `${DESKTOP_SHEET_CLASS} font-serif`}`}
+          // bg-white: the popover had NO background (page text showed through it on desktop and phone alike);
+          // iw-nightable remaps bg-white at night, so this is the one declaration both themes need.
+          className={`iw-nightable iw-touch-guard bg-white font-serif ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS}`}
           onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
           // Phone: the shared sheet above the toolbar (styles/panelSheet.ts). Desktop: a popover over Σ.
           style={isPhone ? { ...phoneSheetStyle(), zIndex: 200 } : { position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', ...desktopSheetStyle('menu'), padding: '6px', zIndex: 200, overflowY: 'auto' }}
@@ -215,22 +217,22 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
             <div style={{ padding: '4px 4px' }}>
               {/* Top bar removed — a subtle back arrow floats at the top-right. */}
               <button type="button" onClick={() => setView('menu')} title="Back"
-                style={{ position: 'absolute', top: 6, right: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '1rem', padding: '0 2px', lineHeight: 1 }}>←</button>
+                style={{ position: 'absolute', top: 6, right: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: SHEET_TYPE.body, padding: '0 2px', lineHeight: 1 }}>←</button>
               <div style={{ maxHeight: 'min(70vh, 420px)', overflowY: 'auto', padding: '4px 0' }}>
                 {ML_SHORTCUT_SECTIONS.map(({ title, rows }) => (
                   <div key={title} style={{ marginBottom: '12px' }}>
-                    <div style={{ padding: '4px 10px 3px', fontSize: '0.72rem', color: '#a89a86', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{title}</div>
+                    <div style={{ padding: '4px 10px 3px', fontSize: SHEET_TYPE.label, color: '#a89a86', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{title}</div>
                     {rows.map(([k, sym, d]) => (
                       <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '10px', padding: '2px 10px', alignItems: 'center' }}>
-                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.82rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
-                        <span style={{ fontSize: '1rem', color: INK, minWidth: '1.2em', textAlign: 'center' }}>{sym}</span>
-                        <span style={{ fontSize: '0.9rem', color: '#6b6058' }}>{d}</span>
+                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: SHEET_TYPE.meta, color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
+                        <span style={{ fontSize: SHEET_TYPE.body, color: INK, minWidth: '1.2em', textAlign: 'center' }}>{sym}</span>
+                        <span style={{ fontSize: SHEET_TYPE.small, color: '#6b6058' }}>{d}</span>
                       </div>
                     ))}
                   </div>
                 ))}
                 <div style={{ borderTop: `1px solid ${INK}12`, marginTop: '4px', padding: '8px 10px 4px' }}>
-                  <div style={{ fontSize: '0.62rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Inkwave keys</div>
+                  <div style={{ fontSize: SHEET_TYPE.label, color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Inkwave keys</div>
                   {([
                     ['hold CapsLock', 'Gk', 'Greek mode while held'],
                     ['//',  '\\frac',  'fraction'],
@@ -241,9 +243,9 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
                     ['Ctrl+Q/E/L', '', 'block alignment'],
                   ] as [string, string, string][]).map(([k, sym, d]) => (
                     <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '8px', padding: '1px 0', alignItems: 'center' }}>
-                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.68rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
-                      <span style={{ fontSize: '0.78rem', color: INK, minWidth: '1.2em', textAlign: 'center', fontFamily: 'ui-monospace,monospace' }}>{sym}</span>
-                      <span style={{ fontSize: '0.72rem', color: '#a89d96' }}>{d}</span>
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: SHEET_TYPE.label, color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
+                      <span style={{ fontSize: SHEET_TYPE.meta, color: INK, minWidth: '1.2em', textAlign: 'center', fontFamily: 'ui-monospace,monospace' }}>{sym}</span>
+                      <span style={{ fontSize: SHEET_TYPE.label, color: '#a89d96' }}>{d}</span>
                     </div>
                   ))}
                 </div>
@@ -255,27 +257,27 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
             <div style={{ padding: '6px 4px 4px' }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 6px 6px', borderBottom: `1px solid ${INK}18` }}>
-                <button type="button" onClick={() => setView('menu')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '0.8rem', padding: '0 2px' }}>←</button>
-                <span style={{ fontSize: '0.75rem', color: INK, fontFamily: 'ui-monospace, monospace' }}>symbols</span>
+                <button type="button" onClick={() => setView('menu')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: SHEET_TYPE.meta, padding: '0 2px' }}>←</button>
+                <span style={{ fontSize: SHEET_TYPE.meta, color: INK, fontFamily: 'ui-monospace, monospace' }}>symbols</span>
               </div>
 
               {/* User-defined symbols */}
               <div style={{ maxHeight: '180px', overflowY: 'auto', padding: '4px 0' }}>
                 {symbols.length === 0 && (
-                  <div style={{ padding: '6px 10px', fontSize: '0.8rem', color: '#c0b8b0', fontStyle: 'italic' }}>none yet</div>
+                  <div style={{ padding: '6px 10px', fontSize: SHEET_TYPE.meta, color: '#c0b8b0', fontStyle: 'italic' }}>none yet</div>
                 )}
                 {symbols.map(s => (
                   <div key={s.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '3px 8px', gap: '8px' }}>
-                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.8rem', color: INK }}>{s.key}</span>
-                    <span style={{ fontSize: '0.75rem', color: '#7a6e65', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.latex}</span>
-                    <button type="button" onClick={() => removeSymbol(s.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c0b8b0', fontSize: '0.85rem', padding: '0 2px' }}>×</button>
+                    <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: SHEET_TYPE.meta, color: INK }}>{s.key}</span>
+                    <span style={{ fontSize: SHEET_TYPE.meta, color: '#7a6e65', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.latex}</span>
+                    <button type="button" onClick={() => removeSymbol(s.key)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#c0b8b0', fontSize: SHEET_TYPE.small, padding: '0 2px' }}>×</button>
                   </div>
                 ))}
               </div>
 
               {/* Presets */}
               <div style={{ borderTop: `1px solid ${INK}12`, padding: '4px 0' }}>
-                <div style={{ padding: '2px 8px', fontSize: '0.62rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.06em' }}>presets</div>
+                <div style={{ padding: '2px 8px', fontSize: SHEET_TYPE.label, color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.06em' }}>presets</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', padding: '4px 8px' }}>
                   {PRESETS.map(p => (
                     <button
@@ -283,7 +285,7 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
                       type="button"
                       title={p.latex}
                       onClick={() => { saveSymbol(p.key, p.latex); reload() }}
-                      style={{ fontSize: '0.72rem', padding: '2px 7px', border: `1px solid ${symbols.some(s => s.key === p.key) ? INK : 'rgba(72, 73, 101, 0.2)'}`, borderRadius: '4px', background: symbols.some(s => s.key === p.key) ? 'rgba(72, 73, 101, 0.10)' : 'transparent', color: symbols.some(s => s.key === p.key) ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
+                      style={{ fontSize: SHEET_TYPE.label, padding: '2px 7px', border: `1px solid ${symbols.some(s => s.key === p.key) ? INK : 'rgba(72, 73, 101, 0.2)'}`, borderRadius: '4px', background: symbols.some(s => s.key === p.key) ? 'rgba(72, 73, 101, 0.10)' : 'transparent', color: symbols.some(s => s.key === p.key) ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
                     >{p.key}</button>
                   ))}
                 </div>
@@ -296,18 +298,18 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
                   onChange={e => setNewKey(e.target.value)}
                   placeholder="key"
                   onKeyDown={e => { if (e.key === 'Enter') addSymbol() }}
-                  style={{ width: '56px', fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', border: `1px solid ${INK}33`, borderRadius: '4px', padding: '3px 5px', outline: 'none' }}
+                  style={{ width: '56px', fontFamily: 'ui-monospace, monospace', fontSize: SHEET_TYPE.meta, border: `1px solid ${INK}33`, borderRadius: '4px', padding: '3px 5px', outline: 'none' }}
                 />
-                <span style={{ color: '#b0a898', fontSize: '0.8rem' }}>=</span>
+                <span style={{ color: '#b0a898', fontSize: SHEET_TYPE.meta }}>=</span>
                 <input
                   value={newLatex}
                   onChange={e => setNewLatex(e.target.value)}
                   placeholder="LaTeX"
                   onKeyDown={e => { if (e.key === 'Enter') addSymbol() }}
-                  style={{ flex: 1, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', border: `1px solid ${INK}33`, borderRadius: '4px', padding: '3px 5px', outline: 'none' }}
+                  style={{ flex: 1, fontFamily: 'ui-monospace, monospace', fontSize: SHEET_TYPE.meta, border: `1px solid ${INK}33`, borderRadius: '4px', padding: '3px 5px', outline: 'none' }}
                 />
                 <button type="button" onClick={addSymbol}
-                  style={{ background: INK, color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: '0.78rem', cursor: 'pointer', whiteSpace: 'nowrap' }}>+</button>
+                  style={{ background: INK, color: 'white', border: 'none', borderRadius: '4px', padding: '3px 8px', fontSize: SHEET_TYPE.meta, cursor: 'pointer', whiteSpace: 'nowrap' }}>+</button>
               </div>
             </div>
           )}

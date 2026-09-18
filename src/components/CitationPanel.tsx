@@ -759,12 +759,17 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
 
   function panelStyle(): React.CSSProperties {
     if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
-    // Default: 18px below top, centred over the writing area (shift left by half the PDF panel width
-    // when it's open so the panel doesn't sit under it).
-    return { position: 'fixed', top: 18, left: 'calc(50% - var(--iw-pdf-room, 0px) / 2 + var(--iw-pdf-room-left, 0px) / 2)', transform: 'translateX(-50%)' }
+    // Default: centred over the writing area, like every other modal-kind panel (Peter, 2026-09-18:
+    // "too high to begin" when it hung 18px from the top). Shift left by half the PDF panel width
+    // when that is open so the panel doesn't sit under it.
+    return { position: 'fixed', top: '50%', left: 'calc(50% - var(--iw-pdf-room, 0px) / 2 + var(--iw-pdf-room-left, 0px) / 2)', transform: 'translate(-50%, -50%)' }
   }
 
-  function onHeaderMouseDown(e: React.MouseEvent) {
+  // Drag by POINTER events, start to finish. The grip is wired through onPointerDownCapture, and
+  // preventDefault on a pointerdown suppresses the compatibility mouse events — so a document
+  // `mouseup` listener never fired and the panel followed the pointer forever (Peter, 2026-09-18:
+  // "drag won't stop when mouse comes up").
+  function onHeaderMouseDown(e: React.PointerEvent | React.MouseEvent) {
     if ((e.target as HTMLElement).closest('button')) return
     e.preventDefault()
     const panel = panelRef.current
@@ -775,7 +780,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     setDragPos({ left, top })
     dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: left, origTop: top }
 
-    function onMove(ev: MouseEvent) {
+    function onMove(ev: PointerEvent) {
       if (!dragRef.current) return
       setDragPos({
         left: dragRef.current.origLeft + (ev.clientX - dragRef.current.startX),
@@ -784,11 +789,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
     }
     function onUp() {
       dragRef.current = null
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
     }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
   }
 
   return createPortal(
@@ -836,7 +843,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           // desktop it is also the drag grip; full screen keeps its own strip (nothing to drag).
           <SheetHeader title="Citations" onClose={onClose}
             style={isTouchDevice() ? undefined : { cursor: 'grab' }}
-            onPointerDownCapture={isTouchDevice() ? undefined : (e) => { if ((e.target as HTMLElement).closest('button')) return; onHeaderMouseDown(e as unknown as React.MouseEvent) }}
+            onPointerDownCapture={isTouchDevice() ? undefined : onHeaderMouseDown}
             right={
               <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
                 className="flex items-center justify-center rounded-full"
@@ -851,7 +858,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           <div
             className="flex items-center justify-center pt-2 pb-1"
             style={{ cursor: fullscreen ? 'default' : 'grab' }}
-            onMouseDown={fullscreen ? undefined : onHeaderMouseDown}
+            onPointerDown={fullscreen ? undefined : onHeaderMouseDown}
           >
             {!fullscreen && <div className="w-9 h-1 rounded-full bg-stone-200" />}
           </div>

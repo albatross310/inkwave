@@ -18,7 +18,7 @@ import {
 } from './heatmap'
 import { assetUrl } from './store'
 import type { Author, Piece } from './types'
-import { TOUCH_MIN, TYPE } from './typeScale'
+import { TOUCH_MIN, TYPE, TYPE_PX } from './typeScale'
 
 export function HeatmapScreen({ piece, onChange }: {
   piece: Piece
@@ -211,7 +211,7 @@ function BarThumb({ piece, bar }: { piece: Piece; bar: BarAddress }) {
   // The thumbnail scales WITH the type ramp (Peter: "every font proportionally up"). The words
   // getting bigger while the music stayed at 34px would have inverted the hierarchy of a screen
   // whose whole subject IS the music — and the reading distance here is a music stand, not a desk.
-  const H = TYPE.title * 2
+  const H = TYPE_PX.title * 2
   const pageW = H / (bar.region.h / aspect)     // page width in px such that the bar's band is H tall
 
   return (
