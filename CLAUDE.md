@@ -215,6 +215,32 @@ rituals: `docs/rules/team-channel.md`.
   predicts behaviour, a correction where the old understanding was confidently wrong. NOT facts looked
   up, decisions or status. **A day that produced nothing gets an empty entry saying so.**
 
+## UI taxonomy and style (desktop and phone) — the rules every surface obeys
+
+Detail and the measurements: `docs/rules/toolbar.md` (chrome, popups, zoom) and `docs/rules/panels.md`
+(panels). The words below are the vocabulary; use them in code, comments and channel posts.
+
+- **Four surfaces, one module: `src/styles/panelSheet.ts`.** SHEET (phone: rises from the toolbar),
+  POPUP (desktop: small, fixed above its trigger, tail on the button — `desktopPopupStyle`), PANEL
+  (desktop: big, centred on the writing, sized from `--iw-paper-w` so it follows page zoom —
+  `desktopPanelStyle`), BAR (a second row INSIDE the toolbar pill: style / review / music — same width
+  as the main row, controls shrink to fit). Nothing floats outside the pill; the pill never shifts.
+- **The ▲ row is the honeycomb on both platforms**: a second row inside the pill, one cell per gap of
+  the main row, blank cells blank and droppable; the row stays open while an app launched from it is
+  open. Bars close the ▲ row and vice versa.
+- **The press contract, every style button**: click applies the button's current default; click-and-
+  hold opens the popup; release on an item selects; release outside closes only the popup (the bar
+  stays); a click while the popup is up closes only the popup. Defaults: the document's most common
+  font/size, else the house — Carlito 12pt, yellow highlight, bright red text, left.
+- **Faces and labels**: font/size/colour/alignment buttons wear the first three letters of the
+  selection's value; no capital first letters on button or menu-row names; shortcut keys are sans
+  lower-case with spaces around symbols (`alt + =`); body copy of panels stays serif.
+- **Lines are hairlines**: the pill outline, the circles, bar and popup borders hold ONE DEVICE PIXEL
+  under cmd +/- (`--iw-hairline-k`, index.css HAIRLINES). The chrome follows browser zoom like the
+  page does — never counter-zoom it again.
+- **Speech-bubble tails are the SVG in `.iw-desktop-popup::after`**, not CSS triangles; popups are
+  `overflow: visible` (scroll an inner div).
+
 ## Style
 
 Match the surrounding code: terse purposeful comments explaining *why*, section dividers
