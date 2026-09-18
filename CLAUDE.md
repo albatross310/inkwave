@@ -93,8 +93,10 @@ THE VERSION** when an anchor is load-bearing. Build history and code map:
 - **ONE CHECKOUT PER SESSION, AND YOU SYNC IT BEFORE YOU TOUCH ANYTHING ELSE.** The layout on the
   Mac: `~/inkwave` is **master only** — never checked out to a branch, never edited, no dev server; it
   exists to be the `.git` the worktrees hang off. `~/iw-<name>` is that session's own worktree, which
-  it OWNS (`git -C ~/inkwave worktree add ~/iw-<name> -b <name>/<focus> origin/master`), and
-  `~/inkwave-lane-<L>` belongs to `follow-lanes.sh`. **First thing every session, in your own
+  it OWNS (`git -C ~/inkwave worktree add ~/iw-<name> -b <name>/<focus> origin/master`); **a session
+  that genuinely needs more than one suffixes a LETTER — `~/iw-maxA`, `~/iw-maxB`** — never a word,
+  a topic or a date, so the owner is still the first thing the name says. `~/inkwave-lane-<L>`
+  belongs to `follow-lanes.sh`. **First thing every session, in your own
   worktree, before any other work:** `git status -sb`; if the tree is dirty, COMMIT AND PUSH IT
   first; then `git fetch origin master && git rebase origin/master`. Push again before you stop.
   ⚠ **AN UNPUSHED WORKING TREE IS AN EMPTY ANSWER TO EVERYONE ELSE** — it is the data-loss shape
