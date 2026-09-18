@@ -27,7 +27,7 @@ wrongly and silently: it presents its cut as the root, so `git merge-base`
 returns nothing for anything that forked earlier and a fully merged branch
 reads as an unrelated history. Check `ls .git/shallow` before trusting it.
 
-## Superseded, not merged — recorded 2026-09-18 by Nigel, on Peter's yes
+## Superseded, not merged — recorded 2026-09-18 22:30 AEST by Nigel, on Peter's yes
 
 These four are NOT reachable from master. `git rev-list --count origin/<b> --not origin/master` is
 1, 1, 4 and 2 — not 0. What makes them safe to delete is a different test: `git cherry origin/master

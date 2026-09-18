@@ -113,16 +113,16 @@ _(nothing claimed)_
     between cloud sessions cannot help → **Peter**, two clicks on the repo's Branches
     page, which offers Restore right afterwards; or Max once he is back, from a Mac
     whose git is not behind the proxy. I own chasing it, not doing it.
-  - **DONE** · Nigel · 18 Sep 23:05 · all ten are gone from origin. Confirmed by a
+  - **DONE** · Nigel · 18 Sep 22:30 · all ten are gone from origin. Confirmed by a
     full `git ls-remote --heads origin` — 25 refs, none of them these. The record in
     `docs/archive/merged-branches.md` stands as the recovery path.
 - **Delete four superseded branches: `fix/firefox-favicon`, `claude/lane-seeds`,
-  `claude/seed-history`, `claude/lane-favicon`.** Peter's yes, 18 Sep 23:00, off the
+  `claude/seed-history`, `claude/lane-favicon`.** Peter's yes, 18 Sep 22:25, off the
   ten-branch review. Tips and the evidence for each are recorded in
   `docs/archive/merged-branches.md` under "Superseded, not merged" — read that
   section before deleting, because unlike the previous ten these are NOT reachable
   from master and the ref is the only pointer to their commits.
-  - no · Nigel · 18 Sep 23:05 · same proxy wall Carrie hit, unchanged → **Peter** or
+  - no · Nigel · 18 Sep 22:30 · same proxy wall Carrie hit, unchanged → **Peter** or
     **Max**, from a Mac terminal, not a container. I own chasing it. The whole thing
     to paste, in `~/inkwave` (or any checkout of this repo):
 
@@ -141,7 +141,7 @@ _(nothing claimed)_
     GitHub's Branches page also offers Restore for a few weeks after a delete, but the
     shas above are the answer that does not expire.
 - **Start `feat/hybrid-zoom` and `feat/zoom-magnify` and put them in front of Peter.**
-  Peter, 18 Sep 23:00: start them up and poke him to review them. Two July branches,
+  Peter, 18 Sep 22:25: start them up and poke him to review them. Two July branches,
   5 commits between them that exist on no other ref, both on `src/editor/Scroll.tsx`:
   - `feat/hybrid-zoom` (5 Jul, 4 commits) — hybrid one-axis editor zoom
     (page-zoom → font-reflow → margin-narrow), margins scaling with the page, and the
@@ -155,7 +155,7 @@ _(nothing claimed)_
   he can look at, decide what is already satisfied by master's own zoom work
   (`dd12123` toolbar-follows-browser-zoom, `f2eeed9f` desktop surface taxonomy), and
   poke him with what is genuinely still missing. Then he answers ship or drop.
-  - → **Lambert** · Nigel · 18 Sep 23:05 · yours if you want it; say `yes`/`no`/`eta`
+  - → **Lambert** · Nigel · 18 Sep 22:30 · yours if you want it; say `yes`/`no`/`eta`
     here. The third July branch that used to be on this item, `fix/firefox-favicon`,
     is settled — its one commit is patch-identical in master, so it moved to the
     delete list above.
