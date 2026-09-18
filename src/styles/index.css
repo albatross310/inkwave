@@ -1143,7 +1143,6 @@
   .iw-phone-sheet .h-8, .iw-phone-sheet .h-7 { height: 40px; }
   .iw-phone-sheet .text-\[13px\] { font-size: var(--iw-sheet-small); }
   .iw-phone-sheet input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--iw-ink); }
-}
 /* ── THE DESKTOP SHEET (styles/panelSheet.ts DESKTOP_SHEET) — outside the coarse-pointer block ──
    The same remaps as the phone sheet, onto the :root desktop ramp, so a panel's legacy text-sm /
    text-xs land on 15 / 13 and no panel reads as fine print beside another. */
@@ -1165,6 +1164,13 @@
      target — the 44px floor, whatever padding it was written with. */
   .iw-phone-sheet > .px-2\.5 { padding-left: 1rem; padding-right: 1rem; }
   .iw-phone-sheet > button.w-full { min-height: 44px; }
+}
+/* ⚠ BRACE AUDIT (2026-09-18): the block above must close HERE. df25b7f closed `@layer base` early
+   instead and let the layer's own `}` (~800 lines down) close this phone block, so every rule
+   between — the toolbar outline grey, the whole .iw-desktop-toolbar geometry, the desktop panel
+   rules — silently became phone-only. Peter saw it as "the outline is gone", "padding at the far
+   sides", and "phone sizes inherited on desktop". `src/styles/cssBlocks.test.ts` now pins the
+   enclosing block of these rules. */
 
   /* Footer chrome has one literal neutral outline. Glyphs may change colour for hover/open/error
      state, but their circles and the three sibling pills must remain the same grey. */
@@ -1221,7 +1227,11 @@
        gap takes only what is genuinely left over (floored at 2px, capped at 10px so it can never
        inflate the bar again). Result: the bar stops growing on a wide window, and on a narrow one the
        squeeze comes out of the SPACING before it ever comes out of the circles. */
-    --iw-bar-pad: clamp(4px, calc(var(--iw-bar-budget, 100vw) * 0.02), 10px);
+    /* END PADDING = BUTTON GAP (Peter, 2026-09-18: "equal padding at far sides should be the same as
+       padding between buttons"). Same floor/ceiling as --iw-bar-gap below, so on any comfortable
+       window both sit at 6px; the pad can't be written in terms of the gap (the gap is derived from
+       the inner width, which subtracts the pad — a var cycle), so the bounds are matched instead. */
+    --iw-bar-pad: clamp(2px, calc(var(--iw-bar-budget, 100vw) * 0.012), 6px);
     /* Budget minus the end paddings and the pill's 1px borders — the space the slots divide up. */
     --iw-bar-inner: calc(var(--iw-bar-budget, 100vw) - 2 * var(--iw-bar-pad) - 2px);
     /* −2px reserves the minimum gap per slot so the division can't claim space the gaps still need.

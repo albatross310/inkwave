@@ -23,6 +23,8 @@ import { readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemo
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
+// Desktop 'bar' chrome (style / review / music): the same outline + radius as the main pill.
+const DESKTOP_BAR_CLASS = 'iw-nightable iw-toolbar-outline iw-desktop-bar bg-white border rounded-[15px] shadow-sm'
 import { createDock, KEYBOARD_MIN_PX, floatingBarAllowance } from './toolbarDock'
 import { isWarmLoad } from './loadWarmth'
 import { moveSlot, nearestSlot, neighborShift, brokeHoldSlop } from './toolbarSlots'
@@ -946,7 +948,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // One bar fully retreats before the other rises (Peter, 2026-07-10: pressing S then R had the
   // style bar riding the review bar). 240ms = the collapse transition + a beat.
   const barSeqRef = useRef(0)
-  const [barsAnimating, setBarsAnimating] = useState(false)
+  // The flag itself is no longer read: the phone pill is always overflow-hidden and the desktop
+  // bars float outside the pill (see the DESKTOP BARS note in the JSX). The timer stays as the
+  // hand-off clock for planBarToggle.
+  const [, setBarsAnimating] = useState(false)
   const barsAnimTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   function markBarsAnimating() {
     setBarsAnimating(true)
@@ -3576,7 +3581,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         >
           <div
             ref={footerRef}
-            className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating || isTouch ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
+            className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'overflow-hidden w-full' : 'relative'}`}
             style={{
               // ── ⚠ ONE BUDGET, TWO CONSUMERS. `--iw-bar-budget` is the maximum width the toolbar
               // may occupy, and BOTH this box's max-width and the per-circle shrink clamp in
@@ -3602,6 +3607,14 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               transformOrigin: 'bottom center',
             }}
           >
+            {/* ⚠ DESKTOP BARS FLOAT ABOVE THE PILL, THEY DO NOT WIDEN IT (Peter, 2026-09-18: "Style bar
+                is still moving the toolbar … rhs pos should be fixed"). The pill is a flex COLUMN
+                sized by its widest child, so a style row wider than the circle row grew the pill
+                and re-centred it — the main row jumped left on every S. On desktop the three bar
+                rows live in this absolutely positioned group above the pill (bottom-anchored, so
+                they grow upward), each wearing its own outline: Peter's "bar" category. Phone keeps
+                the in-pill stack (the bar is w-full there and the keyboard dock owns its height). */}
+            <div className={isTouch ? 'contents' : 'absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 flex flex-col items-center gap-1.5 w-max'}>
             {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM.
                 Auto-expands on phone text-selection even when the main toolbar row is hidden. */}
             {(showMainRow || selectionOnPhone || selectionOnDesktop) && (
@@ -3620,7 +3633,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 ...(styleBarExpanded ? {} : { width: 0, minWidth: '100%' }),
               }}>
                 {/* Phone: slim side padding — nine 38px circles + the font/size pills need the room */}
-                <div className={`flex items-center ${isTouch ? 'px-1.5' : 'px-4'} py-2 border-b border-stone-200`}>
+                <div className={`flex items-center ${isTouch ? 'px-1.5 py-2 border-b border-stone-200' : `px-3 py-1.5 ${DESKTOP_BAR_CLASS}`}`}>
                   {editor && <StyleBar editor={editor} onActivity={armStyleTimer} phone={isTouch} barVisible={styleBarExpanded} />}
                 </div>
               </div>
@@ -3636,7 +3649,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 pointerEvents: reviewOpen ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
-                {reviewOpen && <ReviewBar editor={editor} phone={isTouch} />}
+                {reviewOpen && (isTouch ? <ReviewBar editor={editor} phone={isTouch} /> : <div className={DESKTOP_BAR_CLASS}><ReviewBar editor={editor} phone={isTouch} /></div>)}
               </div>
             )}
 
@@ -3650,9 +3663,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 pointerEvents: activeBar === 'music' ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
               }}>
-                {activeBar === 'music' && <MusicBar phone={isTouch} documentId={doc.id} mediaAssets={doc.media ?? []} />}
+                {activeBar === 'music' && (isTouch ? <MusicBar phone={isTouch} documentId={doc.id} mediaAssets={doc.media ?? []} /> : <div className={DESKTOP_BAR_CLASS}><MusicBar phone={isTouch} documentId={doc.id} mediaAssets={doc.media ?? []} /></div>)}
               </div>
             )}
+
+            </div>
 
             {/* Main toolbar row. Phone: `iw-phone-toolbar` (index.css) sizes the circles from
                 --iw-row-slots and caps each button's 44px min-WIDTH at the same size; the footer RO
