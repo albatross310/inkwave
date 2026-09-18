@@ -807,7 +807,12 @@
      over its held water, the noise texture arriving only once the colour has landed. */
   .inkwave-editor-surface.is-phone.iw-uncovering { z-index: 1; background-image: none; }
   .inkwave-editor-surface.is-phone.iw-wave-covered {
-    background-color: transparent;
+    /* PAPER AT ALPHA 0, not `transparent` (2026-09-18, the 2-frame DARK DIP at the start of the
+       uncover): `transparent` is rgba(0,0,0,0), and a browser that interpolates colour
+       transitions un-premultiplied (WebKit, in the sim) walks the first frames of the 0.8s fade
+       through near-black at low alpha before the paper hue takes over. Starting from the paper
+       colour itself at alpha 0 makes the ramp hue-constant in either interpolation space. */
+    background-color: rgba(233, 231, 227, 0);
     background-image: none;
     /* ABOVE the sibling shell (z-raise; the shell keeps z:auto): the covered surface is fully
        transparent, so the shell's opaque water shows through it while the paper + chrome fade
@@ -2102,7 +2107,7 @@
    loading shell's water — an opaque night surface would blot the water out; see the covered
    block in the wave section). Placed after the night surface rule so it wins the tie. */
 :root[data-theme="night"] .inkwave-editor-surface.is-phone.iw-wave-covered {
-  background-color: transparent;
+  background-color: rgba(10, 11, 14, 0); /* night surface #0a0b0e at alpha 0 — see the day rule */
   background-image: none;
 }
 

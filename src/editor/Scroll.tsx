@@ -1357,7 +1357,11 @@ export function Scroll({
   // the ref said "already handled" — the surface stayed z-raised over the toolbar forever.
   const [uncovering, setUncovering] = useState(false)
   const wasCovered = useRef(covered)
-  useEffect(() => {
+  // useLayoutEffect, not useEffect: a passive effect lands one PAINT after the commit that dropped
+  // `covered`, so for that frame the surface had neither class — z-raise gone, waves un-hidden,
+  // fade already started underneath the shell (seen at 6x CPU throttle, 2026-09-18). The layout
+  // effect re-renders before that paint, so `iw-uncovering` replaces `iw-wave-covered` atomically.
+  useLayoutEffect(() => {
     if (wasCovered.current && !covered && phone) setUncovering(true)
     wasCovered.current = covered
   }, [covered, phone])
