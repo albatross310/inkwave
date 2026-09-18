@@ -1,9 +1,20 @@
 # Commit stamps
 
-`core.hooksPath` is not set by a clone. **Each session runs this once per
+`core.hooksPath` is not set by a clone. **Each session runs these once per
 checkout**, alongside its git identity:
 
     git config core.hooksPath .githooks
+    git config claude.session carrie          # your own name; never --global
+
+The second line is the name the stamp uses. `CLAUDE_SESSION_NAME` still wins
+when it is exported, but **do not rely on it in a cloud session**: the tool
+shell is non-interactive and Debian's `~/.bashrc` returns on `[ -z "$PS1" ]`
+before any export runs, so the variable is unset at commit time and the hook
+stamps the branch, omits the name, and looks like it worked.
+
+**In a shared checkout — the Mac's `/root/dev/iw-master` — set the variable,
+not the config.** Two sessions read one `.git/config` there, so a repo-local
+name would have one of them committing as the other.
 
 Then every commit looks like this:
 
@@ -34,10 +45,9 @@ completely. The trailer is written while the answer is still knowable.
 
 ## What the hook refuses to do
 
-- **Guess a name.** `CLAUDE_SESSION_NAME` is the one fact a shared checkout
-  cannot supply — two sessions share this working copy — so if it is unset the
-  hook writes no `Session:` line. A wrong name is worse than none, because it
-  is believed.
+- **Guess a name.** With neither `CLAUDE_SESSION_NAME` nor `claude.session`
+  set, the hook writes no `Session:` line and no subject prefix. A wrong name
+  is worse than none, because it is believed.
 - **Stamp a replay.** Merges, squashes, amends and every rebase are skipped. A
   rebase re-runs the hook per commit and would otherwise relabel somebody
   else's work with your name and today's branch.

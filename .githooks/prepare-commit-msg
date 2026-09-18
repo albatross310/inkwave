@@ -11,10 +11,23 @@
 # a rebase destroys the provenance entirely. The trailer is written while the
 # answer is still knowable.
 #
-# Session name comes from the ENVIRONMENT, never from the repo: it is the one
-# fact a shared checkout cannot tell you, since two sessions share this working
-# copy. Absent, we write nothing rather than guess -- a wrong name is worse than
-# no name, because it is believed.
+# Session name comes from the ENVIRONMENT first: it is the one fact a shared
+# checkout cannot tell you, since two sessions share the Mac working copy and a
+# repo-local answer would have one committing as the other. Absent, we write
+# nothing rather than guess -- a wrong name is worse than no name, because it is
+# believed.
+#
+# THE ENVIRONMENT IS OFTEN SILENT, and silently. A cloud session's tool shell is
+# NON-INTERACTIVE, and Debian's ~/.bashrc returns on `[ -z "$PS1" ]` before any
+# export runs, so a profile line never reaches the commit and the hook writes
+# nothing while appearing to work. Hence the fallback below -- explicitly named,
+# and set ONLY in a checkout one session owns alone:
+#
+#     git config claude.session carrie      # never --global
+#
+# In a SHARED checkout (the Mac's /root/dev/iw-master) leave it unset and rely
+# on the exported variable: there the config cannot be right for both readers,
+# and being wrong is the failure this whole stamp exists to prevent.
 MSG="$1"; SRC="${2:-}"
 
 # Skip the cases where a message is already fixed or is being replayed: a merge,
@@ -24,7 +37,7 @@ case "$SRC" in merge|squash|commit) exit 0 ;; esac
 [ -d "$(git rev-parse --git-path rebase-merge 2>/dev/null)" ] && exit 0
 [ -d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ] && exit 0
 
-WHO="${CLAUDE_SESSION_NAME:-}"
+WHO="${CLAUDE_SESSION_NAME:-$(git config --get claude.session 2>/dev/null)}"
 BR="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
 
 # Idempotent: a hook that appends blindly duplicates trailers on every retry.
