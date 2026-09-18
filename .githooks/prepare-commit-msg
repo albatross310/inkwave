@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Stamp every commit with WHO wrote it and WHICH BRANCH it was written on.
+#
+# TRAILERS, NOT THE SUBJECT LINE. A subject carrying "[carrie]" makes
+# `git log --oneline` unreadable and breaks the feat:/fix: convention; trailers
+# are a git-native key/value block that tooling already understands, and they
+# stay greppable forever.
+#
+# WHY BRANCH AT ALL, when git knows it: it does not, afterwards. `git branch
+# --contains` answers only while the branch still exists, and a squash-merge or
+# a rebase destroys the provenance entirely. The trailer is written while the
+# answer is still knowable.
+#
+# Session name comes from the ENVIRONMENT first: it is the one fact a shared
+# checkout cannot tell you, since two sessions share the Mac working copy and a
+# repo-local answer would have one committing as the other. Absent, we write
+# nothing rather than guess -- a wrong name is worse than no name, because it is
+# believed.
+#
+# THE ENVIRONMENT IS OFTEN SILENT, and silently. A cloud session's tool shell is
+# NON-INTERACTIVE, and Debian's ~/.bashrc returns on `[ -z "$PS1" ]` before any
+# export runs, so a profile line never reaches the commit and the hook writes
+# nothing while appearing to work. Hence the fallback below -- explicitly named,
+# and set ONLY in a checkout one session owns alone:
+#
+#     git config claude.session carrie      # never --global
+#
+# In a SHARED checkout (the Mac's /root/dev/iw-master) leave it unset and rely
+# on the exported variable: there the config cannot be right for both readers,
+# and being wrong is the failure this whole stamp exists to prevent.
+MSG="$1"; SRC="${2:-}"
+
+# Skip the cases where a message is already fixed or is being replayed: a merge,
+# a squash, an amend (-c/-C), and every rebase. Rebase re-runs this hook per
+# commit and would stamp somebody else's work with my name and today's branch.
+case "$SRC" in merge|squash|commit) exit 0 ;; esac
+[ -d "$(git rev-parse --git-path rebase-merge 2>/dev/null)" ] && exit 0
+[ -d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ] && exit 0
+
+WHO="${CLAUDE_SESSION_NAME:-$(git config --get claude.session 2>/dev/null)}"
+BR="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+
+# Idempotent: a hook that appends blindly duplicates trailers on every retry.
+grep -qi '^Session:' "$MSG" 2>/dev/null && exit 0
+
+# THE NAME GOES IN THE SUBJECT, as a PREFIX, and that is not a style choice.
+# GitHub's web commit filter lists GITHUB ACCOUNTS, not git author names -- we
+# all push as one account, so `git log --author` works in a terminal and is
+# invisible in the only place Peter actually reads commits. The subject line is
+# the sole field the web list renders, and it TRUNCATES, so a suffix is exactly
+# what gets cut. A prefix survives, and scans down a column.
+#
+# The branch stays a trailer: it would eat the truncation budget the name needs,
+# and the web already shows branch context everywhere except after a
+# squash-merge -- which is the one case the trailer exists for.
+if [ -n "$WHO" ]; then
+  SUBJ=$(head -1 "$MSG")
+  case "$SUBJ" in
+    "[$WHO]"*) ;;                                   # already stamped
+    "["*"]"*)  ;;                                   # somebody else's stamp: leave it
+    *) printf '[%s] %s\n' "$WHO" "$SUBJ" > "$MSG.iw"
+       tail -n +2 "$MSG" >> "$MSG.iw"
+       mv "$MSG.iw" "$MSG" ;;
+  esac
+fi
+
+{
+  echo
+  [ -n "$WHO" ] && echo "Session: $WHO"
+  [ -n "$BR" ] && [ "$BR" != "HEAD" ] && echo "Branch: $BR"
+} >> "$MSG"
+exit 0
