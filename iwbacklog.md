@@ -116,6 +116,11 @@ _(nothing claimed)_
   hybrid one-axis editor zoom, snapshot "biggest change" scrub, transform-magnify
   below fit, and the userSpaceOnUse-gradient favicon Firefox cannot rasterise.
   The work may have been redone since; nobody has checked.
+- **Two `CLAUDE.md` files, one in Inkwave and one in MnemonicEcologies, and it is
+  confusing which a session is reading.** Peter, 18 Sep 21:20. They serve different
+  repos but share a name, a voice and several rules (the roster, the channel format,
+  Brisbane time), so a session that has read one can believe it has read the other.
+  Worth deciding what is genuinely shared and where the shared part should live.
 - **`T + B` and `P` are undefined in the glossary.** Both came from Peter's
   replies to the desktop toolbar review. Max to confirm the expansions —
   unconfirmed guesses stay out, per `docs/rules/glossary.md`.
