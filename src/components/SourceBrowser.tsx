@@ -746,9 +746,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
   // the feature works only on the second attempt, which reads as flakiness.
   // → docs/archive/reader-panels.md#sb-framing-install
   useEffect(() => {
-    // Live framing is DEFAULT ON — `reader/liveFrameFlag.ts` carries why, and what it does not fix.
-    // ⚠ Read the flag HERE, per effect, never from a cached resolve: the extension can be granted
-    // mid-session and the flag can be flipped.
+    // Live framing is UNGATED as of 2026-09-18 — `reader/liveFrameFlag.ts` is gone and the mode is
+    // the writer's own sticky toggle (`inkwave:readerLive`), off until they choose Live once.
+    // ⚠ BOTH CONDITIONS ARE READ HERE, PER EFFECT, never from a cached resolve: the extension can
+    // be granted mid-session, which is the whole reason `extState` is a dependency — a resolve
+    // cached at mount would leave framing dead for a tab that gained the extension after it.
     if (!framed || extState !== 'ready') { setFramingOn(false); return }
     // ⚠ AN EMBED NEEDS NO RULE, AND ASKING FOR ONE KILLS A PLAYING VIDEO — an /embed/ URL sends no
     // framing headers, but installing bumps `frameKey`, which remounts the iframe and restarts the
