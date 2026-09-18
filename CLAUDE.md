@@ -79,6 +79,17 @@ THE VERSION** when an anchor is load-bearing. Build history and code map:
 
   Nothing between the links: no `echo`, no pipe, no `set -e`. Typecheck may carry pre-existing
   TS7016/TS2550 in test files; ALL tests must pass; push = production deploy.
+- **BLOCKED BY A PERMISSION? HAND PETER THE WHOLE SCRIPT AND WAIT.** Not a description of
+  what to run, not a menu path, not "two clicks on the Branches page" — **the complete,
+  untruncated, copy-and-paste commands**, with the directory to run them in, what they will
+  print, and how to undo them. He is a strategist, not a developer: a command he has to
+  finish writing himself is a command that does not get run, and the work silently stalls
+  while looking handed over. Prefer a CHECKED-IN SCRIPT with a dry run by default
+  (`scripts/prune-merged.sh`, then `--yes`) over a one-off paste, so the next instance of
+  the same block costs nobody anything. Then STOP and wait for his reply rather than
+  reassigning it — **a block on capability is not fixed by moving the item between
+  sessions**, and reassignment makes it look staffed.
+
 - **BACKTICKS IN `git commit -m` ARE COMMAND SUBSTITUTION** — use `-F <file>` with a heredoc for any
   message containing code identifiers.
 - **`/root/dev/iw-master` IS A SHARED CHECKOUT.** 1. **`git status -sb` before every commit or push** —
