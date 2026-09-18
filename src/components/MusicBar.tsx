@@ -79,7 +79,7 @@ export function MusicBar({ phone, documentId, mediaAssets }: MusicBarProps): JSX
 
   return (
     <div
-      className={`iw-nightable iw-touch-guard font-serif flex items-center ${phone ? 'px-1.5 gap-1.5' : 'px-4 gap-2'} py-2 border-b border-stone-200`}
+      className={`iw-nightable iw-touch-guard font-serif flex items-center ${phone ? 'px-1.5 gap-1.5 py-2 border-b border-stone-200' : 'gap-2 w-full'}`}
     >
       <span
         className="italic mr-1 select-none"

@@ -1221,6 +1221,43 @@
      `px-2` on the element (which is why that class was removed from the row's className) — because
      the shrink formulas below must subtract this exact value as part of their overhead. Two places
      needing one number is the same trap `--iw-bar-budget` exists to close, so it is a var too. */
+  /* ⚠ THE FOUR ROW VARIABLES LIVE ON THE PILL, NOT THE MAIN ROW (2026-09-18): the bar rows above
+     the circles (style / review / music) size their controls from the SAME --iw-circle and
+     --iw-bar-gap so they fit the toolbar's width exactly (Peter: "style buttons need to shrink so
+     they fit the toolbar length"). Siblings can't read a sibling's custom properties; the pill is
+     their common parent. --iw-row-slots is written on the pill by TiptapEditor for the same reason. */
+  .iw-desktop-pill {
+    /* END PADDING = BUTTON GAP (Peter, 2026-09-18: "equal padding at far sides should be the same as
+       padding between buttons"). Same floor/ceiling as --iw-bar-gap below, so on any comfortable
+       window both sit at 6px; the pad can't be written in terms of the gap (the gap is derived from
+       the inner width, which subtracts the pad — a var cycle), so the bounds are matched instead. */
+    --iw-bar-pad: clamp(2px, calc(var(--iw-bar-budget, 100vw) * 0.012), 6px);
+    /* Budget minus the end paddings and the pill's 1px borders — the space the slots divide up. */
+    --iw-bar-inner: calc(var(--iw-bar-budget, 100vw) - 2 * var(--iw-bar-pad) - 2px);
+    /* −2px reserves the minimum gap per slot so the division can't claim space the gaps still need.
+       FLOOR 17px, and it buys the last usable width: at ~460px of viewport the eight circles fit only
+       at 17, and a small-but-contained circle beats one spilling outside the pill's own border.
+       ⚠ STATED CEILING: below ~440px the row cannot fit at all — 8 circles plus the two edge-anchored
+       text pills need more than that width, and no clamp can invent it. Deliberately not chased: a
+       desktop window that narrow is unrealistic, and touch has its own rules (.iw-phone-toolbar).
+       The honest failure there is a spill; if it ever matters, the fix is to fall back to the phone
+       row, not to shrink the circles into invisibility. */
+    --iw-circle: clamp(17px, calc(var(--iw-bar-inner) / (var(--iw-row-slots, 6) + 2) - 2px), 30px);
+    --iw-bar-gap: clamp(2px, calc((var(--iw-bar-inner) - (var(--iw-row-slots, 6) + 2) * var(--iw-circle)) / (var(--iw-row-slots, 6) + 1)), 6px);
+  }
+  /* The bar row: spread across the pill's width, the main row's end padding and gap, no divider —
+     it MERGES with the toolbar (one outline, one colour, one type). Circles and the font / size
+     pills take the main row's circle size. */
+  .iw-desktop-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--iw-bar-gap);
+    padding: 5px var(--iw-bar-pad) 0;
+    font-size: 14px;
+  }
+  .iw-desktop-bar > * { gap: var(--iw-bar-gap); }
+  .iw-desktop-bar .w-8 { width: var(--iw-circle); height: var(--iw-circle); }
+  .iw-desktop-bar .h-8 { height: var(--iw-circle); }
+  .iw-desktop-bar .min-w-\[2\.5rem\] { min-width: 0; }
   .iw-desktop-toolbar {
     /* SPREAD, DON'T PAD (Peter, 2026-08-20: "expand them out to meet the edge of the central pill").
        The width won by the two widening rounds had all gone into END PADDING — ~90px of empty pill
@@ -1243,23 +1280,6 @@
        gap takes only what is genuinely left over (floored at 2px, capped at 10px so it can never
        inflate the bar again). Result: the bar stops growing on a wide window, and on a narrow one the
        squeeze comes out of the SPACING before it ever comes out of the circles. */
-    /* END PADDING = BUTTON GAP (Peter, 2026-09-18: "equal padding at far sides should be the same as
-       padding between buttons"). Same floor/ceiling as --iw-bar-gap below, so on any comfortable
-       window both sit at 6px; the pad can't be written in terms of the gap (the gap is derived from
-       the inner width, which subtracts the pad — a var cycle), so the bounds are matched instead. */
-    --iw-bar-pad: clamp(2px, calc(var(--iw-bar-budget, 100vw) * 0.012), 6px);
-    /* Budget minus the end paddings and the pill's 1px borders — the space the slots divide up. */
-    --iw-bar-inner: calc(var(--iw-bar-budget, 100vw) - 2 * var(--iw-bar-pad) - 2px);
-    /* −2px reserves the minimum gap per slot so the division can't claim space the gaps still need.
-       FLOOR 17px, and it buys the last usable width: at ~460px of viewport the eight circles fit only
-       at 17, and a small-but-contained circle beats one spilling outside the pill's own border.
-       ⚠ STATED CEILING: below ~440px the row cannot fit at all — 8 circles plus the two edge-anchored
-       text pills need more than that width, and no clamp can invent it. Deliberately not chased: a
-       desktop window that narrow is unrealistic, and touch has its own rules (.iw-phone-toolbar).
-       The honest failure there is a spill; if it ever matters, the fix is to fall back to the phone
-       row, not to shrink the circles into invisibility. */
-    --iw-circle: clamp(17px, calc(var(--iw-bar-inner) / (var(--iw-row-slots, 6) + 2) - 2px), 30px);
-    --iw-bar-gap: clamp(2px, calc((var(--iw-bar-inner) - (var(--iw-row-slots, 6) + 2) * var(--iw-circle)) / (var(--iw-row-slots, 6) + 1)), 6px);
     padding-left: var(--iw-bar-pad);
     padding-right: var(--iw-bar-pad);
     /* 5px, up from Tailwind's py-0.5 (2px) — Peter, 2026-08-21: "about another millimetre above and

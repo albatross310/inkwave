@@ -436,7 +436,9 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
 
   return (
     <div
-      className={`flex items-center ${phone ? 'justify-between' : 'gap-1'} text-sm text-stone-500 font-serif w-full`}
+      // Both platforms spread across the row: the bar takes the toolbar's width and the controls
+      // fit it (desktop gap = the main row's --iw-bar-gap, index.css .iw-desktop-bar).
+      className="flex items-center justify-between text-sm text-stone-500 font-serif w-full"
       onMouseDown={e => { if (!(e.target as Element).closest('input')) e.preventDefault() }}
       onMouseEnter={() => onActivity?.()}
     >

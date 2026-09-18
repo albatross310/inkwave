@@ -24,7 +24,9 @@ import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
 // Desktop 'bar' chrome (style / review / music): the same outline + radius as the main pill.
-const DESKTOP_BAR_CLASS = 'iw-nightable iw-toolbar-outline iw-desktop-bar bg-white border rounded-[15px] shadow-sm'
+// Desktop 'bar' row (style / review / music): INSIDE the pill, spread to the toolbar's width, the
+// pill's own outline/colour/type (index.css .iw-desktop-bar). Peter, 2026-09-18 14:36.
+const DESKTOP_BAR_CLASS = 'iw-desktop-bar'
 import { createDock, KEYBOARD_MIN_PX, floatingBarAllowance } from './toolbarDock'
 import { isWarmLoad } from './loadWarmth'
 import { moveSlot, nearestSlot, neighborShift, brokeHoldSlop } from './toolbarSlots'
@@ -3586,7 +3588,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         >
           <div
             ref={footerRef}
-            className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'overflow-hidden w-full' : 'relative'}`}
+            className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'overflow-hidden w-full' : 'iw-desktop-pill'}`}
             style={{
               // ── ⚠ ONE BUDGET, TWO CONSUMERS. `--iw-bar-budget` is the maximum width the toolbar
               // may occupy, and BOTH this box's max-width and the per-circle shrink clamp in
@@ -3599,6 +3601,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               ...(isTouch ? {} : {
                 ['--iw-bar-budget' as string]: `calc((100vw - 2 * var(--iw-side-reserve, ${SIDE_RESERVE_FALLBACK_PX}px) - ${2 * TOOLBAR_SIDE_GAP_PX}px) / ${(zoom * 1.12).toFixed(4)})`,
                 maxWidth: 'var(--iw-bar-budget)',
+                // On the PILL so the bar rows can read it too (index.css .iw-desktop-pill).
+                ['--iw-row-slots' as string]: String(toolbarSlots.length),
               }),
               border: '1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.75))',
               borderRadius: isTouch ? '22px 22px 0 0' : '15px',
@@ -3612,14 +3616,14 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               transformOrigin: 'bottom center',
             }}
           >
-            {/* ⚠ DESKTOP BARS FLOAT ABOVE THE PILL, THEY DO NOT WIDEN IT (Peter, 2026-09-18: "Style bar
-                is still moving the toolbar … rhs pos should be fixed"). The pill is a flex COLUMN
-                sized by its widest child, so a style row wider than the circle row grew the pill
-                and re-centred it — the main row jumped left on every S. On desktop the three bar
-                rows live in this absolutely positioned group above the pill (bottom-anchored, so
-                they grow upward), each wearing its own outline: Peter's "bar" category. Phone keeps
-                the in-pill stack (the bar is w-full there and the keyboard dock owns its height). */}
-            <div className={isTouch ? 'contents' : 'absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 flex flex-col items-center gap-1.5 w-max'}>
+            {/* ⚠ BARS LIVE INSIDE THE PILL AND NEVER SIZE IT (Peter, 2026-09-18 14:36: "a bar like it
+                was before, same dimensions as the toolbar, merging together"). The pill is a flex
+                COLUMN sized by its widest child, so a bar row wider than the circle row used to
+                grow the pill and re-centre it — the main row jumped left on every S. Every bar row
+                wrapper below is `width: 0; min-width: 100%` ALWAYS (open or collapsed): it takes the
+                width the main row gives the pill and its controls shrink to fit (index.css
+                .iw-desktop-bar sizes them from the same --iw-circle / --iw-bar-gap as the circles). */}
+            <div className="contents">
             {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM.
                 Auto-expands on phone text-selection even when the main toolbar row is hidden. */}
             {(showMainRow || selectionOnPhone || selectionOnDesktop) && (
@@ -3635,10 +3639,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 // child, so the invisible style bar was sizing it (86px of dead pill past the last
                 // circle). `width: 0; min-width: 100%` drops the contribution while collapsed
                 // without breaking the layout when it expands.
-                ...(styleBarExpanded ? {} : { width: 0, minWidth: '100%' }),
+                width: 0, minWidth: '100%',
               }}>
                 {/* Phone: slim side padding — nine 38px circles + the font/size pills need the room */}
-                <div className={`flex items-center ${isTouch ? 'px-1.5 py-2 border-b border-stone-200' : `px-3 py-1.5 ${DESKTOP_BAR_CLASS}`}`}>
+                <div className={isTouch ? 'flex items-center px-1.5 py-2 border-b border-stone-200' : DESKTOP_BAR_CLASS}>
                   {editor && <StyleBar editor={editor} onActivity={armStyleTimer} phone={isTouch} barVisible={styleBarExpanded} />}
                 </div>
               </div>
@@ -3653,6 +3657,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 opacity: reviewOpen ? 1 : 0,
                 pointerEvents: reviewOpen ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
+                width: 0, minWidth: '100%',
               }}>
                 {reviewOpen && (isTouch ? <ReviewBar editor={editor} phone={isTouch} /> : <div className={DESKTOP_BAR_CLASS}><ReviewBar editor={editor} phone={isTouch} /></div>)}
               </div>
@@ -3667,6 +3672,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 opacity: activeBar === 'music' ? 1 : 0,
                 pointerEvents: activeBar === 'music' ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
+                width: 0, minWidth: '100%',
               }}>
                 {activeBar === 'music' && (isTouch ? <MusicBar phone={isTouch} documentId={doc.id} mediaAssets={doc.media ?? []} /> : <div className={DESKTOP_BAR_CLASS}><MusicBar phone={isTouch} documentId={doc.id} mediaAssets={doc.media ?? []} /></div>)}
               </div>
