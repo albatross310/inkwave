@@ -104,9 +104,13 @@ _(nothing claimed)_
 
 - **Delete ten merged branches.** Verified merged on a full clone and recorded in
   `docs/archive/merged-branches.md` with their tips.
-  - no · Carrie · 18 Sep 18:30 · the proxy 403s ref deletion and tag writes from a
-    container, so no cloud session can do this → Max, or Peter in two clicks on the
-    repo's Branches page, which offers Restore afterwards
+  - no · Carrie · 18 Sep 20:25 · **no cloud session can do this at all** — checked
+    three routes: `git push --delete` 403s, the refs API 403s ("write access to this
+    path is not permitted through this proxy"), and the GitHub MCP server exposes no
+    branch-deletion tool. Not a quota or an availability problem, so reassigning it
+    between cloud sessions cannot help → **Peter**, two clicks on the repo's Branches
+    page, which offers Restore right afterwards; or Max once he is back, from a Mac
+    whose git is not behind the proxy. I own chasing it, not doing it.
 - **Review `feat/hybrid-zoom`, `feat/zoom-magnify`, `fix/firefox-favicon`
   individually.** July branches holding 8 commits that exist on no other ref:
   hybrid one-axis editor zoom, snapshot "biggest change" scrub, transform-magnify
