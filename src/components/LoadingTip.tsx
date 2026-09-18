@@ -33,12 +33,20 @@ export function loadingTipFontSize(text: string): string {
  * `.iw-water-ready` opens the water gate. This avoids random server/client text (a hydration
  * mismatch) and avoids inserting anything imperatively into React's document before hydration.
  */
-export function LoadingTip({ ready, onContinue }: { ready: boolean; onContinue: () => void }) {
+export function LoadingTip({ ready, onContinue, countdownMs = LOADING_TIP_COUNTDOWN_MS }: { ready: boolean; onContinue: () => void; countdownMs?: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const chosenRef = useRef<number | null>(null)
   const continuingRef = useRef(false)
-  const [secondsRemaining, setSecondsRemaining] = useState(LOADING_TIP_COUNTDOWN_MS / 1000)
+  // 0 on a WARM load (editor/loadWarmth.ts): the page opens the instant it is ready.
+  const [secondsRemaining, setSecondsRemaining] = useState(Math.ceil(countdownMs / 1000))
   const [continuing, setContinuing] = useState(false)
+  // PRERENDER GUARD (2026-09-18): index.html is rendered at build time (react-router.config.ts
+  // `prerender`), where there is no sessionStorage, so the static HTML carried the COLD label
+  // "Ready in 3…" — every WARM load flashed a 3-second promise until hydration (~0.5s in dev)
+  // replaced it with "Opening…". The countdown number is only shown once mounted; server and first
+  // client render agree on the neutral label, so there is no hydration mismatch either.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
     if (secondsRemaining <= 0) return
@@ -124,11 +132,13 @@ export function LoadingTip({ ready, onContinue }: { ready: boolean; onContinue: 
       >
         New tip (Tab)
       </button>
-      {secondsRemaining > 0 ? (
+      {!mounted ? (
+        <span className="iw-loading-tip__countdown" aria-live="polite">Opening…</span>
+      ) : secondsRemaining > 0 ? (
         <span className="iw-loading-tip__countdown" aria-live="polite">
           Ready in {secondsRemaining}…
         </span>
-      ) : continuing || ready ? (
+      ) : continuing || ready || countdownMs === 0 ? ( // warm: never "Finishing…" — the page is opening
         <span className="iw-loading-tip__countdown" aria-live="polite">Opening…</span>
       ) : (
         <span className="iw-loading-tip__countdown" aria-live="polite">Finishing…</span>

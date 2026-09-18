@@ -26,6 +26,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { isTouchDevice } from '../editor/isTouchDevice'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_PANEL_CLASS, desktopSheetStyle, desktopPanelStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 import { deleteStoredDocument, freezeDocWrites, listOpfsDocuments, readDocumentBytes, unfreezeDocWrites } from '../storage/opfs'
 import { deleteMeta, listMeta } from '../storage/indexeddb'
 import { clearTabDoc, heldDocIds, releaseDocLock, switchTabToDocument, tabDocId, DOC_LOCK_PREFIX } from '../storage/tabDoc'
@@ -39,7 +42,6 @@ import { forgetSaveFile } from '../storage/folder'
 import { clearGoogleDriveFile } from '../storage/gdrive'
 import { clearOneDriveFile } from '../storage/onedrive'
 
-const INK = '#302438'
 
 interface Row {
   id: string
@@ -309,16 +311,14 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
       <div
         role="dialog" aria-modal="true" aria-label="Documents on this device"
         onMouseDown={e => e.stopPropagation()}
-        className="iw-nightable iw-touch-guard iw-no-print relative bg-white w-[820px] max-w-[96vw] max-h-[86vh] flex flex-col shadow-xl font-serif text-stone-600"
-        style={{ border: `1px solid ${INK}bf`, borderRadius: 14 }}
+        // One sheet with every other panel (styles/panelSheet.ts): the shared head, edge and type ramp.
+        // Phone: centred like the ⋮ modals, rows WRAP (a phone has no width for the one-line row).
+        className={`iw-nightable iw-touch-guard iw-no-print relative bg-white ${isTouchDevice() ? `${PHONE_SHEET_CLASS} w-[400px] max-w-[92vw] max-h-[80vh]` : `${DESKTOP_PANEL_CLASS} max-h-[86vh]`} flex flex-col font-serif text-stone-600 overflow-hidden`}
+        style={isTouchDevice()
+          ? (() => { const ps = phoneSheetStyle(); return { borderRadius: ps.borderRadius, boxShadow: ps.boxShadow, border: ps.border } })()
+          : { ...desktopSheetStyle(), width: desktopPanelStyle().width }}
       >
-        <div className="flex items-start justify-between px-5 pt-4">
-          <div>
-            <h2 className="text-lg" style={{ color: 'var(--iw-ink, #302438)' }}>Documents on this device</h2>
-          </div>
-          <button type="button" aria-label="Close" onClick={onClose}
-            className="text-stone-400 hover:text-[#302438] text-2xl leading-none -mt-1">×</button>
-        </div>
+        <SheetHeader title="Documents on this device" onClose={onClose} />
 
         {error && (
           <p className="mx-5 mt-3 text-xs px-3 py-2" style={{ color: 'var(--iw-ink, #302438)', border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 8 }}>{error}</p>
@@ -343,7 +343,7 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
             : 'Every local recovery copy Inkwave can find. Delete permanently removes that local document and its snapshot history; recognised files and cloud copies are not deleted.'}
         </p>
 
-        <div className="flex-1 overflow-auto px-5 py-3 flex flex-col gap-1.5">
+        <div className="flex-1 min-h-0 overflow-auto px-5 py-3 flex flex-col gap-1.5">
           {rows === null && <p className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>Scanning…</p>}
           {rows && visibleRows.length === 0 && <p className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{tab === 'current' ? 'No documents are in the auto-open workflow.' : 'No documents are stored on this device.'}</p>}
           {visibleRows.map((r, index) => {
@@ -351,7 +351,7 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
             const saveLive = recognisedSaveIsLive(r.id, now)
             return (
             <div key={r.id} data-testid="opfs-row" data-doc-id={r.id}
-              className="px-3 py-2 flex items-center gap-2 min-w-max"
+              className={`px-3 py-2 flex items-center gap-2 ${isTouchDevice() ? 'flex-wrap' : 'min-w-max'}`}
               title={r.preview || undefined}
               style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 10 }}
             >

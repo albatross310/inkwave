@@ -15,6 +15,10 @@ import { withScasDefaults } from '../scas/state'
 import { emailEnabled } from '../email/flag'
 import { openInkwaveFile } from '../storage/openDoc'
 import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_POPUP_CLASS, desktopPopupStyle, DESKTOP_PANEL_CLASS, desktopPanelStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
+import { clearWarm } from '../editor/loadWarmth'
 import { oneDriveFilename } from '../storage/onedrive'
 import { googleDriveConfigured, preloadGis } from '../storage/gdrive'
 import { AccountMenuItems } from './AccountControl'
@@ -92,6 +96,8 @@ async function createDocument(
 }
 
 export function OptionsMenu({
+  open: openProp,
+  onOpenChange,
   paperRight,
   installPrompt,
   onExportBundle,
@@ -117,6 +123,9 @@ export function OptionsMenu({
   onWorkReport,
   onFileOpenError,
 }: {
+  /** Lifted open state (toolbarContract.ts: a slot is a trigger, never an owner). */
+  open?: boolean
+  onOpenChange?: (v: boolean) => void
   paperRight: number
   installPrompt?: any
   onExportBundle?: (stripPdfs?: 'all' | 'public', gzip?: boolean) => void
@@ -144,7 +153,10 @@ export function OptionsMenu({
   onFileOpenError?: (msg: string) => void
 }) {
   const navigate = useNavigate()
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const menuOpen = openProp ?? internalOpen
+  const setMenuOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
+  const isPhone = isTouchDevice()
   const [modal, setModal] = useState<ModalKey | null>(null)
   // The OPFS inspector is NOT a ModalKey: it is a full recovery panel with its own portal +
   // sizing, not one of the little drop-ups anchored over the kebab.
@@ -180,6 +192,7 @@ export function OptionsMenu({
       setModal('changeunsaved')
       return
     }
+    clearWarm() // a different document: its first load is the full choreography again
     void createDocument('Untitled', emptyTiptapDoc())
   }
 
@@ -230,37 +243,31 @@ export function OptionsMenu({
   // Two columns (Peter, 2026-07-10): RIGHT = file ops ending with Export; LEFT = the rest, ending
   // with Sign in/Logout (AccountMenuItems renders after the left column).
   const fileItems: Array<{ label: string; run: () => void }> = [
-    { label: 'Change doc', run: changeToBlankDocument },
-    { label: 'New doc', run: openNewInkwaveWindow },
-    { label: 'New blank', run: openNewBlankInkwaveWindow },
+    { label: 'new doc', run: openNewInkwaveWindow },
+    { label: 'new blank', run: openNewBlankInkwaveWindow },
+    { label: 'change doc', run: changeToBlankDocument },
     // An email is created exactly like any other document (§B2.1) — same path, one extra field.
     // Flag-gated, so the menu is unchanged until `?email=1`.
     ...(emailEnabled() ? [{
-      label: 'New email',
+      label: 'new email',
       run: () => void createDocument('Untitled email', emptyTiptapDoc(), uuidv4(), {
         docType: 'email' as const,
         email: { to: [], cc: [], bcc: [], subject: '' },
       }),
     }] : []),
-    { label: 'Open…', run: () => setModal('upload') },
-    { label: 'Recent', run: () => setModal('recent') },
-    { label: 'Save…', run: () => setModal('save') },
-    { label: 'Save as…', run: () => setModal('savecopy') },
-    { label: 'Export…', run: () => setModal('export') },
+    { label: 'open…', run: () => setModal('upload') },
+    { label: 'recent', run: () => setModal('recent') },
+    { label: 'save…', run: () => setModal('save') },
+    { label: 'save as…', run: () => setModal('savecopy') },
+    { label: 'export…', run: () => setModal('export') },
   ]
   const items: Array<{ label: string; run: () => void }> = [
     // Flag-gated (`?prodReport=1`, default OFF) — the free paste-back work report (§A7.1).
-    ...(onWorkReport ? [{ label: 'Report', run: onWorkReport }] : []),
-    { label: 'Verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
-    { label: 'About', run: () => navigate('/about') },
-    { label: 'Privacy', run: () => navigate('/privacy') },
-    { label: 'Print', run: () => onPrint?.() },
-    // Peter's "opfs button" (2026-07-17) — named for what a WRITER is looking for, not for the
-    // API. Every document this device is actually holding, including any the Recent list can't
-    // see, with Open + Download on each. See OpfsInspector.tsx.
-    { label: 'Storage', run: () => setInspector(true) },
+    ...(onWorkReport ? [{ label: 'report', run: onWorkReport }] : []),
+    // Order (Peter, 2026-09-17): the document's record first (Snapshots, Verify, Storage), then
+    // Print, then the two pages about the app.
     {
-      label: 'Snapshots',
+      label: 'snapshots',
       run: () => {
         // Open the snapshot view at the MOST RECENT snapshot of the active doc.
         void (async () => {
@@ -282,10 +289,18 @@ export function OptionsMenu({
         })()
       },
     },
+    { label: 'verify', run: () => onVerifyRecord ? onVerifyRecord() : navigate('/verify') },
+    // Peter's "opfs button" (2026-07-17) — named for what a WRITER is looking for, not for the
+    // API. Every document this device is actually holding, including any the Recent list can't
+    // see, with Open + Download on each. See OpfsInspector.tsx.
+    { label: 'storage', run: () => setInspector(true) },
+    { label: 'print', run: () => onPrint?.() },
+    { label: 'about', run: () => navigate('/about') },
+    { label: 'privacy', run: () => navigate('/privacy') },
   ]
   if (installPrompt) {
     items.push({
-      label: 'Install app…',
+      label: 'install app…',
       run: async () => {
         installPrompt.prompt()
         const { outcome } = await (installPrompt as any).userChoice
@@ -302,7 +317,7 @@ export function OptionsMenu({
     const bottom = br ? Math.round(window.innerHeight - br.top + PANEL_GAP) : 60
     // Phone: hug the right edge (the ⋮ button is the rightmost control; the old centre-clamp used
     // HALF of the WIDEST panel, which shoved the little menu toward mid-screen — Peter, 2026-07-09).
-    if (isTouchDevice()) return { position: 'fixed', bottom, right: EDGE_BUFFER }
+    if (isTouchDevice()) return phoneSheetStyle() // the shared sheet (styles/panelSheet.ts)
     const HALF = 150 // ~half the widest panel, for edge clamping
     const center = br ? br.left + br.width / 2 : (paperRight || window.innerWidth / 2)
     return {
@@ -312,7 +327,10 @@ export function OptionsMenu({
       transform: 'translateX(-50%)',
     }
   }
-  const menuStyle: CSSProperties = { ...(menuOpen ? panelAnchor() : {}), border: `1px solid ${INK}66`, borderRadius: '10px' }
+  const menuStyle: CSSProperties = isPhone
+    ? (menuOpen ? panelAnchor() : {})
+    // Desktop: a POPUP over ⋮ (styles/panelSheet.ts) — content-sized, tail on the button.
+    : (menuOpen ? desktopPopupStyle(btnRef.current?.getBoundingClientRect()) : {})
 
   return (
     <div ref={rootRef} className="relative" onPointerDown={e => e.stopPropagation()}>
@@ -332,7 +350,8 @@ export function OptionsMenu({
       <input ref={fileInputRef} type="file" className="hidden" onChange={onOpenFile} />
       <button
         ref={btnRef} type="button" aria-label="Options" aria-haspopup="menu" aria-expanded={menuOpen}
-        onClick={() => setMenuOpen(o => !o)}
+        {...{ [PANEL_TRIGGER_ATTR]: 'options' }}
+        onClick={() => setMenuOpen(!menuOpen)}
         className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-stone-400 hover:text-[#302438] transition-colors"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -342,18 +361,25 @@ export function OptionsMenu({
 
       {menuOpen && createPortal(
         <>
-          {/* Backdrop — dismiss on outside click; sits below the menu in the portal layer */}
-          <div className="fixed inset-0 z-[55]" aria-hidden="true" onMouseDown={() => setMenuOpen(false)} />
+          {/* Desktop backdrop — dismiss on outside press (pointerdown, never mousedown: iOS withholds
+              it). None on phone: it would cover the footer and eat the tap meant for the next button;
+              the editor's one outside-tap rule closes the sheet instead. */}
+          {!isPhone && <div className="fixed inset-0 z-[55]" aria-hidden="true" onPointerDown={() => setMenuOpen(false)} />}
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
-          <div role="menu" className="iw-nightable iw-touch-guard iw-no-print z-[60] w-[14.375rem] py-0.5 bg-white shadow-md text-[17px] text-stone-600 font-serif flex" style={menuStyle}
+          <div role="menu" {...{ [PANEL_ATTR]: 'options' }}
+            className={`iw-nightable iw-touch-guard iw-no-print z-[60] bg-white text-[17px] text-stone-600 font-serif ${isPhone ? PHONE_SHEET_CLASS : `${DESKTOP_POPUP_CLASS} py-0.5 flex`}`} style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
-            {/* LEFT column: Verify/About/Privacy/Print/Snapshots … ending with Sign in/Logout. */}
-            <div className="flex-1 border-r border-stone-100">
+            {isPhone && <SheetHeader title="Menu" onClose={() => setMenuOpen(false)} />}
+            <div className={isPhone ? 'flex items-stretch py-0.5' : 'contents'}>
+            {/* LEFT column: Snapshots/Verify/Storage/Print/About/Privacy … ending with Sign in/Logout.
+                Phone: both columns are flex columns whose rows STRETCH (flex-1) — the two columns are
+                always the same height whatever their counts (Peter, 2026-09-17). */}
+            <div className={`flex-1 border-r border-stone-100 ${isPhone ? 'flex flex-col' : ''}`}>
               {items.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className="w-full text-left pl-3 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors"
+                  className={`w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
                 >
                   {it.label}
                 </button>
@@ -361,15 +387,16 @@ export function OptionsMenu({
               <AccountMenuItems onClose={() => setMenuOpen(false)} />
             </div>
             {/* RIGHT column: file ops, ending with Export. */}
-            <div className="flex-1">
+            <div className={`flex-1 ${isPhone ? 'flex flex-col' : ''}`}>
               {fileItems.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className="w-full text-left pl-3 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors"
+                  className={`w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
                 >
                   {it.label}
                 </button>
               ))}
+            </div>
             </div>
           </div>
         </>,
@@ -641,17 +668,18 @@ function Modal({ title, onClose, children, anchorStyle }: { title: string; onClo
   // trapped in the footer's pointer-events/stacking context). Positioned above the kebab (same anchor as
   // the menu) so it reads as one continuous panel.
   return createPortal(
-    <div className="fixed inset-0 z-[100]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[100]" onPointerDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
-      <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={e => e.stopPropagation()}
-        className="iw-nightable bg-white w-[300px] max-w-[92vw] p-5 flex flex-col shadow-xl"
-        style={{ ...anchorStyle, border: `1px solid ${INK}bf`, borderRadius: '14px' }}
+      <div role="dialog" aria-modal="true" aria-label={title} onPointerDown={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
+        className={`iw-nightable ${isTouchDevice() ? PHONE_SHEET_CLASS : DESKTOP_PANEL_CLASS} bg-white max-w-[92vw] flex flex-col overflow-hidden`}
+        // Phone: the sheet's type and edge (styles/panelSheet.ts), centred like the desktop modal.
+        style={isTouchDevice()
+          ? (() => { const ps = phoneSheetStyle(); return { ...anchorStyle, borderRadius: ps.borderRadius, boxShadow: ps.boxShadow, border: ps.border, width: 'min(400px, 92vw)', maxHeight: '80vh' } })()
+          : desktopPanelStyle()}
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-serif" style={{ color: INK }}>{title}</h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-[#302438] text-2xl leading-none">×</button>
-        </div>
-        {children}
+        {/* The same head as every other panel (PanelSheet.tsx) — one look across desktop and phone. */}
+        <SheetHeader title={title} onClose={onClose} />
+        <div className="flex flex-col min-h-0 overflow-y-auto px-4 pt-3 pb-4">{children}</div>
       </div>
     </div>,
     document.body,
