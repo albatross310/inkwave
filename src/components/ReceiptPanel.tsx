@@ -3,6 +3,9 @@ import type { SnapshotMeta } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
 import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill, useFooterCramped } from './sidePill'
+import { PANEL_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 
 // Module-level so its identity is stable: React re-invokes a callback ref (null, then el) whenever
 // its identity changes, and an inline arrow would re-register the pill on every render.
@@ -177,11 +180,16 @@ export function ReceiptPanel({
 
   return (
     <>
-      {panelOpen && <div className="fixed inset-0 z-30" aria-hidden="true" onMouseDown={() => setOpen(false)} />}
+      {/* Desktop scrim (pointerdown — iOS withholds mousedown). On phone (hideTrigger: the ◈ lives in
+          the ▲ drawer) there is none: the editor's outside-tap rule closes the sheet, and a scrim
+          over the footer would eat the tap meant for the next button. */}
+      {panelOpen && !hideTrigger && <div className="fixed inset-0 z-30" aria-hidden="true" onPointerDown={() => setOpen(false)} />}
 
       <div
-        className="fixed left-0 z-40 font-serif text-sm select-none flex flex-col-reverse items-start"
-        style={{
+        className={`fixed z-40 font-serif text-sm select-none flex flex-col-reverse items-start ${hideTrigger ? '' : 'left-0'}`}
+        // Phone (hideTrigger): the shared sheet above the toolbar (styles/panelSheet.ts) — the
+        // wrapper takes the sheet's position and the panel below fills it.
+        style={hideTrigger ? { ...phoneSheetStyle(), border: 'none', boxShadow: 'none', color: 'var(--iw-ink, #302438)' } : {
           color: 'var(--iw-ink, #302438)',
           // MIDLINE-matched to the toolbar and to the sync pill opposite (2026-08-20) — this used to be
           // `28*zoom + 10`, a bottom-edge offset with a stray +10 that put this pill 10px above the
@@ -238,7 +246,7 @@ export function ReceiptPanel({
               left: 0,
               background: 'rgb(var(--iw-ink-rgb) / 0.85)',
               color: '#fff',
-              fontSize: '0.75rem',
+              fontSize: SHEET_TYPE.small,
               padding: '4px 10px',
               borderRadius: 8,
               whiteSpace: 'nowrap',
@@ -253,9 +261,13 @@ export function ReceiptPanel({
 
         {panelOpen && (
           <div
-            className="iw-nightable mb-1.5 bg-white overflow-auto"
-            style={{ border: `1px solid rgb(var(--iw-ink-rgb) / 0.4)`, borderRadius: 10, maxHeight: '55vh', width: 210 }}
+            {...{ [PANEL_ATTR]: 'receipt' }}
+            className={`iw-nightable bg-white overflow-auto ${hideTrigger ? `${PHONE_SHEET_CLASS} w-full` : `${DESKTOP_SHEET_CLASS} mb-1.5`}`}
+            style={hideTrigger
+              ? { border: phoneSheetStyle().border, borderRadius: phoneSheetStyle().borderRadius, boxShadow: phoneSheetStyle().boxShadow, maxHeight: 'inherit' }
+              : { ...desktopSheetStyle(), maxHeight: '55vh', width: DESKTOP_SHEET.widthPx }}
           >
+            {hideTrigger && <SheetHeader title="Snapshots" onClose={() => setOpen(false)} />}
             {/* Save version — stays open so the new entry appears in-place */}
             {onSaveVersion && (
               <button
@@ -263,7 +275,7 @@ export function ReceiptPanel({
                 onClick={handleSaveVersion}
                 disabled={saving}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50 font-medium disabled:opacity-50"
-                style={{ borderBottom: `1px solid rgb(var(--iw-ink-rgb) / 0.12)`, color: 'var(--iw-ink, #302438)', fontSize: '0.78rem' }}
+                style={{ borderBottom: `1px solid rgb(var(--iw-ink-rgb) / 0.12)`, color: 'var(--iw-ink, #302438)', fontSize: SHEET_TYPE.body }}
                 title="Save a named version of this document now"
               >
                 {saving ? '⊕ saving…' : '⊕ save version'}
@@ -271,7 +283,7 @@ export function ReceiptPanel({
             )}
 
             {typeof wordCount === 'number' && (
-              <div className="px-2.5 py-1.5 text-stone-500 tabular-nums" style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: '0.75rem' }}>
+              <div className="px-2.5 py-1.5 text-stone-500 tabular-nums" style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: SHEET_TYPE.small }}>
                 {wordCount} word{wordCount === 1 ? '' : 's'}
               </div>
             )}
@@ -280,7 +292,7 @@ export function ReceiptPanel({
                 type="button"
                 onClick={onVerifyChain}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50"
-                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: '0.75rem' }}
+                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', fontSize: SHEET_TYPE.small }}
                 title="Verify the signed receipt chain against the published key"
               >
                 ✦ {chainStatus ? `chain: ${chainStatus}` : 'verify chain…'}
@@ -291,7 +303,7 @@ export function ReceiptPanel({
                 type="button"
                 onClick={onCheckBitcoin}
                 className="w-full px-2.5 py-1.5 text-left hover:bg-stone-50"
-                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', color: 'var(--iw-light, #41425b)', fontSize: '0.75rem' }}
+                style={{ borderBottom: '1px solid rgb(var(--iw-ink-rgb) / 0.12)', color: 'var(--iw-light, #41425b)', fontSize: SHEET_TYPE.small }}
               >
                 ⏳ check Bitcoin…
               </button>
@@ -319,7 +331,7 @@ export function ReceiptPanel({
                   title={s.summary ?? `bundle ${s.bundleHash}`}
                 >
                   {/* Row 1: v1s3 · Arvo. 30/06 · wordcount · OTS */}
-                  <div className="flex items-center gap-1.5 w-full" style={{ fontSize: '0.72rem' }}>
+                  <div className="flex items-center gap-1.5 w-full" style={{ fontSize: SHEET_TYPE.small }}>
                     <span style={{ color: 'var(--iw-ink, #302438)', fontWeight: 600 }}>{vLabel}</span>
                     <span style={{ color: 'var(--iw-light, #41425b)' }}>{period}</span>
                     <span className="text-stone-400">{s.wordCount}w</span>
@@ -329,7 +341,7 @@ export function ReceiptPanel({
                   <div
                     className="text-stone-400 w-full"
                     style={{
-                      fontSize: '0.68rem',
+                      fontSize: SHEET_TYPE.meta,
                       lineHeight: '1.3',
                       overflow: 'hidden',
                       display: '-webkit-box',

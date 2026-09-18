@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { summariseRecord, type ScrubPresenter } from '../editor/scrubRaster'
-import { snapThumbsEnabled, thumbStats, thumbPaneCounts } from '../editor/snapThumbs'
+import { thumbStats, thumbPaneCounts } from '../editor/snapThumbs'
 
 // ── ?snapThumbs=debug overlay ─────────────────────────────────────────────────────────────────
 // The wave-video lesson: an on-device readout beats hours of guessing. One glance must separate
@@ -58,7 +58,7 @@ export function ScrubDebugOverlay({ presenter, dbg, docId, snapCount }: {
   const d = dbg.current
   const st = docId ? thumbStats(docId) : { entries: 0, bytes: 0, loaded: false }
   const bake = docId ? thumbPaneCounts(docId) : { doc: 0, diff: 0, map: 0 }
-  const on = snapThumbsEnabled()
+  const on = true
   const row = (k: string, v: string, bad?: boolean) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: bad ? HUD.bad : HUD.ok }}>
       <span style={{ opacity: 0.75 }}>{k}</span><span style={{ fontWeight: 700 }}>{v}</span>

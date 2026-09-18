@@ -46,11 +46,14 @@ describe('snapThumbs debug flag is session-scoped, never persistent', () => {
     expect(localStorage.getItem('inkwave:snapThumbsDebug')).toBeNull() // and purged
   })
 
-  it('?snapThumbs=1 enables the thumbnails feature WITHOUT the debug overlay', async () => {
+  // The feature's own gate came off on 2026-09-18 — the cache is always on. `?snapThumbs=1` is no
+  // longer a switch, and must NOT be mistaken for the overlay's `debug`: any value but `debug`
+  // leaves the overlay off.
+  it('?snapThumbs=1 does NOT raise the debug overlay — only `debug` does', async () => {
     setSearch('?snapThumbs=1')
     vi.resetModules()
     const m = await import('./snapThumbs')
-    expect(m.snapThumbsEnabled()).toBe(true)
     expect(m.snapThumbsDebug()).toBe(false)
+    expect(sessionStorage.getItem('inkwave:snapThumbsDebug')).toBeNull()
   })
 })

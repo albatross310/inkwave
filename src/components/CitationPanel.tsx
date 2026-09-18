@@ -9,6 +9,9 @@ import { citeClickOpensReader, setCiteClickOpensReader } from './dockLayout'
 import { importLegacyLibrary, legacyLibrarySize } from '../citations/library'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE, DESKTOP_SHEET_CLASS, desktopSheetStyle, DESKTOP_PANEL_CLASS, desktopPanelStyle } from '../styles/panelSheet'
+import { SheetHeader, usePanelDrag } from './PanelSheet'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
@@ -358,8 +361,8 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
       <div className="fixed inset-0 z-[100] bg-black/20" onMouseDown={onClose} />
       <div
         role="dialog" aria-label="Edit citation"
-        className="iw-nightable fixed z-[101] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(460px, 96vw)', maxHeight: '92vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
+        className={`iw-nightable ${DESKTOP_SHEET_CLASS} fixed z-[101] bg-white font-serif text-sm text-stone-600 flex flex-col`}
+        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(460px, 96vw)', maxHeight: '92vh', ...desktopSheetStyle() }}
         onMouseDown={e => e.stopPropagation()}
       >
         {/* Type selector — the titled header bar is gone; close (×) sits next to the dropdown. */}
@@ -748,44 +751,16 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   }
 
   // Drag state — null means use default centered position.
-  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null)
-  const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [recheckTip, setRecheckTip] = useState(false)
 
+  // Desktop: a PANEL (styles/panelSheet.ts) — centred, a bit under the paper's width (Peter,
+  // 2026-09-18: "Citations is too high to begin"). Dragged: explicit corner, no centring transform.
+  const { dragPos, onPointerDown: onDragPointerDown } = usePanelDrag(panelRef)
   function panelStyle(): React.CSSProperties {
-    if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
-    // Default: 18px below top, centred over the writing area (shift left by half the PDF panel width
-    // when it's open so the panel doesn't sit under it).
-    return { position: 'fixed', top: 18, left: 'calc(50% - var(--iw-pdf-room, 0px) / 2 + var(--iw-pdf-room-left, 0px) / 2)', transform: 'translateX(-50%)' }
-  }
-
-  function onHeaderMouseDown(e: React.MouseEvent) {
-    if ((e.target as HTMLElement).closest('button')) return
-    e.preventDefault()
-    const panel = panelRef.current
-    if (!panel) return
-    const r = panel.getBoundingClientRect()
-    const left = r.left
-    const top = r.top
-    setDragPos({ left, top })
-    dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: left, origTop: top }
-
-    function onMove(ev: MouseEvent) {
-      if (!dragRef.current) return
-      setDragPos({
-        left: dragRef.current.origLeft + (ev.clientX - dragRef.current.startX),
-        top:  dragRef.current.origTop  + (ev.clientY - dragRef.current.startY),
-      })
-    }
-    function onUp() {
-      dragRef.current = null
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    const base = desktopPanelStyle()
+    return dragPos ? { ...base, top: dragPos.top, left: dragPos.left, transform: 'none' } : base
   }
 
   return createPortal(
@@ -811,31 +786,56 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         />
       )}
       {/* Backdrop — in fullscreen it becomes the aquamarine wave surround (paper floats over it). */}
-      <div className={`fixed inset-0 z-[90] ${fullscreen ? 'inkwave-editor-surface' : ''}`} aria-hidden="true" onMouseDown={onClose} />
+      {/* Desktop / fullscreen backdrop (pointerdown — iOS withholds mousedown). The phone sheet has
+          none: the editor's outside-tap rule closes it, and a scrim over the footer would eat the
+          tap meant for the next toolbar button. */}
+      {(!isTouchDevice() || fullscreen) && <div className={`fixed inset-0 z-[90] ${fullscreen ? 'inkwave-editor-surface' : ''}`} aria-hidden="true" onPointerDown={onClose} />}
       <div
         ref={panelRef}
         role="dialog" aria-label="Citations"
-        className="iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
+        {...{ [PANEL_ATTR]: 'bib' }}
+        className={`iw-nightable z-[91] bg-white font-serif text-sm text-stone-600 flex flex-col ${isTouchDevice() && !fullscreen ? PHONE_SHEET_CLASS : fullscreen ? 'shadow-xl' : DESKTOP_PANEL_CLASS}`}
         style={fullscreen
           ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: isTouchDevice() ? '100vw' : 'min(864px, 96vw)', overflow: 'hidden', borderRadius: 0, ...(isTouchDevice() ? {} : { borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }) }
-          : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
+          : isTouchDevice()
+            // Phone: the shared sheet above the toolbar (styles/panelSheet.ts); the list scrolls inside.
+            ? { ...phoneSheetStyle(), minHeight: 'calc(var(--iw-vv-h, 100dvh) * 0.3)', overflow: 'hidden' }
+            : { ...panelStyle(), minHeight: 320, resize: 'both', overflow: 'hidden' }}
         onMouseDown={e => e.stopPropagation()}
       >
-        {/* Slim drag grip (fullscreen toggle lives beside the × in the Add row). */}
-        <div
-          className="flex items-center justify-center pt-2 pb-1"
-          style={{ cursor: fullscreen ? 'default' : 'grab' }}
-          onMouseDown={fullscreen ? undefined : onHeaderMouseDown}
-        >
-          {!fullscreen && <div className="w-9 h-1 rounded-full bg-stone-200" />}
-        </div>
+        {(isTouchDevice() || !fullscreen) ? (
+          // The shared sheet header (title, ⛶, ×) — the same head as every other panel. On the
+          // desktop it is also the drag grip; full screen keeps its own strip (nothing to drag).
+          <SheetHeader title="Citations" onClose={onClose}
+            style={isTouchDevice() ? undefined : { cursor: 'grab' }}
+            onPointerDownCapture={isTouchDevice() ? undefined : onDragPointerDown}
+            right={
+              <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
+                className="flex items-center justify-center rounded-full"
+                style={{ minWidth: 44, minHeight: 44, margin: -8, fontSize: 18, lineHeight: 1, color: 'var(--iw-pill-fg, #78716c)' }}
+              >
+                {fullscreen ? '🗗' : '⛶'}
+              </button>
+            }
+          />
+        ) : (
+          /* Desktop: slim drag grip (fullscreen toggle lives beside the × in the Add row). */
+          <div
+            className="flex items-center justify-center pt-2 pb-1"
+            style={{ cursor: fullscreen ? 'default' : 'grab' }}
+            onPointerDown={fullscreen ? undefined : onDragPointerDown}
+          >
+            {!fullscreen && <div className="w-9 h-1 rounded-full bg-stone-200" />}
+          </div>
+        )}
 
         {/* Hidden input for embedding source PDFs (📎 on a library row triggers it) */}
         <input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" className="hidden"
           onChange={e => void onPdfChosen(e)} />
 
-        {/* Extension promo — top of panel (dismissible) */}
-        {!extDismissed && (
+        {/* Extension promo — top of panel (dismissible). Desktop only: there is no Chrome/Firefox
+            extension on a phone, and on a 390px sheet the pitch ran to three lines above the list. */}
+        {!extDismissed && !isTouchDevice() && (
           <div className="px-4 py-2.5 border-b border-stone-100 flex items-center justify-between"
             style={{ background: 'var(--iw-subtle-bg, #fcfcfb)' }}>
             <span className="text-xs text-stone-500">Download the Inkwave citation extension for single-click import on any page, using Claude Sonnet</span>
@@ -873,11 +873,14 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             >
               {busy ? '…' : 'Add'}
             </button>
-            {/* Close — big ×, next to Add (the old titled header bar is gone). */}
+            {/* Desktop: ⛶ and a big × next to Add (the old titled header bar is gone). Phone has
+                both in the sheet header. */}
+            {!isTouchDevice() && fullscreen && <>
             <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
               className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-500 hover:text-[#302438] hover:border-stone-300 text-base leading-none flex items-center justify-center">{fullscreen ? '🗗' : '⛶'}</button>
             <button type="button" onClick={onClose} title="Close (Esc)"
               className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-500 hover:text-stone-600 hover:border-stone-300 text-2xl leading-none flex items-center justify-center">×</button>
+            </>}
           </div>
           {notice && (
             <div className="mt-1.5 text-[11px]" style={{ color: notice.kind === 'err' ? '#b91c1c' : notice.kind === 'warn' ? '#b45309' : '#15803d' }}>
@@ -937,8 +940,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             </div>
             {/* ↻ before + New (swapped per Peter, 2026-07-10). */}
             <button type="button" onClick={openNewRef}
-              className="h-7 px-2 rounded border flex items-center whitespace-nowrap"
-              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
+              className="h-8 px-3 rounded border flex items-center whitespace-nowrap"
+              style={{ background: `${INK}12`, borderColor: 'var(--iw-cite-color, #302438)', color: 'var(--iw-cite-color, #302438)' }}>
               + New
             </button>
           </div>
@@ -948,7 +951,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
               shipped inert). `citeClickOpensReader` and `importLegacyLibrary` were written, tested
               and then never given a control, so the first did nothing at all and the second left a
               writer's entire previous library unreachable after the per-document change. */}
-          <div className="flex items-center gap-3 flex-wrap px-1 pt-1" style={{ fontSize: '12px', color: 'var(--iw-pill-fg, #78716c)' }}>
+          <div className="flex items-center gap-3 flex-wrap px-1 pt-1" style={{ fontSize: SHEET_TYPE.small, color: 'var(--iw-pill-fg, #78716c)' }}>
             <label className="flex items-center gap-1.5 cursor-pointer" title="Clicking a citation opens its web page in the reader panel, instead of the PDF viewer">
               <input type="checkbox" checked={clickReads}
                 onChange={e => { setCiteClickOpensReader(e.target.checked); setClickReads(e.target.checked) }} />
@@ -971,7 +974,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           </div>
         </div>
 
-        <div className={`iw-snap-scroll flex-1 overflow-y-auto px-4 py-2 ${isTouchDevice() ? 'order-1' : ''} ${fullscreen ? 'grid grid-cols-2 gap-x-6 content-start items-start' : ''}`}>
+        <div className={`iw-snap-scroll flex-1 min-h-0 overflow-y-auto px-4 py-2 ${isTouchDevice() ? 'order-1' : ''} ${fullscreen ? 'grid grid-cols-2 gap-x-6 content-start items-start' : ''}`}>
           {!helpDismissed && (
             <div className={`flex items-start gap-2 mb-2 ${fullscreen ? 'col-span-2' : ''}`}>
               <div className="text-[11px] text-stone-500">

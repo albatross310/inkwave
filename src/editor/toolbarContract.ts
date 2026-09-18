@@ -16,7 +16,6 @@
 // (settings) are slots too; only ▲ and ⋮ are fixed. A new slot MUST NOT add itself to
 // DEFAULT_SLOTS.
 import { prodLedgerEnabled } from '../productivity/ledgerFlag'
-import { musicEnabled } from '../music/flag'
 
 export type SlotId =
   | 'bib' | 'guide' | 'math' | 'receipt' | 'page' | 'style' | 'settings'
@@ -63,9 +62,8 @@ const SLOT_LIVE: Record<SlotId, () => boolean> = {
   // feat/prod-ledger — the Pomodoro/ledger drop-up. Default OFF; the countdown is the other door.
   clock: prodLedgerEnabled,
   media: () => true, // photo/audio/video import — landed 2026-07-17
-  // feat/music-piece-photo — the music BAR trigger, behind the SAME flag the music module ships
-  // behind, so this slot and the bar's body turn on together.
-  music: musicEnabled,
+  // feat/music-piece-photo — the music BAR trigger.
+  music: () => true,
 }
 
 /** Is this slot renderable right now? The ONE definition of "shows up". */
@@ -307,4 +305,42 @@ export function resolveToolbarRow(read: ToolbarConfigRead, globalRow: readonly S
 /** May a resolved row be persisted back into this document? Never on a failed read. */
 export function mayPersistConfig(read: ToolbarConfigRead): boolean {
   return read.kind !== 'error'
+}
+
+// ─── Population 3: the drop-up PANELS ────────────────────────────────────────
+// The floating surfaces the footer opens (P page, ⚙ settings, i guide, ❐ media, ⋮ options, the ▲
+// drawer, and the drawer's ◈ ☁ ‟ Σ ⁝). The same ONE-VARIABLE rule as the bar layers: the editor
+// holds `openPanel: PanelId | null`, every trigger is a dumb toggle, and "two panels open at once"
+// is unrepresentable. Peter, 2026-09-17 (iPhone): the P panel would not close — each panel owned
+// its own boolean, so tapping another button opened a second surface over the first and nothing
+// but the panel's own × (or a keyboard Escape the phone does not have) closed it.
+//
+// Three rules, one owner: a panel closes on (a) a tap anywhere outside it, (b) a tap on any OTHER
+// toolbar button — that button's panel opens instead, (c) a tap on its own button again.
+// (a) is ONE document listener over `tapClosesPanel`; (b)+(c) fall out of `planPanelToggle`.
+export type PanelId =
+  | 'page' | 'settings' | 'guide' | 'media' | 'options' | 'math' | 'clock'
+  | 'drawer'  // the ▲ overflow strip itself — a panel, so opening anything else retracts it
+  | 'receipt' | 'sync' | 'bib' // the ◈ ☁ ‟ surfaces reached from the drawer (or the row)
+
+/** Tapping the open panel's button closes it; tapping any other button swaps to that panel. */
+export function planPanelToggle(active: PanelId | null, which: PanelId): PanelId | null {
+  return active === which ? null : which
+}
+
+/** A panel's SURFACE carries `data-iw-panel="<id>"`; its TRIGGER button `data-iw-panel-trigger="<id>"`. */
+export const PANEL_ATTR = 'data-iw-panel'
+export const PANEL_TRIGGER_ATTR = 'data-iw-panel-trigger'
+
+/**
+ * Rule (a): does a pointerdown on `target` close the open panel? Anywhere except the panel's own
+ * surface and its own trigger. The trigger is exempt so the following click can TOGGLE it shut
+ * (rule c) — closing on pointerdown and then re-opening on click was the "∑ never toggles" bug.
+ * Any OTHER trigger is NOT exempt: pointerdown closes, its click opens its own panel (rule b).
+ */
+export function tapClosesPanel(target: Element | null, open: PanelId): boolean {
+  if (!target?.closest) return true
+  if (target.closest(`[${PANEL_ATTR}="${open}"]`)) return false
+  if (target.closest(`[${PANEL_TRIGGER_ATTR}="${open}"]`)) return false
+  return true
 }

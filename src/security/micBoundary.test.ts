@@ -1,31 +1,33 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
-import { CAMERA_CAPABLE, MIC_CAPABLE, MIC_FORBIDDEN, MIC_PATTERN, PATTERN_CARRIER, isCameraOnly, micPolicyAllows } from './micBoundary'
-import * as copy from './copy'
+import { CAMERA_CAPABLE, MIC_CAPABLE, MIC_PATTERN, PATTERN_CARRIER, isCameraOnly, micPolicyAllows } from './micBoundary'
 
-// The firebreak under test (micBoundary.ts has the argument). Three layers:
+// The firebreak under test (micBoundary.ts has the argument). Two layers:
 //   1. `Permissions-Policy: microphone=()` in vercel.json — the platform chokepoint, already live.
-//   2. A source allow-list — which module may name a capture API.
-//   3. An import-graph firebreak — nothing REACHABLE from src/music/lesson/ may be mic-capable.
+//   2. A source allow-list — which module may name a capture API — swept over the whole of src/.
 //
-// ─── WHY LAYER 3 IS FOLLOWED RATHER THAN GREPPED ─────────────────────────────────────────────
+// ─── THE LAYER THAT CAME OFF, AND WHY THAT IS NOT A WEAKENING ────────────────────────────────
 //
-// `copy.test.ts` already asserts no capture API appears in `lesson/`'s own files. That assertion is
-// true and will KEEP being true after it stops meaning anything: the moment §A5 puts getUserMedia
-// behind `src/music/recording/recorder.ts`, `lesson/` can `import { openMic }` and the grep still
-// passes. A firebreak whose instrument cannot see the thing that breaks it is the house disease
-// wearing the exact costume it wore in `canvasShapingMatchesEditor`. So the import graph is walked.
+// There was a third: an IMPORT-GRAPH firebreak asserting that nothing reachable from
+// `src/music/lesson/` was mic-capable, walked rather than grepped, because the moment §A5 puts
+// getUserMedia behind a helper a grep of a directory's OWN files passes while that directory
+// imports the helper. The argument was right and it is not retracted. Its SUBJECT is what went:
+// the lesson layer was ripped out on 2026-09-18, and a protected directory that does not exist
+// makes "nothing reachable from it is mic-capable" true of the empty set — passing forever, meaning
+// nothing, exactly the empty-list disease this repo keeps paying for. So it came off WITH the
+// feature rather than being left as decoration.
 //
-// ─── AND WHY THE WALK ITSELF IS PROVED FIRST ─────────────────────────────────────────────────
-//
-// "Nothing reachable from lesson/ is mic-capable" passes trivially if the resolver reaches NOTHING
-// — a broken extension guess, a bad path join, and the reachable set is just the start files. That
-// is the empty-list probe CLAUDE.md records. So the walk must first be shown to CROSS A MODULE
-// BOUNDARY it is known to cross (lesson/session.ts → ../types.ts, a real import), before any
-// verdict about what it did not find is read.
+// ⚠ WHAT THE SWEEP CANNOT DO, SO IT IS SAID HERE: while `MIC_CAPABLE` is empty, the repo-wide sweep
+// below is strictly STRONGER than any reachability claim — nothing in src/ names a capture API at
+// all, so nothing can reach one. That equivalence ENDS the day `MIC_CAPABLE` gains an entry. At
+// that moment the sweep starts PERMITTING a module, cannot say who may import it, and the import
+// walk has to come back (it is in this file's git history, with its empty-list probe intact).
 
-const REPO = resolve(__dirname, '../../..')
+// ⚠ DEPTH-SENSITIVE, and it bit on the move out of `src/music/lesson/`: this was `'../../..'` and
+// silently pointed one directory above the repo. It failed LOUDLY (ENOENT on vercel.json) only
+// because layer 1 reads a real file — the sweep below would have gone quiet instead.
+const REPO = resolve(__dirname, '../..')
 const SRC = join(REPO, 'src')
 
 // ─── The instruments ─────────────────────────────────────────────────────────
@@ -72,22 +74,6 @@ function importsOf(file: string): string[] {
   return specs
 }
 
-/** Every file reachable from `roots` by following relative imports, transitively. */
-function reachableFrom(roots: string[]): Set<string> {
-  const seen = new Set<string>()
-  const stack = [...roots]
-  while (stack.length) {
-    const f = stack.pop()!
-    if (seen.has(f)) continue
-    seen.add(f)
-    for (const spec of importsOf(f)) {
-      const r = resolveImport(f, spec)
-      if (r && !seen.has(r)) stack.push(r)
-    }
-  }
-  return seen
-}
-
 const rel = (f: string) => relative(REPO, f).replace(/\\/g, '/')
 
 // ─── 0. Prove the instruments ────────────────────────────────────────────────
@@ -119,38 +105,9 @@ describe('instrument — the capture-API scanner fires', () => {
   })
 })
 
-describe('instrument — the import walk actually CROSSES MODULE BOUNDARIES', () => {
-  // THE CONTROL THAT MAKES LAYER 3 MEAN ANYTHING. If this fails, "nothing mic-capable is
-  // reachable" is a statement about an empty set.
-  const lessonRoots = allSourceFiles(join(SRC, 'music', 'lesson'))
-  const reach = reachableFrom(lessonRoots)
-
-  it('finds the lesson module itself', () => {
-    expect(lessonRoots.length).toBeGreaterThanOrEqual(5)
-  })
-
-  it('REACHES ../types.ts — a real import, outside the lesson directory', () => {
-    // session.ts → './types' → '../types' (the §1 Piece contract). If the resolver cannot follow
-    // that, it cannot follow lesson/ → recording/ either, and the firebreak is decoration.
-    const reached = [...reach].map(rel)
-    expect(reached, 'the walk never left src/music/lesson/').toContain('src/music/types.ts')
-  })
-
-  it('reaches strictly MORE than the roots (it traverses, it does not just echo)', () => {
-    expect(reach.size).toBeGreaterThan(lessonRoots.length)
-  })
-
-  it('resolveImport handles the real extensions', () => {
-    const session = join(SRC, 'music', 'lesson', 'session.ts')
-    expect(resolveImport(session, './types')).toBe(join(SRC, 'music', 'lesson', 'types.ts'))
-    expect(resolveImport(session, '../types')).toBe(join(SRC, 'music', 'types.ts'))
-    expect(resolveImport(session, 'uuid')).toBeNull() // bare → not followed; see the scope note
-  })
-})
-
 // ─── 1. Layer 1 — the HTTP header (the real chokepoint) ──────────────────────
 
-describe('layer 1 — Permissions-Policy is the line, and the copy is bound to it', () => {
+describe('layer 1 — Permissions-Policy is the line', () => {
   const vercel = JSON.parse(readFileSync(join(REPO, 'vercel.json'), 'utf8'))
   const policy: string = vercel.headers
     .flatMap((h: { headers: { key: string; value: string }[] }) => h.headers)
@@ -178,23 +135,6 @@ describe('layer 1 — Permissions-Policy is the line, and the copy is bound to i
     expect(micPolicyAllows('camera=(), geolocation=()')).toBe(true)
   })
 
-  it('THE BINDING: while the mic is disabled, the lesson may claim it cannot record', () => {
-    // The claim and the policy move together or this test fails. Flip the header to
-    // `microphone=(self)` for §A5's recordings and THIS FIRES — which is the prompt to rewrite the
-    // copy, /privacy, and this assertion, deliberately, in one commit.
-    const claimsNoMic = /does not record audio|cannot record audio|not recording/i.test(
-      Object.values(copy).filter((v) => typeof v === 'string').join(' '),
-    )
-    if (!micPolicyAllows(policy)) {
-      expect(claimsNoMic, 'mic is off but no copy says so — the reassurance is missing').toBe(true)
-    } else {
-      expect(
-        claimsNoMic,
-        'THE MIC IS NOW ENABLED but the lesson copy still says Inkwave cannot record. ' +
-          'Rewrite the copy and /privacy before shipping this header.',
-      ).toBe(false)
-    }
-  })
 })
 
 // ─── 2. Layer 2 — the source allow-list ──────────────────────────────────────
@@ -294,84 +234,6 @@ describe('the camera exemption is real, discriminates, and cannot hide a microph
   })
 })
 
-// ─── 3. Layer 3 — the import-graph firebreak (the one that survives a helper) ─
-
-describe('layer 3 — the lesson path cannot REACH a microphone, transitively', () => {
-  for (const protectedDir of MIC_FORBIDDEN) {
-    it(`nothing reachable from ${protectedDir} is mic-capable`, () => {
-      const roots = allSourceFiles(join(REPO, protectedDir))
-      const reach = [...reachableFrom(roots)]
-      const capable = reach.filter(isMicCapable).map(rel).filter((f) => f !== PATTERN_CARRIER)
-      expect(
-        capable,
-        `${protectedDir} can reach a microphone. §A3's promise to the teacher is that this ` +
-          `screen cannot. If that is now intended, the guarantee CHANGES SHAPE and the copy must ` +
-          `say so — do not simply delete this test.`,
-      ).toEqual([])
-    })
-  }
-
-  it('KNOWN-NEGATIVE: the firebreak FIRES when the lesson imports a mic-capable module', () => {
-    // THE REAL EROSION PATH, SIMULATED WHERE IT WILL ACTUALLY HAPPEN. §A5's practice recordings
-    // land in the media lane (`src/media/` — importMedia/mediaStore are LIVE as of 2026-07-17 and
-    // are that feature's prerequisite), and the lesson panel has every innocent reason to import
-    // from there one day: an attachment, a thumbnail, a type. The moment that lane gains
-    // `getUserMedia`, THIS is the import that hands the lesson path a microphone.
-    //
-    // The fixture is CROSS-DIRECTORY on purpose. A same-directory fixture would have proved only
-    // that the walk resolves './x' — it would not prove the walk LEAVES the lesson module, which is
-    // the entire claim. (copy.test.ts's grep of lesson/'s own files stays green through all of
-    // this, which is why that guard is not the one doing the work here.)
-    const fakeRecorder = join(SRC, 'media', '__fake_recorder_fixture.ts')
-    const fakeLessonFile = join(SRC, 'music', 'lesson', '__fake_importer_fixture.ts')
-    const { writeFileSync, rmSync } = require('node:fs') as typeof import('node:fs')
-    try {
-      writeFileSync(fakeRecorder, 'export const open = () => navigator.mediaDevices.getUserMedia({ audio: true })\n')
-      writeFileSync(fakeLessonFile, "import { open } from '../../media/__fake_recorder_fixture'\nexport const go = open\n")
-      const roots = allSourceFiles(join(SRC, 'music', 'lesson'))
-      const reach = [...reachableFrom(roots)]
-      const capable = reach.filter(isMicCapable).map(rel).filter((f) => f !== PATTERN_CARRIER)
-      expect(
-        capable,
-        'the walk did not follow lesson/ → src/media/ — the firebreak cannot see the §A5 path',
-      ).toContain('src/media/__fake_recorder_fixture.ts')
-      // And prove the IMPORT is what carried it — the importer itself names no API, so a
-      // file-local grep would call this clean.
-      expect(isMicCapable(fakeLessonFile)).toBe(false)
-      // Layer 2 must catch it too, from the other direction: an unlisted mic-capable module. The
-      // camera exclusion (same as the main sweep) must NOT rescue it — the fixture is not the
-      // declared camera module and asks for `{audio:true}`.
-      const offenders = allSourceFiles(SRC)
-        .filter((f) => rel(f) !== PATTERN_CARRIER)
-        .filter((f) => !MIC_CAPABLE.some((p) => rel(f).startsWith(p)))
-        .filter((f) => !isCameraOnly(rel(f), stripComments(readFileSync(f, 'utf8'))))
-        .filter(isMicCapable)
-        .map(rel)
-      expect(offenders).toContain('src/media/__fake_recorder_fixture.ts')
-    } finally {
-      rmSync(fakeRecorder, { force: true })
-      rmSync(fakeLessonFile, { force: true })
-    }
-  })
-
-  it('the media lane is REACHED by the sweep at all (an unswept lane cannot be judged)', () => {
-    // §A5's recordings will live in `src/media/`. If layer 2's sweep never walks that directory,
-    // "no module outside MIC_CAPABLE reaches for a microphone" would be true of a set that does not
-    // include the one lane most likely to break it — the empty-list probe, one directory over.
-    const swept = allSourceFiles(SRC).map(rel)
-    expect(swept).toContain('src/media/mediaStore.ts')
-  })
-
-  it('and the firebreak is CLEAN again once the fixture is gone', () => {
-    // Proves the previous test's failure was the fixture and not a permanent state — a negative
-    // that leaves the suite red forever would be indistinguishable from a real break.
-    const roots = allSourceFiles(join(SRC, 'music', 'lesson'))
-    const capable = [...reachableFrom(roots)].filter(isMicCapable).map(rel)
-      .filter((f) => f !== PATTERN_CARRIER)
-    expect(capable).toEqual([])
-  })
-})
-
 describe('the carrier exclusion cannot become a hole', () => {
   it('micBoundary.ts is imported by TEST FILES ONLY', () => {
     // The exemption above is safe ONLY while this file is inert data. If production code imports
@@ -379,7 +241,7 @@ describe('the carrier exclusion cannot become a hole', () => {
     // exactly where a microphone would hide. Same guard `src/copy/claims.test.ts` puts on
     // claimMatchers.ts, for the same reason.
     const importers = allSourceFiles(SRC).filter((f) =>
-      importsOf(f).some((spec) => resolveImport(f, spec) === join(SRC, 'music', 'lesson', 'micBoundary.ts')),
+      importsOf(f).some((spec) => resolveImport(f, spec) === join(SRC, 'security', 'micBoundary.ts')),
     )
     expect(importers.map(rel), 'production code imports the pattern carrier').toEqual([])
   })
@@ -387,16 +249,16 @@ describe('the carrier exclusion cannot become a hole', () => {
   it('and it IS imported by the tests (an exclusion nothing uses proves nothing)', () => {
     // If no test imported it, the "tests only" assertion above would pass vacuously on a file that
     // had simply fallen out of use — and MIC_PATTERN would be guarding nothing at all.
-    const testFiles = readdirSync(join(SRC, 'music', 'lesson')).filter((f) => /\.test\.tsx?$/.test(f))
+    const testFiles = readdirSync(join(SRC, 'security')).filter((f) => /\.test\.tsx?$/.test(f))
     const importers = testFiles.filter((f) =>
-      readFileSync(join(SRC, 'music', 'lesson', f), 'utf8').includes("from './micBoundary'"),
+      readFileSync(join(SRC, 'security', f), 'utf8').includes("from './micBoundary'"),
     )
-    expect(importers.length).toBeGreaterThanOrEqual(2)
+    expect(importers.length).toBeGreaterThanOrEqual(1)
   })
 })
 
-// SCOPE, STATED: bare specifiers are not followed, so a microphone reached through an npm package
-// would not be seen. That is a real hole and it is named rather than implied. Layer 1 covers it
-// anyway — `Permissions-Policy: microphone=()` blocks the platform API no matter who calls it — and
-// layer 2 sweeps `src/`. A dependency that opens a mic would need the header changed to work at
+// SCOPE, STATED: layer 2 sweeps `src/` only, so a microphone reached through an npm package would
+// not be seen here. That is a real hole and it is named rather than implied. Layer 1 covers it
+// anyway — `Permissions-Policy: microphone=()` blocks the platform API no matter who calls it. A
+// dependency that opens a mic would need the header changed to work at
 // all, which is the decision point this whole file routes through.

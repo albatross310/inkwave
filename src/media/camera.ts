@@ -4,7 +4,7 @@
 //
 // The constraints are `{ video: true, audio: false }` — a photo button has no use for a microphone.
 // getUserMedia is CAMERA-OR-MICROPHONE and a source scan cannot read the constraints, so this file
-// is the single declared `CAMERA_CAPABLE` entry in the mic firebreak (`music/lesson/micBoundary.ts`).
+// is the single declared `CAMERA_CAPABLE` entry in the mic firebreak (`src/security/micBoundary.ts`).
 // The microphone guarantee does NOT weaken: `Permissions-Policy: microphone=()` in vercel.json is
 // UNTOUCHED, so even a mistaken `audio:true` here would be denied by the browser at the platform.
 // The camera is granted `camera=(self)` (this origin only) — the change this feature required.

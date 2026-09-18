@@ -190,6 +190,25 @@ export function Scroll({
   // with no vertical movement. rAF-throttled.
   const surfaceRef = useRef<HTMLDivElement>(null)
   const sheetRef = useRef<HTMLDivElement>(null)
+  // `--iw-paper-w` = the paper's LIVE painted width (page size × zoom). The desktop panels size
+  // themselves from it (styles/panelSheet.ts desktopPanelStyle: "a bit under width of paper, so
+  // they can resize with whole page zoom" — Peter, 2026-09-18). Written on <html> so a portalled
+  // panel anywhere in the tree can read it.
+  useEffect(() => {
+    const el = sheetRef.current
+    // Only the LIVE editor's paper: the loading shell mounts a second Scroll (an empty facsimile,
+    // narrower) whose observer would otherwise be the last to write before it unmounts.
+    if (!el || loadingTwinkles || typeof ResizeObserver === 'undefined') return
+    const write = () => document.documentElement.style.setProperty('--iw-paper-w', `${Math.round(el.getBoundingClientRect().width)}px`)
+    write()
+    const ro = new ResizeObserver(write)
+    ro.observe(el)
+    // The GPU magnify is a TRANSFORM — the paper's layout box never changes, so ResizeObserver
+    // stays silent while the painted width does change. Subscribe to the magnify owner too, so
+    // the panels follow the water zoom (Peter, 2026-09-18: "panels also follow the wave/GPU zoom").
+    const unsub = subscribeMagnify(write)
+    return () => { ro.disconnect(); unsub() }
+  }, [loadingTwinkles])
   // Hybrid zoom (desktop live editor only): the paper sits inside a size-compensated wrapper that
   // the magnify transform scales. paperRef is optional (the loading shell passes none) — keep a
   // local ref so the wrapper machinery works on every hybrid surface.
@@ -1347,6 +1366,29 @@ export function Scroll({
   // mounts synchronously into this stable host before the atomic gate opens; no art decode, runtime
   // RNG, or server feed exists. Intro objects have one finite opacity window. The overlapping desktop
   // scroll population is driven later by absolute scrollTop; phone has no marks once water rests.
+  // ⚠ THE UNCOVER IS A CROSS-FADE, NOT A CUT (Peter's "flick", 60fps strip 2026-09-17). Phone: at
+  // wave-rest `covered` drops, and with it the surface's z-raise over the shell — so the paper
+  // faded in UNDERNEATH the still-opaque shell, and the shell's unmount 850ms later was a hard
+  // water→paper cut. `iw-uncovering` keeps the z-raise for the fade and lets the background
+  // colour transition in over the shell's held water (index.css).
+  // Two effects, deliberately: StrictMode replays an effect (run → cleanup → run), and a single
+  // effect that both flipped the ref and armed the timer lost the timer to its own cleanup while
+  // the ref said "already handled" — the surface stayed z-raised over the toolbar forever.
+  const [uncovering, setUncovering] = useState(false)
+  const wasCovered = useRef(covered)
+  // useLayoutEffect, not useEffect: a passive effect lands one PAINT after the commit that dropped
+  // `covered`, so for that frame the surface had neither class — z-raise gone, waves un-hidden,
+  // fade already started underneath the shell (seen at 6x CPU throttle, 2026-09-18). The layout
+  // effect re-renders before that paint, so `iw-uncovering` replaces `iw-wave-covered` atomically.
+  useLayoutEffect(() => {
+    if (wasCovered.current && !covered && phone) setUncovering(true)
+    wasCovered.current = covered
+  }, [covered, phone])
+  useEffect(() => {
+    if (!uncovering) return
+    const t = window.setTimeout(() => setUncovering(false), 900)
+    return () => window.clearTimeout(t)
+  }, [uncovering])
   const twinkleRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const host = twinkleRef.current
@@ -1371,7 +1413,7 @@ export function Scroll({
   }, [fill, phone, waveMode, covered, loadingTwinkles])
 
   return (
-    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}`}
+    <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}${uncovering ? ' iw-uncovering' : ''}`}
       style={{
         '--iw-editor-zoom': editorZoom,
         // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the

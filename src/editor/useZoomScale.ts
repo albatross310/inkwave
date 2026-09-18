@@ -21,8 +21,13 @@ function scaleFor(baseline: number): number {
   return Number(Math.min(4, Math.max(0.25, 1 / ratio)).toFixed(4)) // constant size both directions
 }
 
+// UNLOCKED (Peter, 2026-09-18: "toolbars unlocked so cmd +/- resizes them like master"): the
+// chrome now follows browser zoom like the page does, so the hook returns 1. What survives is the
+// RATIO — written to `--iw-hairline-k` (= 1 / zoom ratio) on <html> so the pill outline, the
+// circles and the bar borders can hold ONE DEVICE PIXEL at any zoom ("line widths stay 1px under
+// cmd +/-"): `border-width: calc(1px * var(--iw-hairline-k))`, index.css HAIRLINES.
 export function useZoomScale(): number {
-  const [scale, setScale] = useState(() => scaleFor(readBaseline()))
+  const [scale, setScale] = useState(1)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -31,7 +36,10 @@ export function useZoomScale(): number {
       baseline = window.devicePixelRatio || 1
       try { localStorage.setItem(BASELINE_KEY, String(baseline)) } catch { /* private mode */ }
     }
-    const compute = () => setScale(scaleFor(baseline))
+    const compute = () => {
+      document.documentElement.style.setProperty('--iw-hairline-k', String(scaleFor(baseline)))
+      setScale(1)
+    }
     compute()
     window.addEventListener('resize', compute) // DPR/zoom changes fire a resize
     return () => window.removeEventListener('resize', compute)

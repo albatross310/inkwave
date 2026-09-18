@@ -35,6 +35,28 @@ export const WAVE_MARK_TIMELINE_MS = WAVE_INTRO_MS / WAVE_MARK_PLAYBACK_RATE
 // viewport width, so a mathematically correct stored tangent visibly misses the painted curve.
 export const WAVE_SCENE_LEFT_PX = -2 * WAVE_TILE_PX
 
+// ─── VIEWPORT CULL (Peter, iPhone 12, 2026-09-17: the loading waves stutter) ─────────────────────
+// The checked-in scene is 2800×1680 — a desktop's worth of water — and every one of its 192 marks
+// animates opacity on the compositor, so each is its own layer. Mounted whole on a 390×844 phone
+// that was 208 compositor layers and 13.5 megapixels of backing store (two 4.7 Mpx fields) behind
+// a 0.33 Mpx screen, and the drift hitched 100–180ms at a time. A mark that can never enter the
+// viewport paints nothing, so it is not mounted: the fields horizontally translate at most one tile
+// (the drift) plus the coast brake (d = vT/2 ≈ 72px), and never vertically, so a mark is reachable
+// iff its scene x lies within the viewport plus CULL_MARGIN_PX each side and its y within the
+// viewport height plus one tile. The fields are sized to that same box. The scene, its clocks and
+// every mounted mark's coordinates and windows are unchanged — this is purely which nodes exist.
+// If the viewport later grows past the box (rotation, desktop resize) the host is rebuilt against
+// the new box; WAAPI startTimes are re-stamped to the same epoch, so the choreography is continuous.
+const CULL_MARGIN_PX = 2 * WAVE_TILE_PX
+type CullBox = { w: number; h: number }
+function cullBox(): CullBox {
+  if (typeof window === 'undefined') return { w: WAVE_SCENE_WIDTH, h: WAVE_SCENE_HEIGHT }
+  return { w: window.innerWidth + 2 * CULL_MARGIN_PX, h: window.innerHeight + WAVE_TILE_PX }
+}
+// Scene x is field-relative; the field's left edge sits at WAVE_SCENE_LEFT_PX (= -CULL_MARGIN_PX).
+const reachable = (mark: { x: number; y: number }, box: CullBox): boolean =>
+  mark.x >= 0 && mark.x <= box.w && mark.y >= -WAVE_TILE_PX && mark.y <= box.h
+
 type Group = 'a' | 'b'
 type Mode = 'anim' | 'coast' | 'off'
 
@@ -53,6 +75,8 @@ type HostState = {
   holding: boolean
   epoch: number | null
   scrollTop: number
+  box: CullBox
+  want: Parameters<typeof syncTwinkles>[1] | null
 }
 const hosts = new Map<HTMLElement, HostState>()
 let listenersInstalled = false
@@ -93,28 +117,29 @@ function prepareHost(host: HTMLElement): HostState {
   const old = hosts.get(host)
   if (old) return old
 
+  const box = cullBox()
   const set = document.createElement('div')
   set.className = 'iw-twk-set iw-scene-set'
   const fields = { a: document.createElement('div'), b: document.createElement('div') }
   for (const group of ['a', 'b'] as const) {
     const field = fields[group]
     field.className = `iw-twk-field iw-scene-field ${group === 'a' ? 'iw-twk-fa' : 'iw-twk-fb'}`
-    field.style.width = `${WAVE_SCENE_WIDTH}px`
-    field.style.height = `${WAVE_SCENE_HEIGHT}px`
+    field.style.width = `${Math.min(WAVE_SCENE_WIDTH, box.w)}px`
+    field.style.height = `${Math.min(WAVE_SCENE_HEIGHT, box.h)}px`
     field.style.left = `${WAVE_SCENE_LEFT_PX}px`
     field.style.right = 'auto'
     field.style.marginLeft = '0'
     set.appendChild(field)
   }
 
-  const intro = WAVE_SCENE.intro.map((mark) => {
+  const intro = WAVE_SCENE.intro.filter((mark) => reachable(mark, box)).map((mark) => {
     const el = makeMark(mark.kind, mark.x, mark.y, mark.angle, mark.size)
     el.dataset.sceneId = mark.id
     el.dataset.waveOffset = String(mark.offsetY)
     fields[mark.group].appendChild(el)
     return { mark, el }
   })
-  const scroll = WAVE_SCENE.scroll.map((mark) => {
+  const scroll = WAVE_SCENE.scroll.filter((mark) => reachable(mark, box)).map((mark) => {
     const el = makeMark('dash', mark.x, mark.y, mark.angle, mark.size)
     el.classList.add('iw-scene-scroll')
     el.dataset.sceneId = mark.id
@@ -131,6 +156,7 @@ function prepareHost(host: HTMLElement): HostState {
   const state: HostState = {
     host, set, fields, intro, scroll, mode: 'anim', phone: false,
     holding: false, epoch: null, scrollTop: host.parentElement?.scrollTop ?? 0,
+    box, want: null,
   }
   hosts.set(host, state)
 
@@ -322,6 +348,23 @@ function installListeners(): void {
     pruneHosts()
     for (const state of hosts.values()) cancelIntro(state)
   })
+  // The cull box was sized to the viewport at mount; a viewport that outgrows it (rotation,
+  // desktop resize) would leave water with no marks past the old edge. Rebuild against the new box.
+  let resizeTimer = 0
+  window.addEventListener('resize', () => {
+    window.clearTimeout(resizeTimer)
+    resizeTimer = window.setTimeout(() => {
+      const box = cullBox()
+      pruneHosts()
+      for (const [host, state] of [...hosts]) {
+        if (box.w <= state.box.w && box.h <= state.box.h) continue
+        const want = state.want
+        cancelIntro(state)
+        hosts.delete(host)
+        if (want) syncTwinkles(host, want)
+      }
+    }, 150)
+  })
 }
 
 export function syncTwinkles(
@@ -334,6 +377,7 @@ export function syncTwinkles(
   const previous = state.mode
   state.mode = want.mode
   state.phone = want.phone
+  state.want = want
   state.set.style.display = want.sparks || want.dashes ? '' : 'none'
 
   if (want.mode === 'anim') {

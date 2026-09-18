@@ -33,8 +33,6 @@ function aPiece(over: Partial<Piece> = {}): Piece {
     reference_tracks: [],
     annotations: [],
     heatmap: [],
-    lesson_notes: [],
-    assignments: [],
     recordings: [],
     practice: { tasks: [], sessions: [], schedule: { planned: {}, shared_with_teacher: false } },
     provenance: { hashes: {}, ots_anchors: [] },

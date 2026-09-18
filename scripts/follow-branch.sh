@@ -21,9 +21,12 @@ ROOT="$(git rev-parse --show-toplevel)"
 
 LANE="${LANE:-}"
 if [ -n "$LANE" ]; then
-  LETTERS=ABCDEFGHIJ
+  # A–Z, matching scripts/follow-lanes.sh's port formula (5181 + letter - 'A'). It was A–J while
+  # lanes.tsv already carried lane M, so `follow-lanes.sh` computed M's port and then this refused
+  # to start it — the lane was in the table and unopenable.
+  LETTERS=ABCDEFGHIJKLMNOPQRSTUVWXYZ
   idx="${LETTERS%%$LANE*}"; idx="${#idx}"
-  [ "$idx" -lt "${#LETTERS}" ] || { echo "LANE must be one of A–J"; exit 1; }
+  [ "$idx" -lt "${#LETTERS}" ] || { echo "LANE must be a single letter A–Z"; exit 1; }
   PORT="${PORT:-$((5181 + idx))}"
   WT="$ROOT/../inkwave-lane-$LANE"
   export VITE_LANE="$LANE"

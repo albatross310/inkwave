@@ -164,21 +164,21 @@ describe('the editor bundle is untouched by the music module', () => {
     expect([...files].some(f => f.includes('/editor/'))).toBe(true) // and reached the editor
   })
 
-  it('reaches ONLY the cheap flag from the editor — never the panel, studio or OSMD', () => {
-    // THE TOOLBAR'S MUSIC SLOT reads `musicEnabled()` (via editor/toolbarContract) to decide whether
-    // the ♪ slot is live, exactly as it reads `prodLedgerEnabled()` for the clock. That flag lives
-    // under src/music/, so the editor statically reaches `src/music/flag.ts` — and ONLY it. flag.ts is
-    // a leaf with zero imports and a few hundred bytes.
+  it('reaches NO music file at all from the editor — not the panel, studio or OSMD', () => {
+    // THE TOOLBAR'S MUSIC SLOT used to read `musicEnabled()` (via editor/toolbarContract), which put
+    // the one leaf `src/music/flag.ts` on the editor's static path. The module UNGATED on 2026-09-18
+    // — `SLOT_LIVE.music` is now `() => true` — so the editor reaches ZERO music files. The
+    // allow-list below is empty on purpose: it is the tightest this guard can be, and any music file
+    // that creeps back onto the editor's STATIC path lengthens the array and FAILS.
     //
     // NB the MUSIC BAR itself (components/MusicBar.tsx, feat/music-layer 2026-07-18 — the `/music`
     // route was retired) reads the two demo flags + the type ramp AND `lazy(() => import(...))`s the
     // two heavy panels, but it sits BEHIND the dynamic TiptapEditor import (routes/Edit.tsx loads the
     // editor with `import()`), so NONE of MusicBar's imports enter the editor's static graph. That
     // laziness is instead guarded directly on MusicBar below ("the music BAR defers its panels") and
-    // by the real built chunks (guard 2). Here the exact allow-list stays a single leaf: any heavier
-    // music file reached from the editor's STATIC path lengthens this array and FAILS.
+    // by the real built chunks (guard 2).
     const { files } = staticGraph(EDITOR_ENTRY)
-    expect(musicFiles(files)).toEqual(['src/music/flag.ts'])
+    expect(musicFiles(files)).toEqual([])
   })
 
   it('never pulls opensheetmusicdisplay into the editor', () => {
