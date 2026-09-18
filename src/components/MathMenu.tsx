@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import type { Editor } from '@tiptap/core'
 import { getSymbols, deleteSymbol, setSymbol as saveSymbol, PRESETS, type MathSymbol } from '../editor/extensions/mathSymbols'
@@ -172,10 +172,10 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
         {!isPhone && <div className="fixed inset-0 z-[199]" aria-hidden="true" onPointerDown={() => setOpen(false)} />}
         <div
           {...{ [PANEL_ATTR]: 'math' }}
-          className={`iw-nightable iw-touch-guard ${isPhone ? `${PHONE_SHEET_CLASS} font-serif` : ''}`}
+          className={`iw-nightable iw-touch-guard ${isPhone ? `${PHONE_SHEET_CLASS} font-serif` : `${DESKTOP_SHEET_CLASS} font-serif`}`}
           onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
           // Phone: the shared sheet above the toolbar (styles/panelSheet.ts). Desktop: a popover over Σ.
-          style={isPhone ? { ...phoneSheetStyle(), zIndex: 200 } : { position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', background: 'white', border: '1px solid rgb(var(--iw-ink-rgb) / 0.75)', borderRadius: '10px', boxShadow: '0 4px 20px rgba(0,0,0,0.12)', padding: '4px', zIndex: 200, minWidth: view === 'symbols' ? '280px' : '118px' }}
+          style={isPhone ? { ...phoneSheetStyle(), zIndex: 200 } : { position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', ...desktopSheetStyle(), padding: '6px', zIndex: 200, minWidth: view === 'symbols' ? DESKTOP_SHEET.widthPx : 180 }}
         >
           {isPhone && <SheetHeader title="Math" onClose={() => setOpen(false)} />}
           {view === 'menu' && (

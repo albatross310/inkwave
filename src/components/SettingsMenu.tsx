@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader, SheetSection } from './PanelSheet'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
 import { flushPendingSave } from '../storage/opfs'
@@ -72,7 +72,7 @@ export function SettingsMenu({ limitN, onLimitChange, open: openProp, onOpenChan
     if (isPhone) return phoneSheetStyle()
     const br = btnRef.current?.getBoundingClientRect()
     if (!br) return { position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)' }
-    const HALF = twoCol ? 184 : 104 // ~half the panel width, for edge clamping
+    const HALF = twoCol ? 230 : DESKTOP_SHEET.widthPx / 2 // ~half the panel width, for edge clamping
     const center = Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, br.left + br.width / 2))
     // Keyboard up: cap the panel to the visual-viewport band above the docked pill (the panel
     // opens above the toolbar, which hugs the keyboard) and scroll any overflow.
@@ -114,8 +114,8 @@ export function SettingsMenu({ limitN, onLimitChange, open: openProp, onOpenChan
             role="dialog"
             aria-label="Settings"
             {...{ [PANEL_ATTR]: 'settings' }}
-            className={`iw-nightable iw-touch-guard z-[91] ${isPhone ? PHONE_SHEET_CLASS : twoCol ? 'w-[23rem] max-w-[94vw]' : 'w-52'} bg-white shadow-lg font-serif text-sm text-stone-600`}
-            style={isPhone ? menuStyle() : { ...menuStyle(), border: `1px solid ${INK}55`, borderRadius: 12 }}
+            className={`iw-nightable iw-touch-guard z-[91] ${isPhone ? PHONE_SHEET_CLASS : `${DESKTOP_SHEET_CLASS} ${twoCol ? 'w-[29rem] max-w-[94vw]' : ''}`} bg-white font-serif text-sm text-stone-600`}
+            style={isPhone ? menuStyle() : { ...menuStyle(), ...desktopSheetStyle(), ...(twoCol ? {} : { width: DESKTOP_SHEET.widthPx }) }}
             onMouseDown={e => e.stopPropagation()}
           >
             <SheetHeader title="Settings" onClose={() => setOpen(false)} />

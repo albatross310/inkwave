@@ -4,7 +4,7 @@ import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
 import { useZoomScale } from '../editor/useZoomScale'
 import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom, registerSidePill, useFooterCramped } from './sidePill'
 import { PANEL_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 
 // Module-level so its identity is stable: React re-invokes a callback ref (null, then el) whenever
@@ -262,10 +262,10 @@ export function ReceiptPanel({
         {panelOpen && (
           <div
             {...{ [PANEL_ATTR]: 'receipt' }}
-            className={`iw-nightable bg-white overflow-auto ${hideTrigger ? `${PHONE_SHEET_CLASS} w-full` : 'mb-1.5'}`}
+            className={`iw-nightable bg-white overflow-auto ${hideTrigger ? `${PHONE_SHEET_CLASS} w-full` : `${DESKTOP_SHEET_CLASS} mb-1.5`}`}
             style={hideTrigger
               ? { border: phoneSheetStyle().border, borderRadius: phoneSheetStyle().borderRadius, boxShadow: phoneSheetStyle().boxShadow, maxHeight: 'inherit' }
-              : { border: `1px solid rgb(var(--iw-ink-rgb) / 0.4)`, borderRadius: 10, maxHeight: '55vh', width: 210 }}
+              : { ...desktopSheetStyle(), maxHeight: '55vh', width: DESKTOP_SHEET.widthPx }}
           >
             {hideTrigger && <SheetHeader title="Snapshots" onClose={() => setOpen(false)} />}
             {/* Save version — stays open so the new entry appears in-place */}

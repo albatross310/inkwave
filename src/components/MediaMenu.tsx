@@ -14,7 +14,7 @@ import { isTouchDevice } from '../editor/isTouchDevice'
 import { cameraSupported } from '../media/camera'
 import { CameraCapturePopup } from './CameraCapturePopup'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 
 const INK = 'var(--iw-ink, #302438)'
@@ -110,11 +110,11 @@ export function MediaMenu({ assets, onImported, open: openProp, onOpenChange }: 
       // contenteditable blurs it on iOS → the keyboard retracts → the docked pill and this menu
       // slide to the screen bottom. iw-nightable or it renders white-on-white in night mode.
       {...{ [PANEL_ATTR]: 'media' }}
-      className={`iw-nightable iw-touch-guard fixed z-[120] bg-white shadow-xl font-serif flex flex-col ${isTouch ? PHONE_SHEET_CLASS : 'rounded-2xl'} ${open ? '' : 'invisible pointer-events-none'}`}
+      className={`iw-nightable iw-touch-guard fixed z-[120] bg-white font-serif flex flex-col ${isTouch ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS} ${open ? '' : 'invisible pointer-events-none'}`}
       // Phone: the shared sheet above the toolbar (styles/panelSheet.ts). Desktop: centred over ❐.
       style={isTouch ? phoneSheetStyle() : {
         left: pos.left, bottom: pos.bottom, transform: 'translateX(-50%)',
-        border: `1px solid var(--iw-nightable-border, ${INK}bf)`,
+        ...desktopSheetStyle(), width: DESKTOP_SHEET.widthPx,
         // Peter: "Every font proportionally up. It's okay if users have to scroll." Nothing here
         // may drop below 16px — iOS auto-zooms (and STAYS zoomed) on controls under it.
         fontSize: 17, minWidth: 200, padding: 8,

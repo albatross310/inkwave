@@ -50,6 +50,35 @@ export const SHEET_TYPE = {
 /** Class on the sheet's outer box (index.css `.iw-phone-sheet`): scrolling, max-height, type. */
 export const PHONE_SHEET_CLASS = 'iw-phone-sheet'
 
+// ─── THE DESKTOP SHEET — the same panels, sized for a pointer (Peter, 2026-09-18) ──────────────
+// Screenshots at 1440×900 showed the desktop panels each at their own size: Settings 208px wide in
+// 13px type beside a 470px Guide, the ⋮ menu at 230px, its modals at 300px, the receipt at 210px.
+// ONE width for a menu-shaped panel, one for a modal, one radius / border / shadow, one type ramp
+// (15/13/12/11 — index.css :root), and the SheetHeader on every one of them.
+export const DESKTOP_SHEET = {
+  /** Menu-shaped panels: Settings, ⋮, receipt, sync, math, media, clock. */
+  widthPx: 340,
+  /** Dialog-shaped panels (Save / Open / Export…, citations). */
+  modalWidthPx: 400,
+  radiusPx: 14,
+  fontPx: 15,
+  shadow: 'var(--iw-sheet-shadow, 0 10px 40px rgba(28, 25, 23, 0.18))',
+  border: '1px solid var(--iw-nightable-border, #e7e5e4)',
+} as const
+
+/** Class on a desktop panel's outer box (index.css `.iw-desktop-sheet`): the type ramp remaps. */
+export const DESKTOP_SHEET_CLASS = 'iw-desktop-sheet'
+
+/** The desktop box: radius, shadow, border and body type. Position and width are the caller's. */
+export function desktopSheetStyle(): CSSProperties {
+  return {
+    borderRadius: DESKTOP_SHEET.radiusPx,
+    boxShadow: DESKTOP_SHEET.shadow,
+    border: DESKTOP_SHEET.border,
+    fontSize: DESKTOP_SHEET.fontPx,
+  }
+}
+
 /**
  * The sheet's box on phone: fixed, full-width minus the inset, bottom-anchored ABOVE THE TOOLBAR
  * AND THE KEYBOARD. The two CSS vars are written live by TiptapEditor — `--iw-toolbar-h` from the

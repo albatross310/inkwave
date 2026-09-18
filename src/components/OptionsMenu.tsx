@@ -16,7 +16,7 @@ import { emailEnabled } from '../email/flag'
 import { openInkwaveFile } from '../storage/openDoc'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import { clearWarm } from '../editor/loadWarmth'
 import { oneDriveFilename } from '../storage/onedrive'
@@ -329,7 +329,7 @@ export function OptionsMenu({
   }
   const menuStyle: CSSProperties = isPhone
     ? (menuOpen ? panelAnchor() : {})
-    : { ...(menuOpen ? panelAnchor() : {}), border: `1px solid ${INK}66`, borderRadius: '10px' }
+    : { ...(menuOpen ? panelAnchor() : {}), ...desktopSheetStyle(), width: DESKTOP_SHEET.widthPx }
 
   return (
     <div ref={rootRef} className="relative" onPointerDown={e => e.stopPropagation()}>
@@ -367,7 +367,7 @@ export function OptionsMenu({
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
           <div role="menu" {...{ [PANEL_ATTR]: 'options' }}
-            className={`iw-nightable iw-touch-guard iw-no-print z-[60] bg-white shadow-md text-[17px] text-stone-600 font-serif ${isPhone ? PHONE_SHEET_CLASS : 'w-[14.375rem] py-0.5 flex'}`} style={menuStyle}
+            className={`iw-nightable iw-touch-guard iw-no-print z-[60] bg-white text-[17px] text-stone-600 font-serif ${isPhone ? PHONE_SHEET_CLASS : `${DESKTOP_SHEET_CLASS} py-0.5 flex`}`} style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {isPhone && <SheetHeader title="Menu" onClose={() => setMenuOpen(false)} />}
             <div className={isPhone ? 'flex items-stretch py-0.5' : 'contents'}>
@@ -670,14 +670,12 @@ function Modal({ title, onClose, children, anchorStyle }: { title: string; onClo
     <div className="fixed inset-0 z-[100]" onPointerDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label={title} onPointerDown={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
-        className="iw-nightable bg-white w-[300px] max-w-[92vw] p-5 flex flex-col shadow-xl"
-        style={{ ...anchorStyle, border: `1px solid ${INK}bf`, borderRadius: '14px' }}
+        className={`iw-nightable ${DESKTOP_SHEET_CLASS} bg-white max-w-[92vw] flex flex-col overflow-hidden`}
+        style={{ ...anchorStyle, ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx }}
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-serif" style={{ color: INK }}>{title}</h2>
-          <button type="button" aria-label="Close" onClick={onClose} className="text-stone-400 hover:text-[#302438] text-2xl leading-none">×</button>
-        </div>
-        {children}
+        {/* The same head as every other panel (PanelSheet.tsx) — one look across desktop and phone. */}
+        <SheetHeader title={title} onClose={onClose} />
+        <div className="flex flex-col px-4 pt-3 pb-4">{children}</div>
       </div>
     </div>,
     document.body,

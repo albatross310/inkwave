@@ -3,12 +3,11 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import { Link } from 'react-router'
 import { STUDIO_FILE_SETUP_MAC } from '../pwa/studioFileSetup'
 
-const INK = '#302438'
 
 // Each section is an array of { k: shortcut, d: description }.
 const CITATIONS: Array<{ k: string; d: string }> = [
@@ -141,16 +140,13 @@ export function GuideMenu({ open: openProp, onOpenChange }: { open?: boolean; on
             role="dialog"
             aria-label="Guide"
             {...{ [PANEL_ATTR]: 'guide' }}
-            className={`iw-nightable iw-touch-guard fixed z-[100] font-serif ${isPhone ? PHONE_SHEET_CLASS : ''}`}
+            className={`iw-nightable iw-touch-guard fixed z-[100] font-serif bg-white ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS}`}
             onMouseDown={e => e.stopPropagation()}
             style={isPhone ? phoneSheetStyle() : {
               ...(pos ? { left: pos.left, top: pos.top } : defaultAnchor()),
               width: 470, maxWidth: '92vw', height: 'calc(100vh - 92px)', maxHeight: 'calc(100vh - 92px)',
               resize: 'both', overflow: 'auto',
-              background: 'white',
-              boxShadow: '0 12px 48px rgba(0,0,0,0.16)',
-              border: `1px solid ${INK}bf`,
-              borderRadius: '14px',
+              ...desktopSheetStyle(),
             }}
           >
             {/* The shared header — on desktop also the drag handle. */}

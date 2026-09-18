@@ -10,7 +10,7 @@ import { importLegacyLibrary, legacyLibrarySize } from '../citations/library'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
@@ -361,8 +361,8 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
       <div className="fixed inset-0 z-[100] bg-black/20" onMouseDown={onClose} />
       <div
         role="dialog" aria-label="Edit citation"
-        className="iw-nightable fixed z-[101] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col"
-        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(460px, 96vw)', maxHeight: '92vh', border: `1px solid ${INK}55`, borderRadius: 14 }}
+        className={`iw-nightable ${DESKTOP_SHEET_CLASS} fixed z-[101] bg-white font-serif text-sm text-stone-600 flex flex-col`}
+        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(460px, 96vw)', maxHeight: '92vh', ...desktopSheetStyle() }}
         onMouseDown={e => e.stopPropagation()}
       >
         {/* Type selector — the titled header bar is gone; close (×) sits next to the dropdown. */}
@@ -822,13 +822,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         ref={panelRef}
         role="dialog" aria-label="Citations"
         {...{ [PANEL_ATTR]: 'bib' }}
-        className={`iw-nightable z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col ${isTouchDevice() && !fullscreen ? PHONE_SHEET_CLASS : ''}`}
+        className={`iw-nightable z-[91] bg-white font-serif text-sm text-stone-600 flex flex-col ${isTouchDevice() && !fullscreen ? PHONE_SHEET_CLASS : fullscreen ? 'shadow-xl' : DESKTOP_SHEET_CLASS}`}
         style={fullscreen
           ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: isTouchDevice() ? '100vw' : 'min(864px, 96vw)', overflow: 'hidden', borderRadius: 0, ...(isTouchDevice() ? {} : { borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }) }
           : isTouchDevice()
             // Phone: the shared sheet above the toolbar (styles/panelSheet.ts); the list scrolls inside.
             ? { ...phoneSheetStyle(), height: 'calc(var(--iw-vv-h, 100dvh) * 0.72)', overflow: 'hidden' }
-            : { ...panelStyle(), width: 384, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }}
+            : { ...panelStyle(), ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden' }}
         onMouseDown={e => e.stopPropagation()}
       >
         {isTouchDevice() ? (

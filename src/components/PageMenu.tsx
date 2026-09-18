@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader, SheetSection, SheetPill } from './PanelSheet'
 import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight'
 import type { ParagraphStyleAttrs } from '../editor/extensions/ParagraphStyle'
@@ -17,7 +17,6 @@ import {
   getOrientation, setOrientation, type Orientation,
 } from '../editor/pageSettings'
 
-const INK = '#302438'
 const isPhone = isTouchDevice()
 
 // 96 CSS px = 1 inch = 2.54 cm (96 DPI reference)
@@ -70,7 +69,7 @@ export function PageMenu({ editor, open: openProp, onOpenChange }: { editor?: Ed
     const pos = dragPos
       ? { position: 'fixed' as const, top: dragPos.top, left: dragPos.left }
       : { position: 'fixed' as const, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
-    return { ...pos, width: 384, minWidth: 300, minHeight: 260, maxWidth: '96vw', maxHeight: '90vh', resize: 'both', overflow: 'auto', border: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRadius: 14 }
+    return { ...pos, ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx, minWidth: 300, minHeight: 260, maxWidth: '96vw', maxHeight: '90vh', resize: 'both', overflow: 'auto' }
   }
 
   function onHeaderMouseDown(e: React.MouseEvent) {
@@ -189,7 +188,7 @@ export function PageMenu({ editor, open: openProp, onOpenChange }: { editor?: Ed
         <>
           <div ref={panelRef} role="dialog" aria-label="Page settings"
             {...{ [PANEL_ATTR]: 'page' }}
-            className={`iw-nightable iw-touch-guard z-[91] bg-white shadow-xl font-serif text-sm text-stone-600 flex flex-col ${isPhone ? PHONE_SHEET_CLASS : ''}`}
+            className={`iw-nightable iw-touch-guard z-[91] bg-white font-serif text-sm text-stone-600 flex flex-col ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS}`}
             style={menuStyle()}
             onMouseDown={e => e.stopPropagation()}>
 

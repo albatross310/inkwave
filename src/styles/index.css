@@ -1007,9 +1007,9 @@
   /* Desktop values of the panel type ramp (styles/panelSheet.ts SHEET_TYPE); the phone block below
    overrides them on .iw-phone-sheet. */
 :root {
-  --iw-sheet-body: 0.8rem;
-  --iw-sheet-small: 0.75rem;
-  --iw-sheet-meta: 0.7rem;
+  --iw-sheet-body: 15px;
+  --iw-sheet-small: 13px;
+  --iw-sheet-meta: 12px;
   --iw-sheet-label: 11px;
 }
 
@@ -1131,6 +1131,16 @@
     --iw-sheet-label: 12px;
   }
   .iw-phone-sheet .font-serif, .iw-phone-sheet.font-serif { font-family: inherit; }
+}
+/* ── THE DESKTOP SHEET (styles/panelSheet.ts DESKTOP_SHEET) — outside the coarse-pointer block ──
+   The same remaps as the phone sheet, onto the :root desktop ramp, so a panel's legacy text-sm /
+   text-xs land on 15 / 13 and no panel reads as fine print beside another. */
+.iw-desktop-sheet { font-size: var(--iw-sheet-body); }
+.iw-desktop-sheet .text-sm { font-size: var(--iw-sheet-body); line-height: 1.4; }
+.iw-desktop-sheet .text-xs { font-size: var(--iw-sheet-small); line-height: 1.4; }
+.iw-desktop-sheet .text-\[11px\], .iw-desktop-sheet .text-\[10px\] { font-size: var(--iw-sheet-meta); line-height: 1.4; }
+.iw-desktop-sheet > .px-2\.5 { padding-left: 1rem; padding-right: 1rem; }
+@media (pointer: coarse) and (hover: none) {
   .iw-phone-sheet .text-\[17px\] { font-size: var(--iw-sheet-body); }
   /* Legacy Tailwind sizes inside a sheet land on the ramp — the Sync, Snapshots and Citations
      bodies were written for a 210px desktop pop-over in 0.68–0.78rem and read as fine print on a
