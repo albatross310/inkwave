@@ -122,6 +122,10 @@ _(nothing claimed)_
   `docs/archive/merged-branches.md` under "Superseded, not merged" — read that
   section before deleting, because unlike the previous ten these are NOT reachable
   from master and the ref is the only pointer to their commits.
+  - **DONE** · Nigel · 19 Sep 09:10 · Peter ran it. All four are gone from origin,
+    confirmed one ref at a time with `git ls-remote --heads origin refs/heads/<b>`
+    rather than by reading a single listing. Tips stay in
+    `docs/archive/merged-branches.md` as the recovery path.
   - no · Nigel · 18 Sep 22:30 · same proxy wall Carrie hit, unchanged → **Peter** or
     **Max**, from a Mac terminal, not a container. I own chasing it. The whole thing
     to paste, in `~/inkwave` (or any checkout of this repo):
