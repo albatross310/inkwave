@@ -831,9 +831,12 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             : { ...panelStyle(), ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx, minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '80vh', resize: 'both', overflow: 'hidden' }}
         onMouseDown={e => e.stopPropagation()}
       >
-        {isTouchDevice() ? (
-          // Phone: the shared sheet header (title, ⛶, ×) — nothing to drag, so no grip.
+        {(isTouchDevice() || !fullscreen) ? (
+          // The shared sheet header (title, ⛶, ×) — the same head as every other panel. On the
+          // desktop it is also the drag grip; full screen keeps its own strip (nothing to drag).
           <SheetHeader title="Citations" onClose={onClose}
+            style={isTouchDevice() ? undefined : { cursor: 'grab' }}
+            onPointerDownCapture={isTouchDevice() ? undefined : (e) => { if ((e.target as HTMLElement).closest('button')) return; onHeaderMouseDown(e as unknown as React.MouseEvent) }}
             right={
               <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
                 className="flex items-center justify-center rounded-full"
@@ -900,7 +903,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             </button>
             {/* Desktop: ⛶ and a big × next to Add (the old titled header bar is gone). Phone has
                 both in the sheet header. */}
-            {!isTouchDevice() && <>
+            {!isTouchDevice() && fullscreen && <>
             <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
               className="flex-shrink-0 w-9 rounded border border-stone-200 text-stone-500 hover:text-[#302438] hover:border-stone-300 text-base leading-none flex items-center justify-center">{fullscreen ? '🗗' : '⛶'}</button>
             <button type="button" onClick={onClose} title="Close (Esc)"
