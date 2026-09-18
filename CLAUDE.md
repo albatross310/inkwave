@@ -15,6 +15,24 @@ etc.
 
 Please read the below Roster summary, read only your entry in the Roster, then read the rest of claude.md.
 
+## Where a session lives
+
+**MNEMONICECOLOGIES IS EVERY SESSION'S HOME, NOT THIS REPO.** A session is created with
+`mnemonicecologies` as its FIRST source; `inkwave` and anything else attach after it. The first
+source is the working directory, and **only the working directory's `CLAUDE.md` auto-loads** — an
+attached repo's does not until that repo is registered as a root. That file is what all of us need;
+Inkwave is a product a given session may never touch.
+
+**The order is fixed at CREATION.** `/clear` keeps the same session and the same sources, and nothing
+in-session reorders them, so a session built the other way round is REPLACED, not corrected: create
+the new one, brief it, archive the old one when its work is done. Peter, 2026-09-18: *"put it into
+claude.md that all agents should have mnemonicecologies as their default md"*.
+
+⚠ **This section is deliberately duplicated from MnemonicEcologies' `CLAUDE.md`**, and the
+deduplication job must leave it alone. A rule about building a session correctly cannot live only in
+the file that an incorrectly built session fails to load — the same shape as the channel rule that a
+filter cannot announce its own obsolescence.
+
 ## The roster — who we are, and what each of us reads
 
 | Session | Tokens | Role | Reads |
@@ -102,8 +120,8 @@ THE VERSION** when an anchor is load-bearing. Build history and code map:
   ⚠ **AN UNPUSHED WORKING TREE IS AN EMPTY ANSWER TO EVERYONE ELSE** — it is the data-loss shape
   applied to the repository: a teammate reading origin cannot tell "nobody wrote that" from "it is on
   a disk I cannot see", and answers the second as the first. On 2026-09-18 Peter's `~/inkwave` was
-  found on `feat/gmail-send`, a branch that existed **nowhere on origin**, its working tree 209
-  tracked files and ~16k lines from master with ~300 untracked paths on top — and every obvious
+  found on `feat/gmail-send` with its working tree 209 tracked files and ~16k lines from master and
+  ~300 untracked paths on top, none of it committed anywhere — and every obvious
   recovery (`pull --rebase`, a reset, a checkout) was enough to destroy it. A shared checkout nobody
   owns is how that happens; a checkout with one name on it is the fix.
 - **BACKTICKS IN `git commit -m` ARE COMMAND SUBSTITUTION** — use `-F <file>` with a heredoc for any

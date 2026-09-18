@@ -113,11 +113,52 @@ _(nothing claimed)_
     between cloud sessions cannot help → **Peter**, two clicks on the repo's Branches
     page, which offers Restore right afterwards; or Max once he is back, from a Mac
     whose git is not behind the proxy. I own chasing it, not doing it.
-- **Review `feat/hybrid-zoom`, `feat/zoom-magnify`, `fix/firefox-favicon`
-  individually.** July branches holding 8 commits that exist on no other ref:
-  hybrid one-axis editor zoom, snapshot "biggest change" scrub, transform-magnify
-  below fit, and the userSpaceOnUse-gradient favicon Firefox cannot rasterise.
-  The work may have been redone since; nobody has checked.
+  - **DONE** · Nigel · 18 Sep 23:05 · all ten are gone from origin. Confirmed by a
+    full `git ls-remote --heads origin` — 25 refs, none of them these. The record in
+    `docs/archive/merged-branches.md` stands as the recovery path.
+- **Delete four superseded branches: `fix/firefox-favicon`, `claude/lane-seeds`,
+  `claude/seed-history`, `claude/lane-favicon`.** Peter's yes, 18 Sep 23:00, off the
+  ten-branch review. Tips and the evidence for each are recorded in
+  `docs/archive/merged-branches.md` under "Superseded, not merged" — read that
+  section before deleting, because unlike the previous ten these are NOT reachable
+  from master and the ref is the only pointer to their commits.
+  - no · Nigel · 18 Sep 23:05 · same proxy wall Carrie hit, unchanged → **Peter** or
+    **Max**, from a Mac terminal, not a container. I own chasing it. The whole thing
+    to paste, in `~/inkwave` (or any checkout of this repo):
+
+        cd ~/inkwave
+        git fetch origin
+        git push origin --delete fix/firefox-favicon claude/lane-seeds claude/seed-history claude/lane-favicon
+
+    It prints four `- [deleted]` lines. To undo any of them, the tips are in
+    `docs/archive/merged-branches.md`:
+
+        git push origin 384a9f1c83fb9ac3488c6229fdab0e7b30e3b4ad:refs/heads/fix/firefox-favicon
+        git push origin 3267f4748948c705d9e2b3d0d8ce351dbc3a83e3:refs/heads/claude/lane-seeds
+        git push origin 910b9235d4d79bee5b900fee48945449439c6953:refs/heads/claude/seed-history
+        git push origin d355765f3edfc90ff1b40077bc6812b7d21c8a55:refs/heads/claude/lane-favicon
+
+    GitHub's Branches page also offers Restore for a few weeks after a delete, but the
+    shas above are the answer that does not expire.
+- **Start `feat/hybrid-zoom` and `feat/zoom-magnify` and put them in front of Peter.**
+  Peter, 18 Sep 23:00: start them up and poke him to review them. Two July branches,
+  5 commits between them that exist on no other ref, both on `src/editor/Scroll.tsx`:
+  - `feat/hybrid-zoom` (5 Jul, 4 commits) — hybrid one-axis editor zoom
+    (page-zoom → font-reflow → margin-narrow), margins scaling with the page, and the
+    snapshot "biggest change" dotted-line mode with shift-wheel fast scrub.
+  - `feat/zoom-magnify` (6 Jul, 1 commit, `c0e4c37b`) — transform-magnify below fit,
+    font-reflow above, tagged in its own message as **Peter's spec**. A day newer and
+    on the same file, so it probably supersedes hybrid-zoom rather than complementing
+    it — establish which before showing him both.
+  Both are ~1325 commits behind master, so this is a merge before it is a review.
+  **What Peter needs is a running tab, not a diff** — get each onto a localhost lane
+  he can look at, decide what is already satisfied by master's own zoom work
+  (`dd12123` toolbar-follows-browser-zoom, `f2eeed9f` desktop surface taxonomy), and
+  poke him with what is genuinely still missing. Then he answers ship or drop.
+  - → **Lambert** · Nigel · 18 Sep 23:05 · yours if you want it; say `yes`/`no`/`eta`
+    here. The third July branch that used to be on this item, `fix/firefox-favicon`,
+    is settled — its one commit is patch-identical in master, so it moved to the
+    delete list above.
 - **Deduplicate the two `CLAUDE.md` files — do NOT merge them.** Peter, 18 Sep
   21:20 and 22:10: *"we probably shouldn't even merge the claude.mds. what happens
   if we don't merge them?"* Answer: nothing breaks. Both load as separate blocks
