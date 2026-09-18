@@ -6,7 +6,7 @@
 #   scripts/follow-branch.sh <branch> [interval-seconds]
 #
 # Env (all optional; scripts/follow-lanes.sh sets them per lane):
-#   LANE=A      lane letter → worktree ../inkwave-lane-A and port 5180+index (A=5181 … G=5187)
+#   LANE=A      lane letter → worktree ../inkwave-lane-A and port 5180+index (A=5181 … Z=5206)
 #   PR=7        PR number (printed in the table only; the tab title is the bare lane letter)
 #   PORT=5181   explicit port (overrides the LANE-derived one; default 5173)
 #   SEED=1      open http://localhost:<port>/?seed once the server answers (dev-only sample text)

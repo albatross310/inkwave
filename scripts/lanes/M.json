@@ -1,9 +1,0 @@
-{"title": "M — #22 CLAUDE.md becomes a router",
- "paragraphs": [
-  "CLAUDE.md was 2,041 lines and about 33,000 tokens, and it is injected into every session's context and re-sent on every turn of every session. This lane cuts it to 208 lines (about 3,100 tokens): it now holds only the rules every session must obey, plus a roster table saying what each named session reads.",
-  "Everything else moved rather than vanished. Rules that only matter to one subsystem went to docs/rules/<area>.md, one file per area. The stories behind them — measurement rounds, refuted hypotheses, the data-loss forensics, the build log — went to docs/archive/, verbatim, under a dated heading.",
-  "This lane touches no source code at all, so the app should behave exactly as production. What is worth your eye is whether the file still tells a session what it needs, and whether the roster row for each of us says the right thing."],
- "checks": [
-  "Open CLAUDE.md on the branch: your own session's row in the roster table names the right role and the right files to read.",
-  "Pick any rule you remember being in the old file (a data-loss one, the toolbar hotkeys, the wave rules): it is either still in CLAUDE.md or in the docs/rules/ file the table points at.",
-  "The app at this lane's tab behaves exactly like production — no source file was changed, only docs."]}
