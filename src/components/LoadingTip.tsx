@@ -40,6 +40,13 @@ export function LoadingTip({ ready, onContinue, countdownMs = LOADING_TIP_COUNTD
   // 0 on a WARM load (editor/loadWarmth.ts): the page opens the instant it is ready.
   const [secondsRemaining, setSecondsRemaining] = useState(Math.ceil(countdownMs / 1000))
   const [continuing, setContinuing] = useState(false)
+  // PRERENDER GUARD (2026-09-18): index.html is rendered at build time (react-router.config.ts
+  // `prerender`), where there is no sessionStorage, so the static HTML carried the COLD label
+  // "Ready in 3…" — every WARM load flashed a 3-second promise until hydration (~0.5s in dev)
+  // replaced it with "Opening…". The countdown number is only shown once mounted; server and first
+  // client render agree on the neutral label, so there is no hydration mismatch either.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
 
   useEffect(() => {
     if (secondsRemaining <= 0) return
@@ -125,11 +132,13 @@ export function LoadingTip({ ready, onContinue, countdownMs = LOADING_TIP_COUNTD
       >
         New tip (Tab)
       </button>
-      {secondsRemaining > 0 ? (
+      {!mounted ? (
+        <span className="iw-loading-tip__countdown" aria-live="polite">Opening…</span>
+      ) : secondsRemaining > 0 ? (
         <span className="iw-loading-tip__countdown" aria-live="polite">
           Ready in {secondsRemaining}…
         </span>
-      ) : continuing || ready ? (
+      ) : continuing || ready || countdownMs === 0 ? ( // warm: never "Finishing…" — the page is opening
         <span className="iw-loading-tip__countdown" aria-live="polite">Opening…</span>
       ) : (
         <span className="iw-loading-tip__countdown" aria-live="polite">Finishing…</span>
