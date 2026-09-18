@@ -46,6 +46,14 @@ ledger, clock, charts, AI report, email · `reader-pdf.md` PDF viewer, source re
 `testing.md` guards, probes, refactors · `lanes.md` · `team-channel.md`. **Touching any write path?**
 The data-loss rules below are universal; read them, then `storage-sync.md`.
 
+## The backlog — `iwbacklog.md` in the repo root
+
+**Peter's own queue of bugs and wants, in a file he edits directly on GitHub.** Ask it for work
+("what's next on the backlog") and take from the top of `## Next`; claim by moving the line to
+`## Doing` with your name, in a commit. **Do not read it as standing context** — it is pointed at
+rather than inlined precisely so a growing backlog does not ride in every session's window all day.
+Never delete or reword one of his lines; close by moving it to `## Done` with the PR that closed it.
+
 ## Stack
 
 Vite + React 18 + TS + Tailwind 3 + Tiptap (ProseMirror) + OPFS/IndexedDB, React Router v7 framework
