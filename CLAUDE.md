@@ -27,6 +27,7 @@ Please read the below Roster summary, read only your entry in the Roster, then r
 | Saul | saul | General, cloud | this file |
 | lane agent | — | one subsystem at a time | this file · the area file for that subsystem |
 | triage | — | the channel only | this file · `docs/rules/team-channel.md` — **no area file** |
+
 Group tokens: `iw`/`iwc` = Carrie, Max, Nigel · `gen`/`genc` = Quinn, Saul · `locals`/`localsc` = Max,
 Quinn · `clouds`/`cloudsc` = Carrie, Saul, Nigel · `all`/`allc` = everyone. Suffix `c` = Claude,
 `k` = Kimi, `x` = Codex; bare forms mean everyone online; matching is case-insensitive.
