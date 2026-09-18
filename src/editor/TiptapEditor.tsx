@@ -98,7 +98,6 @@ import { musicEnabled } from '../music/flag'
 import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
 import { WorkSummaryAutoOpen } from '../components/WorkSummaryAutoOpen'
 import { PageMenu } from '../components/PageMenu'
-import { PHONE_SHEET } from '../styles/panelSheet'
 import { gappedPagesEnabled } from './pageView'
 import { setPaginationGappedMode } from './extensions/PaginationExtension'
 import { getLineHeight } from './lineHeight'
@@ -563,11 +562,24 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // was the music bar when ♪ lives there. `openPanel` still holds ONE id; this is only the LOOK.
   // ⚠ Two things are called 'receipt': the SLOT (the R review bar on the main row) and the PANEL
   // (the ◈ snapshots sheet), and on the phone ◈ is only ever reached from the drawer.
-  const drawerHeld = isTouchDevice() && (
+  // Both platforms (Peter, 2026-09-18: the desktop ▲ row "needs to match the design on phone,
+  // likewise the panel persistence behaviour").
+  const drawerHeld = (
     (openPanel !== null && openPanel !== 'drawer' && openPanel !== 'options' // ⋮ is a main-row fixture
       && (openPanel === 'receipt' || !(toolbarSlots as readonly string[]).includes(openPanel)))
     || (activeBar === 'music' && !toolbarSlots.includes('music')))
   const toolbarPickerOpen = openPanel === 'drawer' || drawerHeld
+  // Desktop honeycomb width: the ▲ row spans the WHOLE main row (slots + the fixed circles), one
+  // cell per gap, so its column count is COUNTED FROM THE ROW ITSELF (R2: never a second copy of
+  // how many circles the row holds — the fixed set has drifted before). Re-counted whenever the row
+  // opens or the slots change; the ref is the row div.
+  const mainRowRef = useRef<HTMLDivElement>(null)
+  const [desktopRowCircles, setDesktopRowCircles] = useState(0)
+  useEffect(() => {
+    if (isTouchDevice()) return
+    const n = mainRowRef.current?.querySelectorAll('.rounded-full.border-current').length ?? 0
+    if (n > 0 && n !== desktopRowCircles) setDesktopRowCircles(n)
+  }, [toolbarPickerOpen, toolbarSlots, desktopRowCircles])
   // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts). The ledger drop-up's open state lives
   // HERE, not in the clock button: the row is SIX (Peter), so `clock` competes and sits in the ▲
   // overflow by default — its button is frequently unmounted. The slot and the countdown are two
@@ -3236,14 +3248,23 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const renderDrawer = () => {
                   const available = overflowSlots(toolbarSlots)
                   return (
-                    <div className={`bg-white flex items-center z-[120] ${isTouch ? 'iw-toolbar-circles iw-phone-toolbar iw-drawer-row pt-1.5 pb-0' : `absolute bottom-full left-0 ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}`}
+                    <div className={`bg-white items-center z-[120] iw-toolbar-circles iw-drawer-row pt-1.5 pb-0 ${isTouch ? 'flex iw-phone-toolbar' : 'iw-desktop-drawer'}`}
                       {...{ [PANEL_ATTR]: 'drawer' }}
-                      // The drawer is a panel too. Phone: a second toolbar ROW (the pill grows; the same
-                      // --iw-row-slots clamp sizes its circles so the two rows match). Desktop: anchored
-                      // above the ▲, its own width, the shared sheet radius / shadow / border.
-                      style={isTouch
-                        ? { ['--iw-row-slots' as string]: String(toolbarSlots.length), ['--iw-drawer-cols' as string]: String(toolbarSlots.length + 1) }
-                        : { border: PHONE_SHEET.border, borderRadius: PHONE_SHEET.radiusPx, boxShadow: PHONE_SHEET.shadow, marginBottom: PHONE_SHEET.gapPx }}
+                      // The drawer is a panel too, and on BOTH platforms it is a second toolbar ROW inside
+                      // the pill — the honeycomb (index.css .iw-drawer-row): a grid of (main-row circles − 1)
+                      // cells inset half a circle, so each cell centre sits over a gap below; empty cells
+                      // stay blank and are DROP TARGETS (Peter, 2026-09-18: "draggable to the empty slots
+                      // and displacing any buttons anywhere else on either panel").
+                      style={{ ['--iw-row-slots' as string]: String(toolbarSlots.length), ['--iw-drawer-cols' as string]: String(isTouch ? toolbarSlots.length + 1 : Math.max(desktopRowCircles - 1, 1)) }}
+                      onDragOver={isTouch ? undefined : e => e.preventDefault()}
+                      onDrop={isTouch ? undefined : e => {
+                        // A main-row button dropped on the row's blank space: out of the row, into the pool.
+                        e.preventDefault()
+                        const from = dragIdRef.current; dragIdRef.current = null
+                        if (!from || !toolbarSlots.includes(from)) return
+                        if (toolbarSlots.length <= 1) return
+                        updateSlots(toolbarSlots.filter(s => s !== from))
+                      }}
                       onMouseDown={e => e.stopPropagation()}>
                       {/* + add more opps */}
                       <div className="flex items-center">
@@ -3293,19 +3314,33 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                         </>
                       )}
                       {/* divider if there are available slots */}
-                      {!isTouch && available.length > 0 && <div className="w-px h-6 bg-stone-100 mx-1" />}
                       {available.map(id => (
                         <div key={id}
                           className="iw-slot"
                           draggable={!isTouch}
                           onDragStart={() => { dragIdRef.current = id }}
                           onDragEnd={() => { dragIdRef.current = null }}
-                          onClick={() => { if (!isTouch) setPanelOpen('drawer', false) }} // desktop only: phone keeps the row (drawerHeld)
+                          onDragOver={isTouch ? undefined : e => { e.preventDefault(); e.stopPropagation() }}
+                          onDrop={isTouch ? undefined : e => {
+                            // A main-row button dropped ON a drawer button: they swap places.
+                            e.preventDefault(); e.stopPropagation()
+                            const from = dragIdRef.current; dragIdRef.current = null
+                            if (!from || from === id) return
+                            const fromIdx = toolbarSlots.indexOf(from)
+                            if (fromIdx < 0) return
+                            const next = [...toolbarSlots]; next[fromIdx] = id
+                            updateSlots(next)
+                          }}
                           {...(isTouch ? popupTouchHandlers(id) : {})}
                           style={isTouch ? { touchAction: 'none' } : undefined}
                         >
                           {renderSlotButton(id, false)}
                         </div>
+                      ))}
+                      {/* Blank cells (desktop): the honeycomb's empty tracks, made real so they accept a
+                          drop — dropping a main-row button here removes it from the row (into the pool). */}
+                      {!isTouch && Array.from({ length: Math.max(0, desktopRowCircles - 1 - available.length - 1 /* the + cell */) }, (_, i) => (
+                        <div key={`blank-${i}`} className="iw-slot-blank min-h-[44px] w-full" aria-hidden="true" />
                       ))}
                     </div>
                   )
@@ -3684,14 +3719,14 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 --iw-row-slots and caps each button's 44px min-WIDTH at the same size; the footer RO
                 mirrors whatever height results into --iw-toolbar-h + the PM scroll reserve, so
                 NEVER hardcode the pill height anywhere. */}
-            {isTouch && showMainRow && (
-              <div style={{ overflow: 'hidden', maxHeight: toolbarPickerOpen ? 96 : 0, transition: 'max-height 220ms ease' }}
+            {showMainRow && (
+              <div style={{ overflow: 'hidden', maxHeight: toolbarPickerOpen ? (isTouch ? 96 : 200) : 0, transition: 'max-height 220ms ease', width: 0, minWidth: '100%' }}
                 aria-hidden={!toolbarPickerOpen} {...(toolbarPickerOpen ? {} : { inert: '' as unknown as boolean })}>
                 {renderDrawer()}
               </div>
             )}
             {showMainRow && (
-            <div className={`iw-toolbar-circles flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
+            <div ref={mainRowRef} className={`iw-toolbar-circles flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
               // ⚠ ONE ROW SIZE, DERIVED FROM THE ROW ITSELF (R2). index.css once divided by a
               // literal 8 — a second copy of ROW_SLOTS in another language — and this then fed it
               // the static constant rather than the live length, so a seventh slot left exactly one
@@ -3718,7 +3753,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
                   {...{ [PANEL_TRIGGER_ATTR]: 'drawer' }}
-                  onClick={() => { togglePanel('drawer'); closeBarLayer('style') }}
+                  onClick={() => { togglePanel('drawer'); closeBarLayer('style'); closeBarLayer('music') }}
                   className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
                   title="Customise toolbar"
                 >
@@ -3728,7 +3763,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                     </svg>
                   </span>
                 </button>
-                {!isTouch && renderDrawer()}</div>
+                </div>
               {/* Customisable slots — desktop: HTML5 drag between slots or from the ▲ popup;
                   phone: touch-hold a circle to arm, drag sideways, neighbours FLIP-slide out of
                   the way (slotDragView preview), release to drop (see slotTouchHandlers above). */}
@@ -3748,7 +3783,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                     if (fromIdx >= 0) newSlots[fromIdx] = slotId  // swap: put old slot where new slot was
                     newSlots[slotIdx] = from as SlotId
                     updateSlots(newSlots)
-                    setPanelOpen('drawer', false)
                   }}
                   onDragEnd={() => { dragIdRef.current = null }}
                   {...(isTouch ? slotTouchHandlers(slotIdx) : {})}

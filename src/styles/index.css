@@ -1258,6 +1258,23 @@
   .iw-desktop-bar .w-8 { width: var(--iw-circle); height: var(--iw-circle); }
   .iw-desktop-bar .h-8 { height: var(--iw-circle); }
   .iw-desktop-bar .min-w-\[2\.5rem\] { min-width: 0; }
+  /* The desktop ▲ row = the phone honeycomb (see .iw-phone-toolbar.iw-drawer-row), but EXACT: the
+     main row is a uniform run of --iw-circle circles at --iw-bar-gap, so one cell per INTERIOR gap
+     (cols = circles − 1, --iw-drawer-cols from TiptapEditor), each cell one circle + one gap wide,
+     inset by the row padding plus half a circle — cell k's centre lands on the gap between circles
+     k and k+1. Overflow (a pool bigger than the gaps) wraps to a second honeycomb line. */
+  .iw-desktop-drawer {
+    display: grid;
+    grid-template-columns: repeat(var(--iw-drawer-cols, 7), calc(var(--iw-circle) + var(--iw-bar-gap)));
+    justify-content: start;
+    justify-items: center;
+    padding-left: calc(var(--iw-bar-pad) + var(--iw-circle) / 2);
+    padding-right: calc(var(--iw-bar-pad) + var(--iw-circle) / 2);
+    margin-bottom: calc(var(--iw-circle) * -0.16);
+  }
+  .iw-desktop-drawer .min-w-\[44px\] { min-width: var(--iw-circle); }
+  .iw-desktop-drawer .w-9 { width: var(--iw-circle); height: var(--iw-circle); }
+  .iw-desktop-drawer .min-h-\[44px\] { min-height: var(--iw-circle); }
   .iw-desktop-toolbar {
     /* SPREAD, DON'T PAD (Peter, 2026-08-20: "expand them out to meet the edge of the central pill").
        The width won by the two widening rounds had all gone into END PADDING — ~90px of empty pill
