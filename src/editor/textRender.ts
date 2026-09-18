@@ -25,10 +25,6 @@ import { unmodelledMark } from './arithMeasure'
 import { pageBoxPx } from './pageModel'
 import { getPaperSize, getOrientation, getTopMarginPx, getSideMarginPx, getParaSpacingEm } from './pageSettings'
 
-// The flag lives in its own module so the editor can gate on it WITHOUT static-importing this
-// paint path — see textRenderFlag.ts. Re-exported here for callers that already have the renderer.
-export { textRenderEnabled, _resetTextRenderFlag } from './textRenderFlag'
-
 // ─── Geometry ─────────────────────────────────────────────────────────────────────────────────
 export interface RenderGeom {
   pageWidthPx: number

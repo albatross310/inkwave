@@ -23,13 +23,19 @@ import { readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemo
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
-import { createDock } from './toolbarDock'
+// Desktop 'bar' chrome (style / review / music): the same outline + radius as the main pill.
+// Desktop 'bar' row (style / review / music): INSIDE the pill, spread to the toolbar's width, the
+// pill's own outline/colour/type (index.css .iw-desktop-bar). Peter, 2026-09-18 14:36.
+const DESKTOP_BAR_CLASS = 'iw-desktop-bar'
+import { createDock, KEYBOARD_MIN_PX, floatingBarAllowance } from './toolbarDock'
+import { isWarmLoad } from './loadWarmth'
 import { moveSlot, nearestSlot, neighborShift, brokeHoldSlop } from './toolbarSlots'
 import {
   SlotId, BarLayerId, BAR_HANDOFF_MS,
   overflowSlots, planBarToggle, readStoredRow, saveStoredRow,
   slotIndexForDigit, hotkeyHintFor,
   readToolbarConfig, resolveToolbarRow, mayPersistConfig, mergeRowIntoConfig,
+  type PanelId, planPanelToggle, tapClosesPanel, PANEL_ATTR, PANEL_TRIGGER_ATTR,
 } from './toolbarContract'
 import { subscribe as subscribeMagnify } from './magnify'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
@@ -48,7 +54,6 @@ import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
 import type { ApplicationSurfaceMode } from '../components/ApplicationSurface'
 import { readApplicationSurfaceMode, writeApplicationSurfaceMode } from '../components/applicationSurfaceMode'
-import { emailEnabled } from '../email/flag'
 import { titleForDocument } from './docTitle'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
@@ -78,7 +83,7 @@ const ProductivityReportModal = lazy(() =>
 const ProductivityGraphsPanel = lazy(() =>
   import('../components/ProductivityGraphsPanel').then(m => ({ default: m.ProductivityGraphsPanel })),
 )
-import { prodGraphsEnabled, prodReportDemo, prodReportEnabled } from '../productivity/flag'
+import { prodReportDemo } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { MediaMenu } from '../components/MediaMenu'
 import type { MediaAsset } from '../media/types'
@@ -88,7 +93,6 @@ import { clipboardImageFiles, pastedImageName } from './imagePaste'
 import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
 import { CountdownOverlay } from '../components/CountdownOverlay'
 import { MusicBar } from '../components/MusicBar'
-import { musicEnabled } from '../music/flag'
 import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
 import { WorkSummaryAutoOpen } from '../components/WorkSummaryAutoOpen'
 import { PageMenu } from '../components/PageMenu'
@@ -316,7 +320,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // reveal. Uncovering mid-coast made iOS composite/rasterize the just-shown copy late = the
   // freeze-frame + gradient shift Peter saw. At rest the phone editor has no waves at all
   // (parchment), so the uncover is inert; the flag exists to hold `covered` through the coast.
-  const [waveRest, setWaveRest] = useState(false)
+  // ⚠ WARM loads (editor/loadWarmth.ts) never reach wave-rest: Edit.tsx drops the shell 850ms
+  // after reveal, mid-coast, so 'inkwave:wave-rest' is never dispatched — and a surface held
+  // `covered` forever is transparent with z-index 1, painted OVER the toolbar (Peter: "the
+  // toolbar's completely gone", 2026-09-17). Warm starts uncovered.
+  const [waveRest, setWaveRest] = useState(() => isWarmLoad())
   // wave-rest ALWAYS arrives on a live page (the rest handoff is a resolved-clock timer over
   // compositor-only playback); the 30s load watchdog (Scroll.tsx, 'inkwave:load-watchdog') is
   // the one backstop — it force-lifts `covered` too.
@@ -415,8 +423,23 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
 
   const [currentParagraphIndex, setCurrentParagraphIndex] = useState(0)
   const [paperRight, setPaperRight] = useState(0)
-  // Mobile toolbar: controlled open state for the ◈ and ☁ triggers embedded in the toolbar.
-  const [receiptOpen, setReceiptOpen] = useState(false)
+  // THE PANELS — ONE variable, holding ONE id (toolbarContract.ts, Population 3). P, ⚙, i, ❐, ⋮,
+  // Σ, ⁝, the ▲ drawer and its ◈ ☁ ‟ were each a private boolean, so on the phone a second tap
+  // opened a second surface over the first and nothing but × closed either (Peter, 2026-09-17).
+  // Now every trigger is a dumb toggle through `togglePanel`, "two open" is unrepresentable, and
+  // the outside-tap rule is ONE document listener (below) rather than a scrim per panel — a scrim
+  // over the footer would also swallow the tap meant for the NEXT button.
+  const [openPanel, setOpenPanel] = useState<PanelId | null>(null)
+  const togglePanel = useCallback((id: PanelId) => setOpenPanel(p => planPanelToggle(p, id)), [])
+  // The controlled-prop adapter: a panel's own × / item-select says "close ME", never "close
+  // whatever is open" — by the time it fires, another panel may already own the slot.
+  const setPanelOpen = useCallback((id: PanelId, v: boolean) => setOpenPanel(p => (v ? id : p === id ? null : p)), [])
+  const receiptOpen = openPanel === 'receipt'
+  const syncOpen = openPanel === 'sync'
+  const bibPanelOpen = openPanel === 'bib'
+  const ledgerOpen = openPanel === 'clock'
+  const openPanelRef = useRef(openPanel)
+  openPanelRef.current = openPanel
   // THE SECOND TOOLBAR LAYER — ONE variable, holding ONE id (see toolbarContract.ts). Peter's word
   // is "mutually exclusive": R and the music bar cannot both own the bar. This was two booleans =
   // four states, one of them illegal ("both open") and prevented only by the discipline of a
@@ -425,15 +448,13 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // member to BarLayerId and rendering on `activeBar === 'x'`.
   const [activeBar, setActiveBar] = useState<BarLayerId | null>(null)
   const reviewOpen = activeBar === 'review'   // review layer: sticky-note comments + track changes
-  const [syncOpen, setSyncOpen] = useState(false)
   const [verifyOpen, setVerifyOpen] = useState(false)
-  // The free paste-back work report (§A7.1, Path 1) — now DEFAULT ON (`?prodReport=off` to disable).
+  // The free paste-back work report (§A7.1, Path 1).
   const [reportOpen, setReportOpen] = useState(false)
-  const reportFlag = prodReportEnabled()
   // Dynamic: demo.ts statically pulls fixtures.ts (2.8KB gzip of synthetic prose that ONLY
-  // `?prodReport=demo` ever reads). Gated on DEMO MODE, not on `reportFlag` — with the report now
-  // on by default, gating on the flag would fetch the demo/fixtures chunk for EVERY writer even
-  // though installProdReportDemo() no-ops unless demo mode. Demo implies the flag, so this loses
+  // `?prodReport=demo` ever reads). Gated on DEMO MODE — gating on anything broader would fetch
+  // the demo/fixtures chunk for EVERY writer even though installProdReportDemo() no-ops unless demo
+  // mode. So this loses
   // nothing.
   const reportDemo = prodReportDemo()
   useEffect(() => {
@@ -477,7 +498,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   }, [])
 
   // ── Citation / bibliography state ─────────────────────────────────────────
-  const [bibPanelOpen, setBibPanelOpen] = useState(false)
   const [bibPanelStartsNew, setBibPanelStartsNew] = useState(false)
   const bibBtnRef = useRef<HTMLButtonElement>(null)
   const [citationStyle, setCitationStyle] = useState(doc.citationStyle ?? 'apa')
@@ -486,7 +506,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   useEffect(() => {
     const onOpen = (event: Event) => {
       setBibPanelStartsNew(Boolean((event as CustomEvent<{ newReference?: boolean }>).detail?.newReference))
-      setBibPanelOpen(true)
+      setPanelOpen('bib', true)
     }
     window.addEventListener(OPEN_CITATION_PANEL_EVENT, onOpen)
     return () => window.removeEventListener(OPEN_CITATION_PANEL_EVENT, onOpen)
@@ -521,7 +541,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     const shared = p.get('url') || p.get('text') || ''
     if (/^https?:\/\//i.test(shared)) {
       setShareCapture(shared)
-      setBibPanelOpen(true)
+      setPanelOpen('bib', true)
       const clean = window.location.pathname + window.location.hash
       window.history.replaceState(null, '', clean)
     }
@@ -534,16 +554,37 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const [toolbarSlots, setToolbarSlots] = useState<SlotId[]>(
     () => resolveToolbarRow(toolbarRead, readStoredRow()),
   )
-  const [toolbarPickerOpen, setToolbarPickerOpen] = useState(false)
+  // Phone (Peter, 2026-09-17): an app opened FROM the drawer row keeps the row open until that app
+  // closes — a panel whose trigger is not on the main row was reached through the drawer, and so
+  // was the music bar when ♪ lives there. `openPanel` still holds ONE id; this is only the LOOK.
+  // ⚠ Two things are called 'receipt': the SLOT (the R review bar on the main row) and the PANEL
+  // (the ◈ snapshots sheet), and on the phone ◈ is only ever reached from the drawer.
+  // Both platforms (Peter, 2026-09-18: the desktop ▲ row "needs to match the design on phone,
+  // likewise the panel persistence behaviour").
+  const drawerHeld = (
+    (openPanel !== null && openPanel !== 'drawer' && openPanel !== 'options' // ⋮ is a main-row fixture
+      && (openPanel === 'receipt' || !(toolbarSlots as readonly string[]).includes(openPanel)))
+    || (activeBar === 'music' && !toolbarSlots.includes('music')))
+  const toolbarPickerOpen = openPanel === 'drawer' || drawerHeld
+  // Desktop honeycomb width: the ▲ row spans the WHOLE main row (slots + the fixed circles), one
+  // cell per gap, so its column count is COUNTED FROM THE ROW ITSELF (R2: never a second copy of
+  // how many circles the row holds — the fixed set has drifted before). Re-counted whenever the row
+  // opens or the slots change; the ref is the row div.
+  const mainRowRef = useRef<HTMLDivElement>(null)
+  const [desktopRowCircles, setDesktopRowCircles] = useState(0)
+  useEffect(() => {
+    if (isTouchDevice()) return
+    const n = mainRowRef.current?.querySelectorAll('.rounded-full.border-current').length ?? 0
+    if (n > 0 && n !== desktopRowCircles) setDesktopRowCircles(n)
+  }, [toolbarPickerOpen, toolbarSlots, desktopRowCircles])
   // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts). The ledger drop-up's open state lives
   // HERE, not in the clock button: the row is SIX (Peter), so `clock` competes and sits in the ▲
   // overflow by default — its button is frequently unmounted. The slot and the countdown are two
   // access paths to ONE setter.
-  const [ledgerOpen, setLedgerOpen] = useState(false)
   // Stable opener — the countdown, the clock slot AND the end-of-session reflection watcher all set
   // ONE state (a slot is a trigger, never an owner). Stable so ReflectionAutoOpen's listener never
   // re-subscribes per render.
-  const openLedger = useCallback(() => setLedgerOpen(true), [])
+  const openLedger = useCallback(() => setPanelOpen('clock', true), [setPanelOpen])
   // The measured-charts panel (P1a-viz), opened FROM the clock drop-up. Its own lifted state — a
   // second surface, one owner — following the ReceiptPanel precedent Peter named.
   const [graphsOpen, setGraphsOpen] = useState(false)
@@ -814,7 +855,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       const next = [...toolbarSlots]
       next[st.targetIdx] = st.id
       updateSlots(next)
-      setToolbarPickerOpen(false)
+      setPanelOpen('drawer', false)
     }
   }
   const [popupDragActive, setPopupDragActive] = useState(false)
@@ -861,16 +902,35 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   })
   // ────────────────────────────────────────────────────────────────────────────
 
+  // RULE (a) OF THE PANEL CONTRACT: a pointerdown anywhere outside the open panel (and off its own
+  // trigger, so the click can toggle it shut) closes it — for EVERY panel, phone and desktop alike
+  // (the desktop scrims stay as belt-and-braces; on phone they are dropped, or they would eat the
+  // tap meant for the next toolbar button). pointerdown, never mousedown: iOS withholds the
+  // synthetic mouse event under the .iw-touch-guard touchmove preventDefault (docs/rules/ios-webkit.md).
+  // Capture phase: OptionsMenu stops pointerdown propagation at its root.
+  // The style + music rows retract on a tap outside the footer too. The REVIEW row deliberately
+  // does not: closing it silently switches track-changes off, and its comment notes are worked by
+  // tapping the paper.
   useEffect(() => {
-    if (!toolbarPickerOpen) return
-    function closeOnOutside(e: MouseEvent) {
-      if (toolbarPickerRef.current && !toolbarPickerRef.current.contains(e.target as Node)) {
-        setToolbarPickerOpen(false)
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null
+      const open = openPanelRef.current
+      // The ▲ row survives a pointerdown on a MAIN-ROW slot: that is how a drag out of the row
+      // (into a blank honeycomb cell) begins, and a plain click still closes it through the
+      // button's own toggle. Everywhere else rule (a) stands.
+      const slotDragStart = open === 'drawer' && !!t?.closest('.iw-slot') && !!mainRowRef.current?.contains(t)
+      if (open && !slotDragStart && tapClosesPanel(t, open)) setOpenPanel(null)
+      // Desktop too (Peter, 2026-09-18: the style bar "only hides when you stop using anything from
+      // it — same as phone"): the 5s idle timer is gone, so a pointerdown anywhere outside the
+      // footer chrome and its panels is what retracts the style/music rows.
+      if (t && !t.closest(`.iw-touch-guard, [${PANEL_ATTR}]`)) {
+        closeBarLayer('style')
+        closeBarLayer('music')
       }
     }
-    document.addEventListener('mousedown', closeOnOutside)
-    return () => document.removeEventListener('mousedown', closeOnOutside)
-  }, [toolbarPickerOpen])
+    document.addEventListener('pointerdown', onDown, { capture: true })
+    return () => document.removeEventListener('pointerdown', onDown, { capture: true } as EventListenerOptions)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Formatting (font/size/align) is per-selection via marks, persisted in the content.
   const styleBarOpen = activeBar === 'style'
@@ -906,7 +966,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // One bar fully retreats before the other rises (Peter, 2026-07-10: pressing S then R had the
   // style bar riding the review bar). 240ms = the collapse transition + a beat.
   const barSeqRef = useRef(0)
-  const [barsAnimating, setBarsAnimating] = useState(false)
+  // The flag itself is no longer read: the phone pill is always overflow-hidden and the desktop
+  // bars float outside the pill (see the DESKTOP BARS note in the JSX). The timer stays as the
+  // hand-off clock for planBarToggle.
+  const [, setBarsAnimating] = useState(false)
   const barsAnimTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   function markBarsAnimating() {
     setBarsAnimating(true)
@@ -931,6 +994,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // only its hands — timing, sequence guard, idle timer. Adding a layer changes NOTHING here.
   function toggleBar(which: BarLayerId) {
     const seq = ++barSeqRef.current
+    setOpenPanel(null) // a bar button is "any other toolbar button" to an open panel (rule b)
     markBarsAnimating()
     const plan = planBarToggle(activeBar, which)
     const land = (id: BarLayerId | null) => {
@@ -1006,9 +1070,17 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return () => window.removeEventListener('inkwave:doc-surrendered', onSurrendered as EventListener)
   }, [])
 
+  // The idle retract is a DESKTOP courtesy: the mouse re-arms it on every hover over the row.
+  // A phone has no hover, so nothing ever re-armed it and the row vanished 5s after S was
+  // tapped — while the S circle stayed dark under iOS's sticky :hover, so it read as "S is on
+  // but no row" (Peter, iPhone, 2026-09-17). On touch the row is owned by the tap contract
+  // instead: tap-away, another button, or S again (docs/rules/ios-webkit.md).
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
-    styleTimerRef.current = setTimeout(() => closeBarLayer('style'), 5000)
+    if (isTouchDevice()) return
+    // NO IDLE TIMER (Peter, 2026-09-18: "Upper toolbar needs to remain when you click a button, only
+    // hides when you stop using anything from it / having it open — same as phone"). The bar now
+    // closes the way the phone's does: S again, the ▲ picker, or a click on the water/page.
   }
   function clearStyleTimer() {
     if (styleTimerRef.current) { clearTimeout(styleTimerRef.current); styleTimerRef.current = null }
@@ -1041,7 +1113,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const compliance = useComplianceProvider()
-  const emailDocument = emailEnabled() && doc.docType === 'email'
+  const emailDocument = doc.docType === 'email'
   const [emailSurfaceMode, setEmailSurfaceMode] = useState<ApplicationSurfaceMode>(() =>
     emailDocument ? readApplicationSurfaceMode('email', doc.id) : 'isolated',
   )
@@ -1158,6 +1230,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         'data-placeholder': 'Begin writing…',
         'aria-label': doc.docType === 'email' ? 'Message body editor' : 'Document body editor',
         spellcheck: 'false',
+        // Peter, 2026-09-17: no iOS QuickType — autocorrect/prediction off hides the suggestion
+        // strip above the keyboard (the ▲▼✓ form-assistant bar is Safari's own and cannot be hidden
+        // by a page; only an installed home-screen app loses the URL pill).
+        autocorrect: 'off',
+        autocapitalize: 'off',
+        autocomplete: 'off',
       },
       handlePaste: (view, event) => {
         const images = clipboardImageFiles(event.clipboardData)
@@ -1520,9 +1598,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     const vv = window.visualViewport
     if (!vv) return
     const onVV = () => {
+      // The phone sheets (styles/panelSheet.ts) cap their height to the VISIBLE band.
+      document.documentElement.style.setProperty('--iw-vv-h', `${Math.round(vv.height)}px`)
       if (vv.scale > 1.01) return // pinch-zoomed: the viewport shrink is zoom, not the keyboard
       kbMaxRef.current = Math.max(kbMaxRef.current, vv.height)
-      setKeyboardUp(vv.height < kbMaxRef.current - 150)
+      setKeyboardUp(vv.height < kbMaxRef.current - KEYBOARD_MIN_PX) // ONE threshold with the dock
     }
     const onOrient = () => { kbMaxRef.current = vv.height; setKeyboardUp(false) }
     onVV()
@@ -1550,6 +1630,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     let lastApplied = 0
     let clearTransTimer = 0
     let revealTimers: number[] = []
+    // iOS 26 Safari floats its collapsed URL pill INSIDE the visual viewport while the keyboard
+    // is up — over whatever sits flush on the vv bottom, i.e. our toolbar (Peter, 2026-09-17:
+    // "this localhost thing displays over the toolbar"). Lift by that much more while lifting.
+    const allowance = floatingBarAllowance(navigator.userAgent,
+      window.matchMedia?.('(display-mode: standalone)').matches || !!(navigator as unknown as { standalone?: boolean }).standalone)
     const dock = createDock({
       readGeom: () => {
         // Rubber-band detection: under elastic overscroll the vv geometry is garbage, so the dock
@@ -1563,13 +1648,16 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           height: vv.height,
           scale: vv.scale,
           overscroll: y < -1 || y > maxY + 1,
+          // The accessory-only keyboard latch (toolbarDock.ts ACCESSORY_MIN_PX).
+          focused: !!document.activeElement?.closest?.('.ProseMirror, input, textarea, [contenteditable="true"]'),
         }
       },
-      apply: (off) => {
+      apply: (off, kbH) => {
         vvSettledRef.current = false
         revealTimers.forEach(clearTimeout)
         revealTimers = []
         root.style.setProperty('--iw-kb-offset', `${off}px`)
+        root.style.setProperty('--iw-kb-height', `${kbH}px`) // the surface's bottom reserve (toolbarDock.ts keyboardHeightFor)
         const wrap = footerWrapRef.current
         if (wrap) {
           // KEYBOARD-SLIDE CHASE: iOS reports the keyboard's final geometry in one or two big
@@ -1578,8 +1666,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           // compositor tracking IS the mechanism.
           clearTimeout(clearTransTimer)
           const jump = Math.abs(off - lastApplied)
-          wrap.style.transition = jump > 60 ? 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1)' : ''
-          if (jump > 60) clearTransTimer = window.setTimeout(() => { wrap.style.transition = '' }, 300)
+          wrap.style.transition = jump > 40 ? 'transform 250ms cubic-bezier(0.22, 1, 0.36, 1)' : ''
+          if (jump > 40) clearTransTimer = window.setTimeout(() => { wrap.style.transition = '' }, 300)
           wrap.style.transform = off ? `translate3d(0, ${-off}px, 0)` : ''
         }
         lastApplied = off
@@ -1600,9 +1688,33 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       },
       raf: (cb) => requestAnimationFrame(cb),
       caf: (id) => cancelAnimationFrame(id),
-    })
+    }, allowance)
     const kick = () => dock.kick()
     const check = () => dock.check()
+    // DEV readout (`?vvdebug`): the live geometry, on screen, for a device with no devtools.
+    let dbg: HTMLDivElement | null = null
+    let dbgRaf = 0
+    // Per-TAB sticky (sessionStorage): Edit.tsx cleans the query before this mounts, and a tab
+    // Peter is writing in must never inherit a readout from one I was measuring in. `?vvdebug=0` clears.
+    const vvDebug = (() => { try {
+      localStorage.removeItem('iw:vvdebug') // the first cut was device-sticky; retire it everywhere
+      if (/vvdebug=0/.test(location.search)) sessionStorage.removeItem('iw:vvdebug')
+      else if (/vvdebug/.test(location.search)) sessionStorage.setItem('iw:vvdebug', '1')
+      return sessionStorage.getItem('iw:vvdebug') === '1'
+    } catch { return false } })()
+    if (import.meta.env.DEV && vvDebug) {
+      dbg = document.createElement('div')
+      dbg.style.cssText = 'position:fixed;top:44px;left:4px;z-index:9999;background:var(--iw-ink);color:var(--iw-toggle-off);font:11px/1.3 monospace;padding:4px;pointer-events:none;white-space:pre'
+      document.body.appendChild(dbg)
+      const tickDbg = () => {
+        const w = footerWrapRef.current
+        dbg!.style.transform = `translateY(${vv.offsetTop}px)` // ride the visual viewport, not the layout one
+        const se = document.scrollingElement
+        dbg!.textContent = `iH ${window.innerHeight} vvH ${Math.round(vv.height)} top ${Math.round(vv.offsetTop)} sY ${Math.round(scrollY)} maxY ${se ? se.scrollHeight - se.clientHeight : '-'}\nkb ${root.style.getPropertyValue('--iw-kb-offset')} tb ${root.style.getPropertyValue('--iw-toolbar-h')} foc ${!!document.activeElement?.closest?.('.ProseMirror')}\nwrap ${w ? Math.round(w.getBoundingClientRect().top) : '-'}..${w ? Math.round(w.getBoundingClientRect().bottom) : '-'} cb ${w ? getComputedStyle(w).bottom : '-'} tf ${w?.style.transform || '-'}\nhit ${w ? (document.elementFromPoint(195, w.getBoundingClientRect().top + 30)?.tagName ?? 'none') : '-'} pillOp ${footerRef.current ? getComputedStyle(footerRef.current).opacity : '-'} pill ${footerRef.current ? Math.round(footerRef.current.getBoundingClientRect().top) : '-'} dbgTop ${Math.round(dbg!.getBoundingClientRect().top)} pageTop ${Math.round(vv.pageTop)}\n${[...document.querySelectorAll('.inkwave-editor-surface')].map(e => `[${e.className.replace('inkwave-editor-surface', '').trim()} z=${getComputedStyle(e).zIndex} pos=${getComputedStyle(e).position}]`).join(' ')} wrapZ ${w ? getComputedStyle(w).zIndex : '-'} hitCls ${(document.elementFromPoint(195, (w?.getBoundingClientRect().top ?? 0) + 30)?.closest('.inkwave-editor-surface, .iw-toolbar-outline') as HTMLElement | null)?.className.slice(0, 40) ?? '-'}`
+        dbgRaf = requestAnimationFrame(tickDbg)
+      }
+      tickDbg()
+    }
     vv.addEventListener('resize', kick)
     vv.addEventListener('scroll', kick)
     window.addEventListener('resize', kick)
@@ -1618,10 +1730,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       window.removeEventListener('resize', kick)
       window.removeEventListener('scroll', check)
       clearInterval(watchdog)
+      cancelAnimationFrame(dbgRaf); dbg?.remove()
       dock.stop()
       revealTimers.forEach(clearTimeout)
       clearTimeout(clearTransTimer)
       root.style.removeProperty('--iw-kb-offset')
+      root.style.removeProperty('--iw-kb-height')
       if (footerWrapRef.current) {
         footerWrapRef.current.style.transform = ''
         footerWrapRef.current.style.transition = ''
@@ -1644,10 +1758,24 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       syncPmScrollReserve(h)
       keepCaretRef.current() // rows opening/closing move the pill's top edge — keep the caret clear
     }
-    const ro = new ResizeObserver(write)
+    // ⚠ NOT per frame while a row animates (Peter, iPhone 12, 2026-09-17: "opening and closing S is
+    // laggy"). The S/R/♪ rows open with a 220ms max-height transition, so the RO fires every frame
+    // of it, and each write of a :root custom property re-styles EVERY element that reads it —
+    // measured: 31 style recalcs of a 3,361-word document per toggle (41ms in desktop Chromium; a
+    // multiple of that on a phone), against 4ms with the writes held. The reserve only has to be
+    // right once the pill has STOPPED moving, so while anything in the footer is mid-animation the
+    // write waits for the last resize plus a beat past the longest row transition, then lands once.
+    let settle = 0
+    const onResize = () => {
+      const animating = el.getAnimations({ subtree: true }).some((a) => a.playState === 'running')
+      window.clearTimeout(settle)
+      if (!animating) { write(); return }
+      settle = window.setTimeout(write, 260)
+    }
+    const ro = new ResizeObserver(onResize)
     ro.observe(el)
     write()
-    return () => { ro.disconnect(); root.style.removeProperty('--iw-toolbar-h') }
+    return () => { ro.disconnect(); window.clearTimeout(settle); root.style.removeProperty('--iw-toolbar-h') }
   }, [])
 
   // `--iw-side-reserve`: the painted px the WIDER side pill claims from its own edge, measured off
@@ -1743,7 +1871,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       const t = e.target as Element | null
       // A reading surface inside a guarded panel is exempt (see the .iw-touch-guard CSS note):
       // this half preventDefaults touchmove, which cancels a drag-select as surely as the CSS does.
-      guarded = !!t?.closest?.('.iw-touch-guard') && !t.closest('[data-iw-selectable]')
+      // A phone sheet SCROLLS (index.css .iw-phone-sheet): a finger that starts inside one is a
+      // scroll, never a slide-onto-the-editor — the guard used to swallow its touchmove and the
+      // Guide / Settings bodies could not be scrolled at all (Peter, 2026-09-17).
+      guarded = !!t?.closest?.('.iw-touch-guard') && !t.closest('[data-iw-selectable]') && !t.closest('.iw-phone-sheet')
     }
     const move = (e: TouchEvent) => { if (guarded && e.cancelable) e.preventDefault() }
     const end = (e: TouchEvent) => { if (e.touches.length === 0) guarded = false }
@@ -1819,7 +1950,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     let readyAnnounced = false
     let revealStarted = false
     let continueRequested = false
-    let waterRested = false
+    // WARM load (editor/loadWarmth.ts): the reveal need not wait for the coast to end.
+    let waterRested = isWarmLoad()
     let revealTimer: ReturnType<typeof setTimeout> | undefined
     let revealRaf = 0
     let revealed = false
@@ -3022,11 +3154,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // the ▲ drop-up (wherever the id currently lives), so behaviour can't drift between homes.
   const renderSlotButton = (id: SlotId, inRow: boolean) => (
     <>
-      {id === 'guide' && <GuideMenu />}
-      {id === 'math' && <MathMenuButton editor={editor} />}
+      {id === 'guide' && <GuideMenu open={openPanel === 'guide'} onOpenChange={v => setPanelOpen('guide', v)} />}
+      {id === 'math' && <MathMenuButton editor={editor} open={openPanel === 'math'} onOpenChange={v => setPanelOpen('math', v)} />}
       {id === 'bib' && (
         <button ref={inRow ? bibBtnRef : undefined} type="button"
-          onClick={() => setBibPanelOpen(o => !o)}
+          {...{ [PANEL_TRIGGER_ATTR]: 'bib' }}
+          onClick={() => togglePanel('bib')}
           className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${bibPanelOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
           title="Bibliography / citations"
         >
@@ -3042,7 +3175,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
         </button>
       )}
-      {id === 'page' && <PageMenu editor={editor ?? undefined} />}
+      {id === 'page' && <PageMenu editor={editor ?? undefined} open={openPanel === 'page'} onOpenChange={v => setPanelOpen('page', v)} />}
       {id === 'style' && (
         <button
           type="button"
@@ -3055,16 +3188,18 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">S</span>
         </button>
       )}
-      {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />}
+      {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} open={openPanel === 'settings'} onOpenChange={v => setPanelOpen('settings', v)} />}
       {id === 'media' && (
         <MediaMenu
           assets={doc.media ?? []}
+          open={openPanel === 'media'}
+          onOpenChange={v => setPanelOpen('media', v)}
           // The bytes are already in OPFS; both picker/camera imports and clipboard pastes use this
           // one reference-commit path so no caller can forget the document save.
           onImported={rememberMediaAsset}
         />
       )}
-      {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => setLedgerOpen(o => !o)} />}
+      {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => togglePanel('clock')} />}
       {id === 'music' && (
         // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts): this opens the music BAR layer;
         // it does not own music. `data-iw-bar="music"` marks it so the row's onClickCapture leaves
@@ -3108,6 +3243,110 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       )}
     </>
   )
+  // The ▲ drawer's contents. Desktop: a pop-up anchored above the ▲. Phone: a SECOND ROW inside
+  // the toolbar pill itself (Peter, 2026-09-17: "the toolbar simply grows up to double height"),
+  // sized by the same --iw-row-slots clamp as the main row so both rows' circles match, no dividers.
+  const renderDrawer = () => {
+                  const available = overflowSlots(toolbarSlots)
+                  return (
+                    <div className={`bg-white items-center z-[120] iw-toolbar-circles iw-drawer-row pt-1.5 pb-0 ${isTouch ? 'flex iw-phone-toolbar' : 'iw-desktop-drawer'}`}
+                      {...{ [PANEL_ATTR]: 'drawer' }}
+                      // The drawer is a panel too, and on BOTH platforms it is a second toolbar ROW inside
+                      // the pill — the honeycomb (index.css .iw-drawer-row): a grid of (main-row circles − 1)
+                      // cells inset half a circle, so each cell centre sits over a gap below; empty cells
+                      // stay blank and are DROP TARGETS (Peter, 2026-09-18: "draggable to the empty slots
+                      // and displacing any buttons anywhere else on either panel").
+                      style={{ ['--iw-row-slots' as string]: String(toolbarSlots.length), ['--iw-drawer-cols' as string]: String(isTouch ? toolbarSlots.length + 1 : Math.max(desktopRowCircles - 1, 1)) }}
+                      onDragOver={isTouch ? undefined : e => e.preventDefault()}
+                      onDrop={isTouch ? undefined : e => {
+                        // A main-row button dropped on the row's blank space: out of the row, into the pool.
+                        e.preventDefault()
+                        const from = dragIdRef.current; dragIdRef.current = null
+                        if (!from || !toolbarSlots.includes(from)) return
+                        if (toolbarSlots.length <= 1) return
+                        updateSlots(toolbarSlots.filter(s => s !== from))
+                      }}
+                      onMouseDown={e => e.stopPropagation()}>
+                      {/* + add more opps */}
+                      <div className="flex items-center">
+                        <button type="button"
+                          onClick={() => setOppsOpen(o => !o)}
+                          className="flex items-center justify-center min-w-[44px] min-h-[44px] text-stone-400 hover:text-[#302438] transition-colors"
+                          title="More options coming">
+                          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-base leading-none">+</span>
+                        </button>
+                        {oppsOpen && createPortal(
+                          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 font-serif" onMouseDown={() => setOppsOpen(false)}>
+                            <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
+                            <div className="relative iw-nightable bg-white rounded-2xl shadow-xl px-12 py-10 text-center" style={{ border: `1px solid ${INK}bf` }} onMouseDown={e => e.stopPropagation()}>
+                              <p className="text-2xl" style={{ color: INK }}>New features coming soon</p>
+                              <p className="mt-6 text-stone-400 italic">~ The Developer</p>
+                            </div>
+                          </div>,
+                          document.body,
+                        )}
+                      </div>
+                      {/* Phone-only: ◈ provenance/snapshots — moved here from the main row
+                          (Peter 2026-07-11: fewer circles, more breathing room). */}
+                      {isTouch && (
+                        <>
+                          <button type="button"
+                            {...{ [PANEL_TRIGGER_ATTR]: 'receipt' }}
+                            onClick={() => togglePanel('receipt')}
+                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                            style={{ color: '#302438' }}
+                            title="Provenance record — snapshots"
+                          >
+                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.75)] text-sm">◈</span>
+                          </button>
+                        </>
+                      )}
+                      {/* Phone-only: ☁ sync in the popup (hideable from main toolbar) */}
+                      {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
+                        <>
+                          <button type="button"
+                            {...{ [PANEL_TRIGGER_ATTR]: 'sync' }}
+                            onClick={() => togglePanel('sync')}
+                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
+                            style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
+                            title="Sync status">
+                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.5)] text-base">☁</span>
+                          </button>
+                        </>
+                      )}
+                      {/* divider if there are available slots */}
+                      {available.map(id => (
+                        <div key={id}
+                          className="iw-slot"
+                          draggable={!isTouch}
+                          onDragStart={() => { dragIdRef.current = id }}
+                          onDragEnd={() => { dragIdRef.current = null }}
+                          onDragOver={isTouch ? undefined : e => { e.preventDefault(); e.stopPropagation() }}
+                          onDrop={isTouch ? undefined : e => {
+                            // A main-row button dropped ON a drawer button: they swap places.
+                            e.preventDefault(); e.stopPropagation()
+                            const from = dragIdRef.current; dragIdRef.current = null
+                            if (!from || from === id) return
+                            const fromIdx = toolbarSlots.indexOf(from)
+                            if (fromIdx < 0) return
+                            const next = [...toolbarSlots]; next[fromIdx] = id
+                            updateSlots(next)
+                          }}
+                          {...(isTouch ? popupTouchHandlers(id) : {})}
+                          style={isTouch ? { touchAction: 'none' } : undefined}
+                        >
+                          {renderSlotButton(id, false)}
+                        </div>
+                      ))}
+                      {/* Blank cells (desktop): the honeycomb's empty tracks, made real so they accept a
+                          drop — dropping a main-row button here removes it from the row (into the pool). */}
+                      {!isTouch && Array.from({ length: Math.max(0, desktopRowCircles - 1 - available.length - 1 /* the + cell */) }, (_, i) => (
+                        <div key={`blank-${i}`} className="iw-slot-blank min-h-[44px] w-full" aria-hidden="true" />
+                      ))}
+                    </div>
+                  )
+  }
+
   return (
     <ComplianceContext.Provider value={compliance}>
       {/* Phone reveal chrome choreography — see chromeDone above (.iw-chrome-hold / .iw-chrome-in). */}
@@ -3212,13 +3451,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               scheduleSave(() => docRef.current, () => { void upsertMeta({ id: docRef.current.id, title: docRef.current.title, updatedAt: docRef.current.updatedAt }) })
               setLedgerGoalsTick(n => n + 1)
             }}
-            // The charts live behind their own default-ON flag; offer the button only when it's on.
-            // Opening the charts closes the drop-up (the charts are a full modal over the same surface).
-            onOpenGraphs={prodGraphsEnabled() ? () => { setLedgerOpen(false); setGraphsOpen(true) } : undefined}
-            // Reporting — the AI work report (P1c). Same lift: offer only behind its flag, and opening
-            // it closes the drop-up (a full modal over the same surface).
-            onOpenReport={reportFlag ? () => { setLedgerOpen(false); setReportOpen(true) } : undefined}
-            onClose={() => setLedgerOpen(false)}
+            // The charts are always offered. Opening them closes the drop-up (the charts are a
+            // full modal over the same surface).
+            onOpenGraphs={() => { setPanelOpen('clock', false); setGraphsOpen(true) }}
+            // Reporting — the AI work report (P1c). Same lift, same close.
+            onOpenReport={() => { setPanelOpen('clock', false); setReportOpen(true) }}
+            onClose={() => setPanelOpen('clock', false)}
           />
         )}
         {graphsOpen && (
@@ -3244,7 +3482,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           wordCount={wordCount}
           compact={isTouch}
           open={receiptOpen}
-          onOpenChange={setReceiptOpen}
+          onOpenChange={v => setPanelOpen('receipt', v)}
           hideTrigger={isTouch || keyboardUp}
         />
 
@@ -3259,7 +3497,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         {!keyboardUp && (() => {
           // On mobile, ◈ and ☁ live inside the toolbar — hide the fixed-position triggers.
           // On desktop they stay as floating corner pills.
-          const syncProps = isTouch ? { open: syncOpen, onOpenChange: setSyncOpen, hideTrigger: true as const } : {}
+          const syncProps = isTouch ? { open: syncOpen, onOpenChange: (v: boolean) => setPanelOpen('sync', v), hideTrigger: true as const } : {}
           if (fileSaveAvailable()) {
             // Regular browser → local folder. Honest states so the writer is never misled into
             // thinking it's saving when it isn't:
@@ -3385,7 +3623,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         >
           <div
             ref={footerRef}
-            className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
+            className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${isTouch ? 'overflow-hidden w-full' : 'iw-desktop-pill'}`}
             style={{
               // ── ⚠ ONE BUDGET, TWO CONSUMERS. `--iw-bar-budget` is the maximum width the toolbar
               // may occupy, and BOTH this box's max-width and the per-circle shrink clamp in
@@ -3398,9 +3636,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               ...(isTouch ? {} : {
                 ['--iw-bar-budget' as string]: `calc((100vw - 2 * var(--iw-side-reserve, ${SIDE_RESERVE_FALLBACK_PX}px) - ${2 * TOOLBAR_SIDE_GAP_PX}px) / ${(zoom * 1.12).toFixed(4)})`,
                 maxWidth: 'var(--iw-bar-budget)',
+                // On the PILL so the bar rows can read it too (index.css .iw-desktop-pill).
+                ['--iw-row-slots' as string]: String(toolbarSlots.length),
               }),
               border: '1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.75))',
-              borderRadius: isTouch ? '15px 15px 0 0' : '15px',
+              borderRadius: isTouch ? '22px 22px 0 0' : '15px',
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
               transition: 'opacity 160ms ease',
@@ -3411,6 +3651,14 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               transformOrigin: 'bottom center',
             }}
           >
+            {/* ⚠ BARS LIVE INSIDE THE PILL AND NEVER SIZE IT (Peter, 2026-09-18 14:36: "a bar like it
+                was before, same dimensions as the toolbar, merging together"). The pill is a flex
+                COLUMN sized by its widest child, so a bar row wider than the circle row used to
+                grow the pill and re-centre it — the main row jumped left on every S. Every bar row
+                wrapper below is `width: 0; min-width: 100%` ALWAYS (open or collapsed): it takes the
+                width the main row gives the pill and its controls shrink to fit (index.css
+                .iw-desktop-bar sizes them from the same --iw-circle / --iw-bar-gap as the circles). */}
+            <div className="contents">
             {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM.
                 Auto-expands on phone text-selection even when the main toolbar row is hidden. */}
             {(showMainRow || selectionOnPhone || selectionOnDesktop) && (
@@ -3426,10 +3674,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 // child, so the invisible style bar was sizing it (86px of dead pill past the last
                 // circle). `width: 0; min-width: 100%` drops the contribution while collapsed
                 // without breaking the layout when it expands.
-                ...(styleBarExpanded ? {} : { width: 0, minWidth: '100%' }),
+                width: 0, minWidth: '100%',
               }}>
                 {/* Phone: slim side padding — nine 38px circles + the font/size pills need the room */}
-                <div className={`flex items-center ${isTouch ? 'px-1.5' : 'px-4'} py-2 border-b border-stone-200`}>
+                <div className={isTouch ? 'flex items-center px-1.5 py-2 border-b border-stone-200' : DESKTOP_BAR_CLASS}>
                   {editor && <StyleBar editor={editor} onActivity={armStyleTimer} phone={isTouch} barVisible={styleBarExpanded} />}
                 </div>
               </div>
@@ -3444,31 +3692,41 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 opacity: reviewOpen ? 1 : 0,
                 pointerEvents: reviewOpen ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
+                width: 0, minWidth: '100%',
               }}>
-                {reviewOpen && <ReviewBar editor={editor} phone={isTouch} />}
+                {reviewOpen && (isTouch ? <ReviewBar editor={editor} phone={isTouch} /> : <div className={DESKTOP_BAR_CLASS}><ReviewBar editor={editor} phone={isTouch} /></div>)}
               </div>
             )}
 
             {/* Music row — the second-bar layer the music slot opens, MUTUALLY EXCLUSIVE with the
                 style/review rows by the TYPE (`activeBar` holds ONE id — toolbarContract.ts). */}
-            {musicEnabled() && (
+            {(
               <div style={{
                 overflow: 'hidden',
                 maxHeight: activeBar === 'music' ? '60px' : '0',
                 opacity: activeBar === 'music' ? 1 : 0,
                 pointerEvents: activeBar === 'music' ? 'auto' : 'none',
                 transition: 'max-height 220ms ease, opacity 160ms ease',
+                width: 0, minWidth: '100%',
               }}>
-                {activeBar === 'music' && <MusicBar phone={isTouch} documentId={doc.id} mediaAssets={doc.media ?? []} />}
+                {activeBar === 'music' && (isTouch ? <MusicBar phone={isTouch} documentId={doc.id} mediaAssets={doc.media ?? []} /> : <div className={DESKTOP_BAR_CLASS}><MusicBar phone={isTouch} documentId={doc.id} mediaAssets={doc.media ?? []} /></div>)}
               </div>
             )}
+
+            </div>
 
             {/* Main toolbar row. Phone: `iw-phone-toolbar` (index.css) sizes the circles from
                 --iw-row-slots and caps each button's 44px min-WIDTH at the same size; the footer RO
                 mirrors whatever height results into --iw-toolbar-h + the PM scroll reserve, so
                 NEVER hardcode the pill height anywhere. */}
             {showMainRow && (
-            <div className={`iw-toolbar-circles flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
+              <div style={{ overflow: 'hidden', maxHeight: toolbarPickerOpen ? (isTouch ? 96 : 200) : 0, transition: 'max-height 220ms ease', width: 0, minWidth: '100%' }}
+                aria-hidden={!toolbarPickerOpen} {...(toolbarPickerOpen ? {} : { inert: '' as unknown as boolean })}>
+                {renderDrawer()}
+              </div>
+            )}
+            {showMainRow && (
+            <div ref={mainRowRef} className={`iw-toolbar-circles flex items-center ${isTouch ? 'iw-phone-toolbar justify-between px-0 py-1.5' : 'iw-desktop-toolbar'} ${slotDragView || popupDragActive ? 'iw-slot-dragging' : ''}`}
               // ⚠ ONE ROW SIZE, DERIVED FROM THE ROW ITSELF (R2). index.css once divided by a
               // literal 8 — a second copy of ROW_SLOTS in another language — and this then fed it
               // the static constant rather than the live length, so a seventh slot left exactly one
@@ -3494,7 +3752,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               {/* ▲-in-circle: manage toolbar slots — thin popup shows only the off-toolbar buttons */}
               <div className="relative" ref={toolbarPickerRef}>
                 <button type="button"
-                  onClick={() => { setToolbarPickerOpen(o => !o); closeBarLayer('style') }}
+                  {...{ [PANEL_TRIGGER_ATTR]: 'drawer' }}
+                  onClick={() => { togglePanel('drawer'); closeBarLayer('style'); closeBarLayer('music') }}
                   className={`flex items-center justify-center ${isTouch ? '' : 'min-w-[44px]'} min-h-[44px] transition-colors font-serif ${toolbarPickerOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
                   title="Customise toolbar"
                 >
@@ -3504,77 +3763,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                     </svg>
                   </span>
                 </button>
-                {(() => {
-                  const available = overflowSlots(toolbarSlots)
-                  return (
-                    <div className={`absolute bottom-full left-0 mb-2 bg-white shadow-md rounded-xl flex items-center z-[120] ${toolbarPickerOpen ? '' : 'invisible pointer-events-none'}`}
-                      style={{ border: '1px solid rgb(var(--iw-ink-rgb) / 0.75)' }}
-                      onMouseDown={e => e.stopPropagation()}>
-                      {/* + add more opps */}
-                      <div className="flex items-center">
-                        <button type="button"
-                          onClick={() => setOppsOpen(o => !o)}
-                          className="flex items-center justify-center min-w-[44px] min-h-[44px] text-stone-400 hover:text-[#302438] transition-colors"
-                          title="More options coming">
-                          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-base leading-none">+</span>
-                        </button>
-                        {oppsOpen && createPortal(
-                          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 font-serif" onMouseDown={() => setOppsOpen(false)}>
-                            <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
-                            <div className="relative iw-nightable bg-white rounded-2xl shadow-xl px-12 py-10 text-center" style={{ border: `1px solid ${INK}bf` }} onMouseDown={e => e.stopPropagation()}>
-                              <p className="text-2xl" style={{ color: INK }}>New features coming soon</p>
-                              <p className="mt-6 text-stone-400 italic">~ The Developer</p>
-                            </div>
-                          </div>,
-                          document.body,
-                        )}
-                      </div>
-                      {/* Phone-only: ◈ provenance/snapshots — moved here from the main row
-                          (Peter 2026-07-11: fewer circles, more breathing room). */}
-                      {isTouch && (
-                        <>
-                          <div className="w-px h-6 bg-stone-100 mx-1" />
-                          <button type="button"
-                            onClick={() => { setReceiptOpen(o => !o); setToolbarPickerOpen(false) }}
-                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
-                            style={{ color: '#302438' }}
-                            title="Provenance record — snapshots"
-                          >
-                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.75)] text-sm">◈</span>
-                          </button>
-                        </>
-                      )}
-                      {/* Phone-only: ☁ sync in the popup (hideable from main toolbar) */}
-                      {isTouch && (fileSaveAvailable() || gdriveActive || oneDriveConfigured()) && (
-                        <>
-                          <div className="w-px h-6 bg-stone-100 mx-1" />
-                          <button type="button"
-                            onClick={() => { setSyncOpen(o => !o); setToolbarPickerOpen(false) }}
-                            className="flex items-center justify-center min-w-[44px] min-h-[44px]"
-                            style={{ color: (fileSaveAvailable() ? !!lastFileSave && !needsReconnect : gdriveActive ? !!lastGdriveSync : !!lastSync) ? '#6b7280' : '#b45309' }}
-                            title="Sync status">
-                            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white border border-[rgb(var(--iw-ink-rgb) / 0.5)] text-base">☁</span>
-                          </button>
-                        </>
-                      )}
-                      {/* divider if there are available slots */}
-                      {available.length > 0 && <div className="w-px h-6 bg-stone-100 mx-1" />}
-                      {available.map(id => (
-                        <div key={id}
-                          className="iw-slot"
-                          draggable={!isTouch}
-                          onDragStart={() => { dragIdRef.current = id }}
-                          onDragEnd={() => { dragIdRef.current = null }}
-                          onClick={() => setToolbarPickerOpen(false)}
-                          {...(isTouch ? popupTouchHandlers(id) : {})}
-                          style={isTouch ? { touchAction: 'none' } : undefined}
-                        >
-                          {renderSlotButton(id, false)}
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}</div>
+                </div>
               {/* Customisable slots — desktop: HTML5 drag between slots or from the ▲ popup;
                   phone: touch-hold a circle to arm, drag sideways, neighbours FLIP-slide out of
                   the way (slotDragView preview), release to drop (see slotTouchHandlers above). */}
@@ -3594,7 +3783,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                     if (fromIdx >= 0) newSlots[fromIdx] = slotId  // swap: put old slot where new slot was
                     newSlots[slotIdx] = from as SlotId
                     updateSlots(newSlots)
-                    setToolbarPickerOpen(false)
                   }}
                   onDragEnd={() => { dragIdRef.current = null }}
                   {...(isTouch ? slotTouchHandlers(slotIdx) : {})}
@@ -3641,6 +3829,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 </div>
               ))}
               <OptionsMenu
+                open={openPanel === 'options'}
+                onOpenChange={v => setPanelOpen('options', v)}
                 paperRight={paperRight}
                 installPrompt={installPrompt}
                 onExportBundle={exportBundle}
@@ -3663,7 +3853,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 onExportEquations={exportEquations}
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
-                onWorkReport={reportFlag ? () => setReportOpen(true) : undefined}
+                onWorkReport={() => setReportOpen(true)}
                 onFileOpenError={reportOpenError}
               />
             </div>
@@ -3701,7 +3891,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               const updated = { ...docRef.current, citationStyle: s, updatedAt: new Date().toISOString() }
               commitDoc(updated)
             }}
-            onClose={() => { setBibPanelOpen(false); setBibPanelStartsNew(false) }}
+            onClose={() => { setPanelOpen('bib', false); setBibPanelStartsNew(false) }}
           />
         )}
       </div>

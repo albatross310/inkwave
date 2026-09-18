@@ -18,21 +18,28 @@ const TAB_TITLES = [
 // declared stylesheet in the replacement head, so the editor cannot mount completely unstyled.
 import stylesheetHref from '../src/styles/index.css?url'
 
-// A lane dev server (scripts/follow-lanes.sh, VITE_LANE="A") gets its LETTER as the favicon, served
-// as a real PNG by vite.config.ts's /__lane-icon.png middleware. It must be a fresh <link> URL at
-// page load: Safari never repaints a tab icon swapped at runtime, so the earlier canvas/data-URI
-// approach showed the logo on every lane tab. Unset in production, so the real icon set stands.
+// EVERY LOCALHOST TAB WEARS A DEV FAVICON, not just a lane's: a lane dev server
+// (scripts/follow-lanes.sh, VITE_LANE="A") gets its LETTER, and the plain `pnpm dev` server gets
+// `iω` on an inverted ground. Both are served as real PNGs by vite.config.ts's /__lane-icon.png
+// middleware. It must be a fresh <link> URL at page load: Safari never repaints a tab icon swapped
+// at runtime, so the earlier canvas/data-URI approach showed the logo on every lane tab.
+// ⚠ THE GATE IS `import.meta.env.DEV`, NOT `VITE_LANE`. Gating on the lane left the main dev server
+// wearing the production icon set — identical to live iwzero.me in the tab strip, which is exactly
+// the tab you must not confuse with a local one. DEV is false in the build, so prerender, `pnpm
+// preview` and production all keep the real icon set below, untouched.
+const DEV_ICON = import.meta.env.DEV
 const LANE = import.meta.env.VITE_LANE
-const laneIconLinks = LANE
+const devIconQuery = LANE ? `?l=${LANE}` : ''
+const devIconLinks = DEV_ICON
   ? [
-      { rel: 'icon', type: 'image/png', href: `/__lane-icon.png?l=${LANE}` },
-      { rel: 'apple-touch-icon', href: `/__lane-icon.png?l=${LANE}` },
+      { rel: 'icon', type: 'image/png', href: `/__lane-icon.png${devIconQuery}` },
+      { rel: 'apple-touch-icon', href: `/__lane-icon.png${devIconQuery}` },
     ]
   : null
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheetHref },
-  ...(laneIconLinks ?? []),
+  ...(devIconLinks ?? []),
   // NO SVG favicon: our logo SVG uses userSpaceOnUse gradients that Firefox can't rasterise at tab size —
   // and Firefox, having "preferred" the SVG, then shows its generic page icon WITHOUT falling back to the
   // PNGs. Rasterised PNG/ICO render reliably in every browser (a 128px PNG is crisp at tab size). The ?v
@@ -42,7 +49,7 @@ export const links: LinksFunction = () => [
   // TiptapEditor effect swapped the first icon link to an inline document-glyph SVG at editor mount,
   // which at tab size looks like Firefox's default page icon. The swap is removed (see TiptapEditor);
   // ?v=20 displaces the doc glyph any returning Firefox profile has stored against the page URL.
-  ...(laneIconLinks ? [] : [
+  ...(devIconLinks ? [] : [
   { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=20' },
   { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=20' },
   { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=20' },
@@ -52,7 +59,12 @@ export const links: LinksFunction = () => [
   ]),
   // Version the manifest URL when install metadata/assets change. Chromium and macOS otherwise
   // keep a previously installed Dock icon even when the bytes behind the old icon URL changed.
-  { rel: 'manifest', href: '/manifest.webmanifest?v=studio-file-handler-2' },
+  // In DEV the manifest is the generated one (vite.config.ts), so an INSTALLED localhost PWA is
+  // named for its lane and wears the same letter — otherwise every install is another "Inkwave
+  // PWA" with the production logo, and the Dock cannot tell them apart.
+  DEV_ICON
+    ? { rel: 'manifest', href: `/__lane-manifest.webmanifest${devIconQuery}` }
+    : { rel: 'manifest', href: '/manifest.webmanifest?v=studio-file-handler-2' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
   // which previously raced the external Google fetch and fell back to Georgia. See src/editor/exportPdf.ts.

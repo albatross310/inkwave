@@ -9,55 +9,58 @@
 // HARD CONSTRAINTS (Peter): this NEVER travels with the .studio bundle — it's a regenerable local
 // cache, so the emailed/synced file stays byte-for-byte unchanged and a fresh device just warms as
 // it's used. Writes go through storage/opfsWrite.ts (iOS-safe). LRU byte-budgeted (it's a cache).
-// Flag-gated `inkwave:snapThumbs` (default OFF). Baking happens ENTIRELY in the /snapshot presenter's
-// idle capture path — the editor snapshot-create/persist path gets ZERO added code, so save latency
-// is unchanged by construction (not merely measured-equal).
+// UNGATED since 2026-09-18 — the cache is simply how cold scrubbing works now. Baking happens
+// ENTIRELY in the /snapshot presenter's idle capture path — the editor snapshot-create/persist path
+// gets ZERO added code, so save latency is unchanged by construction (not merely measured-equal).
 
 import { writeOpfsFile } from '../storage/opfsWrite'
-import { stickyFlag } from '../flags/stickyFlag'
 
 export type ThumbPane = 'doc' | 'diff' | 'map'
 
 // Local disk cap (regenerable). ~70-100KB/snapshot × count: ~30MB/300 snaps, ~60MB/600 — 80MB
 // holds a large thesis' worth and evicts the oldest beyond that.
 const BUDGET = 80 * 1024 * 1024
-const FLAG = 'inkwave:snapThumbs'
 
 // Downscale per pane: doc/diff at 0.5× (Peter's ~30KB target); the minimap is already a narrow
 // strip, keep it at natural size so its diff ticks stay legible (still only a few KB).
 export function thumbScale(pane: ThumbPane): number { return pane === 'map' ? 1 : 0.5 }
 const QUALITY = 0.7
 
-// STICKY URL FLAGS (the `?auth` pattern), on the shared core in `flags/stickyFlag.ts`.
-// /snapshot's local-first nav rewrites the URL on every step (goTo → navigate without our params),
-// so a flag READ FRESH FROM THE URL dies on the first scrub — which silently disabled the whole
-// feature (and the debug overlay) exactly when you started using it. Resolve ONCE per load,
-// persist, then read from storage.
-// `?snapThumbs=1` on · `?snapThumbs=debug` on + overlay · `?snapThumbs=off` clears both.
+// THE DEBUG OVERLAY, AND ONLY IT. The feature's own gate is gone; what survives is the on-device
+// diagnostic (the wave-video lesson: SHOW the state, don't guess it).
 //
-// THIS FLAG IS WHY THE CORE HAS A `companionStorage` FIELD AT ALL. It carries BOTH hazards of the
-// pattern at once, in opposite directions: the FEATURE must persist (or it dies on the first
-// scrub), and the DEBUG OVERLAY must NOT (a `?snapThumbs=debug` written to localStorage haunted
-// every later /snapshot visit forever, 2026-07-19). One flag, two lifetimes — which is exactly the
-// decision nine hand-written copies of this pattern each had to get right alone.
+// IT MUST BE SESSION-SCOPED, AND IT MUST PERSIST WITHIN THE SESSION — both halves are load-bearing
+// and they pull opposite ways. /snapshot's local-first nav rewrites the URL on every step (goTo →
+// navigate without our params), so a value READ FRESH FROM THE URL dies on the first scrub. But a
+// `?snapThumbs=debug` written to localStorage haunted every later /snapshot visit forever
+// (2026-07-19). sessionStorage is the one lifetime that satisfies both, and any stale PERSISTENT
+// copy left by that bug is PURGED on load.
 const DEBUG_FLAG = 'inkwave:snapThumbsDebug'
 
-const flag = stickyFlag({
-  key: FLAG,
-  param: 'snapThumbs',
-  defaultOn: false,
-  companionKey: DEBUG_FLAG,
-  companionValue: 'debug',
-  companionStorage: 'session', // survives the URL rewrites; gone on a new session; purges any
-                               // stale persistent copy left by the pre-2026-07-19 bug
-  override: '__iwSnapThumbs',
-})
+let debugResolved: boolean | undefined
 
-/** `?snapThumbs=debug` — the on-device diagnostic overlay (the wave-video lesson: SHOW the state,
- *  don't guess it). Implies the feature is on, so one URL turns the whole thing on + visible. */
-export function snapThumbsDebug(): boolean { return flag.demo() }
+function resolveDebug(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    localStorage.removeItem(DEBUG_FLAG)                       // purge the pre-2026-07-19 haunting
+    if (new URLSearchParams(window.location.search).get('snapThumbs') === 'debug') {
+      sessionStorage.setItem(DEBUG_FLAG, '1')
+      return true
+    }
+    return sessionStorage.getItem(DEBUG_FLAG) === '1'
+  } catch {
+    return false                                              // private window / denied storage
+  }
+}
 
-export function snapThumbsEnabled(): boolean { return flag.enabled() }
+/** `?snapThumbs=debug` — the on-device diagnostic overlay, for this browser session only. */
+export function snapThumbsDebug(): boolean {
+  if (debugResolved === undefined) debugResolved = resolveDebug()
+  return debugResolved
+}
+
+/** Test-only: forget the resolved overlay state so a fresh URL can be read. */
+export function _resetSnapThumbsDebug(): void { debugResolved = undefined }
 
 // ── Pure helpers (unit-tested) ────────────────────────────────────────────────────────────────
 

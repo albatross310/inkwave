@@ -57,7 +57,6 @@
     "src/music/MusicStudio.tsx": 13,
     "src/music/capture.ts": 2,
     "src/music/heatmap.ts": 6,
-    "src/music/lesson/LessonPanel.tsx": 3,
     "src/music/theme.ts": 5,
     "src/reader/markInk.ts": 5,
     "src/routes/About.tsx": 14,
