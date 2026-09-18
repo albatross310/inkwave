@@ -15,9 +15,14 @@ Narrative: docs/archive/working-model.md. -->
 - **The tab title and favicon are the BARE LANE LETTER** (`VITE_LANE`, unset in prod) so Peter flicks
   between tabs by letter; the PR number lives in `lanes.tsv` and the start-up table, not the tab.
 - **The favicon must be a REAL URL** — `scripts/laneIcon.mjs` bakes a PNG served at
-  `/__lane-icon.png?l=A`, and `root.tsx`'s `links()` points at it when `VITE_LANE` is set. **Safari
-  never repaints a tab icon swapped at runtime**; a fresh `<link>` href at page load is the only thing
-  it honours.
+  `/__lane-icon.png?l=A`, and `root.tsx`'s `links()` points at it **in DEV generally**, not only when
+  `VITE_LANE` is set: no lane means the main dev server, which wears `iω` on an inverted ground so a
+  localhost tab is never mistaken for live iwzero.me. **Safari never repaints a tab icon swapped at
+  runtime**; a fresh `<link>` href at page load is the only thing it honours. Dev also serves its own
+  `/__lane-manifest.webmanifest`, so an installed localhost PWA carries the lane in its Dock name.
+- **A new lane letter needs a GLYPH** — `FONT` covers A–Z; it covered A–L while `lanes.tsv` already
+  had lane M, and M rendered a blank square. `src/dev/devIcon.test.ts` holds every letter in
+  `lanes.tsv` against the font, so the table can never again name a lane the icon cannot draw.
 - `?seed` is DEV-only (`src/dev/seedDocument.ts`), reachable only from the absence path, never Peter's
   prose. `?seed=fresh` always mints a NEW seeded document for the tab — plain `?seed` leaves an
   existing one alone, which is how a tab ends up showing stale sample text.

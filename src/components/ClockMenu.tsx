@@ -24,6 +24,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
+import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_PANEL_CLASS, desktopPanelStyle } from '../styles/panelSheet'
+import { SheetHeader } from './PanelSheet'
 import { LEDGER_ROW_EVENT, isLabelSuppressed, setLabelSuppressed } from '../productivity/capture'
 import { CHIME_VOICES, chimeMuted, chimeVoiceId, previewChime, setChimeMuted, setChimeVoiceId } from '../productivity/chime'
 import { prodLedgerEnabled, setProdLedgerEnabled } from '../productivity/ledgerFlag'
@@ -211,6 +214,7 @@ export function ClockSlotButton({ open, onToggle }: { open: boolean; onToggle: (
       aria-pressed={open}
       // The drop-up finds its anchor by this attribute, so it works from the row OR from ▲.
       data-iw-ledger-btn=""
+      {...{ [PANEL_TRIGGER_ATTR]: 'clock' }}
       onClick={onToggle}
       className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors ${open || running ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
       title={running ? 'Pomodoro running — your ledger' : 'Pomodoro & your ledger'}
@@ -316,8 +320,9 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
   }, [rows])
 
   const isPhone = isTouchDevice()
+  // Phone: the shared sheet above the toolbar (styles/panelSheet.ts).
   const style: React.CSSProperties = isPhone
-    ? { position: 'fixed', left: 8, right: 8, bottom: 68 }
+    ? phoneSheetStyle()
     : (() => {
         const br = anchor?.getBoundingClientRect()
         const centre = br ? br.left + br.width / 2 : window.innerWidth / 2
@@ -327,7 +332,6 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
           bottom: 70,
           left: Math.round(Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, centre))),
           transform: 'translateX(-50%)',
-          width: 372,
         }
       })()
 
@@ -340,18 +344,30 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
       // iw-touch-guard: a portalled panel over the editor — taps must not blur the contenteditable
       // (iOS retracts the keyboard and the docked pill walks to the screen bottom).
       // iw-nightable: opts the whole panel into the themed surface.
-      className="iw-nightable iw-touch-guard iw-no-print z-[60] flex flex-col overflow-hidden bg-white font-serif"
-      style={{
-        ...style,
-        maxHeight: '72vh',
-        borderRadius: 14,
-        boxShadow: '0 10px 40px rgba(28,25,23,0.18)',
-        border: '1px solid var(--iw-nightable-border, #ece9e6)',
-      }}
+      {...{ [PANEL_ATTR]: 'clock' }}
+      className={`iw-nightable iw-touch-guard iw-no-print z-[60] flex flex-col overflow-hidden bg-white font-serif ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_PANEL_CLASS}`}
+      // Desktop: a PANEL (styles/panelSheet.ts) — centred, sized from the paper, not anchored to ⏱.
+      style={isPhone ? style : { ...desktopPanelStyle(), maxHeight: '72vh' }}
     >
       {/* The header: a back affordance on a sub-view + the view's name. This is the one nav chrome;
           the views below never draw their own. Home shows no header (its buttons ARE the surface). */}
-      {title !== null && (
+      {isPhone ? (
+        // Phone: the one header every sheet wears (small-caps title, ×); a sub-view adds ‹ before it.
+        <SheetHeader
+          onClose={onClose}
+          title={title === null ? 'Writing time' : (
+            <span className="inline-flex items-center gap-1">
+              <button type="button" onClick={() => setView('home')} aria-label="Back"
+                className="flex items-center justify-center rounded-full"
+                style={{ minWidth: TOUCH_MIN, minHeight: TOUCH_MIN, margin: '-8px 0 -8px -14px', fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}
+              >
+                ‹
+              </button>
+              {title}
+            </span>
+          )}
+        />
+      ) : title !== null && (
         <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: '1px solid var(--iw-nightable-border, #f0eeec)' }}>
           <button type="button" onClick={() => setView('home')} aria-label="Back"
             className="flex items-center justify-center rounded-full transition-colors hover:bg-stone-50"
@@ -366,6 +382,7 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
       <div className="overflow-y-auto">
         {view === 'home' && (
           <HomeView
+            showTitle={!isPhone}
             onNavigate={setView}
             onOpenGraphs={onOpenGraphs}
             onOpenReport={onOpenReport}
@@ -414,8 +431,10 @@ function NavRow({ glyph, label, desc, accent, onClick }: {
   )
 }
 
-function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection }: {
+function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection, showTitle = true }: {
   onNavigate: (v: NavView) => void
+  /** False on phone, where the sheet header carries the title. */
+  showTitle?: boolean
   onOpenGraphs?: () => void
   onOpenReport?: () => void
   reflection: React.ReactNode
@@ -428,8 +447,8 @@ function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection }: {
   return (
     <div className="pb-2">
       {/* A quiet header + the running-timer glance, so opening from a running block shows its state. */}
-      <div className="flex items-center justify-between px-4 pb-1 pt-4">
-        <span style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}>Your writing time</span>
+      {(showTitle || running) && <div className="flex items-center justify-between px-4 pb-1 pt-4">
+        {showTitle ? <span style={{ fontSize: TYPE.heading, color: 'var(--iw-ink, #302438)' }}>Your writing time</span> : <span />}
         {running && (
           <button type="button" onClick={() => onNavigate('work')}
             className="flex items-center gap-1.5 rounded-full px-3 transition-colors hover:opacity-80"
@@ -438,11 +457,12 @@ function HomeView({ onNavigate, onOpenGraphs, onOpenReport, reflection }: {
             <TimeFace className="tabular-nums" style={{ fontSize: TYPE.label }} />
           </button>
         )}
-      </div>
+      </div>}
 
       {reflection}
 
-      <div className="mt-1">
+      {/* No top margin under the sheet header (phone): it would double the header's own rule. */}
+      <div className={showTitle ? 'mt-1' : ''}>
         <NavRow accent glyph={<ClockGlyph running={running} />} label={running ? 'Work in progress' : 'Start / stop work'}
           desc={running ? 'Your block is running — pause, stop or summarise' : 'A focused block, with a gentle timer'}
           onClick={() => onNavigate('work')} />

@@ -18,7 +18,7 @@
 // → docs/archive/snapshot-scrub-rounds.md#raster
 
 import { probePerf } from './perflog'
-import { snapThumbsEnabled, thumbScale, putThumb, getThumb, hasThumb, loadThumbIndex, thumbHash, type ThumbPane } from './snapThumbs'
+import { thumbScale, putThumb, getThumb, hasThumb, loadThumbIndex, thumbHash, type ThumbPane } from './snapThumbs'
 
 export type ScrubPaneKind = 'doc' | 'diff' | 'map'
 
@@ -964,7 +964,7 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     return `${box}|z${zoom.toFixed(3)}|${theme}|f${fontsSig()}`
   }
   function bakeThumb(kind: ScrubPaneKind, snapId: string, w: number, h: number, zoom: number, dpr: number, src: CanvasImageSource | null, srcW: number, srcH: number) {
-    if (!src || !snapThumbsEnabled()) return
+    if (!src) return
     const docId = opts.getDocId?.(); if (!docId) return
     // Draw the downscaled thumb SYNCHRONOUSLY (the source bitmap is alive now) into a detached
     // canvas, so the async WebP encode can't race the entry's eviction/close.
@@ -1003,7 +1003,6 @@ export function createScrubPresenter(opts: { touch: boolean; getLiveId: () => st
     })()
   }
   function preloadThumbs(center: string) {
-    if (!snapThumbsEnabled()) return
     const docId = opts.getDocId?.(); if (!docId) return
     void loadThumbIndex(docId) // idempotent; until it resolves hasThumb() is false (safe)
     const ci = order.indexOf(center); if (ci < 0) { for (const k of surfaces.keys()) hydrate(k, center); return }
