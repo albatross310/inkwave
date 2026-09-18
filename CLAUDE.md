@@ -48,11 +48,14 @@ The data-loss rules below are universal; read them, then `storage-sync.md`.
 
 ## The backlog — `iwbacklog.md` in the repo root
 
-**Peter's own queue of bugs and wants, in a file he edits directly on GitHub.** Ask it for work
-("what's next on the backlog") and take from the top of `## Next`; claim by moving the line to
-`## Doing` with your name, in a commit. **Do not read it as standing context** — it is pointed at
-rather than inlined precisely so a growing backlog does not ride in every session's window all day.
-Never delete or reword one of his lines; close by moving it to `## Done` with the PR that closed it.
+**Peter's own queue of bugs and wants, in a file he edits directly on GitHub.** Read it when you
+finish a piece of work and have nothing queued — **"I am free" is the trigger, never a timer**, since
+nothing in it is urgent by construction. Answer an item in the file, in a commit, with one of
+`yes` / `no` / `later` plus your name and a Brisbane time; **a `no` MUST name who it goes to next**,
+or it is a silent drop that looks like a decision. Two forwards without a `yes` and it returns to
+Peter. **Do not read it as standing context** — it is pointed at rather than inlined precisely so a
+growing backlog does not ride in every session's window all day. Never delete or reword one of his
+lines, and never delete someone's `no`; close by moving the item to `## Done` with the PR.
 
 ## Stack
 
