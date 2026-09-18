@@ -670,12 +670,15 @@ function Modal({ title, onClose, children, anchorStyle }: { title: string; onClo
     <div className="fixed inset-0 z-[100]" onPointerDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label={title} onPointerDown={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
-        className={`iw-nightable ${DESKTOP_SHEET_CLASS} bg-white max-w-[92vw] flex flex-col overflow-hidden`}
-        style={{ ...anchorStyle, ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx }}
+        className={`iw-nightable ${isTouchDevice() ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS} bg-white max-w-[92vw] flex flex-col overflow-hidden`}
+        // Phone: the sheet's type and edge (styles/panelSheet.ts), centred like the desktop modal.
+        style={isTouchDevice()
+          ? (() => { const ps = phoneSheetStyle(); return { ...anchorStyle, borderRadius: ps.borderRadius, boxShadow: ps.boxShadow, border: ps.border, width: 'min(400px, 92vw)', maxHeight: '80vh' } })()
+          : { ...anchorStyle, ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx }}
       >
         {/* The same head as every other panel (PanelSheet.tsx) — one look across desktop and phone. */}
         <SheetHeader title={title} onClose={onClose} />
-        <div className="flex flex-col px-4 pt-3 pb-4">{children}</div>
+        <div className="flex flex-col min-h-0 overflow-y-auto px-4 pt-3 pb-4">{children}</div>
       </div>
     </div>,
     document.body,

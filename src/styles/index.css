@@ -1130,7 +1130,14 @@
     --iw-sheet-meta: 14px;
     --iw-sheet-label: 12px;
   }
-  .iw-phone-sheet .font-serif, .iw-phone-sheet.font-serif { font-family: inherit; }
+  /* A sheet whose ROOT carries font-serif must not inherit the page's serif — the sans is repeated
+     here on purpose (the ◈ Σ ⁝ sheets rendered in Garamond, 2026-09-18 screenshot pass). */
+  .iw-phone-sheet .font-serif { font-family: inherit; }
+  .iw-phone-sheet.font-serif { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  /* Legacy control sizes (the citations strip): a thumb needs 40px, and 13px is fine print. */
+  .iw-phone-sheet .h-8, .iw-phone-sheet .h-7 { height: 40px; }
+  .iw-phone-sheet .text-\[13px\] { font-size: var(--iw-sheet-small); }
+  .iw-phone-sheet input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--iw-ink); }
 }
 /* ── THE DESKTOP SHEET (styles/panelSheet.ts DESKTOP_SHEET) — outside the coarse-pointer block ──
    The same remaps as the phone sheet, onto the :root desktop ramp, so a panel's legacy text-sm /

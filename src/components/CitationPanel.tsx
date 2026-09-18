@@ -827,8 +827,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: isTouchDevice() ? '100vw' : 'min(864px, 96vw)', overflow: 'hidden', borderRadius: 0, ...(isTouchDevice() ? {} : { borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }) }
           : isTouchDevice()
             // Phone: the shared sheet above the toolbar (styles/panelSheet.ts); the list scrolls inside.
-            ? { ...phoneSheetStyle(), height: 'calc(var(--iw-vv-h, 100dvh) * 0.72)', overflow: 'hidden' }
-            : { ...panelStyle(), ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx, height: '80vh', minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '92vh', resize: 'both', overflow: 'hidden' }}
+            ? { ...phoneSheetStyle(), minHeight: 'calc(var(--iw-vv-h, 100dvh) * 0.3)', overflow: 'hidden' }
+            : { ...panelStyle(), ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx, minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '80vh', resize: 'both', overflow: 'hidden' }}
         onMouseDown={e => e.stopPropagation()}
       >
         {isTouchDevice() ? (
@@ -965,8 +965,8 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
             </div>
             {/* ↻ before + New (swapped per Peter, 2026-07-10). */}
             <button type="button" onClick={openNewRef}
-              className="h-7 px-2 rounded border flex items-center whitespace-nowrap"
-              style={{ background: '#e0f2fe', borderColor: '#7dd3fc', color: 'var(--iw-newbtn-fg, #0369a1)' }}>
+              className="h-8 px-3 rounded border flex items-center whitespace-nowrap"
+              style={{ background: `${INK}12`, borderColor: 'var(--iw-cite-color, #302438)', color: 'var(--iw-cite-color, #302438)' }}>
               + New
             </button>
           </div>
@@ -999,7 +999,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           </div>
         </div>
 
-        <div className={`iw-snap-scroll flex-1 overflow-y-auto px-4 py-2 ${isTouchDevice() ? 'order-1' : ''} ${fullscreen ? 'grid grid-cols-2 gap-x-6 content-start items-start' : ''}`}>
+        <div className={`iw-snap-scroll flex-1 min-h-0 overflow-y-auto px-4 py-2 ${isTouchDevice() ? 'order-1' : ''} ${fullscreen ? 'grid grid-cols-2 gap-x-6 content-start items-start' : ''}`}>
           {!helpDismissed && (
             <div className={`flex items-start gap-2 mb-2 ${fullscreen ? 'col-span-2' : ''}`}>
               <div className="text-[11px] text-stone-500">

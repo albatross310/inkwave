@@ -143,11 +143,12 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
       type="button"
       onClick={onClick}
       title={hint ? `${label}  ·  ${hint}` : label}
-      style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '6px 10px', borderRadius: '5px', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
+      style={{ display: 'flex', alignItems: 'center', width: '100%', padding: isPhone ? '10px 12px' : '6px 10px', minHeight: isPhone ? 44 : undefined, borderRadius: '5px', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}
       onMouseEnter={e => (e.currentTarget.style.background = 'rgba(72, 73, 101, 0.08)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
-      <span style={{ fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif', fontSize: '15px', color: '#57534e' }}>{label}</span>
+      {/* Phone: the sheet's sans ramp (index.css .iw-phone-sheet); desktop keeps the serif menu voice. */}
+      <span style={isPhone ? { fontSize: 'var(--iw-sheet-body)', color: '#57534e' } : { fontFamily: 'IM Fell DW Pica, EB Garamond, Georgia, serif', fontSize: '15px', color: '#57534e' }}>{label}</span>
     </button>
   )
 
@@ -199,7 +200,7 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
                           editor?.chain().updateAttributes('mathBlock', { align: o.value }).run()
                           setOpen(false)
                         }}
-                        style={{ fontSize: '0.72rem', padding: '2px 8px', border: `1px solid ${active ? INK : 'rgba(72, 73, 101, 0.22)'}`, borderRadius: '4px', background: active ? 'rgba(72, 73, 101, 0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
+                        style={{ fontSize: isPhone ? 18 : '0.72rem', padding: isPhone ? '8px 16px' : '2px 8px', minHeight: isPhone ? 40 : undefined, border: `1px solid ${active ? INK : 'rgba(72, 73, 101, 0.22)'}`, borderRadius: '4px', background: active ? 'rgba(72, 73, 101, 0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
                       >{o.label}</button>
                     )
                   })}

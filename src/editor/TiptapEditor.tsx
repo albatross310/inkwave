@@ -557,8 +557,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // Phone (Peter, 2026-09-17): an app opened FROM the drawer row keeps the row open until that app
   // closes — a panel whose trigger is not on the main row was reached through the drawer, and so
   // was the music bar when ♪ lives there. `openPanel` still holds ONE id; this is only the LOOK.
+  // ⚠ Two things are called 'receipt': the SLOT (the R review bar on the main row) and the PANEL
+  // (the ◈ snapshots sheet), and on the phone ◈ is only ever reached from the drawer.
   const drawerHeld = isTouchDevice() && (
-    (openPanel !== null && openPanel !== 'drawer' && !(toolbarSlots as readonly string[]).includes(openPanel))
+    (openPanel !== null && openPanel !== 'drawer' && openPanel !== 'options' // ⋮ is a main-row fixture
+      && (openPanel === 'receipt' || !(toolbarSlots as readonly string[]).includes(openPanel)))
     || (activeBar === 'music' && !toolbarSlots.includes('music')))
   const toolbarPickerOpen = openPanel === 'drawer' || drawerHeld
   // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts). The ledger drop-up's open state lives
