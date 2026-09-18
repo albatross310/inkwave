@@ -18,6 +18,7 @@ import { aiSummariesEnabled, setAiSummaries, urlLookupEnabled, setUrlLookup, aiC
 import { AiConsentDialog } from './AiConsentDialog'
 import { LimitSelector } from './LimitSelector'
 import { scasSuggestionsEnabled, setScasSuggestionsEnabled } from '../scas/display'
+import { snapshotEvery, cycleSnapshotEvery } from '../editor/snapshotSettings'
 
 const INK = '#302438'
 // Shared gap between a footer button and the panel it opens (keep the same across all footer panels).
@@ -134,6 +135,21 @@ export function SettingsMenu({ limitN, onLimitChange }: SettingsMenuProps) {
                 title="Cycle old-word display style"
               >
                 {crossoutMode()}
+              </button>
+            </div>
+
+            {/* Snapshot cadence (Peter, 2026-09-17): paragraph (default) | sentence */}
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span>Snapshot every</span>
+              <button
+                type="button"
+                onClick={() => { cycleSnapshotEvery(); rerender(n => n + 1) }}
+                className="text-xs px-2 py-0.5 rounded-full hover:bg-stone-100 transition-colors tabular-nums"
+                style={{ color: INK, border: `1px solid ${INK}44` }}
+                title="Take an automatic provenance snapshot after every paragraph or every sentence"
+                data-testid="snapshot-every"
+              >
+                {snapshotEvery()}
               </button>
             </div>
 

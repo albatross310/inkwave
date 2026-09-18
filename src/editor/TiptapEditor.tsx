@@ -43,7 +43,11 @@ import { ComplianceContext, useComplianceProvider } from '../scas/compliance'
 import { ScasController } from '../scas/controller'
 import { normalizeScasState, DEFAULT_SET_SIZE } from '../scas/state'
 import { createSnapshotIfChanged, readSnapshotArchive, toSnapshotMeta, stampSnapshot, drainUnstamped, upgradePending, patchSnapshotSummary, patchSnapshotDiffSummary, type ManualSnapshotResult } from '../provenance/snapshots'
-import { summariseParagraph, summariseBullets, summariseDiff } from '../provenance/summarise'
+import { summariseParagraph, summariseDiff } from '../provenance/summarise'
+import { EditBatcher } from '../provenance/editBatcher'
+import { sentenceJustCompleted, enterCompletesUnit } from '../provenance/sentenceEnd'
+import { snapshotEvery } from './snapshotSettings'
+import { ReplaceStep } from '@tiptap/pm/transform'
 import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
 import type { ApplicationSurfaceMode } from '../components/ApplicationSurface'
@@ -51,7 +55,7 @@ import { readApplicationSurfaceMode, writeApplicationSurfaceMode } from '../comp
 import { emailEnabled } from '../email/flag'
 import { titleForDocument } from './docTitle'
 import { SessionRunner } from '../provenance/session'
-import { CadenceTap } from '../provenance/cadence'
+import { CadenceTap, countSteps } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { prodLedgerEnabled } from '../productivity/ledgerFlag'
 import { getCapture } from '../productivity/capture'
@@ -228,10 +232,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // gates the ban-credit lock detection (so a not-yet-committed word isn't mistaken for a delete).
   const prevDocSizeRef = useRef(-1)
 
-  // Paragraph snapshot tracking: count of top-level paragraphs seen last transaction; buffer of
-  // short-para (<70 word) texts waiting to group into a single snapshot.
+  // Automatic snapshot cadence: count of top-level paragraphs seen last transaction; the pending
+  // small-edit set (rule 3); the empty paragraph Enter just made and whether text went into it
+  // (rule 4). `block` is the top-level child index of that paragraph.
   const prevParaCountRef = useRef(0)
-  const shortParaBufferRef = useRef<string[]>([])
+  const editBatcherRef = useRef(new EditBatcher())
+  const newParaRef = useRef<{ block: number; typed: boolean } | null>(null)
 
   // Snapshots (the provenance record). Loaded per document; appended when a resolved kick changes
   // the content. createSnapshotIfChanged is serialised through a promise chain so rapid kicks can't
@@ -1219,6 +1225,13 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         return true // preventDefault — the async browser-mutation path is skipped entirely
       },
     },
+    onSelectionUpdate: ({ editor: e }) => {
+      const np = newParaRef.current
+      if (!np?.typed) return
+      const { $from } = e.state.selection
+      if (($from.depth > 0 ? $from.index(0) : -1) !== np.block) completeLeftParagraph()
+    },
+    onBlur: () => { if (newParaRef.current?.typed) completeLeftParagraph() },
     onTransaction: ({ editor: e, transaction }) => {
       // ── Insignia (paid): keystroke-cadence tap. Counts only — never chars — and inert for the
       // free tier (the tap is never created).
@@ -1352,19 +1365,42 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         if (words.length > 0) prefetchSynonyms([...new Set(words)])
       }, 600)
 
-      // ── ⚠ Paragraph snapshot: ENTER MUST DO NO O(doc) WORK ON THE KEYSTROKE. A cheap top-level
-      // count first; the paragraph TEXTS are collected only when the count actually grew by one.
+      // ── ⚠ Automatic snapshot cadence (Peter, 2026-09-17). ENTER MUST DO NO O(doc) WORK ON THE
+      // KEYSTROKE: a cheap top-level count first; texts are read only for the ONE paragraph involved.
+      //   1. one snapshot per completed paragraph, whatever its length;
+      //   2. "Snapshot every: sentence" — also on sentence-ending punctuation + whitespace/Enter;
+      //   3. edits to existing text batch (EditBatcher) until a char/paragraph budget or a 1/2 event;
+      //   4. Enter → empty paragraph → typed text → completes on the next Enter, a sentence end, or
+      //      the caret leaving it (see onSelectionUpdate/onBlur); a bare Enter never snapshots;
+      //   5. the first edit of each calendar day also saves a version (the manual funnel).
       // → docs/archive/editor-surface.md#editor-enter
       {
+        noteDailyVersion()
+
         let paraCount = 0
         e.state.doc.forEach((node) => { if (node.type.name === 'paragraph') paraCount++ })
         const prev = prevParaCountRef.current
         prevParaCountRef.current = paraCount
 
-        // Only trigger on a single new paragraph (Enter key, not paste of multiple blocks).
+        // O(steps): chars in/out and which top-level blocks each step touched (for the batcher).
+        const { ins, del } = countSteps(transaction.steps)
+        const touched = new Set<number>()
+        let insertedText = ''
+        for (const st of transaction.steps) {
+          if (!(st instanceof ReplaceStep)) continue
+          try {
+            const $p = transaction.before.resolve(st.from)
+            touched.add(Math.min($p.index(0), Math.max(0, transaction.before.childCount - 1)))
+          } catch { /* position outside the pre-step doc: ignore */ }
+          if (st.slice.size > 0) insertedText += st.slice.content.textBetween(0, st.slice.content.size, '\n', '\n')
+        }
+        const caretBlock = $from.depth > 0 ? $from.index(0) : -1
+        const sentenceMode = snapshotEvery() === 'sentence'
+
+        let completion = false
+        // Rule 1: a single new paragraph (Enter, not a multi-block paste) after a non-empty one.
         if (paraCount === prev + 1 && pIdx >= 2) {
-          // ONLY the completed paragraph's text — collecting every paragraph's was an O(doc) string
-          // build ON the keystroke. pIdx-1 is the new empty paragraph; pIdx-2 the just-completed one.
+          // pIdx-1 is the new empty paragraph; pIdx-2 the just-completed one.
           let completedRaw = ''
           let paraIdx = 0
           e.state.doc.forEach((node) => {
@@ -1373,46 +1409,38 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
             paraIdx++
           })
           const completedText = completedRaw.trim()
-          if (completedText.length > 0) {
-            const wordCount = completedText.match(/[\p{L}\p{N}]+/gu)?.length ?? 0
+          // Enter completes the unit in BOTH modes — in sentence mode a sentence + newline counts,
+          // and so does an unpunctuated line (the writer chose to end it). Empty never does.
+          if (enterCompletesUnit(sentenceMode ? 'sentence' : 'paragraph', completedText)) {
+            completion = true
+            takeAutoSnapshot(() => summariseParagraph(completedText))
+          }
+          // Rule 4: remember the empty paragraph Enter just made, so the text typed into it counts
+          // as a unit even if the writer wanders off before pressing Enter again.
+          newParaRef.current = { block: caretBlock, typed: false }
+        } else if (sentenceMode && /^\s+$/.test(insertedText) && $from.parent.isTextblock) {
+          // Rule 2: whitespace typed right after . ! ? — only the caret's own paragraph is read.
+          const before = $from.parent.textBetween(0, $from.parentOffset, '\n', '\n')
+          if (sentenceJustCompleted(before, insertedText)) {
+            completion = true
+            takeAutoSnapshot(() => summariseParagraph(before.trim()))
+          }
+        }
 
-            // ⚠ The snapshot chain (getJSON + JCS + hash + OPFS write + OTS stamp) is DEFERRED to a
-            // genuine input pause — content is still captured at WORK time, as it always was. The
-            // buffer bookkeeping stays synchronous so Enter ordering is deterministic.
-            const takeParaSnapshot = (summaryFn: () => Promise<string>) => runWhenQuiet(() => {
-              enqueueSnapshotWork(async () => {
-                const snap = await createSnapshotIfChanged(docRef.current, 'paragraph', sessionRef.current?.receipts ?? [])
-                if (!snap) return
-                setSnapshots((prev) => [...prev, toSnapshotMeta(snap)])
-                const stamped = await stampSnapshot(snap.documentId, snap.id)
-                if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? toSnapshotMeta(stamped) : s)))
-                mirrorIfActive()
-                // Async summary — patch when it resolves (does not block the snapshot chain).
-                summaryFn().then((summary) => {
-                  if (!summary) return
-                  enqueueSnapshotWork(async () => {
-                    const patched = await patchSnapshotSummary(docRef.current.id, snap.id, summary)
-                    if (patched) setSnapshots((prev) => prev.map((s) => (s.id === patched.id ? toSnapshotMeta(patched) : s)))
-                  })
-                }).catch(() => {})
-              })
-            }, 1500)
+        const np = newParaRef.current
+        if (!completion && np && caretBlock === np.block && ins > 0) np.typed = true
 
-            if (wordCount >= 70) {
-              // Flush any buffered short paras first.
-              if (shortParaBufferRef.current.length > 0) {
-                const flushed = [...shortParaBufferRef.current]
-                shortParaBufferRef.current = []
-                takeParaSnapshot(() => summariseBullets(flushed))
-              }
-              takeParaSnapshot(() => summariseParagraph(completedText))
-            } else {
-              shortParaBufferRef.current.push(completedText)
-              if (shortParaBufferRef.current.length >= 3) {
-                const group = [...shortParaBufferRef.current]
-                shortParaBufferRef.current = []
-                takeParaSnapshot(() => summariseBullets(group))
-              }
+        if (completion) {
+          editBatcherRef.current.reset()
+        } else {
+          // Rule 3: appending at the very end of the document is new writing, not an edit — the
+          // paragraph/sentence rules cover it. Anything else is a small edit and accumulates.
+          const appending = del === 0 && touched.size === 1 && caretBlock === e.state.doc.childCount - 1 && $from.parentOffset === $from.parent.content.size
+          if (!appending) {
+            editBatcherRef.current.record(ins, del, touched)
+            if (editBatcherRef.current.flushReason()) {
+              editBatcherRef.current.reset()
+              takeAutoSnapshot(async () => '')
             }
           }
         }
@@ -2059,6 +2087,60 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     scasLastCaretRef.current = 1
     if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(SCAS_HINT_META, true))
   }, [doc.id, editor]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ⚠ The automatic snapshot chain (getJSON + JCS + hash + OPFS write + OTS stamp) is DEFERRED to a
+  // genuine input pause — content is still captured at WORK time, as it always was. The summary
+  // (when AI summaries are on) is patched in afterwards and never blocks the chain.
+  function takeAutoSnapshot(summaryFn: () => Promise<string>, quietMs = 1500) {
+    runWhenQuiet(() => {
+      enqueueSnapshotWork(async () => {
+        const snap = await createSnapshotIfChanged(docRef.current, 'paragraph', sessionRef.current?.receipts ?? [])
+        if (!snap) return
+        setSnapshots((prev) => [...prev, toSnapshotMeta(snap)])
+        const stamped = await stampSnapshot(snap.documentId, snap.id)
+        if (stamped) setSnapshots((prev) => prev.map((s) => (s.id === stamped.id ? toSnapshotMeta(stamped) : s)))
+        mirrorIfActive()
+        summaryFn().then((summary) => {
+          if (!summary) return
+          enqueueSnapshotWork(async () => {
+            const patched = await patchSnapshotSummary(docRef.current.id, snap.id, summary)
+            if (patched) setSnapshots((prev) => prev.map((s) => (s.id === patched.id ? toSnapshotMeta(patched) : s)))
+          })
+        }).catch(() => {})
+      })
+    }, quietMs)
+  }
+
+  // Rule 4: the paragraph Enter created has text in it and the caret has left (or the editor
+  // blurred) — that is a completed unit. Fires after 1.5 s of quiet; the pending edit set is folded
+  // into the same snapshot.
+  function completeLeftParagraph() {
+    const np = newParaRef.current
+    newParaRef.current = null
+    if (!np?.typed) return
+    editBatcherRef.current.reset()
+    const e = editorRef.current
+    let text = ''
+    if (e && !e.isDestroyed && np.block >= 0 && np.block < e.state.doc.childCount) text = e.state.doc.child(np.block).textContent.trim()
+    if (!text) return
+    takeAutoSnapshot(() => summariseParagraph(text))
+  }
+
+  // Rule 5: once per LOCAL calendar day, the first edit also saves a version through the manual
+  // funnel. The date is remembered per document (same localStorage-per-doc pattern as the OTS
+  // sweep) so a reload does not repeat it.
+  function noteDailyVersion() {
+    if (!sawUserInputRef.current) return
+    const docId = docRef.current.id
+    const key = `inkwave:autoVersionDate:${docId}`
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    let last: string | null = null
+    try { last = localStorage.getItem(key) } catch { /* private mode */ }
+    if (last === today) return
+    try { localStorage.setItem(key, today) } catch { /* private mode */ }
+    runWhenQuiet(() => { if (docRef.current.id === docId) void createManualSnapshot() }, 1500)
+  }
 
   // Rebuild docRef from the live editor if a keystroke left it stale (the lazy half of the
   // console-snappy rule). Called at every point that consumes the document: the autosave beat,
