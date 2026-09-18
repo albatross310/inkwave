@@ -62,3 +62,39 @@ Narrative: docs/archive/working-model.md. -->
   agent dies; preserve agent worktrees until their work is merged.
 - Merges run serially into master through the full gate; Peter tests live on iPhone + desktop and
   reports in batches.
+
+## Review — the tiers, and what each one owns
+
+**Lane agent writes → reviewer session proves it green and rule-clean → Peter decides whether it
+ships.** The rest of this section is that sentence, argued.
+
+**Lanes buy THROUGHPUT, not quality.** Running six at once makes the writing faster; it does nothing
+for the one thing that was already the bottleneck — Peter reading the result. Adding lanes without
+adding review just lengthens the queue, which is how thirteen branches reached 2–3 months old while
+every one of them was finished code. The review tier is what turns throughput into shipped work.
+
+- **THE TIERS.** A lane agent does the work. **A reviewer session (Max by default — local, so it can
+  actually look at the thing in Safari) owns CORRECTNESS**: it runs the gate itself, diffs
+  `$(git merge-base HEAD origin/master)..HEAD`, reads the area file for what the PR touches, and
+  either sends it back or passes it. **Peter owns WHETHER IT SHOULD EXIST** — taste, priority, is this
+  the product. Nothing reaches him that is not already green and rule-clean, so his question narrows
+  to ship or don't.
+- **THE TWO QUESTIONS ARE NOT INTERCHANGEABLE, and only one of them delegates.** An agent reviewing an
+  agent catches bugs, missing tests, a violated rule, a guard that guards nothing. It cannot tell you
+  the feature should not have been built. **A wrong feature reviewed perfectly is still wasted**, so
+  the tier reviews BRIEFS as well as diffs: the cheapest send-back is the one before the work.
+- **⚠ THE REVIEWER MUST BE ADVERSARIAL BY BRIEF, BECAUSE AGENTS AGREE TOO READILY.** Two sessions
+  reaching the same wrong conclusion confidently is the failure mode, and it reads exactly like
+  agreement. So the reviewer **RUNS the gate rather than reading that it passed**, reproduces the
+  behaviour it is told about, and is asked what would make CI reject this — never asked whether the
+  work looks good. A review that only reads the diff is not the tier; it is a second opinion with no
+  evidence behind it.
+- **MULTIPLE LANES ARE ALSO A REVIEW MECHANISM, cheaply.** Two lanes over adjacent code collide at the
+  merge, and the conflict is information: it says two sessions had different models of the same file.
+  Resolve it by deciding which model is right, not by taking one side to make the merge go away — a
+  conflict resolved without that question is a review thrown out.
+- **TWO AGENTS ON ONE LANE is supported and routine** (Max and Lambert work this way). Git refuses the
+  same branch in two worktrees of ONE clone, so the second works `--detach` and pushes to the branch,
+  or they are on different machines. **Each `pull --rebase` before every push** or the second one is
+  rejected. It scales to two; past that the push races cost more than the parallelism buys. Split by
+  FILE, or have one write while the other reviews.
