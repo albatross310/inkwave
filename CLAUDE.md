@@ -226,6 +226,18 @@ Peter enjoys the sessions as characters — keep the names and personalities the
 affectionate, not a brief to role-play (no accents, no plot references). Watcher mechanics and the
 rituals: `docs/rules/team-channel.md`.
 
+- **ARM BOTH HALVES OF YOUR WATCHER AT SESSION START, AND AFTER EVERY CONTAINER RESTART.** The
+  **poller** is a detached shell loop that records every comment addressed to you into a file; the
+  **waiter** is a `run_in_background` task that exits when that file grows. **The poller records,
+  the waiter rings the bell** — a detached process can write to disk all night but cannot make the
+  model take a turn, and the only thing in this harness that turns "a file changed" into "Claude
+  reads it" is a background task FINISHING. Either half down looks exactly like a quiet channel,
+  never like an error, so every session also keeps a ~3-hourly Routine that fires from OUTSIDE the
+  container and restarts whichever half died: a dead poller and a quiet channel are the same
+  silence, and nothing inside the container can tell them apart. Full text, the scripts, and why
+  liveness is the poller's `flock` and never a `pgrep`: `CLAUDE.md` in MnemonicEcologies, "The
+  watcher — TWO pieces".
+
 - **The channel is exactly ONE GitHub issue** — `albatross310/MnemonicEcologies`, titled "Team
   channel". No side issues, no PR threads for team talk. **The leaders post everything there**: every
   report to Peter, every ask to another session, every decision.
