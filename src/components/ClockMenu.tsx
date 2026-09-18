@@ -25,7 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_PANEL_CLASS, desktopPanelStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import { LEDGER_ROW_EVENT, isLabelSuppressed, setLabelSuppressed } from '../productivity/capture'
 import { CHIME_VOICES, chimeMuted, chimeVoiceId, previewChime, setChimeMuted, setChimeVoiceId } from '../productivity/chime'
@@ -332,7 +332,6 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
           bottom: 70,
           left: Math.round(Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, centre))),
           transform: 'translateX(-50%)',
-          width: DESKTOP_SHEET.widthPx,
         }
       })()
 
@@ -346,8 +345,9 @@ export function LedgerDropUp({ docLabel, goals, onGoalsChange, onOpenGraphs, onO
       // (iOS retracts the keyboard and the docked pill walks to the screen bottom).
       // iw-nightable: opts the whole panel into the themed surface.
       {...{ [PANEL_ATTR]: 'clock' }}
-      className={`iw-nightable iw-touch-guard iw-no-print z-[60] flex flex-col overflow-hidden bg-white font-serif ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS}`}
-      style={isPhone ? style : { ...style, maxHeight: '72vh', ...desktopSheetStyle() }}
+      className={`iw-nightable iw-touch-guard iw-no-print z-[60] flex flex-col overflow-hidden bg-white font-serif ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_PANEL_CLASS}`}
+      // Desktop: a PANEL (styles/panelSheet.ts) — centred, sized from the paper, not anchored to ⏱.
+      style={isPhone ? style : { ...desktopPanelStyle(), maxHeight: '72vh' }}
     >
       {/* The header: a back affordance on a sub-view + the view's name. This is the one nav chrome;
           the views below never draw their own. Home shows no header (its buttons ARE the surface). */}

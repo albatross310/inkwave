@@ -27,6 +27,9 @@ import { createPortal } from 'react-dom'
 import { musicDemo } from '../music/flag'
 import { musicXmlDemo } from '../music/xmlFlag'
 import { TYPE } from '../music/typeScale'
+import { DESKTOP_BAR } from '../styles/panelSheet'
+// Desktop BAR type (Peter, 2026-09-18: "music too big"): the music ramp is a phone ramp (≥16px floor).
+const DESK_TYPE = { title: 20, heading: 18, body: 15, label: DESKTOP_BAR.fontPx, meta: 12 } as const
 // TYPE-ONLY: erased at compile time, so it ships no bytes into the editor's static graph (chunk.test.ts
 // skips `import type`). The value pipeline that turns a photo into a Piece lives in the lazy studio.
 import type { MediaAsset } from '../media/types'
@@ -53,14 +56,14 @@ interface MusicBarProps {
 }
 
 /** A bar button: a pill on the ramp, ≥44px touch, that opens a panel. */
-function BarButton({ label, onClick }: { label: string; onClick: () => void }): JSX.Element {
+function BarButton({ label, onClick, phone }: { label: string; onClick: () => void; phone?: boolean }): JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
       className="flex items-center gap-1.5 px-3 min-h-[44px] rounded-full border-[1.5px] whitespace-nowrap transition-colors hover:bg-stone-50"
       style={{
-        fontSize: TYPE.label,
+        fontSize: phone ? TYPE.label : DESK_TYPE.label,
         borderColor: 'var(--iw-nightable-border, #e7e5e4)',
         color: 'var(--iw-ink, #302438)',
       }}
@@ -71,6 +74,7 @@ function BarButton({ label, onClick }: { label: string; onClick: () => void }): 
 }
 
 export function MusicBar({ phone, documentId, mediaAssets }: MusicBarProps): JSX.Element {
+  const T = phone ? TYPE : DESK_TYPE
   const [view, setView] = useState<View | null>(null)
 
   return (
@@ -79,7 +83,7 @@ export function MusicBar({ phone, documentId, mediaAssets }: MusicBarProps): JSX
     >
       <span
         className="italic mr-1 select-none"
-        style={{ fontSize: TYPE.meta, color: 'var(--iw-pill-fg, #78716c)' }}
+        style={{ fontSize: T.meta, color: 'var(--iw-pill-fg, #78716c)' }}
         aria-hidden="true"
       >
         ♪ music
@@ -87,12 +91,12 @@ export function MusicBar({ phone, documentId, mediaAssets }: MusicBarProps): JSX
 
       {/* The photo path (§A1/§A2): capture/import a score, mark it up, the "what needs work" heatmap.
           Opens the Piece of the OPEN document — MusicStudio says so honestly when it is not a score. */}
-      <BarButton label="Score studio" onClick={() => setView('studio')} />
+      <BarButton phone={phone} label="Score studio" onClick={() => setView('studio')} />
 
       {/* The MusicXML path (§B): import a Sibelius/MuseScore/Dorico export, play it, and attach
           excerpts to the essay being written. This is build item #2 — the import lives HERE now,
           not behind the dead route. */}
-      <BarButton label="Import a score" onClick={() => setView('musicxml')} />
+      <BarButton phone={phone} label="Import a score" onClick={() => setView('musicxml')} />
 
       {/* NB §A4 reference tracks (YouTube/MP3 + tap-sync) are NOT BUILT (CLAUDE.md), so no button for
           them ships here. The bar carries only working actions — the moment the music module
@@ -115,6 +119,7 @@ function MusicPanelOverlay({ view, phone, documentId, mediaAssets, onClose }: {
   view: View; phone?: boolean; documentId?: string | null; mediaAssets?: readonly MediaAsset[]; onClose: () => void
 }): JSX.Element | null {
   if (typeof document === 'undefined') return null // prerender guard — the editor is client-only
+  const T = phone ? TYPE : DESK_TYPE
 
   const title = view === 'studio' ? 'Score studio' : 'Score'
 
@@ -142,13 +147,13 @@ function MusicPanelOverlay({ view, phone, documentId, mediaAssets, onClose }: {
           className="flex items-center justify-between px-4 py-2 border-b"
           style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
         >
-          <span className="font-serif" style={{ fontSize: TYPE.label, color: 'var(--iw-ink, #302438)' }}>{title}</span>
+          <span className="font-serif" style={{ fontSize: T.label, color: 'var(--iw-ink, #302438)' }}>{title}</span>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
             className="flex items-center justify-center rounded-full hover:bg-stone-100"
-            style={{ minWidth: 44, minHeight: 44, fontSize: TYPE.heading, color: 'var(--iw-pill-fg, #78716c)' }}
+            style={{ minWidth: 44, minHeight: 44, fontSize: T.heading, color: 'var(--iw-pill-fg, #78716c)' }}
           >
             ×
           </button>

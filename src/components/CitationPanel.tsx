@@ -10,8 +10,8 @@ import { importLegacyLibrary, legacyLibrarySize } from '../citations/library'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
-import { SheetHeader } from './PanelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE, DESKTOP_SHEET_CLASS, desktopSheetStyle, DESKTOP_PANEL_CLASS, desktopPanelStyle } from '../styles/panelSheet'
+import { SheetHeader, usePanelDrag } from './PanelSheet'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
 import { CSL_STYLES } from '../citations/styles'
@@ -751,44 +751,16 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
   }
 
   // Drag state — null means use default centered position.
-  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null)
-  const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [recheckTip, setRecheckTip] = useState(false)
 
+  // Desktop: a PANEL (styles/panelSheet.ts) — centred, a bit under the paper's width (Peter,
+  // 2026-09-18: "Citations is too high to begin"). Dragged: explicit corner, no centring transform.
+  const { dragPos, onPointerDown: onDragPointerDown } = usePanelDrag(panelRef)
   function panelStyle(): React.CSSProperties {
-    if (dragPos) return { position: 'fixed', top: dragPos.top, left: dragPos.left }
-    // Default: 18px below top, centred over the writing area (shift left by half the PDF panel width
-    // when it's open so the panel doesn't sit under it).
-    return { position: 'fixed', top: 18, left: 'calc(50% - var(--iw-pdf-room, 0px) / 2 + var(--iw-pdf-room-left, 0px) / 2)', transform: 'translateX(-50%)' }
-  }
-
-  function onHeaderMouseDown(e: React.MouseEvent) {
-    if ((e.target as HTMLElement).closest('button')) return
-    e.preventDefault()
-    const panel = panelRef.current
-    if (!panel) return
-    const r = panel.getBoundingClientRect()
-    const left = r.left
-    const top = r.top
-    setDragPos({ left, top })
-    dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: left, origTop: top }
-
-    function onMove(ev: MouseEvent) {
-      if (!dragRef.current) return
-      setDragPos({
-        left: dragRef.current.origLeft + (ev.clientX - dragRef.current.startX),
-        top:  dragRef.current.origTop  + (ev.clientY - dragRef.current.startY),
-      })
-    }
-    function onUp() {
-      dragRef.current = null
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    const base = desktopPanelStyle()
+    return dragPos ? { ...base, top: dragPos.top, left: dragPos.left, transform: 'none' } : base
   }
 
   return createPortal(
@@ -822,13 +794,13 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
         ref={panelRef}
         role="dialog" aria-label="Citations"
         {...{ [PANEL_ATTR]: 'bib' }}
-        className={`iw-nightable z-[91] bg-white font-serif text-sm text-stone-600 flex flex-col ${isTouchDevice() && !fullscreen ? PHONE_SHEET_CLASS : fullscreen ? 'shadow-xl' : DESKTOP_SHEET_CLASS}`}
+        className={`iw-nightable z-[91] bg-white font-serif text-sm text-stone-600 flex flex-col ${isTouchDevice() && !fullscreen ? PHONE_SHEET_CLASS : fullscreen ? 'shadow-xl' : DESKTOP_PANEL_CLASS}`}
         style={fullscreen
           ? { position: 'fixed', top: 0, bottom: 0, left: '50%', transform: 'translateX(-50%)', width: isTouchDevice() ? '100vw' : 'min(864px, 96vw)', overflow: 'hidden', borderRadius: 0, ...(isTouchDevice() ? {} : { borderLeft: `1px solid var(--iw-nightable-border, ${INK}55)`, borderRight: `1px solid var(--iw-nightable-border, ${INK}55)` }) }
           : isTouchDevice()
             // Phone: the shared sheet above the toolbar (styles/panelSheet.ts); the list scrolls inside.
             ? { ...phoneSheetStyle(), minHeight: 'calc(var(--iw-vv-h, 100dvh) * 0.3)', overflow: 'hidden' }
-            : { ...panelStyle(), ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx, minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '80vh', resize: 'both', overflow: 'hidden' }}
+            : { ...panelStyle(), minHeight: 320, resize: 'both', overflow: 'hidden' }}
         onMouseDown={e => e.stopPropagation()}
       >
         {(isTouchDevice() || !fullscreen) ? (
@@ -836,7 +808,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           // desktop it is also the drag grip; full screen keeps its own strip (nothing to drag).
           <SheetHeader title="Citations" onClose={onClose}
             style={isTouchDevice() ? undefined : { cursor: 'grab' }}
-            onPointerDownCapture={isTouchDevice() ? undefined : (e) => { if ((e.target as HTMLElement).closest('button')) return; onHeaderMouseDown(e as unknown as React.MouseEvent) }}
+            onPointerDownCapture={isTouchDevice() ? undefined : onDragPointerDown}
             right={
               <button type="button" onClick={() => setFullscreen(f => !f)} title={fullscreen ? 'Exit full screen' : 'Full screen'}
                 className="flex items-center justify-center rounded-full"
@@ -851,7 +823,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           <div
             className="flex items-center justify-center pt-2 pb-1"
             style={{ cursor: fullscreen ? 'default' : 'grab' }}
-            onMouseDown={fullscreen ? undefined : onHeaderMouseDown}
+            onPointerDown={fullscreen ? undefined : onDragPointerDown}
           >
             {!fullscreen && <div className="w-9 h-1 rounded-full bg-stone-200" />}
           </div>

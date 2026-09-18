@@ -103,3 +103,85 @@ export function phoneSheetStyle(): CSSProperties {
     fontSize: PHONE_SHEET.fontPx,
   }
 }
+
+// ─── THE DESKTOP TAXONOMY — popup / panel / bar (Peter, 2026-09-18) ───────────────────────────
+// "Need to divide into panels (big) and popovers (small eg hamburger). Panels should all be
+// centralised sensibly on the screen, ideally with same width if it fits. All a bit under width of
+// paper, so they can resize with whole page zoom. Popovers need to be centralised over the button —
+// a little speech-bubble bezier triangle, middle bottom, pointing to just above the button."
+// Three categories, three type sizes (popup 14 / panel 15 / bar 14 — index.css), one helper each.
+// A component picks its category HERE and never carries its own anchor maths again.
+
+/** POPUP: content-sized, anchored over its trigger, tail pointing at the trigger. */
+export const DESKTOP_POPUP = {
+  /** Air between the tail's tip and the trigger's top edge. */
+  gapPx: 10,
+  tailPx: 9,
+  minWidthPx: 200,
+  maxWidthPx: 340,
+  fontPx: 14,
+  /** The popup never gets closer than this to the viewport's side edges. */
+  edgePx: 8,
+} as const
+export const DESKTOP_POPUP_CLASS = 'iw-desktop-popup'
+
+/**
+ * Fixed above `anchor` (the trigger's rect, measured at open), horizontally centred on it and
+ * clamped to the viewport; `--iw-tail-x` carries the trigger's centre into the CSS tail so the
+ * tail still points at the button when the box has been pushed off-centre by the clamp.
+ */
+export function desktopPopupStyle(anchor: { left: number; width: number; top: number } | null | undefined, widthPx?: number): CSSProperties {
+  const base: CSSProperties = {
+    position: 'fixed',
+    borderRadius: DESKTOP_SHEET.radiusPx,
+    boxShadow: DESKTOP_SHEET.shadow,
+    border: DESKTOP_SHEET.border,
+    fontSize: DESKTOP_POPUP.fontPx,
+    minWidth: DESKTOP_POPUP.minWidthPx,
+    maxWidth: `min(${DESKTOP_POPUP.maxWidthPx}px, 96vw)`,
+    ...(widthPx ? { width: widthPx } : { width: 'max-content' }),
+  }
+  if (!anchor || typeof window === 'undefined') return { ...base, bottom: 80, left: '50%', transform: 'translateX(-50%)' }
+  const w = widthPx ?? DESKTOP_POPUP.maxWidthPx
+  const half = w / 2
+  const centre = anchor.left + anchor.width / 2
+  const left = Math.round(Math.max(DESKTOP_POPUP.edgePx + half, Math.min(window.innerWidth - DESKTOP_POPUP.edgePx - half, centre)))
+  return {
+    ...base,
+    bottom: Math.round(window.innerHeight - anchor.top + DESKTOP_POPUP.gapPx + DESKTOP_POPUP.tailPx),
+    left,
+    transform: 'translateX(-50%)',
+    ['--iw-tail-x' as string]: `calc(50% + ${Math.round(centre - left)}px)`,
+  }
+}
+
+/** PANEL: big, centred over the writing, a bit under the paper's width so it zooms with the page. */
+export const DESKTOP_PANEL = {
+  /** Fraction of the paper's live width (`--iw-paper-w`, written by Scroll's ResizeObserver). */
+  paperFrac: 0.92,
+  /** Floor / ceiling so a tiny or huge zoom still gives a usable dialog. */
+  minWidthPx: 420,
+  maxWidthPx: 960,
+  maxHeightVh: 84,
+  fontPx: 15,
+} as const
+export const DESKTOP_PANEL_CLASS = 'iw-desktop-panel'
+
+/** Centred on the writing area (shifted off a docked PDF panel), sized from the paper. */
+export function desktopPanelStyle(): CSSProperties {
+  return {
+    position: 'fixed',
+    top: '50%',
+    left: 'calc(50% - var(--iw-pdf-room, 0px) / 2 + var(--iw-pdf-room-left, 0px) / 2)',
+    transform: 'translate(-50%, -50%)',
+    width: `clamp(${DESKTOP_PANEL.minWidthPx}px, calc(var(--iw-paper-w, 760px) * ${DESKTOP_PANEL.paperFrac}), min(${DESKTOP_PANEL.maxWidthPx}px, 96vw))`,
+    maxHeight: `${DESKTOP_PANEL.maxHeightVh}vh`,
+    borderRadius: DESKTOP_SHEET.radiusPx,
+    boxShadow: DESKTOP_SHEET.shadow,
+    border: DESKTOP_SHEET.border,
+    fontSize: DESKTOP_PANEL.fontPx,
+  }
+}
+
+/** BAR: the style / review / music rows above the toolbar pill (TiptapEditor DESKTOP_BAR_CLASS). */
+export const DESKTOP_BAR = { fontPx: 14 } as const

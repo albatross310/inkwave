@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_PANEL_CLASS, desktopSheetStyle, desktopPanelStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import { deleteStoredDocument, freezeDocWrites, listOpfsDocuments, readDocumentBytes, unfreezeDocWrites } from '../storage/opfs'
 import { deleteMeta, listMeta } from '../storage/indexeddb'
@@ -313,10 +313,10 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
         onMouseDown={e => e.stopPropagation()}
         // One sheet with every other panel (styles/panelSheet.ts): the shared head, edge and type ramp.
         // Phone: centred like the ⋮ modals, rows WRAP (a phone has no width for the one-line row).
-        className={`iw-nightable iw-touch-guard iw-no-print relative bg-white ${isTouchDevice() ? `${PHONE_SHEET_CLASS} w-[400px] max-w-[92vw] max-h-[80vh]` : `${DESKTOP_SHEET_CLASS} w-[820px] max-w-[96vw] max-h-[86vh]`} flex flex-col font-serif text-stone-600 overflow-hidden`}
+        className={`iw-nightable iw-touch-guard iw-no-print relative bg-white ${isTouchDevice() ? `${PHONE_SHEET_CLASS} w-[400px] max-w-[92vw] max-h-[80vh]` : `${DESKTOP_PANEL_CLASS} max-h-[86vh]`} flex flex-col font-serif text-stone-600 overflow-hidden`}
         style={isTouchDevice()
           ? (() => { const ps = phoneSheetStyle(); return { borderRadius: ps.borderRadius, boxShadow: ps.boxShadow, border: ps.border } })()
-          : desktopSheetStyle()}
+          : { ...desktopSheetStyle(), width: desktopPanelStyle().width }}
       >
         <SheetHeader title="Documents on this device" onClose={onClose} />
 

@@ -16,7 +16,7 @@ import { emailEnabled } from '../email/flag'
 import { openInkwaveFile } from '../storage/openDoc'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_POPUP_CLASS, desktopPopupStyle, DESKTOP_PANEL_CLASS, desktopPanelStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import { clearWarm } from '../editor/loadWarmth'
 import { oneDriveFilename } from '../storage/onedrive'
@@ -329,7 +329,8 @@ export function OptionsMenu({
   }
   const menuStyle: CSSProperties = isPhone
     ? (menuOpen ? panelAnchor() : {})
-    : { ...(menuOpen ? panelAnchor() : {}), ...desktopSheetStyle(), width: DESKTOP_SHEET.widthPx }
+    // Desktop: a POPUP over ⋮ (styles/panelSheet.ts) — content-sized, tail on the button.
+    : (menuOpen ? desktopPopupStyle(btnRef.current?.getBoundingClientRect()) : {})
 
   return (
     <div ref={rootRef} className="relative" onPointerDown={e => e.stopPropagation()}>
@@ -367,7 +368,7 @@ export function OptionsMenu({
           {/* Menu rendered in document.body so position:fixed is relative to the viewport,
               not the pill's CSS-transform context (which would break the coordinates). */}
           <div role="menu" {...{ [PANEL_ATTR]: 'options' }}
-            className={`iw-nightable iw-touch-guard iw-no-print z-[60] bg-white text-[17px] text-stone-600 font-serif ${isPhone ? PHONE_SHEET_CLASS : `${DESKTOP_SHEET_CLASS} py-0.5 flex`}`} style={menuStyle}
+            className={`iw-nightable iw-touch-guard iw-no-print z-[60] bg-white text-[17px] text-stone-600 font-serif ${isPhone ? PHONE_SHEET_CLASS : `${DESKTOP_POPUP_CLASS} py-0.5 flex`}`} style={menuStyle}
             onMouseDown={e => e.stopPropagation()}>
             {isPhone && <SheetHeader title="Menu" onClose={() => setMenuOpen(false)} />}
             <div className={isPhone ? 'flex items-stretch py-0.5' : 'contents'}>
@@ -378,7 +379,7 @@ export function OptionsMenu({
               {items.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className={`w-full text-left pl-4 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
+                  className={`w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
                 >
                   {it.label}
                 </button>
@@ -390,7 +391,7 @@ export function OptionsMenu({
               {fileItems.map(it => (
                 <button key={it.label} role="menuitem" type="button"
                   onClick={() => { setMenuOpen(false); it.run() }}
-                  className={`w-full text-left pl-4 pr-1 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
+                  className={`w-full text-left px-4 py-1.5 hover:bg-stone-100 hover:text-[#302438] transition-colors ${isPhone ? 'flex-1 min-h-[44px] flex items-center' : ''}`}
                 >
                   {it.label}
                 </button>
@@ -670,11 +671,11 @@ function Modal({ title, onClose, children, anchorStyle }: { title: string; onClo
     <div className="fixed inset-0 z-[100]" onPointerDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label={title} onPointerDown={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
-        className={`iw-nightable ${isTouchDevice() ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS} bg-white max-w-[92vw] flex flex-col overflow-hidden`}
+        className={`iw-nightable ${isTouchDevice() ? PHONE_SHEET_CLASS : DESKTOP_PANEL_CLASS} bg-white max-w-[92vw] flex flex-col overflow-hidden`}
         // Phone: the sheet's type and edge (styles/panelSheet.ts), centred like the desktop modal.
         style={isTouchDevice()
           ? (() => { const ps = phoneSheetStyle(); return { ...anchorStyle, borderRadius: ps.borderRadius, boxShadow: ps.boxShadow, border: ps.border, width: 'min(400px, 92vw)', maxHeight: '80vh' } })()
-          : { ...anchorStyle, ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx }}
+          : desktopPanelStyle()}
       >
         {/* The same head as every other panel (PanelSheet.tsx) — one look across desktop and phone. */}
         <SheetHeader title={title} onClose={onClose} />

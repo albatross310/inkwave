@@ -905,7 +905,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       const t = e.target as Element | null
       const open = openPanelRef.current
       if (open && tapClosesPanel(t, open)) setOpenPanel(null)
-      if (isTouchDevice() && t && !t.closest(`.iw-touch-guard, [${PANEL_ATTR}]`)) {
+      // Desktop too (Peter, 2026-09-18: the style bar "only hides when you stop using anything from
+      // it — same as phone"): the 5s idle timer is gone, so a pointerdown anywhere outside the
+      // footer chrome and its panels is what retracts the style/music rows.
+      if (t && !t.closest(`.iw-touch-guard, [${PANEL_ATTR}]`)) {
         closeBarLayer('style')
         closeBarLayer('music')
       }
@@ -1060,7 +1063,9 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   function armStyleTimer() {
     if (styleTimerRef.current) clearTimeout(styleTimerRef.current)
     if (isTouchDevice()) return
-    styleTimerRef.current = setTimeout(() => closeBarLayer('style'), 5000)
+    // NO IDLE TIMER (Peter, 2026-09-18: "Upper toolbar needs to remain when you click a button, only
+    // hides when you stop using anything from it / having it open — same as phone"). The bar now
+    // closes the way the phone's does: S again, the ▲ picker, or a click on the water/page.
   }
   function clearStyleTimer() {
     if (styleTimerRef.current) { clearTimeout(styleTimerRef.current); styleTimerRef.current = null }

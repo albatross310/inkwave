@@ -3,7 +3,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_PANEL_CLASS, desktopPanelStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import { Link } from 'react-router'
 import { STUDIO_FILE_SETUP_MAC } from '../pwa/studioFileSetup'
@@ -83,18 +83,6 @@ export function GuideMenu({ open: openProp, onOpenChange }: { open?: boolean; on
   const btnRef = useRef<HTMLButtonElement>(null)
   const drag = useRef<{ dx: number; dy: number } | null>(null)
 
-  // Default position: centred above the "i" button, PANEL_GAP-ish above the toolbar.
-  function defaultAnchor(): React.CSSProperties {
-    const br = btnRef.current?.getBoundingClientRect()
-    const center = br ? br.left + br.width / 2 : window.innerWidth / 2
-    const HALF = 240
-    return {
-      left: Math.round(Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, center))),
-      bottom: 70,
-      transform: 'translateX(-50%)',
-    }
-  }
-
   function onHeaderDown(e: React.MouseEvent) {
     const d = dialogRef.current?.getBoundingClientRect()
     if (!d) return
@@ -140,13 +128,13 @@ export function GuideMenu({ open: openProp, onOpenChange }: { open?: boolean; on
             role="dialog"
             aria-label="Guide"
             {...{ [PANEL_ATTR]: 'guide' }}
-            className={`iw-nightable iw-touch-guard fixed z-[100] font-serif bg-white ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS}`}
+            className={`iw-nightable iw-touch-guard fixed z-[100] font-serif bg-white ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_PANEL_CLASS}`}
             onMouseDown={e => e.stopPropagation()}
+            // Desktop: a PANEL (styles/panelSheet.ts) — centred, a bit under the paper's width.
             style={isPhone ? phoneSheetStyle() : {
-              ...(pos ? { left: pos.left, top: pos.top } : defaultAnchor()),
-              width: 470, maxWidth: '92vw', height: 'calc(100vh - 92px)', maxHeight: 'calc(100vh - 92px)',
-              resize: 'both', overflow: 'auto',
-              ...desktopSheetStyle(),
+              ...desktopPanelStyle(),
+              ...(pos ? { left: pos.left, top: pos.top, transform: 'none' } : {}),
+              height: '84vh', resize: 'both', overflow: 'auto',
             }}
           >
             {/* The shared header — on desktop also the drag handle. */}

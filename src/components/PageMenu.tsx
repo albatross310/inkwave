@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
-import { SheetHeader, SheetSection, SheetPill } from './PanelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_PANEL_CLASS, desktopPanelStyle } from '../styles/panelSheet'
+import { SheetHeader, SheetSection, SheetPill , usePanelDrag } from './PanelSheet'
 import { LINE_HEIGHTS, getLineHeight, setLineHeight } from '../editor/lineHeight'
 import type { ParagraphStyleAttrs } from '../editor/extensions/ParagraphStyle'
 import {
@@ -50,10 +50,8 @@ export function PageMenu({ editor, open: openProp, onOpenChange }: { editor?: Ed
 
   // Movable + resizable like the citations panel: opens CENTRED, drag the header to move, drag the
   // bottom-right corner to resize. dragPos null = default centred.
-  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null)
-  const dragRef = useRef<{ startX: number; startY: number; origLeft: number; origTop: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { if (!open) setDragPos(null) }, [open]) // re-centre each time it opens
+  useEffect(() => { if (!open) dragReset() }, [open]) // eslint-disable-line react-hooks/exhaustive-deps -- re-centre each time it opens
 
   useEffect(() => {
     if (!open) return
@@ -64,29 +62,12 @@ export function PageMenu({ editor, open: openProp, onOpenChange }: { editor?: Ed
 
   // Phone: the shared bottom sheet above the toolbar (styles/panelSheet.ts). Desktop: centred,
   // movable, resizable (the drag handlers below are mouse-only and inert on touch).
+  // Desktop: a PANEL (styles/panelSheet.ts) — centred, sized from the paper; dragged by its header.
+  const { dragPos, onPointerDown: onDragPointerDown, reset: dragReset } = usePanelDrag(panelRef)
   function menuStyle(): React.CSSProperties {
     if (isPhone) return phoneSheetStyle()
-    const pos = dragPos
-      ? { position: 'fixed' as const, top: dragPos.top, left: dragPos.left }
-      : { position: 'fixed' as const, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
-    return { ...pos, ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx, minWidth: 300, minHeight: 260, maxWidth: '96vw', maxHeight: '90vh', resize: 'both', overflow: 'auto' }
-  }
-
-  function onHeaderMouseDown(e: React.MouseEvent) {
-    if ((e.target as HTMLElement).closest('button')) return
-    e.preventDefault()
-    const panel = panelRef.current
-    if (!panel) return
-    const r = panel.getBoundingClientRect()
-    setDragPos({ left: r.left, top: r.top })
-    dragRef.current = { startX: e.clientX, startY: e.clientY, origLeft: r.left, origTop: r.top }
-    function onMove(ev: MouseEvent) {
-      if (!dragRef.current) return
-      setDragPos({ left: dragRef.current.origLeft + (ev.clientX - dragRef.current.startX), top: dragRef.current.origTop + (ev.clientY - dragRef.current.startY) })
-    }
-    function onUp() { dragRef.current = null; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
+    const base = { ...desktopPanelStyle(), minHeight: 260, resize: 'both' as const, overflow: 'auto' as const }
+    return dragPos ? { ...base, top: dragPos.top, left: dragPos.left, transform: 'none' } : base
   }
 
   const paraAttrs = (parFocus && editor) ? (editor.getAttributes('paragraph') as Record<string, string>) : {}
@@ -188,12 +169,12 @@ export function PageMenu({ editor, open: openProp, onOpenChange }: { editor?: Ed
         <>
           <div ref={panelRef} role="dialog" aria-label="Page settings"
             {...{ [PANEL_ATTR]: 'page' }}
-            className={`iw-nightable iw-touch-guard z-[91] bg-white font-serif text-sm text-stone-600 flex flex-col ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS}`}
+            className={`iw-nightable iw-touch-guard z-[91] bg-white font-serif text-sm text-stone-600 flex flex-col ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_PANEL_CLASS}`}
             style={menuStyle()}
             onMouseDown={e => e.stopPropagation()}>
 
             {/* Header — the shared sheet header; on desktop it is also the drag handle. */}
-            <div style={isPhone ? undefined : { cursor: 'grab' }} onMouseDown={isPhone ? undefined : onHeaderMouseDown}>
+            <div style={isPhone ? undefined : { cursor: 'grab' }} onPointerDown={isPhone ? undefined : onDragPointerDown}>
               <SheetHeader title="Page" onClose={() => setOpen(false)} closeTitle="Close (Esc)"
                 right={parFocus && editor ? (
                   <>

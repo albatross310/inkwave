@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_POPUP_CLASS, desktopPopupStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import type { Editor } from '@tiptap/core'
 import { getSymbols, deleteSymbol, setSymbol as saveSymbol, PRESETS, type MathSymbol } from '../editor/extensions/mathSymbols'
@@ -173,10 +173,10 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
         {!isPhone && <div className="fixed inset-0 z-[199]" aria-hidden="true" onPointerDown={() => setOpen(false)} />}
         <div
           {...{ [PANEL_ATTR]: 'math' }}
-          className={`iw-nightable iw-touch-guard ${isPhone ? `${PHONE_SHEET_CLASS} font-serif` : `${DESKTOP_SHEET_CLASS} font-serif`}`}
+          className={`iw-nightable iw-touch-guard ${isPhone ? `${PHONE_SHEET_CLASS} font-serif` : `${DESKTOP_POPUP_CLASS} bg-white font-serif`}`}
           onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
           // Phone: the shared sheet above the toolbar (styles/panelSheet.ts). Desktop: a popover over Σ.
-          style={isPhone ? { ...phoneSheetStyle(), zIndex: 200 } : { position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', ...desktopSheetStyle(), padding: '6px', zIndex: 200, minWidth: view === 'symbols' ? DESKTOP_SHEET.widthPx : 180 }}
+          style={isPhone ? { ...phoneSheetStyle(), zIndex: 200 } : { ...desktopPopupStyle({ left: pos.x - 20, width: 40, top: pos.y }), padding: '6px', zIndex: 200, minWidth: view === 'symbols' ? DESKTOP_SHEET.widthPx : 200 }}
         >
           {isPhone && <SheetHeader title="Math" onClose={() => setOpen(false)} />}
           {view === 'menu' && (
@@ -200,7 +200,7 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
                           editor?.chain().updateAttributes('mathBlock', { align: o.value }).run()
                           setOpen(false)
                         }}
-                        style={{ fontSize: isPhone ? 18 : '0.72rem', padding: isPhone ? '8px 16px' : '2px 8px', minHeight: isPhone ? 40 : undefined, border: `1px solid ${active ? INK : 'rgba(72, 73, 101, 0.22)'}`, borderRadius: '4px', background: active ? 'rgba(72, 73, 101, 0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
+                        style={{ fontSize: isPhone ? 18 : 15, padding: isPhone ? '8px 16px' : '4px 10px', minHeight: isPhone ? 40 : undefined, border: `1px solid ${active ? INK : 'rgba(72, 73, 101, 0.22)'}`, borderRadius: '4px', background: active ? 'rgba(72, 73, 101, 0.10)' : 'transparent', color: active ? INK : '#8a7d74', cursor: 'pointer', fontFamily: 'ui-monospace, monospace' }}
                       >{o.label}</button>
                     )
                   })}
@@ -219,18 +219,18 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
               <div style={{ maxHeight: 'min(70vh, 420px)', overflowY: 'auto', padding: '4px 0' }}>
                 {ML_SHORTCUT_SECTIONS.map(({ title, rows }) => (
                   <div key={title} style={{ marginBottom: '12px' }}>
-                    <div style={{ padding: '4px 10px 3px', fontSize: '0.72rem', color: '#a89a86', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{title}</div>
+                    <div style={{ padding: '4px 10px 3px', fontSize: 12, color: '#a89a86', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{title}</div>
                     {rows.map(([k, sym, d]) => (
                       <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '10px', padding: '2px 10px', alignItems: 'center' }}>
-                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.82rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
-                        <span style={{ fontSize: '1rem', color: INK, minWidth: '1.2em', textAlign: 'center' }}>{sym}</span>
-                        <span style={{ fontSize: '0.9rem', color: '#6b6058' }}>{d}</span>
+                        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 14, color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
+                        <span style={{ fontSize: 19, color: INK, minWidth: '1.2em', textAlign: 'center' }}>{sym}</span>
+                        <span style={{ fontSize: 14, color: '#6b6058' }}>{d}</span>
                       </div>
                     ))}
                   </div>
                 ))}
                 <div style={{ borderTop: `1px solid ${INK}12`, marginTop: '4px', padding: '8px 10px 4px' }}>
-                  <div style={{ fontSize: '0.62rem', color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Inkwave keys</div>
+                  <div style={{ fontSize: 11, color: '#b0a898', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '4px' }}>Inkwave keys</div>
                   {([
                     ['hold CapsLock', 'Gk', 'Greek mode while held'],
                     ['//',  '\\frac',  'fraction'],
@@ -241,9 +241,9 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
                     ['Ctrl+Q/E/L', '', 'block alignment'],
                   ] as [string, string, string][]).map(([k, sym, d]) => (
                     <div key={k} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr', columnGap: '8px', padding: '1px 0', alignItems: 'center' }}>
-                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.68rem', color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
-                      <span style={{ fontSize: '0.78rem', color: INK, minWidth: '1.2em', textAlign: 'center', fontFamily: 'ui-monospace,monospace' }}>{sym}</span>
-                      <span style={{ fontSize: '0.72rem', color: '#a89d96' }}>{d}</span>
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 13, color: '#7a6e65', whiteSpace: 'nowrap' }}>{k}</span>
+                      <span style={{ fontSize: 16, color: INK, minWidth: '1.2em', textAlign: 'center', fontFamily: 'ui-monospace,monospace' }}>{sym}</span>
+                      <span style={{ fontSize: 13, color: '#a89d96' }}>{d}</span>
                     </div>
                   ))}
                 </div>

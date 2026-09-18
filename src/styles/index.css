@@ -1151,6 +1151,22 @@
 .iw-desktop-sheet .text-xs { font-size: var(--iw-sheet-small); line-height: 1.4; }
 .iw-desktop-sheet .text-\[11px\], .iw-desktop-sheet .text-\[10px\] { font-size: var(--iw-sheet-meta); line-height: 1.4; }
 .iw-desktop-sheet > .px-2\.5 { padding-left: 1rem; padding-right: 1rem; }
+/* ── THE DESKTOP TAXONOMY (styles/panelSheet.ts): popup / panel / bar. Three type sizes, and the
+   popup's speech-bubble tail — two stacked triangles (border colour under white) at the bottom
+   centre, offset by --iw-tail-x so it keeps pointing at the trigger when the box is edge-clamped.
+   A popup must NOT be overflow:hidden (the tail hangs outside its box); scroll an inner div. */
+.iw-desktop-popup { font-size: 14px; overflow: visible; }
+.iw-desktop-popup::before, .iw-desktop-popup::after {
+  content: ''; position: absolute; top: 100%; left: var(--iw-tail-x, 50%); transform: translateX(-50%);
+  border-left: 10px solid transparent; border-right: 10px solid transparent; pointer-events: none;
+}
+.iw-desktop-popup::before { border-top: 10px solid var(--iw-nightable-border, #e7e5e4); }
+.iw-desktop-popup::after { border-top: 9px solid var(--iw-nightable-bg, #fff); margin-top: -1px; }
+.iw-desktop-panel { font-size: 15px; }
+.iw-desktop-bar { font-size: 14px; }
+.iw-desktop-popup .text-sm, .iw-desktop-bar .text-sm { font-size: 14px; }
+.iw-desktop-popup .text-\[17px\], .iw-desktop-popup .text-\[15px\] { font-size: 14px; }
+.iw-desktop-panel .text-sm { font-size: 15px; }
 @media (pointer: coarse) and (hover: none) {
   .iw-phone-sheet .text-\[17px\] { font-size: var(--iw-sheet-body); }
   /* Legacy Tailwind sizes inside a sheet land on the ramp — the Sync, Snapshots and Citations
@@ -2331,7 +2347,7 @@
                        lane rather than silently left as two sources of one colour.
      --iw-pill-fg      a muted label: a pill's text, a section heading, an unselected control.
      --iw-nightable-border  the outline of an inline-styled control. */
-:root { --iw-panel-fg: #4a4035; --iw-pill-fg: #78716c; --iw-nightable-border: #e7e5e4; }
+:root { --iw-panel-fg: #4a4035; --iw-pill-fg: #78716c; --iw-nightable-border: #e7e5e4; --iw-nightable-bg: #fff; }
 /* The phone panel sheet's shadow (styles/panelSheet.ts) — one token so every sheet lifts the same. */
 :root { --iw-sheet-shadow: 0 10px 40px rgba(28, 25, 23, 0.18); }
 /* ⚠ THE BORDER'S DAY VALUE IS THE PLURALITY OF ITS CALL SITES, NOT A FRESH CHOICE (2026-08-30).
@@ -2576,6 +2592,7 @@
   --iw-panel-fg: #dfe3e9;                  /* panel body text (== this block's own `color`) */
   --iw-pill-fg: #dfe3e9;                   /* pill label colour (sync/snapshot) */
   --iw-nightable-border: #7c8794;          /* inline-styled control borders (light) */
+  --iw-nightable-bg: #454e59;              /* the .iw-nightable surface — the popup tail fills with it */
   /* Lifted from #cbb8f2 (2026-08-30). As TEXT on the #454e59 chrome that measured 4.70:1 — over the
      AA line but under the panel's own body text at 6.55:1, so anything purple (a panel title, the
      Guide's key column) sat QUIETER than the prose beside it, which inverts the hierarchy in every

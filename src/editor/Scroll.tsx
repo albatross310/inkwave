@@ -190,6 +190,21 @@ export function Scroll({
   // with no vertical movement. rAF-throttled.
   const surfaceRef = useRef<HTMLDivElement>(null)
   const sheetRef = useRef<HTMLDivElement>(null)
+  // `--iw-paper-w` = the paper's LIVE painted width (page size × zoom). The desktop panels size
+  // themselves from it (styles/panelSheet.ts desktopPanelStyle: "a bit under width of paper, so
+  // they can resize with whole page zoom" — Peter, 2026-09-18). Written on <html> so a portalled
+  // panel anywhere in the tree can read it.
+  useEffect(() => {
+    const el = sheetRef.current
+    // Only the LIVE editor's paper: the loading shell mounts a second Scroll (an empty facsimile,
+    // narrower) whose observer would otherwise be the last to write before it unmounts.
+    if (!el || loadingTwinkles || typeof ResizeObserver === 'undefined') return
+    const write = () => document.documentElement.style.setProperty('--iw-paper-w', `${Math.round(el.getBoundingClientRect().width)}px`)
+    write()
+    const ro = new ResizeObserver(write)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [loadingTwinkles])
   // Hybrid zoom (desktop live editor only): the paper sits inside a size-compensated wrapper that
   // the magnify transform scales. paperRef is optional (the loading shell passes none) — keep a
   // local ref so the wrapper machinery works on every hybrid surface.

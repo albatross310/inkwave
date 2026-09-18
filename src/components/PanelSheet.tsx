@@ -1,6 +1,7 @@
 // The shared INSIDES of a footer panel: one header row (small-caps title left, × right), one
 // section label, one pill. Tokens: styles/panelSheet.ts — nothing here carries its own number.
 // Used on BOTH platforms so the pieces read the same; only the outer box differs (phoneSheetStyle).
+import { useRef, useState, type RefObject } from 'react'
 import type { ReactNode } from 'react'
 import { PHONE_SHEET, SHEET_TYPE } from '../styles/panelSheet'
 
@@ -65,4 +66,46 @@ export function SheetPill({ label, active, onClick, title }: { label: string; ac
       {label}
     </button>
   )
+}
+
+/**
+ * Drag a desktop panel by its header. POINTER events with direct DOM writes, not mouse events +
+ * setState (2026-09-18, Peter: "lags when you click and drag, won't stop when mouse comes up"):
+ * the header's pointerdown called preventDefault, which suppresses the compat mouseup the old code
+ * waited for, so the drag never ended; and every move re-rendered the whole panel, so it lagged.
+ * During the drag only `style.left/top` move; React state lands once, on release, so the styled
+ * position and the DOM agree and nothing jumps. The style function must return
+ * `{ left, top, transform: 'none' }` when `dragPos` is set (the centred layout uses a transform).
+ */
+export function usePanelDrag(panelRef: RefObject<HTMLElement>) {
+  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null)
+  const drag = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null)
+  const onPointerDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest('button, input, select, textarea, a, [role="button"]')) return
+    const el = panelRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    drag.current = { sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top }
+    setDragPos({ left: r.left, top: r.top })
+    const move = (ev: PointerEvent) => {
+      const d = drag.current
+      if (!d) return
+      el.style.left = `${d.ox + ev.clientX - d.sx}px`
+      el.style.top = `${d.oy + ev.clientY - d.sy}px`
+      el.style.transform = 'none'
+    }
+    const up = (ev: PointerEvent) => {
+      const d = drag.current
+      drag.current = null
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      if (d) setDragPos({ left: d.ox + ev.clientX - d.sx, top: d.oy + ev.clientY - d.sy })
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    e.preventDefault()
+  }
+  return { dragPos, onPointerDown, reset: () => setDragPos(null) }
 }
