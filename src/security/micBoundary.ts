@@ -1,22 +1,29 @@
 // THE MICROPHONE FIREBREAK — which code may open a microphone, and which may never.
 //
-// Two features want the same Web API and must keep DIFFERENT promises: §A5's practice recording is
-// the student's own, consensual and storable; §A3's lesson sells "there is provably no keepable
-// recording of you" to someone who is not holding the device. ⚠ SO THE LESSON PATH MUST NOT ACQUIRE
-// MICROPHONE ACCESS AS A SIDE EFFECT OF THE MUSIC MODULE GAINING IT — nobody would decide to break
-// that; it would simply stop being true.
+// Inkwave does not record audio. §A5's practice recording is the one feature that would want to,
+// and it is not built. ⚠ THE POINT OF THIS FILE IS THAT MIC ACCESS MUST NEVER ARRIVE AS A SIDE
+// EFFECT — nobody would decide to break that; it would simply stop being true.
 //
-// THREE LAYERS, and the strongest was already there:
+// TWO LAYERS, and the strongest was always the first:
 // 1. ⚠ `Permissions-Policy: microphone=()` (vercel.json) disables the mic for this ORIGIN at the
 //    HTTP header. It is THE REAL LINE: §A5 cannot ship until someone edits it, which makes that
 //    header the one place the decision is made.
-// 2. A source allow-list — which module may name a capture API at all (`MIC_CAPABLE`).
-// 3. ⚠ An IMPORT-GRAPH firebreak, followed rather than assumed: once §A5 puts `getUserMedia` behind
-//    a helper, a grep of `lesson/`'s own files passes while `lesson/` imports the helper — a
-//    scanner like that reports a firebreak that no longer exists, vacuously, forever.
+// 2. A source allow-list — which module may name a capture API at all (`MIC_CAPABLE`), swept over
+//    the whole of `src/`, with the camera declared by path as the one narrow exemption.
 //
-// THE COPY IS BOUND TO LAYER 1, NOT TO A COMMENT: the claim is SCOPED to the lesson screen, and
-// `micBoundary.test.ts` reads the real header and fires when it moves.
+// ⚠ THIS FILE MOVED HERE FROM `src/music/lesson/` ON 2026-09-18, when the lesson layer was ripped
+// out. It was never lesson code — it is repo-wide, and living inside the feature it happened to be
+// written for is how a guard gets deleted with that feature. A THIRD LAYER CAME OFF WITH THE
+// LESSON, deliberately and on the record: an import-graph firebreak asserting that nothing
+// REACHABLE from `src/music/lesson/` was mic-capable. Its protected directory no longer exists, and
+// a guard kept pointing at nothing passes forever while meaning nothing — this repo's empty-list
+// disease. ⚠ IF §A5 LANDS, THE IMPORT WALK COMES BACK WITH IT: the moment `MIC_CAPABLE` gains
+// `src/music/recording/`, layer 2 stops being able to say who may REACH that module, and only a
+// followed import graph can. → git history of this file for the walk that did it.
+//
+// SCOPE, STATED: layer 2 sweeps `src/` and does not follow bare specifiers, so a microphone reached
+// through an npm package would not be seen here. Layer 1 covers it anyway — the header blocks the
+// platform API no matter who calls it.
 // → docs/archive/music-module-build.md#micboundary
 
 /**
@@ -37,10 +44,10 @@ export const CAPTURE_APIS = [
 /**
  * Speech recognisers, which are DIFFERENT and the difference is load-bearing.
  *
- * ⚠ A BARE NAME IS ALLOWED AND `new` IS NOT: `stt.ts` must NAME `webkitSpeechRecognition` to
- * feature-detect it, and reading a `typeof` captures no audio. Matched broadly, this guard flags the
- * module that DOCUMENTS the microphone problem — a guard that cannot tell a mention from a use
- * forces its own documentation to be deleted.
+ * ⚠ A BARE NAME IS ALLOWED AND `new` IS NOT: a feature-detect must NAME `webkitSpeechRecognition`
+ * to read a `typeof`, and that captures no audio. Matched broadly, this guard flags the module that
+ * DOCUMENTS the microphone problem — a guard that cannot tell a mention from a use forces its own
+ * documentation to be deleted (which is why THIS file is excluded from its own sweep, below).
  * → docs/archive/music-module-build.md#mic-mention-vs-use
  */
 export const RECOGNISER_APIS = ['SpeechRecognition', 'webkitSpeechRecognition'] as const
@@ -65,8 +72,8 @@ export const MIC_PATTERN = new RegExp(
  *
  * ⚠ EMPTY TODAY, AND THAT IS THE POINT. §A5 will add exactly one entry (`src/music/recording/`), and
  * that edit is the moment someone must ALSO flip `microphone=()` → `microphone=(self)` in
- * vercel.json, update `/privacy` in the same commit, and rewrite any copy saying Inkwave does not
- * record audio. The tests force all four together instead of the first one alone.
+ * vercel.json and state the recording in `/privacy` in the same commit. The tests force them
+ * together instead of the first one alone.
  * → docs/archive/music-module-build.md#mic-layers
  */
 export const MIC_CAPABLE: readonly string[] = Object.freeze([])
@@ -108,16 +115,6 @@ export function isCameraOnly(relPath: string, code: string): boolean {
 }
 
 /**
- * Modules that may NEVER reach a microphone, transitively — the firebreak's protected side.
- *
- * ⚠ If whisper-WASM ever lands ON the lesson path, this entry is not quietly deleted: the guarantee
- * CHANGES SHAPE, the copy changes with it, and the teacher is told the new truth. Deleting it
- * without that is precisely the erosion this file exists to make loud.
- * → docs/archive/music-module-build.md#mic-layers
- */
-export const MIC_FORBIDDEN: readonly string[] = Object.freeze(['src/music/lesson/'])
-
-/**
  * THIS FILE — the pattern CARRIER, excluded from its own scan, because it has to name every capture
  * API as a literal in order to forbid them. Same shape as `src/copy/claimMatchers.ts`.
  *
@@ -125,7 +122,7 @@ export const MIC_FORBIDDEN: readonly string[] = Object.freeze(['src/music/lesson
  * is imported by TEST FILES ONLY. An excluded file that nothing checks is a place to hide a
  * microphone. → docs/archive/music-module-build.md#mic-mention-vs-use
  */
-export const PATTERN_CARRIER = 'src/music/lesson/micBoundary.ts'
+export const PATTERN_CARRIER = 'src/security/micBoundary.ts'
 
 /** Does a Permissions-Policy allowlist grant the microphone to anyone? `()` = nobody. */
 export function micPolicyAllows(permissionsPolicy: string): boolean {

@@ -135,7 +135,7 @@ describe('§C1.4 — no forbidden claim anywhere in the product (repo-wide sweep
     //
     // ⚠️ THIS CHECK READ A MENTION AS AN IMPORT until 2026-07-17. It was a bare
     // `.includes('claimMatchers')` over the RAW file, so ANY file whose COMMENTS named this guard
-    // failed it — `src/music/lesson/micBoundary.ts` cites claimMatchers.ts as the precedent its own
+    // failed it — `src/security/micBoundary.ts` cites claimMatchers.ts as the precedent its own
     // pattern-carrier exclusion follows, and that sentence alone turned the suite red. The fix this
     // invites is the corrosive one: delete the comment. But this file's own next test is "comments
     // are stripped — the guard survives its own documentation", and the rule holds here too. A

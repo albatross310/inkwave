@@ -13,14 +13,34 @@ const devApi: PluginOption = {
   name: 'dev-api',
   apply: 'serve',
   configureServer(server) {
-    // Lane favicon: a real PNG URL per letter (see scripts/laneIcon.mjs for why not a data URI).
+    // The localhost favicon: a real PNG URL per lane letter, and `iω` inverted for the plain dev
+    // server (see scripts/laneIcon.mjs for why not a data URI, and why the main one inverts).
+    // ⚠ `?l=` ABSENT AND `?l=` UNKNOWN ARE THE SAME ANSWER HERE — both are "not a lane", which is
+    // the main server, NOT a blank square. A typo'd letter wearing iω is a smaller lie than a
+    // favicon that says nothing. The letter range is A–Z: it was A–L while lanes.tsv already had
+    // lane M, and M rendered blank.
+    const laneOf = (url: string | undefined) => {
+      const l = new URL(url ?? '', 'http://x').searchParams.get('l') ?? ''
+      return /^[A-Z]$/.test(l) ? l : ''
+    }
     server.middlewares.use('/__lane-icon.png', async (req, res) => {
-      const l = new URL(req.url ?? '', 'http://x').searchParams.get('l') ?? ''
+      const size = Number(new URL(req.url ?? '', 'http://x').searchParams.get('s')) || 128
       // @ts-expect-error - untyped Node-only ESM module (scripts/, outside the src TS project)
-      const { laneIconPng } = await import('./scripts/laneIcon.mjs')
+      const { laneIconPng, MAIN_LABEL } = await import('./scripts/laneIcon.mjs')
+      const lane = laneOf(req.url)
       res.setHeader('Content-Type', 'image/png')
       res.setHeader('Cache-Control', 'no-store')
-      res.end(laneIconPng(/^[A-L]$/.test(l) ? l : ''))
+      res.end(laneIconPng(lane || MAIN_LABEL, { invert: !lane, size }))
+    })
+    // The DEV manifest, so an INSTALLED localhost PWA carries the lane in its Dock name and icon
+    // instead of being a third "Inkwave PWA" beside the live one. public/manifest.webmanifest is
+    // production's and is untouched.
+    server.middlewares.use('/__lane-manifest.webmanifest', async (req, res) => {
+      // @ts-expect-error - untyped Node-only ESM module (scripts/, outside the src TS project)
+      const { laneManifest } = await import('./scripts/laneIcon.mjs')
+      res.setHeader('Content-Type', 'application/manifest+json')
+      res.setHeader('Cache-Control', 'no-store')
+      res.end(JSON.stringify(laneManifest(laneOf(req.url))))
     })
     const route = async (raw: string, path: string, authorization?: string) => {
       const body = JSON.parse(raw || '{}')
