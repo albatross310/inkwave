@@ -15,7 +15,7 @@
 #      and a fully merged branch reads as unrelated history — it would report
 #      every branch as unmergeable and, run the other way, could hide a real one.
 #   2. Re-verifies EVERY branch at delete time, not from a list written earlier.
-#   3. Never touches master, HEAD, or any branch with even one commit not in master.
+#   3. Never touches the trunk, HEAD, or any branch with even one commit not in it.
 # GitHub keeps a deleted branch restorable from its Branches page for a while, and
 # the commits are in master's history regardless.
 set -u
@@ -30,7 +30,21 @@ if [ -f "$(git rev-parse --git-dir)/shallow" ]; then
 fi
 
 git fetch origin --prune --quiet || { echo "fetch failed"; exit 1; }
-MASTER=$(git rev-parse origin/master) || exit 1
+
+# ASK THE REMOTE which branch is the trunk. Hardcoding "master" was right for inkwave
+# and silently wrong for MnemonicEcologies, whose default is "main" -- and the failure
+# is not an error, it is `git rev-parse origin/master` exiting non-zero on a repo where
+# the question was simply asked in the wrong language.
+TRUNK=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+TRUNK=${TRUNK#origin/}
+if [ -z "$TRUNK" ]; then
+  TRUNK=$(git remote show origin 2>/dev/null | sed -n 's/.*HEAD branch: //p')
+fi
+[ -n "$TRUNK" ] || { echo "REFUSING: cannot tell which branch is the trunk here."; exit 1; }
+git rev-parse --verify --quiet "origin/$TRUNK" >/dev/null || {
+  echo "REFUSING: origin/$TRUNK does not exist locally. Run: git fetch origin $TRUNK"; exit 1; }
+echo "trunk: $TRUNK"
+MASTER=$(git rev-parse "origin/$TRUNK") || exit 1
 
 # The branch names that ACTUALLY EXIST on the remote right now. A remote-tracking
 # ref is a local cache and can hold things that are not remote branches at all --
@@ -48,7 +62,7 @@ for full in $(git for-each-ref --format='%(refname)' refs/remotes/origin); do
   # the bare ref "origin" into the branch name "origin".
   case "$full" in refs/remotes/origin/*) ;; *) continue ;; esac
   b=${full#refs/remotes/origin/}
-  case "$b" in master|HEAD|"") continue ;; esac
+  case "$b" in "$TRUNK"|HEAD|"") continue ;; esac
   printf '%s\n' "$REMOTE" | grep -qxF "$b" || continue
   ref="$full"
   ahead=$(git rev-list --count "$ref" --not "$MASTER")
@@ -71,8 +85,8 @@ done
 
 echo
 if [ "$DO_IT" = 1 ]; then
-  echo "$GONE deleted, $KEEP left alone (they have commits not in master)."
+  echo "$GONE deleted, $KEEP left alone (they have commits not in the trunk)."
 else
-  echo "$GONE would be deleted, $KEEP left alone (they have commits not in master)."
+  echo "$GONE would be deleted, $KEEP left alone (they have commits not in the trunk)."
   echo "Nothing has changed. Run again with --yes to do it."
 fi
