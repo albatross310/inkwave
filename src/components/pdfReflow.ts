@@ -171,8 +171,6 @@ export function buildPageReflow(items: PlacedItem[], pageW: number, pageH: numbe
   return { blocks, items, pageW, pageH }
 }
 
-export function blockTexts(r: PageReflow): string[] { return r.blocks.map(b => b.text) }
-
 // ── page view → reader view ──────────────────────────────────────────────────────────────────────
 
 /** Collapse the whitespace a PDF selection carries (line breaks, double spaces, NBSPs). */

@@ -4,30 +4,7 @@
 import type { CSLItem } from '../types/document'
 import { ensureStyle } from './styles'
 
-// ── In-text cite ────────────────────────────────────────────────────────────
-
-export async function formatInText(
-  items: CSLItem[],
-  styleId = 'apa',
-  opts: { suppressAuthor?: boolean; locator?: string; prefix?: string; suffix?: string } = {},
-): Promise<string> {
-  if (items.length === 0) return ''
-  await ensureStyle(styleId)
-  const { Cite } = await import('@citation-js/core')
-  const cite = new Cite(items)
-  // citation-js in-text template
-  const result: string = cite.format('citation', {
-    format: 'text',
-    template: styleId,
-    lang: 'en-US',
-  }) as string
-  const base = result.trim()
-  const prefix = opts.prefix ? `${opts.prefix} ` : ''
-  const suffix = opts.suffix ? `, ${opts.suffix}` : ''
-  return `${prefix}${base}${suffix}`
-}
-
-// ── Simple in-text fallback (no CSL engine) — "(Author, Year)" ──────────────
+// ── In-text cite (simple fallback, no CSL engine) — "(Author, Year)" ────────
 
 export function simpleInText(items: CSLItem[]): string {
   const parts = items.map(item => {
@@ -41,22 +18,7 @@ export function simpleInText(items: CSLItem[]): string {
 
 // ── Reference list ──────────────────────────────────────────────────────────
 
-export async function formatReferenceList(
-  items: CSLItem[],
-  styleId = 'apa',
-): Promise<string> {
-  if (items.length === 0) return ''
-  await ensureStyle(styleId)
-  const { Cite } = await import('@citation-js/core')
-  const cite = new Cite(items)
-  return cite.format('bibliography', {
-    format: 'html',
-    template: styleId,
-    lang: 'en-US',
-  }) as string
-}
-
-// Like formatReferenceList, but returns each entry paired with its citekey, in the style's own
+// Formats the reference list, returning each entry paired with its citekey, in the style's own
 // sorted order — so callers can attach per-entry DOM anchors / back-references. Each html string is
 // a single `.csl-entry` element already carrying `data-csl-entry-id`. Uses the CSL plugin's
 // `asEntryArray` output option (see @citation-js/plugin-csl/lib/bibliography.js).

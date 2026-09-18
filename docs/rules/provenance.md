@@ -39,6 +39,8 @@
 - **Line compression** (`computeLineCompressionRange`) tightens letter-spacing around a focused word
   to absorb its expansion in place. Pixel-measured and regression-prone: test wrapped lines and
   first-word-on-line cases.
+- `types/document.ts` holds the InkwaveDocument and Snapshot types (ProvenanceEvent/ParagraphMetadata:
+  spec-shape, no live producer).
 - Provenance events funnel through `compliance.ts` (accept/ignore); the record is snapshots + signed
   receipts.
 - **Document IDs are stable UUIDs** (future room identifiers) — don't change the scheme.

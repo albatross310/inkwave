@@ -62,12 +62,6 @@ export interface Wiring {
 
 const CHANNEL_NAME = 'inkwave:single-open'
 
-/** Whether the coordinated (choice-offering) path is available at all. Without a bus a take-over can
- *  still steal, but Switch-to-it (focus) and the ordered handshake cannot run. */
-export function singleOpenSupported(): boolean {
-  return typeof BroadcastChannel !== 'undefined'
-}
-
 function realChannel(): Channel | null {
   if (typeof BroadcastChannel === 'undefined') return null
   const bc = new BroadcastChannel(CHANNEL_NAME)

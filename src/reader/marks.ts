@@ -26,11 +26,6 @@
 // is no second anchoring scheme here to drift out of step with this one.
 export type MarkKind = 'highlight' | 'note' | 'text' | 'box'
 
-/** True for the kinds that INSERT at an edge of their anchor instead of painting over it. */
-export function isPointKind(k: MarkKind): boolean {
-  return k === 'text' || k === 'box'
-}
-
 export type ReaderMark = {
   id: string
   kind: MarkKind

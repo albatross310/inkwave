@@ -167,10 +167,3 @@ export async function syncLedgerMonth(remote: LedgerRemote, month: string): Prom
   const healed = await mergeIntoLocalLedger(month, merged)
   return { ok: true, action: 'wrote', rows: merged.rows.length, grewLocalBy: healed.rows.length - local.rows.length }
 }
-
-/** Sync several months (the current one, plus a straggler at a month boundary). */
-export async function syncLedgerMonths(remote: LedgerRemote, months: readonly string[]): Promise<SyncOutcome[]> {
-  const out: SyncOutcome[] = []
-  for (const m of months) out.push(await syncLedgerMonth(remote, m))
-  return out
-}

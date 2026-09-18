@@ -113,8 +113,3 @@ export async function ensureBibEntries(
   inflight.set(key, run); dbg.inflight = inflight.size
   return run
 }
-
-/** Fire-and-forget request used by a synchronous caller that just missed. Never throws. */
-export function requestBibEntries(items: readonly CSLItem[], style: string, epoch: number): void {
-  void ensureBibEntries(items, style, epoch).catch(() => { /* ensureBibEntries already swallowed it */ })
-}
