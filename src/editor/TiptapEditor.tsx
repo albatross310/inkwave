@@ -918,7 +918,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     const onDown = (e: PointerEvent) => {
       const t = e.target as Element | null
       const open = openPanelRef.current
-      if (open && tapClosesPanel(t, open)) setOpenPanel(null)
+      // The ▲ row survives a pointerdown on a MAIN-ROW slot: that is how a drag out of the row
+      // (into a blank honeycomb cell) begins, and a plain click still closes it through the
+      // button's own toggle. Everywhere else rule (a) stands.
+      const slotDragStart = open === 'drawer' && !!t?.closest('.iw-slot') && !!mainRowRef.current?.contains(t)
+      if (open && !slotDragStart && tapClosesPanel(t, open)) setOpenPanel(null)
       // Desktop too (Peter, 2026-09-18: the style bar "only hides when you stop using anything from
       // it — same as phone"): the 5s idle timer is gone, so a pointerdown anywhere outside the
       // footer chrome and its panels is what retracts the style/music rows.
