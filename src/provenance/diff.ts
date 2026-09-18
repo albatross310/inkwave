@@ -75,7 +75,7 @@ export function diffWords(prev: string, next: string): DiffOp[] {
 
 /**
  * Break each CHANGE op (add/del) that spans a paragraph return into one op per line-segment, so a change
- * crossing a return becomes two (or three, …) separate diffs — each its own alignment lock point in the
+ * crossing a return becomes two (or three, …) separate diffs — each its own bijection lock point in the
  * snapshot view, giving tighter alignment than a single centre for a tall multi-paragraph change. Trailing
  * newlines stay attached to their segment (so `\n\n` paragraph breaks don't spawn empty pieces), and the
  * concatenated `text` is byte-identical to the input, so nothing downstream of display is affected.

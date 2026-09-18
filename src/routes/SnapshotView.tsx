@@ -271,7 +271,11 @@ function FullDiffView({
       </div>
     )
   }
-  // Rich pages for every version.
+  // Rich pages for EVERY version. The legacy flat `pre-wrap` transcript and its `?textRender=off`
+  // escape hatch came off on 2026-09-18 — there is one pane renderer now.
+  // ⚠ The canvas renderer and this DOM landing must stay the SAME renderer (R2) — a rich frame
+  // settling onto a flat pane is round 11’s two-rules-one-pane drift.
+  // → docs/archive/snapshot-scrub-rounds.md#sv-rich-pane
   return (
     <div className="tiptap-editor ProseMirror" style={PANE_WHITE_SPACE}>
       {wrapSnapshot(<RichDiffView doc={snapshot.contentJson} ops={ops} hooks={{ onOpClick, onHoverOp }} />)}
@@ -617,6 +621,42 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
   )
 }
 
+// ── Editor snap (experimental) ────────────────────────────────────────────────
+// Two ways to make the editor "grab" diffs, chosen by a 3-way toggle. Both read the diff CENTRES in the
+// editor's own content coordinates.
+export type SnapMode = 'off' | 'warp'
+export type BijMode = 'both' | 'reverse' | 'off' // cross-pane sync: both directions / diff→editor only / none
+
+type Centre = { c: number; half: number; add: boolean; len: number }
+function diffCentres(el: HTMLElement): Centre[] {
+  const rect = el.getBoundingClientRect()
+  const byIdx = new Map<string, { top: number; bot: number; add: boolean; len: number }>()
+  el.querySelectorAll('[data-opidx]').forEach((node) => {
+    const e = node as HTMLElement
+    const add = e.classList.contains('diff-add'), del = e.classList.contains('diff-del')
+    if (!add && !del) return
+    const idx = e.getAttribute('data-opidx')!
+    const r = e.getBoundingClientRect()
+    const top = r.top - rect.top + el.scrollTop, bot = r.bottom - rect.top + el.scrollTop
+    const len = (e.textContent || '').length
+    const prev = byIdx.get(idx)
+    if (prev) { prev.top = Math.min(prev.top, top); prev.bot = Math.max(prev.bot, bot); prev.len += len }
+    else byIdx.set(idx, { top, bot, add, len })
+  })
+  return [...byIdx.values()].map(({ top, bot, add, len }) => ({ c: (top + bot) / 2, half: (bot - top) / 2, add, len }))
+}
+
+// Potential-well model (Peter's): each diff is a well; the scroll is a particle with a VELOCITY-DEPENDENT
+// resistance — LOW when fast (coasts far, no wading through dense sections) rising HIGH as it slows (settles
+// onto the nearest diff). Only the NEAREST well pulls, so concentrated diffs don't accumulate a huge
+// potential. No critical-damping-per-well coupling (that stalled it mid-nowhere and over-damped clusters).
+const WARP_RESIST_MIN = 0.04  // resistance at high speed (coast)
+const WARP_RESIST_MAX = 0.34  // resistance as it stops (clean settle)
+const WARP_V0 = 8             // velocity scale for the resistance ramp (px/frame)
+const WARP_WELL = 0.3         // well pull strength (how hard the nearest diff grabs)
+const WARP_WELL_PAD = 20      // well half-width beyond each diff's own half-height
+const WARP_IMPULSE = 0.14     // wheel delta → velocity impulse (≈ resistance scale, so scroll is ~1:1 with input, not 5-6×)
+
 // ── DocLayer — one snapshot's fully-rendered, fully-paginated doc pane, KEPT ALIVE ────────────
 // Each recently-visited snapshot keeps its whole rendered pane mounted; only the active one shows.
 // ⚠ HIDE A LAYER WITH `opacity: 0.001` — never 0, `visibility` or `display`. A truly-hidden layer
@@ -771,13 +811,15 @@ const DocLayer = memo(function DocLayer({ snap, prev, active, isPhone, hooks }: 
 
 function SplitDiffView({
   snapshot, prevSnap, nextSnap, isPhone, isNarrow, lineMode, summary, counter, counterRef, summariesOn, onOptInSummaries, nav, allSnaps,
-  presenter,
+  snapMode, bijMode, onCycleSnap, onCycleBijection, presenter,
 }: {
   snapshot: Snapshot; prevSnap: Snapshot | null; nextSnap: Snapshot | null; allSnaps: Snapshot[]
   isPhone: boolean; isNarrow: boolean
   lineMode: 'center' | 'longest'; summary?: string | null; counter?: string
   counterRef?: React.RefObject<HTMLDivElement> // shift-wheel flipbook writes the live version text here
   summariesOn?: boolean; onOptInSummaries?: () => void
+  snapMode: SnapMode; bijMode: BijMode // lifted to SnapshotView (phone hosts the toggles in the bottom bar)
+  onCycleSnap: () => void; onCycleBijection: () => void
   presenter: ScrubPresenter // scrub bitmap overlays (round 3 — see editor/scrubRaster.ts)
   nav?: {
     show: boolean
@@ -799,8 +841,18 @@ function SplitDiffView({
   // VERTICAL (phone/narrow): editor row % — GOLDEN RATIO editor:panels = φ:1 (Peter, 2026-07-10).
   const [vSplitPct, setVSplitPct] = useState(61.8)
   const [sidePanelPx, setSidePanelPx] = useState(240)
-  // Knots: each diff's centre in BOTH panes (ly ↔ ry), sorted by ly. Drive the alignment glow and
-  // the diff pane's end-at-lock clamp.
+  // snapMode/bijMode are lifted props (see SnapshotView). A ref mirrors the bijection so the
+  // scroll handlers read the live value without re-subscribing.
+  const bijectionRef = useRef<BijMode>(bijMode)
+  bijectionRef.current = bijMode
+  const cycleSnap = onCycleSnap
+  const cycleBijection = onCycleBijection
+  // Diff centres cached in CONTENT coords (they never move while scrolling — only on layout change), so
+  // the snap physics does ZERO getBoundingClientRect per frame. Recomputed only when the layout changes.
+  const centresRef = useRef<Centre[]>([])   // editor-pane diff centres (for the editor warp)
+  const rCentresRef = useRef<Centre[]>([])  // diff-pane diff centres (for the diff-pane warp)
+  // Knots for the bijection, cached the same way: each diff's centre in BOTH panes (ly ↔ ry), sorted by
+  // ly. Used forward (editor→diff, onLeftScroll) and inverse (diff→editor, the reverse sync).
   const knotsRef = useRef<Array<{ ly: number; ry: number; lHalf: number; rHalf: number; idx: number }>>([])
   // Which pane the user is actively scrolling ('left' = editor, 'right' = diff) — set by wheel over each,
   // cleared after idle. The follower is moved programmatically, which must NOT flip the driver.
@@ -809,8 +861,32 @@ function SplitDiffView({
   const scrollingRef = useRef(false) // true for ~140ms after any pane scroll (suppresses the hover glow)
   const scrollStopTimer = useRef<number | undefined>(undefined)
   const dragging   = useRef(false)
-  const gentleFollowRef = useRef(false) // minimap scrolling → suppress the page-sync jumps
-  // Minimap drag → suppress the page-sync jumps while it scrubs; the minimap dispatches this event.
+  // FAST exponential follow: the diff pane tracks its bijection target within ~1 frame, so it doesn't
+  // trail the editor (the old soft critically-damped spring lagged ~300ms during continuous scroll). This
+  // can be stiff without feeling jumpy because the LOCAL easing is baked into the target (the magnetic
+  // snap in the map) — and a pure lerp toward the target never overshoots. Minimap uses a gentler factor.
+  const rightTargetRef = useRef<number | null>(null)
+  const springRafRef = useRef(0)
+  const gentleFollowRef = useRef(false) // minimap scrolling → gentler follow
+  const runSpring = useCallback(() => {
+    if (springRafRef.current) return
+    const step = () => {
+      const R = rightScrollRef.current, target = rightTargetRef.current
+      // Bail if the DIFF pane has become the driver (reverse sync) — otherwise this lingering forward-drive
+      // spring keeps yanking the diff pane toward a stale target, fighting the user (the "stuck / rolls back").
+      if (!R || target == null || driverRef.current === 'right') { springRafRef.current = 0; return }
+      const dx = target - R.scrollTop
+      const k = gentleFollowRef.current ? 0.4 : 0.85 // fraction of the gap closed each frame
+      if (Math.abs(dx) < 0.4) { R.scrollTop = target; springRafRef.current = 0; return }
+      R.scrollTop = R.scrollTop + dx * k
+      springRafRef.current = requestAnimationFrame(step)
+    }
+    springRafRef.current = requestAnimationFrame(step)
+  }, [])
+  // While a click-to-diff smooth-scroll is in flight, the diff pane GLIDES (tracks the target directly, at
+  // the editor's pace) instead of springing — no fridge bounce on a click.
+  const directFollowRef = useRef(false)
+  // Minimap scrolling → gentle critically-damped follow (see runSpring); the minimap dispatches this event.
   const gentleTimerRef = useRef<number | undefined>(undefined)
   useEffect(() => {
     const on = () => {
@@ -1258,7 +1334,8 @@ function SplitDiffView({
   }, [isPhone])
 
   // ── Midline PAGE SYNC ────────────────────────────────────────────────────────────────────────
-  // The driver's midline crossing a page boundary flies the follower to that page. ⚠ Latch
+  // The driver's midline crossing a page boundary flies the follower to that page. ⚠ Fire only where
+  // the continuous bijection is NOT already driving that direction, or it fights the spring; latch
   // per pane so one crossing is one jump. → docs/archive/snapshot-scrub-rounds.md#sv-page-sync
   const pageGeoRef = useRef<StaticPageGeo[] | null>(null)
   pageGeoRef.current = pageGeo
@@ -1465,8 +1542,10 @@ function SplitDiffView({
         if (cur) { const s = midlineSignature(cur); if (s) anchorSigRef.current = s }
       })
     }
-    // Alignment glow pass: read each diff's centre in BOTH panes so a change lights up in the two panes
-    // together as it nears the reading line.
+    // Follow the right (hunk) pane via a BIJECTION whose lock points are the diffs ("traffic lights"):
+    // each change's CENTRE in the document pane maps to that change's CENTRE in the diff pane, so both are
+    // in exact sync as a change passes the midline, interpolating smoothly between locks (with a local
+    // slope-1 magnetic snap right at each lock — see below).
     if (!syncTickRef.current) {
       syncTickRef.current = true
       requestAnimationFrame(() => {
@@ -1503,6 +1582,47 @@ function SplitDiffView({
         const atTop = L.scrollTop <= 1
         const atBottom = L.scrollTop >= L.scrollHeight - L.clientHeight - 1
         const topIdx = knots[0]?.idx, botIdx = knots[knots.length - 1]?.idx
+        let ry: number
+        if (lMid <= knots[0].ly) ry = knots[0].ry - (knots[0].ly - lMid)                       // before first lock point: 1:1
+        else if (lMid >= knots[knots.length - 1].ly) ry = knots[knots.length - 1].ry + (lMid - knots[knots.length - 1].ly)
+        else {
+          let i = 0
+          while (i < knots.length - 1 && knots[i + 1].ly <= lMid) i++
+          const a = knots[i], b = knots[i + 1]
+          const t = (lMid - a.ly) / Math.max(1, b.ly - a.ly)
+          ry = a.ry + t * (b.ry - a.ry)
+        }
+        // Local magnetic snap: within ±W of a diff lock point, blend the linear map toward a
+        // slope-1 line through the lock (Taylor-matched to 2nd order; smootherstep ⇒ no kink where
+        // it hands back). ⚠ Cap the window to half the gap to the nearest lock so adjacent windows
+        // never overlap. → docs/archive/snapshot-scrub-rounds.md#sv-warp
+        {
+          const MAXW = 40
+          let nk: { ly: number; ry: number; idx?: number } | null = null, nd = Infinity
+          for (const k of knots) { if (k.idx == null) continue; const d = Math.abs(k.ly - lMid); if (d < nd) { nd = d; nk = k } }
+          if (nk && nd < MAXW) {
+            let gapPrev = Infinity, gapNext = Infinity
+            for (const k of knots) {
+              if (k === nk || k.idx == null) continue
+              const dd = k.ly - nk.ly
+              if (dd < 0) gapPrev = Math.min(gapPrev, -dd)
+              else if (dd > 0) gapNext = Math.min(gapNext, dd)
+            }
+            const W = Math.min(MAXW, gapPrev / 2, gapNext / 2)
+            if (nd < W) {
+              const p = 1 - nd / W                             // 1 at the lock, 0 at the window edge
+              const u = p * p * p * (p * (p * 6 - 15) + 10)     // smootherstep → u' = u'' = 0 at both ends
+              const mag = nk.ry + (lMid - nk.ly)               // slope-1 line through the lock
+              ry = u * mag + (1 - u) * ry
+            }
+          }
+        }
+        if (driverRef.current === 'left' && bijectionRef.current === 'both') { // editor drives diff (forward) only
+          rightTargetRef.current = Math.max(0, ry - R.clientHeight * midFracRef.current)
+          if (directFollowRef.current) { R.scrollTop = rightTargetRef.current } // glide, no bounce
+          else runSpring()
+        }
+
         // Alignment glow: PLATEAU at 1 the whole time the midline is inside the diff body, then a
         // smootherstep dropoff over GLOW_DROP px, so every diff is reliably fully lit once as it
         // passes. Both panes read the same `--iw-align` (R2), so they light together.
@@ -1525,11 +1645,11 @@ function SplitDiffView({
         glowSetRef.current = still
       })
     }
-  }, [setAlignGlow])
+  }, [runSpring, setAlignGlow])
 
-  // Cache the diff KNOTS (each diff's centre in both panes) — recomputed ONLY on layout change
-  // (snapshot / zoom / orientation / pane sizes / resize), never during scroll, so the glow and the
-  // diff-pane clamp read them with zero per-frame getBoundingClientRect. rAF so it reads AFTER paint.
+  // Cache the diff centres — recomputed ONLY on layout change (snapshot / zoom / orientation / pane sizes
+  // / resize), never during scroll. So the snap physics reads centresRef.current with zero per-frame
+  // getBoundingClientRect. rAF so it reads AFTER the new layout has painted.
   useEffect(() => {
     const el = leftScrollRef.current
     if (!el) return
@@ -1537,6 +1657,8 @@ function SplitDiffView({
       const L = leftScrollRef.current, R = rightScrollRef.current
       if (!L) return
       const tKn = performance.now()
+      centresRef.current = diffCentres(L)
+      if (R) rCentresRef.current = diffCentres(R)
       if (R) {
         const lRect = L.getBoundingClientRect(), rRect = R.getBoundingClientRect()
         const ks: Array<{ ly: number; ry: number; lHalf: number; rHalf: number; idx: number }> = []
@@ -1582,12 +1704,26 @@ function SplitDiffView({
   // effZoom: the fit-capped paper zoom reflows the editor pane the same way diffZoom reflows the diff pane.
   }, [snapshot.id, diffZoom, effZoom, vertical, splitPct, sidePanelPx, pageGeo, totalPages, diffPages])
 
-  // DIFF-PANE SCROLL: keep the diff pane's own travel inside the first/last diff, and light the diffs off
-  // its midline while a click flight has it moving on its own.
+  // REVERSE SYNC (bijection): scrolling the DIFF panel maps the EDITOR to the inverse-bijection position
+  // INSTANTLY — a true 1:1 bijection, no trailing. The DRIVER is simply whichever pane the CURSOR is over
+  // (mouseenter), so switching panes flips the direction immediately. The follower moves programmatically;
+  // its own scroll handler sees the driver is the OTHER pane and doesn't drive back.
   useEffect(() => {
     const L = leftScrollRef.current, R = rightScrollRef.current
     if (!L || !R) return
     // (driver is set by the mousemove hit-test above — robust vs mouseenter being dropped.)
+    const inverse = (ry: number): number => { // diff-pane position → editor position
+      const ks = knotsRef.current
+      if (!ks.length) return ry
+      if (ry <= ks[0].ry) return ks[0].ly - (ks[0].ry - ry)
+      const last = ks[ks.length - 1]
+      if (ry >= last.ry) return last.ly + (ry - last.ry)
+      let i = 0
+      while (i < ks.length - 1 && ks[i + 1].ry <= ry) i++
+      const a = ks[i], b = ks[i + 1]
+      return a.ly + ((ry - a.ry) / Math.max(1, b.ry - a.ry)) * (b.ly - a.ly)
+    }
+    let rTick = false
     const onRightScroll = () => {
       // While a click flies the diff pane (editor static), light diffs off the DIFF pane's own midline —
       // onLeftScroll's glow can't fire because the editor isn't moving.
@@ -1602,6 +1738,14 @@ function SplitDiffView({
         if (R.scrollTop < minS) { R.scrollTop = minS; return }
         if (maxS > minS && R.scrollTop > maxS) { R.scrollTop = maxS; return }
       }
+      if (bijectionRef.current === 'off') return   // no cross-pane sync
+      if (driverRef.current !== 'right') return     // cursor isn't over the diff → the diff is just following
+      if (rTick) return
+      rTick = true
+      requestAnimationFrame(() => {
+        rTick = false
+        L.scrollTop = Math.max(0, inverse(R.scrollTop + R.clientHeight * midFracRef.current) - L.clientHeight * midFracRef.current)
+      })
     }
     R.addEventListener('scroll', onRightScroll, { passive: true })
     return () => { R.removeEventListener('scroll', onRightScroll) }
@@ -1639,7 +1783,7 @@ function SplitDiffView({
       for (const r of rules) { if (r.top <= yc) pg = r.page; else break }
       return pg
     }
-    // The jump = the same smooth fly a diff click uses. Targets land the page's start
+    // The jump = the same smooth fly the diff-click bijection uses. Targets land the page's start
     // AT the midline (its rule / its sheet top), mirroring how a page begins under the reading line.
     const flyRightToPage = (pg: number) => {
       const rule = R.querySelector(`[data-page="${pg}"]`) as HTMLElement | null
@@ -1669,15 +1813,17 @@ function SplitDiffView({
       if (lp && lp !== lastLeftPageRef.current) {
         const crossed = lastLeftPageRef.current !== 0
         lastLeftPageRef.current = lp
-        // editor→diff: only while the editor drives.
-        if (crossed && !suppressed && driverRef.current === 'left') flyRightToPage(lp)
+        // editor→diff: only while the editor drives, and only where the forward spring ISN'T
+        // already syncing continuously (bijMode 'both' owns that direction).
+        if (crossed && !suppressed && driverRef.current === 'left' && bijectionRef.current !== 'both') flyRightToPage(lp)
       }
       const rp = pageOfRight()
       if (rp && rp !== lastRightPageRef.current) {
         const crossed = lastRightPageRef.current !== 0
         lastRightPageRef.current = rp
-        // diff→editor: only while the diff drives.
-        if (crossed && !suppressed && driverRef.current === 'right') flyLeftToPage(rp)
+        // diff→editor: only while the diff drives, and only in 'off' — 'both'/'reverse' already
+        // drive the editor per-frame via the inverse bijection (a jump would fight it).
+        if (crossed && !suppressed && driverRef.current === 'right' && bijectionRef.current === 'off') flyLeftToPage(rp)
       }
     }
     const onScroll = () => { if (!tick) { tick = true; requestAnimationFrame(step) } }
@@ -1691,7 +1837,7 @@ function SplitDiffView({
   }, [snapshot.id])
 
   // Right-click-DRAG the diff pane to scroll it (for mouse users with no wheel/trackpad) — the editor flies
-  // to the matching change when it crosses a page. Context menu is suppressed on the pane so the drag owns it.
+  // to the matching change via the bijection. Context menu is suppressed on the pane so the drag owns it.
   useEffect(() => {
     const cleanups: Array<() => void> = []
     let dragging: HTMLDivElement | null = null, lastY = 0
@@ -1700,7 +1846,7 @@ function SplitDiffView({
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     cleanups.push(() => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); document.body.style.cursor = '' })
-    // Right-drag on EITHER pane pans it (and pins the driver to it, so the other pane follows the page sync).
+    // Right-drag on EITHER pane pans it (and pins the driver to it, so the other pane follows via the bijection).
     // While panning: hand cursor everywhere + no hover glow (panningRef).
     const installDrag = (el: HTMLDivElement | null, drive: 'left' | 'right') => {
       if (!el) return
@@ -1727,6 +1873,83 @@ function SplitDiffView({
     const t = setTimeout(() => window.dispatchEvent(new CustomEvent(CITATION_TOAST_EVENT, { detail: { text: 'On a mouse? Right-click-drag EITHER panel to pan it — the other flies to match.' } })), 6800)
     return () => clearTimeout(t)
   }, [])
+
+  // Editor snap mode A — WHEEL-TAKEOVER PHYSICS: a particle under linear resistance in a landscape
+  // of potential wells at the diffs (v += wellForce − resist·v, then x += v · speedWarp).
+  // ⚠ Leave Ctrl/⌘+wheel alone (that is the diff zoom), and read centres from the cache — zero
+  // layout per frame. → docs/archive/snapshot-scrub-rounds.md#sv-warp
+  useEffect(() => {
+    if (snapMode !== 'warp') return
+    const cleanups: Array<() => void> = []
+    // Install the SAME wheel-takeover physics on a pane: nearest-well pull, velocity-based resistance,
+    // fencepost on mousewheel. Runs only while THIS pane is the driver (cursor over it) — the other pane
+    // follows via the bijection. Editor and diff panel each get their own instance + own diff centres.
+    const install = (el: HTMLDivElement | null, getCentres: () => Centre[], drive: 'left' | 'right') => {
+      if (!el) return
+      let v = 0, x = el.scrollTop, raf = 0
+      const maxScroll = () => Math.max(0, el.scrollHeight - el.clientHeight)
+      const tick = () => {
+        if (driverRef.current !== drive) { raf = 0; return } // not the driver → the follow owns this pane
+        const centres = getCentres()
+        let nk: Centre | null = null, nd = Infinity
+        for (const c of centres) { const d = Math.abs(x - c.c); if (d < nd) { nd = d; nk = c } }
+        let F = 0, inWell = false
+        if (nk) {
+          const w = nk.half + WARP_WELL_PAD, u = (x - nk.c) / w
+          // FINITE well: zero at the centre AND at ±w, nothing beyond — no long gaussian tail creeping the
+          // scroll toward a distant diff (the "phantom well / stuck in the middle of nowhere").
+          if (Math.abs(u) < 1) { F = -u * (1 - u * u) * WARP_WELL; inWell = true }
+        }
+        const resistance = WARP_RESIST_MIN + (WARP_RESIST_MAX - WARP_RESIST_MIN) * Math.exp(-Math.abs(v) / WARP_V0)
+        v = v + F - resistance * v
+        x = Math.max(0, Math.min(maxScroll(), x + v))
+        el.scrollTop = x
+        // Settle ONLY when basically on a diff (snapped) or in free space — never mid-pull, which was the creep.
+        const snapped = !!nk && nd <= nk.half + 2
+        if (Math.abs(v) < 0.05 && (!inWell || snapped)) { v = 0; raf = 0; return }
+        raf = requestAnimationFrame(tick)
+      }
+      let fenceRaf = 0, natTarget = el.scrollTop, dispTarget = el.scrollTop
+      const easeFence = () => {
+        if (driverRef.current !== drive) { fenceRaf = 0; return }
+        const dx = dispTarget - el.scrollTop
+        if (Math.abs(dx) < 0.5) { el.scrollTop = dispTarget; x = dispTarget; fenceRaf = 0; return }
+        el.scrollTop = el.scrollTop + dx * 0.3
+        x = el.scrollTop
+        fenceRaf = requestAnimationFrame(easeFence)
+      }
+      const onWheel = (e: WheelEvent) => {
+        if (e.ctrlKey || e.metaKey || e.shiftKey) return // ⌘/ctrl = zoom; shift = snapshot scrub (window handler)
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return // horizontal two-finger swipe = snapshot scrub (below)
+        e.preventDefault()
+        x = el.scrollTop
+        const isMouseWheel = e.deltaMode !== 0 || Math.abs(e.deltaY) >= 100
+        if (isMouseWheel) { // FENCEPOST — hop to the next diff within ±delta/2 of the natural landing
+          if (raf) { cancelAnimationFrame(raf); raf = 0; v = 0 }
+          if (fenceRaf === 0) natTarget = el.scrollTop
+          const delta = e.deltaMode !== 0 ? e.deltaY * 40 : e.deltaY
+          natTarget = Math.max(0, Math.min(maxScroll(), natTarget + delta))
+          const mid = natTarget + el.clientHeight * midFracRef.current, hw = Math.abs(delta) / 2
+          let pick: Centre | null = null
+          for (const c of getCentres()) {
+            if (Math.abs(c.c - mid) > hw) continue
+            if (!pick || (c.add !== pick.add ? c.add : c.len > pick.len)) pick = c // green first, then longest
+          }
+          dispTarget = pick ? Math.max(0, Math.min(maxScroll(), pick.c - el.clientHeight * midFracRef.current)) : natTarget
+          if (!fenceRaf) fenceRaf = requestAnimationFrame(easeFence)
+          return
+        }
+        if (fenceRaf) { cancelAnimationFrame(fenceRaf); fenceRaf = 0 } // a trackpad flick interrupts a fence glide
+        v = Math.max(-40, Math.min(40, v + e.deltaY * WARP_IMPULSE)) // cap max scroll speed (continuous trackpad was flying at ±90)
+        if (!raf) raf = requestAnimationFrame(tick)
+      }
+      el.addEventListener('wheel', onWheel, { passive: false })
+      cleanups.push(() => { el.removeEventListener('wheel', onWheel); if (raf) cancelAnimationFrame(raf); if (fenceRaf) cancelAnimationFrame(fenceRaf) })
+    }
+    install(leftScrollRef.current, () => centresRef.current, 'left')    // editor pane
+    install(rightScrollRef.current, () => rCentresRef.current, 'right') // diff pane
+    return () => cleanups.forEach((fn) => fn())
+  }, [snapMode, snapshot.id])
 
   // Trackpad two-finger horizontal swipe over either pane → a pure POSITION scrubber (no momentum):
   // a FIRST detent commits one snap, every REST px another, applied as a net hop per event.
@@ -1975,12 +2198,20 @@ function SplitDiffView({
 
   // ── The three panes as size-parameterised elements, so desktop (diff | editor | side) and narrow
   //    (editor on top; side + diff below) can arrange the SAME panes differently. ──
+  const toggleBtn = (on: boolean): React.CSSProperties => ({
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    height: 'clamp(20px, 3.4vh, 30px)', width: 'clamp(52px, 9vw, 78px)', padding: '0 clamp(5px, 0.8vw, 10px)',
+    background: on ? INK : CARD, color: on ? ON_INK : INK, border: `1.5px solid ${INK}`, borderRadius: 8,
+    fontSize: 'clamp(0.62rem, 1.3vw, 0.8rem)', fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
+    boxShadow: `0 1px 5px ${CARD_SHADOW}`, flexShrink: 0,
+  })
   const editorPaneEl = (sz: React.CSSProperties) => (
     <div style={{ ...sz, minWidth: 0, minHeight: 0, position: 'relative', overflow: 'hidden' } as React.CSSProperties}>
       {midline}
-      {/* Control stack (version pill) — placements (Peter, round 2 2026-07-11):
-          PHONE: nothing here — the version pill floats over the side/diff boundary (see the grid
-          render below), freeing the old floating row so the minimap + summaries can use the space. WIDE DESKTOP: fixed,
+      {/* Control stack (version pill / snap / bijection) — placements (Peter, round 2 2026-07-11):
+          PHONE: nothing here — the toggles live IN the bottom bar (SnapshotView) and the version
+          pill floats over the side/diff boundary (see the grid render below), freeing the old
+          floating row so the minimap + summaries can use the space. WIDE DESKTOP: fixed,
           right-edge anchored a hair past the divider (left = --snap-split-pct, the split var
           published above) so even the widest pill ends LEFT of the editor's text column — the
           stack floats OVER the diff panel + its scrollbar on a higher layer, still fully
@@ -1992,6 +2223,8 @@ function SplitDiffView({
         ? { position: 'absolute', top: 'clamp(6px, 1.4vh, 12px)', left: 0, zIndex: 6, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-start' }
         : { position: 'fixed', left: 'var(--snap-split-pct, 28%)', top: 'calc(clamp(38px, 7vh, 48px) + 10px)', transform: 'translateX(calc(-100% + 5px))', zIndex: 46, display: 'flex', flexDirection: 'column', gap: 'clamp(5px, 1vh, 10px)', alignItems: 'flex-end' }}>
         {counter && (<div ref={counterRef} style={{ background: CARD, border: `2px solid ${INK}`, color: INK, fontWeight: 700, borderRadius: 8, padding: 'clamp(2px,0.5vh,4px) clamp(7px,1vw,12px)', fontSize: 'clamp(0.72rem, 1.6vw, 1.1rem)', fontFamily: 'inherit', boxShadow: `0 2px 8px ${CARD_SHADOW}`, pointerEvents: 'none' }}>{counter}</div>)}
+        <button type="button" onClick={cycleSnap} title="Editor snap to diffs (wheel physics) — on/off" style={toggleBtn(snapMode !== 'off')}>{snapMode === 'off' ? 'Off' : 'On'}</button>
+        <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both ways · diff drives editor only · Off" style={toggleBtn(bijMode !== 'off')}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L ← R' : 'Off'}</button>
       </div>
       )}
       {/* Keep-alive layer stack (see DocLayer): recently-visited snapshots stay mounted +
@@ -2240,6 +2473,25 @@ export function SnapshotView() {
   const [, setRightSnapFlash] = useState(0)
   const [, setLeftVerFlash]   = useState(0)
   const [, setRightVerFlash]  = useState(0)
+  // Editor-snap (warp physics) + cross-pane bijection modes — lifted from SplitDiffView (round 2,
+  // 2026-07-11) so the PHONE bottom bar can host the toggles; desktop's control stack gets them
+  // as props. Both persisted.
+  const [snapMode, setSnapMode] = useState<SnapMode>(() => {
+    try { return localStorage.getItem('inkwave:editorSnap') === 'warp' ? 'warp' : 'off' } catch { return 'off' }
+  })
+  const cycleSnap = useCallback(() => setSnapMode((m) => {
+    const next: SnapMode = m === 'off' ? 'warp' : 'off'
+    try { localStorage.setItem('inkwave:editorSnap', next) } catch { /* private */ }
+    return next
+  }), [])
+  const [bijMode, setBijMode] = useState<BijMode>(() => {
+    try { const s = localStorage.getItem('inkwave:bijection'); return s === 'both' || s === 'reverse' || s === 'off' ? s : 'reverse' } catch { return 'reverse' }
+  })
+  const cycleBijection = useCallback(() => setBijMode((m) => {
+    const next: BijMode = m === 'both' ? 'reverse' : m === 'reverse' ? 'off' : 'both'
+    try { localStorage.setItem('inkwave:bijection', next) } catch { /* private */ }
+    return next
+  }), [])
 
   // Dotted-line mode: 'center' keeps the same words on the midline; 'longest' snaps the line just
   // above the biggest change in each snapshot. Persisted.
@@ -2897,6 +3149,21 @@ export function SnapshotView() {
           </span>
         )}
 
+        {/* PHONE: the snap/bijection toggles live IN the bar (narrowed) — the freed floating row
+            gives the minimap + summaries their space (Peter, round 2 2026-07-11). */}
+        {isPhone && (<>
+          <button type="button" onClick={cycleSnap} title="Editor snap to diffs — on/off" style={{
+            height: 22, padding: '0 6px', borderRadius: 6, flexShrink: 0,
+            background: snapMode !== 'off' ? INK : CARD, color: snapMode !== 'off' ? ON_INK : INK,
+            border: `1.5px solid ${INK}`, fontSize: '0.6rem', fontFamily: 'inherit', fontWeight: 600, letterSpacing: '-0.02em',
+          }}>{snapMode === 'off' ? 'Off' : 'On'}</button>
+          <button type="button" onClick={cycleBijection} title="Cross-pane sync — Both · L ← R · Off" style={{
+            height: 22, padding: '0 6px', borderRadius: 6, flexShrink: 0,
+            background: bijMode !== 'off' ? INK : CARD, color: bijMode !== 'off' ? ON_INK : INK,
+            border: `1.5px solid ${INK}`, fontSize: '0.6rem', fontFamily: 'inherit', fontWeight: 600, letterSpacing: '-0.02em',
+          }}>{bijMode === 'both' ? 'Both' : bijMode === 'reverse' ? 'L←R' : 'Off'}</button>
+        </>)}
+
         {/* Action buttons — centred on desktop; pushed to the RIGHT end on phone (Peter, round 2).
             The words-diff sits just left of the first (biggest-change) toggle. */}
         <div className={`flex-1 flex items-center ${isPhone ? 'justify-end' : 'justify-center'}`} style={{ gap: 'clamp(3px, 0.7vw, 10px)', minWidth: 0, overflow: 'hidden' }}>
@@ -3033,6 +3300,10 @@ export function SnapshotView() {
             prevSnap={heavyPrev}
             nextSnap={heavyIdx >= 0 && heavyIdx < allSnapshots.length - 1 ? allSnapshots[heavyIdx + 1] : null}
             allSnaps={allSnapshots}
+            snapMode={snapMode}
+            bijMode={bijMode}
+            onCycleSnap={cycleSnap}
+            onCycleBijection={cycleBijection}
             presenter={presenter}
             isPhone={isPhone}
             isNarrow={!isWide}
