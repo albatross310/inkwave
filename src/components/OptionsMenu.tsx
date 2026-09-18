@@ -426,15 +426,15 @@ export function OptionsMenu({
             </div>
           )}
           {modal === 'noprov' && (
-            <div className="iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600"
-              style={{ ...anchorAbove(btnRef.current?.getBoundingClientRect(), 'menu'), left: '50%', ...desktopSheetStyle() }}>
+            <div className={`iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600 ${DESKTOP_POPUP_CLASS}`}
+              style={{ ...desktopPopupStyle(btnRef.current?.getBoundingClientRect()), left: '50%', width: 'max-content' }}>
               No snaps or provenance info yet recorded.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>
           )}
           {modal === 'provunread' && (
-            <div className="iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600"
-              style={{ ...anchorAbove(btnRef.current?.getBoundingClientRect(), 'menu'), left: '50%', ...desktopSheetStyle() }}>
+            <div className={`iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600 ${DESKTOP_POPUP_CLASS}`}
+              style={{ ...desktopPopupStyle(btnRef.current?.getBoundingClientRect()), left: '50%', width: 'max-content' }}>
               Couldn't read this document's history just now — it hasn't been lost. Try again in a moment.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>
