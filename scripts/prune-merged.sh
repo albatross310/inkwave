@@ -32,10 +32,25 @@ fi
 git fetch origin --prune --quiet || { echo "fetch failed"; exit 1; }
 MASTER=$(git rev-parse origin/master) || exit 1
 
+# The branch names that ACTUALLY EXIST on the remote right now. A remote-tracking
+# ref is a local cache and can hold things that are not remote branches at all --
+# Peter's checkout carries a packed `refs/remotes/origin` with no trailing path,
+# whose short name is bare "origin", and an earlier cut of this script offered to
+# delete it. Nothing on the remote matched, so it would have failed rather than
+# destroyed anything, but a delete list must be built from the remote's own answer,
+# not from what our cache happens to contain.
+REMOTE=$(git ls-remote --heads origin | sed 's#.*refs/heads/##') || { echo "ls-remote failed"; exit 1; }
+[ -n "$REMOTE" ] || { echo "REFUSING: the remote listed no branches at all."; exit 1; }
+
 KEEP=0 GONE=0
-for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin); do
-  case "$ref" in origin/master|origin/HEAD) continue ;; esac
-  b=${ref#origin/}
+for full in $(git for-each-ref --format='%(refname)' refs/remotes/origin); do
+  # Full refname, never the short form: stripping "origin/" off a short name turns
+  # the bare ref "origin" into the branch name "origin".
+  case "$full" in refs/remotes/origin/*) ;; *) continue ;; esac
+  b=${full#refs/remotes/origin/}
+  case "$b" in master|HEAD|"") continue ;; esac
+  printf '%s\n' "$REMOTE" | grep -qxF "$b" || continue
+  ref="$full"
   ahead=$(git rev-list --count "$ref" --not "$MASTER")
   if [ "$ahead" != 0 ]; then
     KEEP=$((KEEP+1))
