@@ -67,10 +67,12 @@ the channel with a `!`. So: read this file when you finish a piece of work and
 have nothing queued, not on a timer. "I am free" is the trigger, and only your
 own session knows when that is true.
 
-**Carrie chases, on a clock.** An item is overdue 30 minutes after the later of
-its own deadline (now for a bare `yes`, the stated time for an `eta`) and the last
-time its owner delivered anything from this backlog — so a session that is visibly
-working the queue is not nagged for being mid-stride. Peter's reason for the grace
+**Nigel chases, on a clock.** The sweep runs at 09:00 AEST daily from Nigel's
+session — it was Carrie's until 18 Sep, when Peter moved it. An item is overdue
+30 minutes after the later of its own deadline (now for a bare `yes`, the stated
+time for an `eta`) and the last time its owner delivered anything from this
+backlog — so a session that is visibly working the queue is not nagged for being
+mid-stride. Peter's reason for the grace
 is worth stating, because it changes how you should read an interruption: **he
 wants to be free to pull someone off a backlog item mid-flight**, knowing the
 dropped thread gets picked back up rather than lost. The chase is what makes that
