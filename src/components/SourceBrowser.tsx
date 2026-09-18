@@ -13,7 +13,6 @@ import { createPortal } from 'react-dom'
 import type { ReaderBlock, ReaderDoc, Run } from '../reader/types'
 import { locatorForHeading } from '../reader/types'
 import { splitMath, hasMath } from '../reader/readerMath'
-import { liveFrameEnabled } from '../reader/liveFrameFlag'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { anchorSlice, locateAll, markRuns, pointAt, type ReaderMark, type MarkKind, type Located } from '../reader/marks'
@@ -750,7 +749,7 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     // Live framing is DEFAULT ON — `reader/liveFrameFlag.ts` carries why, and what it does not fix.
     // ⚠ Read the flag HERE, per effect, never from a cached resolve: the extension can be granted
     // mid-session and the flag can be flipped.
-    if (!liveFrameEnabled() || !framed || extState !== 'ready') { setFramingOn(false); return }
+    if (!framed || extState !== 'ready') { setFramingOn(false); return }
     // ⚠ AN EMBED NEEDS NO RULE, AND ASKING FOR ONE KILLS A PLAYING VIDEO — an /embed/ URL sends no
     // framing headers, but installing bumps `frameKey`, which remounts the iframe and restarts the
     // player. This early return is only SAFE because teardown lives in its own effect below: it
@@ -787,11 +786,11 @@ export function SourceBrowser({ url, title, onClose, onCite, onQuote }: {
     return () => { setFramingOn(false); releaseFraming(port) }
   }, [framed])
 
-  // ⚠ `canFrame` MUST AGREE WITH THE INSTALL EFFECT, `liveFrameEnabled()` included (R2). It decides
+  // ⚠ `canFrame` MUST AGREE WITH THE INSTALL EFFECT (R2). It decides
   // whether a typed query opens the real engine in the live frame or the no-JS endpoint in the
   // panel, so a yes here while framing is disabled routes every search to a page we then refuse.
   // → docs/archive/reader-panels.md#sb-canframe
-  useEffect(() => { canFrameRef.current = liveFrameEnabled() && extState === 'ready' }, [extState])
+  useEffect(() => { canFrameRef.current = extState === 'ready' }, [extState])
 
   // ⚠ READER-ONLY IS AN INVARIANT, NOT A DECISION TAKEN AT NAVIGATION TIME (R7). The live/reader
   // toggle is PERSISTED, so a reload restores live view without passing through `go()`; and

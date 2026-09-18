@@ -7,13 +7,11 @@ import {
   readToolbarConfig, resolveToolbarRow, mayPersistConfig, carryToolbarConfig, mergeRowIntoConfig,
 } from './toolbarContract'
 import { setProdLedgerEnabled, _resetProdLedgerFlag } from '../productivity/ledgerFlag'
-// The music module GRADUATED to default ON (2026-07-18): its slot is now live for every writer,
-// toggled OFF in node the same module-level way the clock's is toggled on.
-import { setMusicEnabledForTest, __resetMusicFlagForTest } from '../music/flag'
+// The music module GRADUATED to default ON (2026-07-18) and lost its flag entirely on 2026-09-18:
+// the slot is live for every writer, with nothing left to turn it off.
 
 afterEach(() => {
   setProdLedgerEnabled(false); _resetProdLedgerFlag()
-  __resetMusicFlagForTest()
 })
 
 // The six a writer with NOTHING gets — Peter's first-run list, VERBATIM and complete since the
@@ -100,13 +98,11 @@ describe('migrateSlots — the row, from any stored vintage', () => {
     expect(after.slice(0, 5)).toEqual(['bib', 'guide', 'math', 'receipt', 'style'])
   })
 
-  // GRADUATED 2026-07-18: music is now live by DEFAULT — the module ships to every writer. It is
-  // still not in DEFAULT_SLOTS, so it lands in the ▲ drawer rather than widening the six-circle row,
-  // and `?music=off` still removes it cleanly (a stored music slot must not strand). Mutation-proved:
-  // reverting SLOT_LIVE.music to `() => false` fails the default half here; and the flag's own
-  // off-path is proved in music/flag.test.ts.
-  it('the music slot is live BY DEFAULT and LEAVES on ?music=off', () => {
-    expect(slotIsLive('music')).toBe(true)                  // default ON — live on every toolbar
+  // GRADUATED 2026-07-18, UNGATED 2026-09-18: music is live for every writer with no switch left.
+  // It is still not in DEFAULT_SLOTS, so it lands in the ▲ drawer rather than widening the
+  // six-circle row. Mutation-proved: reverting SLOT_LIVE.music to `() => false` fails this.
+  it('the music slot is live for every writer — nothing gates it', () => {
+    expect(slotIsLive('music')).toBe(true)                  // ungated — live on every toolbar
     expect(livePopulation()).toContain('music' as SlotId)
     // Not in DEFAULT_SLOTS, so it lands in the ▲ drawer by default rather than widening the row.
     expect(migrateSlots(null)).toHaveLength(ROW_SLOTS)
@@ -116,14 +112,6 @@ describe('migrateSlots — the row, from any stored vintage', () => {
     const promoted = migrateSlots(['music', 'bib', 'guide', 'math', 'receipt', 'style'])
     expect(promoted[0]).toBe('music')
     expect(promoted).toHaveLength(ROW_SLOTS)
-
-    // ?music=off: the slot leaves, and a STORED music slot must not strand an unrenderable id.
-    setMusicEnabledForTest(false)
-    expect(slotIsLive('music')).toBe(false)
-    expect(livePopulation()).not.toContain('music' as SlotId)
-    const after = migrateSlots(['music', 'bib', 'guide', 'math', 'receipt', 'style'])
-    expect(after).not.toContain('music' as SlotId)
-    expect(after).toHaveLength(ROW_SLOTS)
   })
 
   // The gate OPENED for real — this is the case that proves it is a seam and not a permanent

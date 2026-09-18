@@ -16,7 +16,6 @@
 // (settings) are slots too; only ▲ and ⋮ are fixed. A new slot MUST NOT add itself to
 // DEFAULT_SLOTS.
 import { prodLedgerEnabled } from '../productivity/ledgerFlag'
-import { musicEnabled } from '../music/flag'
 
 export type SlotId =
   | 'bib' | 'guide' | 'math' | 'receipt' | 'page' | 'style' | 'settings'
@@ -63,9 +62,8 @@ const SLOT_LIVE: Record<SlotId, () => boolean> = {
   // feat/prod-ledger — the Pomodoro/ledger drop-up. Default OFF; the countdown is the other door.
   clock: prodLedgerEnabled,
   media: () => true, // photo/audio/video import — landed 2026-07-17
-  // feat/music-piece-photo — the music BAR trigger, behind the SAME flag the music module ships
-  // behind, so this slot and the bar's body turn on together.
-  music: musicEnabled,
+  // feat/music-piece-photo — the music BAR trigger.
+  music: () => true,
 }
 
 /** Is this slot renderable right now? The ONE definition of "shows up". */

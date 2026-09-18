@@ -54,7 +54,6 @@ import { ReceiptPanel } from '../components/ReceiptPanel'
 import { EmailComposePanel } from '../components/EmailComposePanel'
 import type { ApplicationSurfaceMode } from '../components/ApplicationSurface'
 import { readApplicationSurfaceMode, writeApplicationSurfaceMode } from '../components/applicationSurfaceMode'
-import { emailEnabled } from '../email/flag'
 import { titleForDocument } from './docTitle'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
@@ -84,7 +83,7 @@ const ProductivityReportModal = lazy(() =>
 const ProductivityGraphsPanel = lazy(() =>
   import('../components/ProductivityGraphsPanel').then(m => ({ default: m.ProductivityGraphsPanel })),
 )
-import { prodGraphsEnabled, prodReportDemo, prodReportEnabled } from '../productivity/flag'
+import { prodReportDemo } from '../productivity/flag'
 import { SettingsMenu } from '../components/SettingsMenu'
 import { MediaMenu } from '../components/MediaMenu'
 import type { MediaAsset } from '../media/types'
@@ -94,7 +93,6 @@ import { clipboardImageFiles, pastedImageName } from './imagePaste'
 import { ClockSlotButton, LedgerDropUp } from '../components/ClockMenu'
 import { CountdownOverlay } from '../components/CountdownOverlay'
 import { MusicBar } from '../components/MusicBar'
-import { musicEnabled } from '../music/flag'
 import { ReflectionAutoOpen } from '../components/ReflectionAutoOpen'
 import { WorkSummaryAutoOpen } from '../components/WorkSummaryAutoOpen'
 import { PageMenu } from '../components/PageMenu'
@@ -451,13 +449,12 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const [activeBar, setActiveBar] = useState<BarLayerId | null>(null)
   const reviewOpen = activeBar === 'review'   // review layer: sticky-note comments + track changes
   const [verifyOpen, setVerifyOpen] = useState(false)
-  // The free paste-back work report (§A7.1, Path 1) — now DEFAULT ON (`?prodReport=off` to disable).
+  // The free paste-back work report (§A7.1, Path 1).
   const [reportOpen, setReportOpen] = useState(false)
-  const reportFlag = prodReportEnabled()
   // Dynamic: demo.ts statically pulls fixtures.ts (2.8KB gzip of synthetic prose that ONLY
-  // `?prodReport=demo` ever reads). Gated on DEMO MODE, not on `reportFlag` — with the report now
-  // on by default, gating on the flag would fetch the demo/fixtures chunk for EVERY writer even
-  // though installProdReportDemo() no-ops unless demo mode. Demo implies the flag, so this loses
+  // `?prodReport=demo` ever reads). Gated on DEMO MODE — gating on anything broader would fetch
+  // the demo/fixtures chunk for EVERY writer even though installProdReportDemo() no-ops unless demo
+  // mode. So this loses
   // nothing.
   const reportDemo = prodReportDemo()
   useEffect(() => {
@@ -1116,7 +1113,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const compliance = useComplianceProvider()
-  const emailDocument = emailEnabled() && doc.docType === 'email'
+  const emailDocument = doc.docType === 'email'
   const [emailSurfaceMode, setEmailSurfaceMode] = useState<ApplicationSurfaceMode>(() =>
     emailDocument ? readApplicationSurfaceMode('email', doc.id) : 'isolated',
   )
@@ -3454,12 +3451,11 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               scheduleSave(() => docRef.current, () => { void upsertMeta({ id: docRef.current.id, title: docRef.current.title, updatedAt: docRef.current.updatedAt }) })
               setLedgerGoalsTick(n => n + 1)
             }}
-            // The charts live behind their own default-ON flag; offer the button only when it's on.
-            // Opening the charts closes the drop-up (the charts are a full modal over the same surface).
-            onOpenGraphs={prodGraphsEnabled() ? () => { setPanelOpen('clock', false); setGraphsOpen(true) } : undefined}
-            // Reporting — the AI work report (P1c). Same lift: offer only behind its flag, and opening
-            // it closes the drop-up (a full modal over the same surface).
-            onOpenReport={reportFlag ? () => { setPanelOpen('clock', false); setReportOpen(true) } : undefined}
+            // The charts are always offered. Opening them closes the drop-up (the charts are a
+            // full modal over the same surface).
+            onOpenGraphs={() => { setPanelOpen('clock', false); setGraphsOpen(true) }}
+            // Reporting — the AI work report (P1c). Same lift, same close.
+            onOpenReport={() => { setPanelOpen('clock', false); setReportOpen(true) }}
             onClose={() => setPanelOpen('clock', false)}
           />
         )}
@@ -3704,7 +3700,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
 
             {/* Music row — the second-bar layer the music slot opens, MUTUALLY EXCLUSIVE with the
                 style/review rows by the TYPE (`activeBar` holds ONE id — toolbarContract.ts). */}
-            {musicEnabled() && (
+            {(
               <div style={{
                 overflow: 'hidden',
                 maxHeight: activeBar === 'music' ? '60px' : '0',
@@ -3857,7 +3853,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 onExportEquations={exportEquations}
                 googleDriveActive={gdriveActive}
                 onVerifyRecord={() => setVerifyOpen(true)}
-                onWorkReport={reportFlag ? () => setReportOpen(true) : undefined}
+                onWorkReport={() => setReportOpen(true)}
                 onFileOpenError={reportOpenError}
               />
             </div>

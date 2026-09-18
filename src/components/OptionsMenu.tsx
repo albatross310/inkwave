@@ -12,7 +12,6 @@ import type { DocumentMeta, InkwaveDocument } from '../types/document'
 import { listMeta, upsertMeta } from '../storage/indexeddb'
 import { saveDocument, emptyTiptapDoc } from '../storage/opfs'
 import { withScasDefaults } from '../scas/state'
-import { emailEnabled } from '../email/flag'
 import { openInkwaveFile } from '../storage/openDoc'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
@@ -247,14 +246,13 @@ export function OptionsMenu({
     { label: 'new blank', run: openNewBlankInkwaveWindow },
     { label: 'change doc', run: changeToBlankDocument },
     // An email is created exactly like any other document (§B2.1) — same path, one extra field.
-    // Flag-gated, so the menu is unchanged until `?email=1`.
-    ...(emailEnabled() ? [{
+    {
       label: 'new email',
       run: () => void createDocument('Untitled email', emptyTiptapDoc(), uuidv4(), {
         docType: 'email' as const,
         email: { to: [], cc: [], bcc: [], subject: '' },
       }),
-    }] : []),
+    },
     { label: 'open…', run: () => setModal('upload') },
     { label: 'recent', run: () => setModal('recent') },
     { label: 'save…', run: () => setModal('save') },
