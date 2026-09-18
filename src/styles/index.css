@@ -1166,6 +1166,15 @@
 }
 :root[data-theme="night"] .iw-desktop-popup::after { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 12'%3E%3Cpath d='M0 0C7 0 10.5 4 13 12C15.5 4 19 0 26 0Z' fill='%23454e59'/%3E%3Cpath d='M0 0C7 0 10.5 4 13 12C15.5 4 19 0 26 0' fill='none' stroke='%237c8794' stroke-width='1'/%3E%3C/svg%3E"); }
 .iw-desktop-panel { font-size: 15px; }
+/* HAIRLINES (Peter, 2026-09-18: "line widths (pill, buttons, bars) stay 1px under cmd +/-"). The
+   chrome now follows browser zoom (editor/useZoomScale.ts is unlocked), so its borders would
+   thicken with it; `--iw-hairline-k` (= 1 / zoom ratio, written on <html> by that hook) scales
+   each nominal width back to device pixels. !important: Tailwind's `border` utilities are
+   unlayered and would otherwise win over these. */
+.iw-desktop-pill.iw-toolbar-outline { border-width: calc(1px * var(--iw-hairline-k, 1)) !important; }
+.iw-desktop-toolbar .w-9.rounded-full, .iw-desktop-drawer .w-9.rounded-full { border-width: calc(1.5px * var(--iw-hairline-k, 1)) !important; }
+.iw-desktop-bar .rounded-full { border-width: calc(1px * var(--iw-hairline-k, 1)) !important; }
+.iw-desktop-popup { border-width: calc(1px * var(--iw-hairline-k, 1)) !important; }
 .iw-desktop-bar { font-size: 14px; }
 .iw-desktop-popup .text-sm, .iw-desktop-bar .text-sm { font-size: 14px; }
 .iw-desktop-popup .text-\[17px\], .iw-desktop-popup .text-\[15px\] { font-size: 14px; }
