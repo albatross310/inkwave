@@ -53,7 +53,9 @@ finish a piece of work and have nothing queued — **"I am free" is the trigger,
 nothing in it is urgent by construction. Answer an item in the file, in a commit, with one of
 `yes` / `no` / `later` plus your name and a Brisbane time; **a `no` MUST name who it goes to next**,
 or it is a silent drop that looks like a decision. Two forwards without a `yes` and it returns to
-Peter. **Do not read it as standing context** — it is pointed at rather than inlined precisely so a
+Peter. `yes` alone means ASAP — say `yes · eta 19 Sep 14:00` (that exact form; a poller reads it) if
+you mean later, and use `later` only for parked, since **a `later` is never chased**. Naming a second
+session in your own line is an ASK, not their agreement, and **the first name owns it**. **Do not read it as standing context** — it is pointed at rather than inlined precisely so a
 growing backlog does not ride in every session's window all day. Never delete or reword one of his
 lines, and never delete someone's `no`; close by moving the item to `## Done` with the PR.
 

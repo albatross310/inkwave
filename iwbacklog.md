@@ -18,13 +18,38 @@ three words with your name and a Brisbane timestamp:
       - no · Carrie · 18 Sep 18:30 · proxy 403s ref deletion from a container → Max
       - yes · Max · 18 Sep 20:40
 
-- **`yes`** — it is yours. Move the item to `## Doing` and keep the yes line with it.
+- **`yes`** — it is yours, starting now. Move the item to `## Doing` and keep the
+  line with it. **`yes` on its own means ASAP** and I will chase it as soon as it
+  looks stalled.
+- **`yes · eta <19 Sep 14:00>`** — yours, but not this minute. Give a real time in
+  that exact form (day, month, 24h, Brisbane) because a poller reads it. An `eta`
+  buys you until then and nobody chases you before it; a `yes` with no `eta` is a
+  promise to start now, so say which you mean.
 - **`no`** — **and you must name who it goes to next** (`→ Lambert`). A `no` that
   names nobody is a silent drop wearing a decision's clothes; the item then sits
   looking answered while nobody owns it. If you genuinely do not know who should
   have it, that is `→ Peter`, which is a real answer.
-- **`later`** — you will take it, but not yet. Say what you are waiting for, so
-  the next reader knows whether the blocker has cleared.
+- **`later`** — parked, not claimed. It waits for Peter to hand it to someone.
+  **A `later` is never chased**, which is exactly why it must not be used as a soft
+  `yes`: nothing will come looking for it. Say what you are waiting for. I surface
+  the parked pile to Peter periodically rather than nagging anyone about it.
+
+### Saying yes and naming someone else
+
+You can take an item and name who should have part of it — usually Max taking a
+surface and putting Lambert on the phone half:
+
+    - yes · Max · 18 Sep 20:40 · eta 19 Sep 11:00 · with → Lambert (phone half)
+
+**The first name owns it, and the first name is who I chase.** Everyone after is
+support. That ordering is the whole point of writing it this way — otherwise a
+two-name item has two people each assuming the other is on it.
+
+**A name you write in your own line is an ASK, not their agreement.** It stays an
+open ask until that session writes its own `yes`/`no`/`later` line underneath.
+Nobody can be volunteered into a claim they never made — an unanswered nomination
+that reads as an assignment is the same failure as a `no` that names nobody, and
+it is worse here because it looks staffed.
 
 **Never delete a `no` or a `later`.** They are the record of who has already
 looked, and deleting one sends the next session back to the person who just
@@ -42,8 +67,17 @@ the channel with a `!`. So: read this file when you finish a piece of work and
 have nothing queued, not on a timer. "I am free" is the trigger, and only your
 own session knows when that is true.
 
-**Carrie sweeps `## Doing` once a day** and nudges anything that has gone quiet.
-That is why claims carry a date.
+**Carrie chases, on a clock.** An item is overdue 30 minutes after the later of
+its own deadline (now for a bare `yes`, the stated time for an `eta`) and the last
+time its owner delivered anything from this backlog — so a session that is visibly
+working the queue is not nagged for being mid-stride. Peter's reason for the grace
+is worth stating, because it changes how you should read an interruption: **he
+wants to be free to pull someone off a backlog item mid-flight**, knowing the
+dropped thread gets picked back up rather than lost. The chase is what makes that
+safe. It is not a deadline in the contractual sense and nobody is in trouble for
+missing one.
+
+That is why claims carry a date, and why an `eta` has to be machine-readable.
 
 ## House rules
 
