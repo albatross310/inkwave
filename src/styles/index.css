@@ -1011,6 +1011,10 @@
   --iw-sheet-small: 13px;
   --iw-sheet-meta: 12px;
   --iw-sheet-label: 11px;
+  /* The tallest a desktop panel may be: the viewport minus the toolbar band (pill + its air), so a
+     panel that rises from the toolbar never runs under it and one that floats never runs off the
+     top. `--iw-toolbar-h` is written live by the editor's ResizeObserver. */
+  --iw-sheet-max-h: calc(100vh - var(--iw-toolbar-h, 56px) - 36px);
 }
 
 @media (pointer: coarse) and (hover: none) {

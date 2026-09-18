@@ -16,7 +16,7 @@ import { emailEnabled } from '../email/flag'
 import { openInkwaveFile } from '../storage/openDoc'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle, anchorAbove } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import { clearWarm } from '../editor/loadWarmth'
 import { oneDriveFilename } from '../storage/onedrive'
@@ -39,7 +39,6 @@ import { recognisedSaveIsLive } from '../storage/docSource'
 
 const INK = '#302438'
 // Shared gap between a footer button and the panel it opens (same across all footer panels).
-const PANEL_GAP = 14
 
 type ModalKey = 'recent' | 'save' | 'upload' | 'savecopy' | 'export' | 'noprov' | 'provunread' | 'changeunsaved'
 const MODAL_TITLES: Record<ModalKey, string> = { recent: 'Open Recent', save: 'Save', upload: 'Open', savecopy: 'Save a copy', export: 'Export', noprov: '', provunread: '', changeunsaved: 'Current document is not recently saved' }
@@ -98,7 +97,6 @@ async function createDocument(
 export function OptionsMenu({
   open: openProp,
   onOpenChange,
-  paperRight,
   installPrompt,
   onExportBundle,
   onSave,
@@ -309,27 +307,18 @@ export function OptionsMenu({
     })
   }
 
-  // Centre a panel horizontally over the kebab, clamped to the viewport, PANEL_GAP above the toolbar.
+  // Centre a panel horizontally over the kebab, clamped to the viewport, SHEET_GAP above the toolbar.
   // Shared by the menu AND its modals so both read as one continuous panel over the button.
-  const EDGE_BUFFER = 10
   const panelAnchor = (): CSSProperties => {
     const br = btnRef.current?.getBoundingClientRect()
-    const bottom = br ? Math.round(window.innerHeight - br.top + PANEL_GAP) : 60
     // Phone: hug the right edge (the ⋮ button is the rightmost control; the old centre-clamp used
     // HALF of the WIDEST panel, which shoved the little menu toward mid-screen — Peter, 2026-07-09).
     if (isTouchDevice()) return phoneSheetStyle() // the shared sheet (styles/panelSheet.ts)
-    const HALF = 150 // ~half the widest panel, for edge clamping
-    const center = br ? br.left + br.width / 2 : (paperRight || window.innerWidth / 2)
-    return {
-      position: 'fixed',
-      bottom,
-      left: Math.round(Math.max(EDGE_BUFFER + HALF, Math.min(window.innerWidth - EDGE_BUFFER - HALF, center))),
-      transform: 'translateX(-50%)',
-    }
+    return anchorAbove(br, 'menu')
   }
   const menuStyle: CSSProperties = isPhone
     ? (menuOpen ? panelAnchor() : {})
-    : { ...(menuOpen ? panelAnchor() : {}), ...desktopSheetStyle(), width: DESKTOP_SHEET.widthPx }
+    : { ...(menuOpen ? panelAnchor() : {}), ...desktopSheetStyle('menu') }
 
   return (
     <div ref={rootRef} className="relative" onPointerDown={e => e.stopPropagation()}>
@@ -674,7 +663,7 @@ function Modal({ title, onClose, children, anchorStyle }: { title: string; onClo
         // Phone: the sheet's type and edge (styles/panelSheet.ts), centred like the desktop modal.
         style={isTouchDevice()
           ? (() => { const ps = phoneSheetStyle(); return { ...anchorStyle, borderRadius: ps.borderRadius, boxShadow: ps.boxShadow, border: ps.border, width: 'min(400px, 92vw)', maxHeight: '80vh' } })()
-          : { ...anchorStyle, ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx }}
+          : { ...anchorStyle, ...desktopSheetStyle('modal') }}
       >
         {/* The same head as every other panel (PanelSheet.tsx) — one look across desktop and phone. */}
         <SheetHeader title={title} onClose={onClose} />

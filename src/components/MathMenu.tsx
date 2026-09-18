@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import type { Editor } from '@tiptap/core'
 import { getSymbols, deleteSymbol, setSymbol as saveSymbol, PRESETS, type MathSymbol } from '../editor/extensions/mathSymbols'
@@ -176,7 +176,7 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
           className={`iw-nightable iw-touch-guard ${isPhone ? `${PHONE_SHEET_CLASS} font-serif` : `${DESKTOP_SHEET_CLASS} font-serif`}`}
           onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
           // Phone: the shared sheet above the toolbar (styles/panelSheet.ts). Desktop: a popover over Σ.
-          style={isPhone ? { ...phoneSheetStyle(), zIndex: 200 } : { position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', ...desktopSheetStyle(), padding: '6px', zIndex: 200, minWidth: view === 'symbols' ? DESKTOP_SHEET.widthPx : 180 }}
+          style={isPhone ? { ...phoneSheetStyle(), zIndex: 200 } : { position: 'fixed', left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)', ...desktopSheetStyle('menu'), padding: '6px', zIndex: 200, overflowY: 'auto' }}
         >
           {isPhone && <SheetHeader title="Math" onClose={() => setOpen(false)} />}
           {view === 'menu' && (
@@ -212,7 +212,7 @@ export function MathMenuButton({ editor, open: openProp, onOpenChange }: { edito
           )}
 
           {view === 'info' && (
-            <div style={{ padding: '4px 4px', minWidth: '340px' }}>
+            <div style={{ padding: '4px 4px' }}>
               {/* Top bar removed — a subtle back arrow floats at the top-right. */}
               <button type="button" onClick={() => setView('menu')} title="Back"
                 style={{ position: 'absolute', top: 6, right: 8, background: 'none', border: 'none', cursor: 'pointer', color: '#a89d96', fontSize: '1rem', padding: '0 2px', lineHeight: 1 }}>←</button>

@@ -6,7 +6,7 @@ import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom, register
 const registerRightPill = (el: HTMLButtonElement | null) => registerSidePill('right', el)
 import { relativeTime } from './relativeTime'
 import { PANEL_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
@@ -101,7 +101,7 @@ export function SyncStatus({
       {open && (
         <div {...{ [PANEL_ATTR]: 'sync' }}
           className={`iw-nightable relative z-40 bg-white text-stone-600 ${hideTrigger ? `${PHONE_SHEET_CLASS} w-full` : `${DESKTOP_SHEET_CLASS} mb-2 p-3`}`}
-          style={hideTrigger ? { border: phoneSheetStyle().border, borderRadius: phoneSheetStyle().borderRadius, boxShadow: phoneSheetStyle().boxShadow, maxHeight: 'inherit' } : { ...desktopSheetStyle(), width: DESKTOP_SHEET.widthPx }}>
+          style={hideTrigger ? { border: phoneSheetStyle().border, borderRadius: phoneSheetStyle().borderRadius, boxShadow: phoneSheetStyle().boxShadow, maxHeight: 'inherit' } : desktopSheetStyle('menu')}>
           {hideTrigger && <SheetHeader title="Sync" onClose={() => setOpen(false)} />}
           <div className={hideTrigger ? 'p-3' : 'contents'}>
           <div className="text-xs text-stone-400 mb-1.5">

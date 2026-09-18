@@ -10,7 +10,7 @@ import { importLegacyLibrary, legacyLibrarySize } from '../citations/library'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, SHEET_TYPE, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import type { Editor } from '@tiptap/react'
 import { bibProvider } from '../citations/bibProvider'
@@ -362,7 +362,7 @@ function EditDialog({ item, onSave, onClose }: EditDialogProps) {
       <div
         role="dialog" aria-label="Edit citation"
         className={`iw-nightable ${DESKTOP_SHEET_CLASS} fixed z-[101] bg-white font-serif text-sm text-stone-600 flex flex-col`}
-        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 'min(460px, 96vw)', maxHeight: '92vh', ...desktopSheetStyle() }}
+        style={{ top: '50%', left: '50%', transform: 'translate(-50%,-50%)', ...desktopSheetStyle('wide') }}
         onMouseDown={e => e.stopPropagation()}
       >
         {/* Type selector — the titled header bar is gone; close (×) sits next to the dropdown. */}
@@ -828,7 +828,7 @@ export function CitationPanel({ editor, citationStyle, onStyleChange, onClose, i
           : isTouchDevice()
             // Phone: the shared sheet above the toolbar (styles/panelSheet.ts); the list scrolls inside.
             ? { ...phoneSheetStyle(), minHeight: 'calc(var(--iw-vv-h, 100dvh) * 0.3)', overflow: 'hidden' }
-            : { ...panelStyle(), ...desktopSheetStyle(), width: DESKTOP_SHEET.modalWidthPx, minWidth: 300, minHeight: 320, maxWidth: '96vw', maxHeight: '80vh', resize: 'both', overflow: 'hidden' }}
+            : { ...panelStyle(), ...desktopSheetStyle('modal'), minWidth: 300, minHeight: 320, resize: 'both', overflow: 'hidden' }}
         onMouseDown={e => e.stopPropagation()}
       >
         {(isTouchDevice() || !fullscreen) ? (

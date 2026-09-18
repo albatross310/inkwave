@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle, anchorAbove } from '../styles/panelSheet'
 import { SheetHeader, SheetSection } from './PanelSheet'
 import { gappedPagesEnabled, setGappedPages } from '../editor/pageView'
 import { flushPendingSave } from '../storage/opfs'
@@ -25,7 +25,6 @@ import { scasSuggestionsEnabled, setScasSuggestionsEnabled } from '../scas/displ
 
 const INK = '#302438'
 // Shared gap between a footer button and the panel it opens (keep the same across all footer panels).
-const PANEL_GAP = 14
 
 interface SettingsMenuProps {
   limitN: number | 'infinite'
@@ -67,23 +66,10 @@ export function SettingsMenu({ limitN, onLimitChange, open: openProp, onOpenChan
   }
 
   // Phone: the shared sheet (styles/panelSheet.ts). Desktop: centred above the button, with the
-  // shared PANEL_GAP — same model as the hamburger menu.
+  // shared anchorAbove rule — same model as the hamburger menu.
   function menuStyle(): React.CSSProperties {
     if (isPhone) return phoneSheetStyle()
-    const br = btnRef.current?.getBoundingClientRect()
-    if (!br) return { position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)' }
-    const HALF = twoCol ? 230 : DESKTOP_SHEET.widthPx / 2 // ~half the panel width, for edge clamping
-    const center = Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, br.left + br.width / 2))
-    // Keyboard up: cap the panel to the visual-viewport band above the docked pill (the panel
-    // opens above the toolbar, which hugs the keyboard) and scroll any overflow.
-    const vvH = window.visualViewport?.height ?? window.innerHeight
-    return {
-      position: 'fixed',
-      bottom: Math.round(window.innerHeight - br.top + PANEL_GAP),
-      left: Math.round(center),
-      transform: 'translateX(-50%)',
-      ...(twoCol ? { maxHeight: Math.max(160, vvH - 120), overflowY: 'auto' as const } : {}),
-    }
+    return { ...anchorAbove(btnRef.current?.getBoundingClientRect(), twoCol ? 'wide' : 'menu'), overflowY: 'auto' }
   }
 
   return (
@@ -114,8 +100,8 @@ export function SettingsMenu({ limitN, onLimitChange, open: openProp, onOpenChan
             role="dialog"
             aria-label="Settings"
             {...{ [PANEL_ATTR]: 'settings' }}
-            className={`iw-nightable iw-touch-guard z-[91] ${isPhone ? PHONE_SHEET_CLASS : `${DESKTOP_SHEET_CLASS} ${twoCol ? 'w-[29rem] max-w-[94vw]' : ''}`} bg-white font-serif text-sm text-stone-600`}
-            style={isPhone ? menuStyle() : { ...menuStyle(), ...desktopSheetStyle(), ...(twoCol ? {} : { width: DESKTOP_SHEET.widthPx }) }}
+            className={`iw-nightable iw-touch-guard z-[91] ${isPhone ? PHONE_SHEET_CLASS : DESKTOP_SHEET_CLASS} bg-white font-serif text-sm text-stone-600`}
+            style={isPhone ? menuStyle() : { ...menuStyle(), ...desktopSheetStyle(twoCol ? 'wide' : 'menu') }}
             onMouseDown={e => e.stopPropagation()}
           >
             <SheetHeader title="Settings" onClose={() => setOpen(false)} />

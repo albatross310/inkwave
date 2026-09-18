@@ -3,7 +3,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTouchDevice } from '../editor/isTouchDevice'
 import { PANEL_ATTR, PANEL_TRIGGER_ATTR } from '../editor/toolbarContract'
-import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle } from '../styles/panelSheet'
+import { PHONE_SHEET_CLASS, phoneSheetStyle, DESKTOP_SHEET_CLASS, desktopSheetStyle, anchorAbove, SHEET_MAX_H } from '../styles/panelSheet'
 import { SheetHeader } from './PanelSheet'
 import { Link } from 'react-router'
 import { STUDIO_FILE_SETUP_MAC } from '../pwa/studioFileSetup'
@@ -85,14 +85,7 @@ export function GuideMenu({ open: openProp, onOpenChange }: { open?: boolean; on
 
   // Default position: centred above the "i" button, PANEL_GAP-ish above the toolbar.
   function defaultAnchor(): React.CSSProperties {
-    const br = btnRef.current?.getBoundingClientRect()
-    const center = br ? br.left + br.width / 2 : window.innerWidth / 2
-    const HALF = 240
-    return {
-      left: Math.round(Math.max(8 + HALF, Math.min(window.innerWidth - 8 - HALF, center))),
-      bottom: 70,
-      transform: 'translateX(-50%)',
-    }
+    return anchorAbove(btnRef.current?.getBoundingClientRect(), 'wide')
   }
 
   function onHeaderDown(e: React.MouseEvent) {
@@ -144,9 +137,8 @@ export function GuideMenu({ open: openProp, onOpenChange }: { open?: boolean; on
             onMouseDown={e => e.stopPropagation()}
             style={isPhone ? phoneSheetStyle() : {
               ...(pos ? { left: pos.left, top: pos.top } : defaultAnchor()),
-              width: 470, maxWidth: '92vw', height: 'calc(100vh - 92px)', maxHeight: 'calc(100vh - 92px)',
+              ...desktopSheetStyle('wide'), height: SHEET_MAX_H,
               resize: 'both', overflow: 'auto',
-              ...desktopSheetStyle(),
             }}
           >
             {/* The shared header — on desktop also the drag handle. */}
