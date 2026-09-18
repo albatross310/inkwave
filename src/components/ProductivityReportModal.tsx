@@ -19,6 +19,7 @@
 // Theming: `iw-nightable` + token vars with day fallbacks (CLAUDE.md, mandatory).
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { desktopSheetStyle } from '../styles/panelSheet'
 import { createPortal } from 'react-dom'
 import type { DayAggregate, ReportWindow, WindowAggregate } from '../productivity/types'
 import { compilePayload } from '../productivity/report/compile'
@@ -266,11 +267,11 @@ export function ProductivityReportModal({ onClose }: { onClose: () => void }) {
     <>
       <div className="fixed inset-0 z-[130]" style={{ background: 'rgba(35,25,50,0.35)' }} aria-hidden="true" onMouseDown={onClose} />
       <div role="dialog" aria-modal="true" aria-label="Work report"
-        className="iw-nightable fixed z-[131] bg-white shadow-lg font-serif text-stone-700 overflow-y-auto"
+        className="iw-nightable fixed z-[131] bg-white font-serif text-stone-700 overflow-y-auto"
         style={{
           top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
           width: 'min(48rem, calc(100vw - 2rem))', maxHeight: 'calc(100vh - 3rem)',
-          borderRadius: 12, padding: '1.4rem 1.6rem', border: `1px solid ${border}`,
+          ...desktopSheetStyle(), padding: '1.4rem 1.6rem',
           // The one place the ramp is anchored — every FS.* below is an em of this.
           fontSize: PANEL_ROOT_PX,
         }}

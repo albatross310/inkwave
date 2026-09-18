@@ -6,6 +6,7 @@
 // Menu items trigger on pointer-up for immediacy.
 
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { desktopSheetStyle } from '../styles/panelSheet'
 import { useLongPress } from './useLongPress'
 import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
@@ -405,7 +406,8 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
     const vh = window.visualViewport?.height ?? window.innerHeight
     return { position: 'fixed', bottom: Math.max(8, Math.round(vh - br.top + 8)), left: Math.max(8, Math.round(br.left)) }
   }
-  const box = (w: number): React.CSSProperties => ({ border: `1px solid ${INK}55`, borderRadius: 12, width: w })
+  // The popup box: the shared sheet edge (styles/panelSheet.ts) at the popup's own content width.
+  const box = (w: number): React.CSSProperties => ({ ...desktopSheetStyle(), fontSize: undefined, width: w })
 
   // Font panel is MULTI-COLUMN (Peter, 2026-07-16): 2 columns on desktop, 3 on phone — 17 families
   // in one column was a long scroll. Group headers span the full row (gridColumn 1/-1) so they stay
@@ -449,7 +451,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {fontOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={fontPanelStyle()}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white py-1.5" style={fontPanelStyle()}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {FONTS.map((f, i) => (<Fragment key={f.label}>
             {(i === 0 || FONTS[i - 1].group !== f.group) && (
@@ -478,7 +480,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {sizeOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setSizeOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5 overflow-y-auto" style={{ ...above(sizeBtnRef), ...box(64), maxHeight: 280 }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white py-1.5 overflow-y-auto" style={{ ...above(sizeBtnRef), ...box(64), maxHeight: 280 }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {FONT_SIZES.map(sz => (
             <button key={sz} type="button"
@@ -502,7 +504,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {fmtOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFmtOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1" style={{ ...above(fmtBtnRef), ...box(140) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white py-1" style={{ ...above(fmtBtnRef), ...box(140) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {(['bold', 'italic', 'underline', 'strike'] as CharFmt[]).map(fmt => (
             <button key={fmt} type="button"
@@ -528,7 +530,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {hlOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setHlOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl p-2" style={{ ...above(hlBtnRef), ...box(156) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white p-2" style={{ ...above(hlBtnRef), ...box(156) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           <div className="grid grid-cols-3 gap-1.5">
             {HIGHLIGHT_COLORS.map(h => (
@@ -555,7 +557,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {colorOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setColorOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(colorBtnRef), ...box(136) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white py-1.5" style={{ ...above(colorBtnRef), ...box(136) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {TEXT_COLORS.map(c => (
             <button key={c.label} type="button"
@@ -582,7 +584,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {alignOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setAlignOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(alignBtnRef), ...box(110) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white py-1.5" style={{ ...above(alignBtnRef), ...box(110) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {(['left', 'center', 'right', 'justify'] as Align[]).map(a => (
             <button key={a} type="button"
@@ -607,7 +609,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {listOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setListOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(listBtnRef), ...box(148) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white py-1.5" style={{ ...above(listBtnRef), ...box(148) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {([
             { type: 'bulletList'  as ListType, label: 'Bullets',  preview: '•' },
@@ -649,7 +651,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
       </button>
       {indentOpen && createPortal(
         <><div className="fixed inset-0 z-[98]" onMouseDown={() => setIndentOpen(false)} />
-        <div className="z-[99] iw-touch-guard iw-nightable bg-white shadow-xl py-1.5" style={{ ...above(indentBtnRef), ...box(168) }}
+        <div className="z-[99] iw-touch-guard iw-nightable bg-white py-1.5" style={{ ...above(indentBtnRef), ...box(168) }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {INDENT_ITEMS.map(item => (
             <button key={item.action} type="button"
