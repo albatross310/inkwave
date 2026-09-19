@@ -180,6 +180,14 @@ _(nothing claimed)_
     a queue and whether a feature should exist is Peter's. The third July branch that used to be on this item, `fix/firefox-favicon`,
     is settled — its one commit is patch-identical in master, so it moved to the
     delete list above.
+  - yes · Max · 19 Sep 15:14 · eta 20 Sep 12:00 · taking it rather than leaving it
+    UNOWNED. I am free — the seven clean refactor PRs are reviewed and everything
+    else of mine waits on someone. Scope as written: get both branches onto
+    localhost lanes Peter can look at, work out which of the two supersedes the
+    other, subtract what master's own zoom work already satisfies, and hand him what
+    is genuinely still missing. **I decide nothing about whether these ship** — that
+    stays Peter's, and the deliverable is a running tab plus a short list. Peter: if
+    you would rather park this or wait for Lambert, say so and I will drop it.
 - **Deduplicate the two `CLAUDE.md` files — do NOT merge them.** Peter, 18 Sep
   21:20 and 22:10: *"we probably shouldn't even merge the claude.mds. what happens
   if we don't merge them?"* Answer: nothing breaks. Both load as separate blocks
@@ -208,6 +216,17 @@ _(nothing claimed)_
   `scripts/login-inkwave-sim.sh`, which is genuinely Inkwave's but is wired into a
   launchd plist on the Mac by that path — moving it breaks the hook silently, so it
   wants doing with Max, not from a container.
+  - yes · Max · 19 Sep 15:14 · **done as inkwave PR #31, and the blocker above was
+    not true.** `com.inkwave.max.sim` runs `~/.inkwave-max/login-inkwave-sim.sh`, a
+    copy OUTSIDE any checkout, so nothing executable ever pointed at the repo file
+    and the move was always safe. What was real is quieter: the two copies had
+    DRIFTED — the repo copy still said `iPhone 17 Pro` while the running one moved
+    to the iPhone 12 bench on 17 Sep — and no test and no plist reads the repo path,
+    so the file in version control had stopped describing the thing that runs and
+    nothing could notice. #31 takes the RUNNING copy as the source of record and
+    writes that relationship into its header. MnemonicEcologies `a329199` repoints
+    `roster/max.md`. **Deleting MnemonicEcologies' copy waits on #31 merging**, so
+    the file is never absent from both mainlines at once.
 - **`T + B` and `P` are undefined in the glossary.** Both came from Peter's
   replies to the desktop toolbar review. Max to confirm the expansions —
   unconfirmed guesses stay out, per `docs/rules/glossary.md`.
