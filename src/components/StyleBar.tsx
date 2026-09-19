@@ -525,7 +525,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         {curFont.slice(0, 3).toLowerCase()}
       </button>
       {fontOpen && createPortal(
-        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
+        <><div data-iw-stylescrim="" className="fixed inset-0 z-[98]" onMouseDown={() => setFontOpen(false)} />
         <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={fontPanelStyle()}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {FONTS.map((f, i) => (<Fragment key={f.label}>
@@ -553,7 +553,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         <span className="text-xs select-none">{curSize}</span>
       </button>
       {sizeOpen && createPortal(
-        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setSizeOpen(false)} />
+        <><div data-iw-stylescrim="" className="fixed inset-0 z-[98]" onMouseDown={() => setSizeOpen(false)} />
         <div data-iw-stylepop="" className={`${popClass} py-1.5 overflow-y-auto`} style={{ ...pop(sizeBtnRef, 64), width: 64, maxHeight: 280 }}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {FONT_SIZES.map(sz => (
@@ -576,7 +576,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         {CHAR_FMT_LABELS[lastFmt]}
       </button>
       {fmtOpen && createPortal(
-        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setFmtOpen(false)} />
+        <><div data-iw-stylescrim="" className="fixed inset-0 z-[98]" onMouseDown={() => setFmtOpen(false)} />
         <div data-iw-stylepop="" className={`${popClass} py-1`} style={pop(fmtBtnRef, 140)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {(['bold', 'italic', 'underline', 'strike'] as CharFmt[]).map(fmt => (
@@ -601,7 +601,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         {hlFace}
       </button>
       {hlOpen && createPortal(
-        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setHlOpen(false)} />
+        <><div data-iw-stylescrim="" className="fixed inset-0 z-[98]" onMouseDown={() => setHlOpen(false)} />
         <div data-iw-stylepop="" className={`${popClass} p-2`} style={pop(hlBtnRef, 156)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           <div className="grid grid-cols-3 gap-1.5">
@@ -627,7 +627,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         {txtFace}
       </button>
       {colorOpen && createPortal(
-        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setColorOpen(false)} />
+        <><div data-iw-stylescrim="" className="fixed inset-0 z-[98]" onMouseDown={() => setColorOpen(false)} />
         <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={pop(colorBtnRef, 136)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {TEXT_COLORS.map(c => (
@@ -653,7 +653,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         {curAlign.slice(0, 3)}
       </button>
       {alignOpen && createPortal(
-        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setAlignOpen(false)} />
+        <><div data-iw-stylescrim="" className="fixed inset-0 z-[98]" onMouseDown={() => setAlignOpen(false)} />
         <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={pop(alignBtnRef, 110)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {(['left', 'center', 'right', 'justify'] as Align[]).map(a => (
@@ -677,7 +677,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         {LIST_TYPE_LABELS[lastListType]}
       </button>
       {listOpen && createPortal(
-        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setListOpen(false)} />
+        <><div data-iw-stylescrim="" className="fixed inset-0 z-[98]" onMouseDown={() => setListOpen(false)} />
         <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={pop(listBtnRef, 148)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {([
@@ -718,7 +718,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
         ⇥
       </button>
       {indentOpen && createPortal(
-        <><div className="fixed inset-0 z-[98]" onMouseDown={() => setIndentOpen(false)} />
+        <><div data-iw-stylescrim="" className="fixed inset-0 z-[98]" onMouseDown={() => setIndentOpen(false)} />
         <div data-iw-stylepop="" className={`${popClass} py-1.5`} style={pop(indentBtnRef, 168)}
           onPointerDown={e => { e.stopPropagation(); e.preventDefault() }}>
           {INDENT_ITEMS.map(item => (

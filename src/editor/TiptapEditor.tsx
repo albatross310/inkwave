@@ -17,7 +17,7 @@ import { exportPdfToNewTab } from './exportPdf'
 import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
-import { syncReviewVisibilityStyles, clearLegacySuggestFlag, setSuggestOn } from './review/reviewState'
+import { syncReviewVisibilityStyles, clearLegacySuggestFlag, setSuggestOn, suggestOn } from './review/reviewState'
 import { rememberReturn } from '../citations/citationNav'
 import { readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemory'
 import { CommentNotes } from '../components/CommentNotes'
@@ -923,9 +923,25 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       // Desktop too (Peter, 2026-09-18: the style bar "only hides when you stop using anything from
       // it — same as phone"): the 5s idle timer is gone, so a pointerdown anywhere outside the
       // footer chrome and its panels is what retracts the style/music rows.
+      // A STYLE POPUP'S SCRIM IS PART OF THE POPUP, NOT THE OUTSIDE (Peter, 2026-09-18: releasing
+      // outside a picker "closes only the popup and keeps the style bar"). The pickers portal to
+      // <body> behind a full-screen scrim, so every click outside one lands on the scrim — and
+      // without this the same click retracted the whole bar, which is the behaviour he rejected.
+      // The scrim carries its own marker rather than `iw-touch-guard`: StyleBar's release-outside
+      // rule reads `[data-iw-stylepop]` to mean "inside the popup", and a scrim must NOT be that.
+      if (t?.closest('[data-iw-stylescrim]')) return
       if (t && !t.closest(`.iw-touch-guard, [${PANEL_ATTR}]`)) {
         closeBarLayer('style')
         closeBarLayer('music')
+        // REVIEW RETRACTS THE SAME WAY (Peter, 2026-09-18: "Review is also broken, it needs to be a
+        // bar like style with same behaviour") — with ONE qualification, and it is not a preference.
+        // Closing the row turns suggestion mode off (R4, below: the ✎ toggle lives on this row and
+        // nowhere else, so a closed row would leave the mode invisible, unreachable and still
+        // rewriting every keystroke). A writer in suggestion mode clicks INTO the paper to use it,
+        // which is a tap-away — so unqualified parity would switch the mode off at the exact moment
+        // it was about to be used, silently. While ✎ is on, the row stays; with ✎ off it behaves
+        // exactly like style. → docs/rules/toolbar.md
+        if (!suggestOn()) closeBarLayer('review')
       }
     }
     document.addEventListener('pointerdown', onDown, { capture: true })
@@ -954,6 +970,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       if (!t || !t.closest('.inkwave-editor-surface')) return          // footer/panels/portals: not ours
       if (t.closest('.ProseMirror, .scas-cycle-card, button, [role="menu"], [role="dialog"], input, select')) return
       closeBarLayer('style')
+      if (!suggestOn()) closeBarLayer('review')   // same qualification as the handler above
       const ed = editorRef.current
       if (ed && !ed.state.selection.empty) {
         ed.chain().setTextSelection(ed.state.selection.head).run()     // collapse → selection bar retracts
@@ -3168,7 +3185,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       )}
       {id === 'receipt' && (
         <button type="button"
-          data-iw-bar="review" onClick={() => toggleBar('review')}
+          data-iw-bar="review" aria-pressed={reviewOpen} onClick={() => toggleBar('review')}
           className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
           title="Review — comments & track changes"
         >
