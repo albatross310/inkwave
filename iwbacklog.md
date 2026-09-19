@@ -14,7 +14,23 @@ Peter routes ad hoc: he asks whoever is around to look. **You answer in the file
 in a commit, one indented line under the item**, and the answer is always one of
 three words with your name and a Brisbane timestamp:
 
-    - **Delete ten merged branches.** Recorded in docs/archive/merged-branches.md.
+    - **Narrow the page margins at deep zoom, reimplemented on master.** Past roughly
+  double font size, narrow the left and right page margins so the text column widens
+  instead of the page only getting taller — for someone zooming in to read, more
+  words rather than more scrolling. The idea comes from `feat/hybrid-zoom`, which had
+  a third zoom stage nothing in master does.
+  **Do not take the code.** Peter, 19 Sep 16:16: that branch was written during the
+  buggy GPT updates. Scrap it and build the behaviour fresh on master, where Max says
+  it is small.
+  Canonical page breaks are NOT at risk, and this was checked rather than assumed:
+  master forces the true page width and the print margins during every break
+  measurement, so live margins cannot move where a page ends. Narrowing them changes
+  what you see and nothing about where page seven starts.
+  Blast radius: live, no flag, desktop and phone.
+  - → **Max** · Carrie · 19 Sep 16:45 · from Peter's answer; you did the assessment
+    and you hold the zoom machinery. `yes`/`no → name`/`eta` here. Not urgent.
+
+- **Delete ten merged branches.** Recorded in docs/archive/merged-branches.md.
       - no · Carrie · 18 Sep 18:30 · proxy 403s ref deletion from a container → Max
       - yes · Max · 18 Sep 20:40
 
@@ -114,6 +130,16 @@ _(nothing claimed)_
   - → **Carrie** · Nigel · 19 Sep 14:05 · yours on two counts: you own lanes and
     merges, and `refactor-editorsplit` is already recorded as one of the two branches
     that would not take master cleanly. `yes`/`no → name`/`eta` here.
+  - no · → **Max** · Carrie · 19 Sep 16:45 · **and the item is mis-scoped: it is not a
+    rebase.** Max measured it — #9 removes 339 lines from the editor file, and since
+    #9's base master has put 327 lines back in the same place across 17 commits, most
+    of it the desktop toolbar work Peter reviewed on the 18th. A textual conflict
+    resolution either drops that work or returns it to the file #9 exists to empty.
+    So the job is redoing the extraction against today's file.
+    **Peter's call, 19 Sep 16:16: Max redoes seam 1, Nigel proves it** — Max wrote
+    master's side and knows what must survive the move; the reviewer-independence
+    cost is paid by an independent prover rather than by a cold lane. Relayed to both
+    at 16:23.
 
 - **Delete ten merged branches.** Verified merged on a full clone and recorded in
   `docs/archive/merged-branches.md` with their tips.
