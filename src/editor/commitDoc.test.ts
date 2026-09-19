@@ -22,8 +22,19 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const SRC = readFileSync(resolve(__dirname, 'TiptapEditor.tsx'), 'utf8')
-const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+// ⚠ THE SCAN FOLLOWS THE CODE OUT OF THE FILE (2026-09-19). This guard used to read TiptapEditor.tsx
+//   alone, which was the whole component. Seam 1 moved the toolbar slot write-back into
+//   useToolbarSlots.ts, and that hook calls `commitDoc` — so the moment it moved, a re-inlined
+//   triple THERE became invisible to this guard while every assertion here stayed green. A
+//   path-keyed guard does not fail when its subject moves; it silently narrows, which is the one
+//   failure mode a refactor must never leave behind. Every seam split out of the component adds its
+//   file here, and `strip()` is shared so a new file cannot arrive unstripped.
+const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+const read = (f: string) => strip(readFileSync(resolve(__dirname, f), 'utf8'))
+/** The component. `commitDoc` is DEFINED here. */
+const CODE = read('TiptapEditor.tsx')
+/** Seams split out of the component that CALL commitDoc. Add a file when a seam lands. */
+const SEAMS: Record<string, string> = { 'useToolbarSlots.ts': read('useToolbarSlots.ts') }
 
 /** The longhand triple, at any indent: the shape `commitDoc` replaced. */
 const TRIPLE = /docRef\.current = (\w+)\n\s*onDocChange\(\1\)\n\s*scheduleSave\(\1\)/g
@@ -48,6 +59,23 @@ describe('TiptapEditor commits a document mutation through exactly one path', ()
     const hits = [...ELSEWHERE.matchAll(TRIPLE)]
     expect(hits.map((h) => h[0]), `re-inlined at ${hits.length} site(s); call commitDoc instead`)
       .toEqual([])
+  })
+
+  // The same question asked of every seam split out of the component. A hook that took a document
+  // mutation with it must still hand it to `commitDoc`, not rebuild the triple behind its own door.
+  it.each(Object.keys(SEAMS))('the longhand triple appears nowhere in %s either', (file) => {
+    const src = SEAMS[file]
+    expect(src.length, `${file} scanned empty — the path moved and this guard proves nothing`)
+      .toBeGreaterThan(1_000)
+    const hits = [...src.matchAll(TRIPLE)]
+    expect(hits.map((h) => h[0]), `${file} re-inlined the commit triple at ${hits.length} site(s)`)
+      .toEqual([])
+  })
+
+  // ...and that it does hand it over at all. A seam that quietly stopped calling commitDoc would
+  // pass the triple scan above by writing nothing, which is the louder half of the same bug.
+  it.each(Object.keys(SEAMS))('%s reaches the disk through commitDoc', (file) => {
+    expect(SEAMS[file]).toMatch(/commitDoc\(/)
   })
 
   it('commitDoc itself does all three, in order', () => {

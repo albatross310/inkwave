@@ -71,6 +71,40 @@ your belief instead of the behaviour. Plus: every path-keyed guard that scans a 
 (`touchTargets`, `snapshotPalette`, `readerContrast`, `noAutoDelete`) must be re-pointed AND
 re-proved to fire in the same commit.
 
+**Seam 1 — toolbar slot customisation — DONE (2026-09-19), as a RE-EXTRACTION, not a rebase of PR #9.**
+`src/editor/useToolbarSlots.ts` owns the writer's arrangement of the footer row: which circles it
+holds and in what order, the phone touch-hold reorder, the touch-hold drag from the ▲ drop-up onto
+the row, the write-back to the document and to the writer's own default, and the positional hotkeys.
+TiptapEditor.tsx keeps the circles themselves and everything about what is OPEN. 3,916 → 3,605 lines.
+
+**Why #9 could not simply be rebased, in numbers.** #9 removed 339 lines from the component; master
+then put 327 lines back into the SAME region across 17 commits, most of them the desktop toolbar
+work of 17–18 September. Of the three conflict points, the large one is 342 lines of master's code
+sitting where #9 left an empty space. Resolving that textually would have meant choosing between
+#9's extraction and master's behaviour, and either choice loses something nobody decided to lose.
+
+**The seam moved, and that is the substantive change from #9.** #9's hook also owned
+`toolbarPickerOpen`. On master that value is DERIVED — from `openPanel`, `activeBar` and the row's
+own contents — so a hook cannot own it. The line is now: **the hook owns the ROW and how the writer
+rearranges it; the component owns what is OPEN.** The hook is told only how to CLOSE the drawer
+after a drop, and never learns what is open.
+
+**How you would know.** #9's 28 behaviour tests were ported FIRST and run against the re-extraction
+unchanged — they were written by another session against code that no longer exists, so they cannot
+have been shaped to fit this one. All 28 pass. Of #9's 8 wiring guards, 2 needed re-aiming (they
+pinned July's JSX literally) and 1 hook test moved out entirely, because rule (a) is the component's
+now and fires on POINTERdown, not mousedown. 9 wiring guards and 38 new tests in total. Eight
+mutants planted and killed, covering the stored-row write, the unparseable-config refusal, the
+hold-slop rule, the main-row drag exemption, the one-write-path drop, the pointerdown listener, and
+both halves of the commit path inside the new hook. `commitDoc.test.ts` was re-pointed to follow the
+commit path INTO the hook — it previously scanned the component alone, so the moment the write-back
+moved, a re-inlined triple there would have been invisible while every assertion stayed green.
+
+⚠ **Two guards survived their first mutation and had to be sharpened** — worth reading before
+writing another source-scan guard. `addEventListener('pointerdown'` matched other listeners in the
+file; anchoring to `const onDown = (e: PointerEvent)` ALSO matched, because two handlers share that
+exact name. A source-scan anchor has to be text that occurs exactly once.
+
 ---
 
 ## 4. Dead exports
