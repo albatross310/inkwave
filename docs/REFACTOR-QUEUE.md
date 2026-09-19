@@ -32,9 +32,21 @@ Consolidating may be easier *after* that is resolved, or may be the thing that r
 
 ---
 
-## 2. `daySummary` → `aggregate.ts`
+## 2. `daySummary` → `aggregate.ts` — DONE (2026-09-15)
 
-**What.** `ClockMenu.tsx` carries a second implementation of "sum the day's minutes".
+**Outcome.** `aggregate.ts dayTotals(rows)` is the one day sum (unrounded, no day filter, sums in
+the order handed); `dayAggregate` reads it and applies its `round1`, `daySummary` reads it and
+applies its `Math.round`. Prose byte-identical; 23 verbatim-sentence characterization tests were
+written against the UNMOVED function and pass on both. The planted merge (post-hoc counted as
+measured) in `dayTotals` fails 5 aggregate guards (4 pre-existing + 1 new on `dayTotals`) + 13 of
+31 drop-up tests; on master the same plant in `dayAggregate` failed 4 + 0. The two were NOT two honest copies: they computed the same
+raw sums and differed only in output precision, which each caller now states for itself.
+**Named residual, unchanged by design:** the drop-up rounds the RAW float sum to whole minutes
+while the charts/report carry `round1` — at an exact `.5` with float hair (10.1+10.2+10.2) the
+screen says 30 and the charts 30.5; making the screen say 31 is a one-line behaviour change and
+Peter's call, not a refactor's.
+
+**What.** `ClockMenu.tsx` carried a second implementation of "sum the day's minutes".
 
 **Evidence.** CLAUDE.md: every guard was on `aggregate.ts`, so the drop-up reported 45 *remembered*
 minutes to Peter as "focused minutes" with the whole suite green. R2 again, and the consequence was

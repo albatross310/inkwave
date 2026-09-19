@@ -36,8 +36,13 @@ their own AI and pastes back. Surface is the toolbar's clock drop-up (`ClockMenu
 - **`entered: 'timer' | 'post-hoc'` is explicit on every row — never absence-means-timer.** Read it
   only through `isPostHoc()`. Show "about 45m", never start–end times.
 - **A guard on one implementation of a rule says nothing about the other** — `daySummary` in
-  `ClockMenu.tsx` is a SECOND implementation of "sum the day's minutes" and reported remembered
-  minutes as focused minutes with the suite green.
+  `ClockMenu.tsx` WAS a second implementation of "sum the day's minutes" and reported remembered
+  minutes as focused minutes with the suite green. Consolidated (queue item 2): `aggregate.ts
+  dayTotals` is THE day sum — unrounded, no day filter — and `dayAggregate` (round1, the wire) and
+  `daySummary` (Math.round, the screen) both read it. MEASURED: a merge planted in `dayTotals` fails
+  5 aggregate guards (the 4 that existed + 1 on `dayTotals` itself) AND 13 of the drop-up's 31
+  verbatim-sentence tests; the same plant in `dayAggregate` on master failed 4 and 0. A new
+  summariser must call `dayTotals`, never sum for itself.
 - **Measured numbers never round-trip** — `judged.ts` REFUSES a judged table carrying any measured
   column; `claims.ts` flags narrative numerals absent from the payload.
 - **You cannot judge writing from minutes and word counts** — `insight`/`quality` are asked for ONLY

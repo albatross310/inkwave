@@ -80,8 +80,23 @@ driving the real panel: this function reduced over ALL rows, so the moment the p
 green — they guard `aggregate.ts`, and the drop-up never calls it. **A guard on one implementation
 of a rule says nothing about the other.**
 
-So the split happens HERE too, and the two numbers are spoken as different KINDS of thing. If a
-third summariser ever appears, it must do the same — or better, all three should call one rule.
+So the split happened HERE too, and the two numbers are spoken as different KINDS of thing.
+
+**Consolidated (refactor queue item 2).** `aggregate.ts dayTotals` is now THE day sum, and both
+`dayAggregate` and `daySummary` read it. Two things were checked before keeping that shape, because
+a forced merge of two honest copies would have been worse than the duplication: (1) `dayAggregate`
+does NOT filter by its `day` argument — it labels the output and sums what it is handed — so the
+drop-up's own `today` filter is the only scoping and no row it shows can drop out of the sum; (2)
+the two differed ONLY in precision — `round1` on the wire, `Math.round` on the screen — and
+`Math.round(round1(x))` is a different function from `Math.round(x)` (double rounding shifts the
+25/90-minute band at e.g. 24.46), so the primitive returns the RAW sums and each caller rounds
+once, as before. A first attempt had the drop-up read `dayAggregate.active_minutes` directly, and
+its own test admitted the result "FAILS ON THE ORIGINAL" — the after-the-move belief the
+characterization rule exists to catch.
+
+Measured: a merge planted in `dayTotals` fails 5 aggregate guards (the 4 that existed + 1 on
+`dayTotals` itself) and 13 of the drop-up's 31 sentence tests; the same plant in `dayAggregate` on
+the pre-consolidation code failed 4 and 0.
 
 <a id="clock-trigger-not-owner"></a>
 ### The clock slot is a TRIGGER, never an OWNER

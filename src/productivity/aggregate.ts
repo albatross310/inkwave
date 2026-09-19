@@ -34,16 +34,52 @@ export function deepShallowRatio(rows: readonly SessionRow[]): number {
 // two copies of "what counts as measured" is precisely how the two would drift apart.
 export { isPostHoc, splitByEntry } from './sessionLogic'
 
+/** The day's raw sums, by provenance. UNROUNDED — each caller states its own precision. */
+export interface DayTotals {
+  /** Measured rows' active minutes, summed as-is: the wire rounds to 0.1, the drop-up speaks whole minutes. */
+  active_minutes: number
+  session_count: number
+  net_words: number
+  /** Minutes the writer added FROM MEMORY — a different KIND of number, never inside `active_minutes`. */
+  posthoc_minutes: number
+  posthoc_session_count: number
+}
+
+/**
+ * THE ONE PLACE "sum the day's minutes" is written. `dayAggregate` (the §A3.3 wire rollup) and the
+ * clock drop-up's `daySummary` (the sentence on the writer's screen) both read it, so a guard on
+ * either is a guard on both — a private reduce in the drop-up once reported 45 remembered minutes
+ * as "focused minutes" past a green suite. → docs/archive/panels-and-popovers.md#clock-day-summary
+ *
+ * ⚠ SUMS WHAT IT IS HANDED, IN THE ORDER IT IS HANDED. No day filter (the caller scopes the day:
+ * `buildWindow` by `groupByDay`, the drop-up by its `today` filter) and no rounding (a caller with
+ * its own precision would round twice). Post-hoc rows reach the `posthoc_*` fields and nothing
+ * else. → docs/archive/productivity-email-build.md#aggregate-posthoc-excluded
+ */
+export function dayTotals(allRows: readonly SessionRow[]): DayTotals {
+  const { measured, postHoc } = splitByEntry(allRows)
+  return {
+    active_minutes: measured.reduce((a, r) => a + r.active_minutes, 0),
+    session_count: measured.length,
+    net_words: measured.reduce((a, r) => a + r.net_words, 0),
+    posthoc_minutes: postHoc.reduce((a, r) => a + r.active_minutes, 0),
+    posthoc_session_count: postHoc.length,
+  }
+}
+
 /**
  * Roll one local day's rows up (§A3.3).
  *
  * ⚠ EVERY MEASURED FIELD READS `measured` ONLY; post-hoc rows reach `posthoc_minutes` /
  * `posthoc_session_count` and nothing else. The split happens at the TOP so a field added later
- * reads `measured` because that is the variable in scope — the safe thing is the easy thing.
+ * reads `measured` because that is the variable in scope — the safe thing is the easy thing. The
+ * minute/session/net-word sums come from `dayTotals`, which splits by the same rule, so the drop-up
+ * and this rollup cannot disagree on them.
  * → docs/archive/productivity-email-build.md#aggregate-posthoc-excluded
  */
 export function dayAggregate(day: string, allRows: readonly SessionRow[]): DayAggregate {
-  const { measured: rows, postHoc } = splitByEntry(allRows)
+  const { measured: rows } = splitByEntry(allRows)
+  const totals = dayTotals(allRows)
   const busiest = new Array<number>(24).fill(0)
   // Active minutes are attributed to the hour the session STARTED in — a convention, and the honest
   // one: the ledger never recorded where inside the span the work fell, and spreading them would
@@ -55,18 +91,18 @@ export function dayAggregate(day: string, allRows: readonly SessionRow[]): DayAg
 
   return {
     day,
-    active_minutes: round1(rows.reduce((a, r) => a + r.active_minutes, 0)),
-    session_count: rows.length,
+    active_minutes: round1(totals.active_minutes),
+    session_count: totals.session_count,
     words_added: rows.reduce((a, r) => a + r.words_added, 0),
     words_deleted: rows.reduce((a, r) => a + r.words_deleted, 0),
-    net_words: rows.reduce((a, r) => a + r.net_words, 0),
+    net_words: totals.net_words,
     edit_events: rows.reduce((a, r) => a + r.edit_events, 0),
     break_count: breaks.length,
     break_total_min: round1(breaks.reduce((a, r) => a + r.break_before_min, 0)),
     deep_shallow_ratio: deepShallowRatio(rows),
     busiest_hours: busiest.map(round1),
-    posthoc_minutes: round1(postHoc.reduce((a, r) => a + r.active_minutes, 0)),
-    posthoc_session_count: postHoc.length,
+    posthoc_minutes: round1(totals.posthoc_minutes),
+    posthoc_session_count: totals.posthoc_session_count,
   }
 }
 
