@@ -30,6 +30,8 @@ in place. Items graduate from there to `backlog.md` when someone claims them.
 
 ## Rules
 
-- Edit on master, no branch, no PR — these are working files.
+- Edit on master, no branch, no PR — these are working files. On the Mac the
+  place to do that is `~/inkwave`, which Max keeps on master: Peter types into it,
+  Max commits and pushes with Peter's name.
 - Never delete someone else's Doing line. Ask them on Slack.
 - Dates are Brisbane (AEST). Names are the session's roster name.
