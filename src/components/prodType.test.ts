@@ -241,11 +241,24 @@ describe('index.css — the phone backstop agrees with the ramp (derived, not co
     expect(floorRule()).toBe(`max(${rampFloor}px, 1em)`)
   })
 
-  it('scopes the floor to phone — and PROVES the probe reads the real rule', () => {
-    // The rule only helps where the media query holds. Stated as a test so nobody mistakes it for a
-    // universal guarantee and stops authoring sizes in the components.
-    expect(css).toMatch(/@media \(pointer: coarse\) and \(hover: none\)/)
+  it('scopes the floor to ANY coarse pointer, not the phone query — and PROVES the probe reads the real rule', () => {
+    // THE DEVICE THAT MASQUERADES (Max's review of #28, 2026-09-19). The floor used to sit inside
+    // `(pointer: coarse) and (hover: none)`, the PHONE query. iPadOS with a trackpad or keyboard
+    // reports `pointer: fine, hover: hover` — so that query is FALSE there, while Safari on that
+    // same device still auto-zooms a focused control under 16px. It did not bite before only
+    // because these panels authored a literal 20px; once they resolve through the desktop ramp
+    // (body 15px, label 13px) the floor is the only thing left standing between an iPad writer and
+    // a lurching page. `any-pointer: coarse` is true whenever a touchscreen exists, whatever else
+    // is plugged in, so it covers phone AND that device class. The RAMP stays on the phone query;
+    // only the floor moved. See docs/rules/ios-webkit.md.
+    //
+    // This guard reads the CSS rather than the ramp on purpose: the rest of this file resolves
+    // through TYPE_PX, which IS the phone ramp, so it certifies a size that device never renders.
+    const floorBlock = /@media \(any-pointer: coarse\)\s*\{[^}]*input,\s*select,\s*textarea\s*\{[^}]*\}/
+    expect(floorBlock.test(css), 'the form-control floor must be under @media (any-pointer: coarse) — the phone query misses iPad with a keyboard').toBe(true)
     expect(/input,\s*select,\s*textarea\s*\{[^}]*!important/.test(css)).toBe(true)
+    // The phone query still exists, and is where the RAMP override belongs — not the floor.
+    expect(css).toMatch(/@media \(pointer: coarse\) and \(hover: none\)/)
     // The known-negative: the probe misses a rule that is not there.
     expect(/output,\s*meter\s*\{\s*font-size:\s*([^;]+);/.exec(css)).toBeNull()
   })

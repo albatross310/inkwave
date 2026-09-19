@@ -8,7 +8,7 @@
 // colour is a theme token with a day fallback — no hard-coded hex.
 
 import { useState, useRef, useEffect, type ReactNode } from 'react'
-import { desktopSheetStyle } from '../styles/panelSheet'
+import { sheetEdgeStyle } from '../styles/panelSheet'
 import type { InkwaveDocument, EmailHeaders } from '../types/document'
 import { parseAddressList, suspectAddresses, hasRecipient } from '../email/headers'
 import { draftFor, canHandOff } from '../email/draft'
@@ -312,7 +312,7 @@ export function EmailComposePanel({
             // keyboard retracts (CLAUDE.md, footer drop-up rule).
             <div
               className="absolute left-0 bottom-full mb-1 z-[99] min-w-[190px] iw-touch-guard iw-nightable bg-white py-1 text-sm"
-              style={{ ...desktopSheetStyle(), fontSize: undefined }}
+              style={sheetEdgeStyle()}
             >
               {PROVIDERS.map((p) => {
                 const f = fits(p.id, draft)

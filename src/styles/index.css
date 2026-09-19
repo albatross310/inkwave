@@ -1029,6 +1029,17 @@
   :root { --iw-t-title: 30px; --iw-t-heading: 24px; --iw-t-body: 20px; --iw-t-label: 18px; --iw-t-meta: 16px; }
 }
 
+/* iOS zooms the page to any focused control under 16px computed font — and STAYS zoomed after
+   blur (part of the page out of frame). `any-pointer: coarse`, NOT `(pointer: coarse) and
+   (hover: none)`: iPadOS with a trackpad reports pointer:fine + hover:hover, so the phone query
+   is false there while Safari still auto-zooms — and the desktop type ramp resolves body to 15px,
+   under the floor (Max, 2026-09-19; docs/rules/ios-webkit.md — the device class that masquerades).
+   any-pointer is true whenever a touchscreen exists, whatever else is plugged in; the ramp itself
+   stays gated on the phone query, so a desktop mouse is unaffected. */
+@media (any-pointer: coarse) {
+  input, select, textarea { font-size: max(16px, 1em) !important; }
+}
+
 @media (pointer: coarse) and (hover: none) {
     /* Suppress the browser's native zoom EVERYWHERE on phone (Peter, 2026-07-09): the app has its
        own pinch-zoom (editor font-reflow, PDF magnify) and Safari's page zoom fighting it was
@@ -1044,10 +1055,6 @@
        it, selection drifted into it (Peter, 2026-07-10). clip, not hidden (hidden would make
        body a scroll container). */
     html, body { overflow-x: clip; }
-
-    /* iOS zooms the page to any focused control under 16px computed font — and STAYS zoomed after
-       blur (part of the page out of frame). Floor every form control at 16px on phone. */
-    input, select, textarea { font-size: max(16px, 1em) !important; }
 
     html, body { background-color: #e9e7e3; }
   }

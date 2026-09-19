@@ -38,11 +38,14 @@ import { prodReportDemo } from '../productivity/flag'
 // previous ramp was absolute Tailwind steps (text-xs/sm/lg), which is exactly how you end up
 // scaling the body and leaving the labels behind.
 //
-// Root 18px, +~29% on the old 14px body. iOS FLOOR: Safari auto-zooms — and STAYS zoomed — on a
-// focused control under 16px, so every INPUT must land ≥16px. `FS.body` (1em = 18px) and above
-// are the only sizes used on inputs; the smallest size here (0.62em ≈ 11px) is chart tick labels,
-// which are not focusable. Scrolling is explicitly acceptable, so nothing is shrunk to fit.
-// The panel's root size: the ramp's body step (phone 20 / desktop 15); every FS step is an em of it.
+// The root is the SHARED ramp's body step — phone 20px, desktop 15px (music/typeScale.ts,
+// --iw-t-body in index.css) — so this panel's text matches every other panel at the same step
+// instead of carrying its own 18px. Scrolling is explicitly acceptable; nothing is shrunk to fit.
+// iOS FLOOR: Safari auto-zooms, and stays zoomed, on a focused control under 16px. That floor is
+// NOT kept here any more — the desktop body step is 15px — but by `input, select, textarea
+// { font-size: max(16px, 1em) }` under `@media (any-pointer: coarse)` in index.css, which covers
+// iPad-with-keyboard too. The smallest step here (0.62em) is chart tick labels, not focusable.
+// The 18px fallback is only for a bare render with no stylesheet; it matches neither ramp.
 const PANEL_ROOT_PX = 'var(--iw-t-body, 18px)'
 const FS = {
   tick: '0.62em',    // chart day numbers — never focusable

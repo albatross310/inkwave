@@ -65,4 +65,8 @@ export function type_(step: TypeStep, colour?: string): { fontSize: string; colo
   return colour ? { fontSize: TYPE[step], color: colour } : { fontSize: TYPE[step] }
 }
 
+/**
+ * Minimum touch target, px. Here rather than in a component because it moves WITH the ramp: a
+ * control sized to its text must not end up smaller than a fingertip when the text step changes.
+ */
 export const TOUCH_MIN = 44

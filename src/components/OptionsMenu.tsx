@@ -157,6 +157,9 @@ export function OptionsMenu({
   const menuOpen = openProp ?? internalOpen
   const setMenuOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
   const isPhone = isTouchDevice()
+  // Phone toasts keep their own centred drop-up: the desktop POPUP (tail, one height off the
+  // trigger) is a pointer surface and has no anchor worth pointing at on a full-width sheet toolbar.
+  const TOAST_PHONE_STYLE: CSSProperties = { bottom: 76, left: '50%', transform: 'translateX(-50%)', borderColor: '#30243844' }
   const [modal, setModal] = useState<ModalKey | null>(null)
   // The OPFS inspector is NOT a ModalKey: it is a full recovery panel with its own portal +
   // sizing, not one of the little drop-ups anchored over the kebab.
@@ -426,15 +429,15 @@ export function OptionsMenu({
             </div>
           )}
           {modal === 'noprov' && (
-            <div className={`iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600 ${DESKTOP_POPUP_CLASS}`}
-              style={{ ...desktopPopupStyle(btnRef.current?.getBoundingClientRect()), left: '50%', width: 'max-content' }}>
+            <div className={`iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600 ${isPhone ? 'shadow-md rounded-xl border' : DESKTOP_POPUP_CLASS}`}
+              style={isPhone ? TOAST_PHONE_STYLE : desktopPopupStyle(btnRef.current?.getBoundingClientRect())}>
               No snaps or provenance info yet recorded.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>
           )}
           {modal === 'provunread' && (
-            <div className={`iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600 ${DESKTOP_POPUP_CLASS}`}
-              style={{ ...desktopPopupStyle(btnRef.current?.getBoundingClientRect()), left: '50%', width: 'max-content' }}>
+            <div className={`iw-nightable iw-no-print fixed z-[70] bg-white px-5 py-4 font-serif text-stone-600 ${isPhone ? 'shadow-md rounded-xl border' : DESKTOP_POPUP_CLASS}`}
+              style={isPhone ? TOAST_PHONE_STYLE : desktopPopupStyle(btnRef.current?.getBoundingClientRect())}>
               Couldn't read this document's history just now — it hasn't been lost. Try again in a moment.
               <button type="button" onClick={() => setModal(null)} className="ml-4 text-stone-400 hover:text-stone-600">✕</button>
             </div>

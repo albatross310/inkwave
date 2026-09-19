@@ -4,7 +4,7 @@
 // the footer toolbar. Sits just above the footer.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { desktopSheetStyle } from '../styles/panelSheet'
+import { sheetEdgeStyle } from '../styles/panelSheet'
 import { createPortal } from 'react-dom'
 import { v4 as uuidv4 } from 'uuid'
 import type { Editor } from '@tiptap/react'
@@ -156,7 +156,7 @@ export function ReviewBar({ editor, phone }: { editor: Editor; phone?: boolean }
         {setMenu && createPortal(
           <><div className="fixed inset-0 z-[98]" onMouseDown={() => setSetMenu(false)} />
           <div className="z-[99] min-w-[190px] iw-touch-guard iw-nightable bg-white py-1 text-sm"
-            style={{ ...aboveTrigger(), ...desktopSheetStyle(), fontSize: undefined }}
+            style={{ ...aboveTrigger(), ...sheetEdgeStyle() }}
             onMouseDown={(e) => e.stopPropagation()}>
             {/* Global show/hide — the MS-Word markup toggle: clean (as-if-accepted) vs marked-up */}
             <button type="button"

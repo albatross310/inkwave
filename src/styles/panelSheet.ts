@@ -70,6 +70,22 @@ export const DESKTOP_SHEET = {
 export const DESKTOP_SHEET_CLASS = 'iw-desktop-sheet'
 
 /** The desktop box: radius, shadow, border and body type. Position and width are the caller's. */
+/**
+ * The SHEET EDGE alone — radius, shadow, border, no type size. Platform-agnostic on purpose: the
+ * two sheets' edge values are identical (radius 14, the same nightable border token), and only
+ * their body size differs. A small menu that renders on BOTH platforms inside a bar — ReviewBar's
+ * annotation-set menu, EmailComposePanel's provider menu — wears this rather than
+ * `desktopSheetStyle()` with the font knocked back out, so nothing reads as desktop-only styling
+ * being applied to a phone (Max's review of #28, 2026-09-19).
+ */
+export function sheetEdgeStyle(): CSSProperties {
+  return {
+    borderRadius: DESKTOP_SHEET.radiusPx,
+    boxShadow: DESKTOP_SHEET.shadow,
+    border: DESKTOP_SHEET.border,
+  }
+}
+
 export function desktopSheetStyle(): CSSProperties {
   return {
     borderRadius: DESKTOP_SHEET.radiusPx,
