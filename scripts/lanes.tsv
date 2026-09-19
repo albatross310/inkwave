@@ -5,7 +5,6 @@
 # port and a tab open on a branch nobody is changing, and Peter reviews work that shipped days ago.
 # A DOCS-ONLY LANE GETS NO ROW EITHER — #19 (zoomseam) changes no source file, so its tab would
 # render master and tell Peter nothing. Read those on GitHub.
-A	claude/refactor-breakrule	7
 B	claude/refactor-daysummary	8
 C	claude/refactor-editorsplit	9
 E	claude/refactor-jcs	10
