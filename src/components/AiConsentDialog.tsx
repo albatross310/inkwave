@@ -3,6 +3,7 @@
 // deliberately plain: what leaves the device, where it goes, and that nothing is retained.
 
 import { createPortal } from 'react-dom'
+import { desktopSheetStyle } from '../styles/panelSheet'
 import type { AiFeature } from '../editor/aiSettings'
 
 const INK = '#302438'
@@ -34,10 +35,10 @@ export function AiConsentDialog({ feature, onYes, onNo }: {
       <div className="fixed inset-0 z-[130]" style={{ background: 'rgba(35,25,50,0.35)' }} aria-hidden="true" onMouseDown={onNo} />
       <div
         role="alertdialog" aria-modal="true" aria-label={title}
-        className="iw-nightable fixed z-[131] bg-white shadow-lg font-serif text-stone-700"
+        className="iw-nightable fixed z-[131] bg-white font-serif text-stone-700"
         style={{
           top: '50%', left: 'min(66%, calc(100vw - 14rem))', transform: 'translate(-50%, -50%)',
-          width: 'min(26rem, calc(100vw - 2rem))', borderRadius: 12, padding: '1.3rem 1.5rem',
+          ...desktopSheetStyle(), fontSize: undefined, width: 'min(26rem, calc(100vw - 2rem))', padding: '1.3rem 1.5rem',
           border: `1px solid var(--iw-nightable-border, ${INK}55)`,
         }}
         onMouseDown={e => e.stopPropagation()}

@@ -29,7 +29,7 @@
 // failure. The authored value is the thing under test, so the authored value is what gets read.
 //
 // It does NOT re-type the numbers. `TYPE` is imported and the floor is DERIVED from it
-// (`Math.min(...Object.values(TYPE))`), so if someone lowers a step in `typeScale.ts` this test
+// (`Math.min(...Object.values(TYPE_PX))`), so if someone lowers a step in `typeScale.ts` this test
 // fails there rather than quietly certifying a smaller ramp. A hard-coded `expect(20)` here would
 // be a second copy of the scale — the exact fork the ramp exists to prevent.
 //
@@ -41,7 +41,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { TYPE } from '../music/typeScale'
+import { TYPE, TYPE_PX } from '../music/typeScale'
 
 /** The productivity panels. Every one renders inside, or beside, the clock drop-up. */
 const PANELS = ['ClockMenu.tsx', 'GoalsSection.tsx', 'ReflectionPrompt.tsx'] as const
@@ -109,7 +109,7 @@ function fontSizeExpr(text: string): string | null {
 /** Resolve `TYPE.body` → 20 against the REAL ramp. Bare numbers resolve to themselves. */
 function resolveSize(expr: string): number | null {
   const step = /^TYPE\.(\w+)$/.exec(expr)
-  if (step) return (TYPE as Record<string, number>)[step[1]] ?? null
+  if (step) return (TYPE_PX as Record<string, number>)[step[1]] ?? null
   const n = /^(\d+(?:\.\d+)?)(?:px)?$/.exec(expr)
   return n ? Number(n[1]) : null
 }
@@ -118,11 +118,22 @@ const typedControls = (): Control[] =>
   PANELS.flatMap(controlsIn).filter((c) => !EXEMPT_TYPES.test(c.text))
 
 describe('the ramp itself clears the floor iOS imposes', () => {
+  it('every step is a CSS var whose fallback is the phone size, and the phone block restores it', () => {
+    // TYPE resolves through --iw-t-<step>: desktop :root sets the sheet-sized values, the coarse-
+    // pointer block sets the phone ones. A bare render (no stylesheet) must still land on the
+    // phone px, and the phone block must agree with TYPE_PX byte for byte.
+    const css = readFileSync(resolve(__dirname, '../styles/index.css'), 'utf8')
+    for (const [step, px] of Object.entries(TYPE_PX)) {
+      expect((TYPE as Record<string, string>)[step]).toBe(`var(--iw-t-${step}, ${px}px)`)
+      expect(css, `index.css phone block does not set --iw-t-${step}: ${px}px`).toMatch(new RegExp(`\\(pointer: coarse\\) and \\(hover: none\\) \\{\\s*:root \\{[^}]*--iw-t-${step}: ${px}px`))
+    }
+  })
+
   it('has no step below 16px — the trap is unreachable by construction', () => {
     // The ramp's own promise ("Every step here is ≥16, so the iOS trap is unreachable by
     // construction"). If a step ever drops, EVERY panel using it becomes a trap at once, so the
     // failure belongs here — at the source — and not scattered across ten call sites.
-    for (const [step, px] of Object.entries(TYPE)) {
+    for (const [step, px] of Object.entries(TYPE_PX)) {
       expect(px, `TYPE.${step} is below the iOS zoom floor`).toBeGreaterThanOrEqual(IOS_ZOOM_FLOOR)
     }
   })
@@ -196,7 +207,7 @@ describe('every typed control in the productivity panels clears 16px', () => {
     expect(/^TYPE\.\w+$/.test('13')).toBe(false)                  // the ramp check would fail
     expect(mutant).toMatch(/className=[^>]*\btext-(xs|sm|base|lg|\[\d)/) // the class check would fail
     // And the resolver really is reading the ramp, not echoing a literal back.
-    expect(resolveSize('TYPE.body')).toBe(TYPE.body)
+    expect(resolveSize('TYPE.body')).toBe(TYPE_PX.body)
     expect(resolveSize('TYPE.not_a_step')).toBeNull()
   })
 })
@@ -226,15 +237,28 @@ describe('index.css — the phone backstop agrees with the ramp (derived, not co
     // DERIVED: the CSS says `max(16px, 1em)`; 16 must be the bottom of the ramp, not a coincidence.
     // If someone raises TYPE.meta to 18 and leaves the CSS at 16, that is a real (if benign) drift
     // between two statements of one rule, and it should be noticed here.
-    const rampFloor = Math.min(...Object.values(TYPE))
+    const rampFloor = Math.min(...Object.values(TYPE_PX))
     expect(floorRule()).toBe(`max(${rampFloor}px, 1em)`)
   })
 
-  it('scopes the floor to phone — and PROVES the probe reads the real rule', () => {
-    // The rule only helps where the media query holds. Stated as a test so nobody mistakes it for a
-    // universal guarantee and stops authoring sizes in the components.
-    expect(css).toMatch(/@media \(pointer: coarse\) and \(hover: none\)/)
+  it('scopes the floor to ANY coarse pointer, not the phone query — and PROVES the probe reads the real rule', () => {
+    // THE DEVICE THAT MASQUERADES (Max's review of #28, 2026-09-19). The floor used to sit inside
+    // `(pointer: coarse) and (hover: none)`, the PHONE query. iPadOS with a trackpad or keyboard
+    // reports `pointer: fine, hover: hover` — so that query is FALSE there, while Safari on that
+    // same device still auto-zooms a focused control under 16px. It did not bite before only
+    // because these panels authored a literal 20px; once they resolve through the desktop ramp
+    // (body 15px, label 13px) the floor is the only thing left standing between an iPad writer and
+    // a lurching page. `any-pointer: coarse` is true whenever a touchscreen exists, whatever else
+    // is plugged in, so it covers phone AND that device class. The RAMP stays on the phone query;
+    // only the floor moved. See docs/rules/ios-webkit.md.
+    //
+    // This guard reads the CSS rather than the ramp on purpose: the rest of this file resolves
+    // through TYPE_PX, which IS the phone ramp, so it certifies a size that device never renders.
+    const floorBlock = /@media \(any-pointer: coarse\)\s*\{[^}]*input,\s*select,\s*textarea\s*\{[^}]*\}/
+    expect(floorBlock.test(css), 'the form-control floor must be under @media (any-pointer: coarse) — the phone query misses iPad with a keyboard').toBe(true)
     expect(/input,\s*select,\s*textarea\s*\{[^}]*!important/.test(css)).toBe(true)
+    // The phone query still exists, and is where the RAMP override belongs — not the floor.
+    expect(css).toMatch(/@media \(pointer: coarse\) and \(hover: none\)/)
     // The known-negative: the probe misses a rule that is not there.
     expect(/output,\s*meter\s*\{\s*font-size:\s*([^;]+);/.exec(css)).toBeNull()
   })

@@ -60,7 +60,7 @@ silently, and a new member is then addressable in the docs and invisible to ever
 panel, any colour · `storage-sync.md` OPFS, cloud sync, the open pipeline · `provenance.md`
 snapshots, hashing, receipts, `/verify`, SCAS, the word-cycle · `music.md` · `productivity-email.md`
 ledger, clock, charts, AI report, email · `reader-pdf.md` PDF viewer, source reader, citations, media
-· `snapshot-scrub.md` · `toolbar.md` slots, hotkeys, zoom, chrome · `performance.md` ·
+· `snapshot-scrub.md` · `panels.md` desktop popups / panels / bars, sheet edge, type ramps · `toolbar.md` slots, hotkeys, zoom, chrome · `performance.md` ·
 `testing.md` guards, probes, refactors · `lanes.md` · `team-channel.md`. **Touching any write path?**
 The data-loss rules below are universal; read them, then `storage-sync.md`.
 
