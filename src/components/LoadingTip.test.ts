@@ -3,7 +3,7 @@
 import { createElement, StrictMode } from 'react'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { LoadingTip, LOADING_TIPS, loadingTipFontSize, loadingTipIndex } from './LoadingTip'
+import { LoadingTip, LOADING_TIPS, WEBKIT_LOADING_TIP_COUNTDOWN_MS, loadingTipCountdownMsFor, loadingTipFontSize, loadingTipIndex } from './LoadingTip'
 
 describe('loadingTipIndex', () => {
   it('maps the random range across every available tip', () => {
@@ -14,6 +14,8 @@ describe('loadingTipIndex', () => {
   })
 
   it('marks exactly one tip active even when StrictMode replays its layout effect', () => {
+    const ready = vi.fn()
+    window.addEventListener('inkwave:loading-tip-ready', ready)
     const { container } = render(createElement(StrictMode, null, createElement(LoadingTip, {
       ready: false,
       onContinue: () => {},
@@ -24,7 +26,11 @@ describe('loadingTipIndex', () => {
     expect(root?.getAttribute('data-loading-tip')).toBe(
       root?.querySelector('[data-loading-tip-text][data-active]')?.getAttribute('data-loading-tip-text'),
     )
+    expect((window as unknown as { __iwLoadingTipReady?: boolean }).__iwLoadingTipReady).toBe(true)
+    expect(ready).toHaveBeenCalled()
 
+    window.removeEventListener('inkwave:loading-tip-ready', ready)
+    delete (window as unknown as { __iwLoadingTipReady?: boolean }).__iwLoadingTipReady
     cleanup()
   })
 
@@ -32,6 +38,13 @@ describe('loadingTipIndex', () => {
     expect(loadingTipFontSize('x'.repeat(72))).toBe('0.86rem')
     expect(loadingTipFontSize('x'.repeat(73))).toBe('0.8rem')
     expect(loadingTipFontSize('x'.repeat(111))).toBe('0.74rem')
+  })
+
+  it('does not impose a decorative countdown on WebKit', () => {
+    const safari = 'Mozilla/5.0 AppleWebKit/605.1.15 Version/26.4 Safari/605.1.15'
+    const chrome = 'Mozilla/5.0 AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36'
+    expect(loadingTipCountdownMsFor(safari)).toBe(WEBKIT_LOADING_TIP_COUNTDOWN_MS)
+    expect(loadingTipCountdownMsFor(chrome)).toBe(3000)
   })
 
   it('opens automatically when countdown and readiness are both complete', () => {

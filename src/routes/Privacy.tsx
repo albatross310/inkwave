@@ -36,7 +36,7 @@ import { Link } from 'react-router'
 import { PAGE_GRADIENT, PAGE_PARCHMENT, PAGE_CARD_SHADOW, PAGE_CARD_RADIUS } from './pageChrome'
 
 const INK = '#302438'
-const UPDATED = '6 September 2026'
+const UPDATED = '14 September 2026'
 
 const pill = 'inline-flex items-center rounded-full px-4 py-1.5 no-underline font-medium transition-colors hover:brightness-110'
 
@@ -152,6 +152,31 @@ export function Privacy() {
               switched off by default and can be adjusted at any time in Settings. As Inkwave develops we are also
               exploring browser-local AI models for these features, so that this data truly never
               leaves your device.
+            </p>
+          </Section>
+
+          <Section title="Read along narration">
+            <p>
+              Opening or pasting text in Read along stores it on this device without sending it
+              to a speech provider. When you explicitly confirm a render, selected passages pass
+              through Inkwave’s server to ElevenLabs to generate AI narration. Loading your voice
+              list also contacts ElevenLabs through that relay. Rendering uses your account’s credits.
+            </p>
+            <p className="mt-3">
+              Your ElevenLabs API key, or a private-instance access token, stays in the open
+              reader’s memory and travels to our relay over HTTPS; it is not saved in browser
+              storage or included in exports. Disconnecting or reloading forgets it. Our relay
+              does not log or retain the submitted text, credentials, or returned recordings.
+              ElevenLabs processes requests under its own account and retention terms; this is
+              not a promise of zero provider retention.
+            </p>
+            <p className="mt-3">
+              Text, saved audio, word timings, bookmarks, and reading preferences are held in a
+              separate browser library. Browser storage can be cleared or evicted. Export a
+              listening book to keep a portable backup: <code>.iwlisten</code> files contain your
+              text and selected narration in plaintext, without encryption. Closing the panel
+              pauses playback and further rendering after the current request; closing the tab
+              can lose a request that has already used credits.
             </p>
           </Section>
 

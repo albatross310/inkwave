@@ -26,7 +26,7 @@ import { AiConsentDialog } from '../components/AiConsentDialog'
 import { Scroll, isTouchDevice } from '../editor/Scroll'
 import { probePerf } from '../editor/perflog'
 import { stepDetent, newDetent, resetDetent, trimmed, TRACKPAD_DETENT, TOUCH_DETENT } from '../editor/scrubDetent'
-import { createZoomLatch, omnidirectionalZoomDelta, zoomModeForWheel } from '../editor/zoomZone'
+import { createZoomLatch, omnidirectionalZoomDelta, textZoomDelta, zoomModeForWheel } from '../editor/zoomZone'
 import { LoadingVeil } from '../editor/LoadingVeil'
 import { DocView } from '../components/DocView'
 import { RichDiffView } from '../components/RichDiffView'
@@ -619,7 +619,7 @@ function MinimapPanel({ leftRef, ops, snapKey, midFrac = 0.5, pageGeo }: {
       )}
       {Array.from({ length: total }, (_, p) => (
         p < pages ? (
-          <div key={p} style={{ position: 'relative', background: 'var(--iw-snap-map-page, #f3f1ec)', borderRadius: 2, minHeight: 6, boxShadow: `0 1px 2px ${CARD_SHADOW}`, overflow: 'hidden' }}>
+          <div key={p} style={{ position: 'relative', background: 'var(--iw-snap-map-page, #f6f4f0)', borderRadius: 2, minHeight: 6, boxShadow: `0 1px 2px ${CARD_SHADOW}`, overflow: 'hidden' }}>
             {/* Text block (marks) inset with page-like margins — top/left/right, and a clear bottom margin
                 that leaves room for the logo + number below it (so they're never buried under a diff tick). */}
             <div style={{ position: 'absolute', top: 5, left: 4, right: 4, bottom: numFont + 9 }}>
@@ -984,22 +984,37 @@ function SplitDiffView({
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    // Modifier/latch/cursor parity with the live editor: Command selects the whole-page cursor;
-    // Shift+pinch selects text. Snapshot has one scale pipeline, so both drive diffZoom.
+    // Modifier/cursor parity with the live editor: Command selects text; Shift selects water.
+    // Snapshot has one scale pipeline, so both modes still drive diffZoom.
     const latch = createZoomLatch(() => containerRef.current)
+    let controlHeld = false, metaHeld = false, shiftHeld = false
+    const modifierHeld = () => controlHeld || metaHeld || shiftHeld
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Control') controlHeld = true
+      if (event.key === 'Meta') metaHeld = true
+      if (event.key === 'Shift') shiftHeld = true
+    }
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Control') controlHeld = false
+      if (event.key === 'Meta') metaHeld = false
+      if (event.key === 'Shift') shiftHeld = false
+      if (!modifierHeld()) latch.dispose()
+    }
+    const onBlur = () => { controlHeld = false; metaHeld = false; shiftHeld = false; latch.dispose() }
     const onWheel = (e: WheelEvent) => {
       const requestedMode = zoomModeForWheel(e, true)
       if (!requestedMode) return
       e.preventDefault()
-      const zoomDelta = requestedMode === 'text' && e.shiftKey
+      const zoomDelta = e.shiftKey && !e.metaKey && !e.ctrlKey
         ? omnidirectionalZoomDelta(e.deltaX, e.deltaY)
-        : e.deltaY || e.deltaX
+        : textZoomDelta(e.deltaX, e.deltaY, e.ctrlKey && !e.metaKey && !e.shiftKey)
       if (zoomDelta === 0) return
       const pane = leftScrollRef.current?.contains(e.target as Node) ? leftScrollRef.current
         : rightScrollRef.current?.contains(e.target as Node) ? rightScrollRef.current : null
       latch.resolve(
         () => requestedMode,
         requestedMode === 'water' ? zoomDelta < 0 : zoomDelta > 0,
+        modifierHeld(),
       )
       if (pane) {
         const offY = e.clientY - pane.getBoundingClientRect().top
@@ -1015,7 +1030,16 @@ function SplitDiffView({
       setDiffZoom(z => { const n = Math.max(0.6, Math.min(2.5, +(z * (zoomIn ? 1.08 : 0.926)).toFixed(3))); try { localStorage.setItem('inkwave:diffZoom', String(n)) } catch { /* private */ }; return n })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => { el.removeEventListener('wheel', onWheel); latch.dispose() }
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    window.addEventListener('keyup', onKeyUp, { capture: true })
+    window.addEventListener('blur', onBlur)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      window.removeEventListener('keydown', onKeyDown, { capture: true } as EventListenerOptions)
+      window.removeEventListener('keyup', onKeyUp, { capture: true } as EventListenerOptions)
+      window.removeEventListener('blur', onBlur)
+      latch.dispose()
+    }
   }, [])
   const lastHoveredRef  = useRef<number | null>(null)
   const activeOpIdxRef  = useRef<number | null>(null)
@@ -3002,6 +3026,10 @@ export function SnapshotView() {
     const HOLD = 280      // press-and-hold before moving to arm the multi-snap scrub
     const detent = newDetent()  // the ARMED scrub's position rule — shared with the trackpad
     const onStart = (e: TouchEvent) => {
+      // The fixed header is application chrome, never a snapshot-swipe surface. Safari installed
+      // apps can otherwise promote a slightly moving tap into this ancestor's horizontal gesture
+      // and cancel the click shared by all three top actions.
+      if ((e.target as Element | null)?.closest?.('.iw-snapshot-header')) { dir = 'v'; return }
       // Multi-touch = a PINCH (the doc pane's pane-zoom pinch, or Scroll's on other surfaces) —
       // never a scrub. Without this guard, finger-0's drift during a pinch scrubbed snapshots
       // mid-gesture (merge fix, 2026-07-10).
@@ -3153,7 +3181,7 @@ export function SnapshotView() {
           2026-07-10 — the whole top bar + controls + Verify gather into a two-row bottom region
           there, and the top of the view becomes pure content). */}
       <div
-        className="z-50 flex items-center backdrop-blur"
+        className="iw-snapshot-header z-50 flex items-center"
         style={{
           position: 'fixed', left: 0, right: 0,
           // The bar's own fill is a token, not Tailwind's `bg-white/95`: a utility class cannot carry
@@ -3161,6 +3189,7 @@ export function SnapshotView() {
           background: 'var(--iw-snap-bar, rgba(255,255,255,0.95))',
           ...(isPhone ? { bottom: 0, borderTop: `1px solid ${EDGE}` } : { top: 0, borderBottom: `1px solid ${EDGE}` }),
           fontSize: 'clamp(0.72rem, 1.5vw, 1.02rem)', height: 'clamp(38px, 7vh, 48px)', gap: 'clamp(4px, 0.8vw, 10px)', padding: '0 clamp(6px, 1vw, 12px)',
+          pointerEvents: 'auto', isolation: 'isolate',
         }}
       >
         {/* Phone: tighter tracking, no "read-only", and NO version label next to the ◈ icon

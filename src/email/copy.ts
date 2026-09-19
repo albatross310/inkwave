@@ -48,6 +48,11 @@ export const PROVENANCE_LIMIT =
   'had written exactly this, by this time — which is what matters for showing priority, or that a ' +
   'commitment was made on a given date.'
 
+/** Attachment bytes are sent, but the current v:3 email snapshot commits only headers + body. */
+export const ATTACHMENT_PROVENANCE_NOTE =
+  'Attached files are included in Gmail send and draft sync, but their bytes are not yet included ' +
+  'in the timestamp record. Compose-link handoff cannot transfer attachments.'
+
 /**
  * Shown at the handoff. The provenance is of the INKWAVE DRAFT; the user can edit in the provider's
  * window before sending, and we would never know. Saying so is not a disclaimer, it is the honest
@@ -63,6 +68,32 @@ export const GMAIL_SEND_EXPLAINER =
   'Send with Gmail asks Google for permission to send email only — never to read your inbox. The ' +
   'record is created first, then this browser sends the message directly to Gmail; Inkwave does ' +
   'not receive or store the message or your Google access token. Provider handoff remains available.'
+
+/**
+ * Connected-mailbox permission is a separate, optional step-up from send-only (§B3.1). These
+ * strings are shown together before the first restricted-scope request; none may be hidden behind
+ * Google's own generic consent screen.
+ */
+export const MAILBOX_CONNECT_LABEL = 'Connect Gmail mailbox'
+export const MAILBOX_CONSENT_TITLE = 'Connect your Gmail mailbox?'
+export const MAILBOX_CONSENT_INTRO =
+  'This is separate from Send with Gmail. Google will ask for two additional permissions:'
+export const MAILBOX_READ_CAPABILITY =
+  'View your Inbox and Sent messages. Inkwave fetches full message content only when you open a thread.'
+export const MAILBOX_DRAFT_CAPABILITY =
+  'Create, read, replace and send Gmail drafts.'
+export const MAILBOX_PERMISSION_LIMIT =
+  'This first mailbox connection does not let Inkwave mark messages read or unread, archive, star, label, trash or permanently ' +
+  'delete mail. It does not grant full Gmail access.'
+export const MAILBOX_TRANSPORT_BOUNDARY =
+  'Your Gmail token, mailbox index, recipients, message bodies and attachments travel directly ' +
+  'between this browser and Google. They do not pass through or stay on Inkwave servers.'
+export const MAILBOX_CONTENT_BOUNDARY =
+  'Remote images and attachments stay blocked until you choose to load them. Browsing mail does not ' +
+  'create an Inkwave document, writing session or provenance record.'
+export const MAILBOX_DISCONNECT_BOUNDARY =
+  'Disconnecting clears the Gmail connection and local mailbox index. It does not delete your ' +
+  'Inkwave documents or anything in Gmail.'
 
 /**
  * The storage claim. Two things this must NOT say, for two different reasons:

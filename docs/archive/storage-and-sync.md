@@ -34,9 +34,10 @@ work ORPHANED on disk (intact, but unreachable by any tab: that is the shape of 
 two tabs blind-autosaving one file.
 
 **WHY sessionStorage IS THE CARRIER, AND THE URL IS NOT.** The hard case Peter named is the OAuth
-round-trip — "even if you leave to go to microsofts page or whatever to log in". OneDrive sign-in is
-`msal.loginRedirect` with `redirectUri: window.location.origin` (storage/onedrive.ts) — a FULL-PAGE
-navigation off-origin that returns to a BARE `/`. Any doc id carried in the query string is GONE on
+round-trip — "even if you leave to go to microsofts page or whatever to log in". OneDrive browser-
+tab sign-in is `msal.loginRedirect` with `redirectUri: window.location.origin`
+(storage/onedrive.ts) — a FULL-PAGE navigation off-origin that returns to a BARE `/`. Any doc id
+carried in the query string is GONE on
 return. sessionStorage is scoped per-tab per-origin and SURVIVES that round-trip, so it is the source
 of truth. The URL is a secondary, human-visible reflection: it makes a tab self-describing and
 bookmarkable, but nothing depends on it surviving. (CLAUDE.md round-8 bug 2 is the precedent for not
@@ -318,6 +319,15 @@ directory is the only way to see what is really there.
 One file read per document: `size`/`lastModified` come from the same File handle as the bytes, so
 this costs one pass, not three. Per-document failures degrade to `doc: null` rather than losing the
 whole listing — a corrupt file is still a document the writer may want back.
+
+That direct scan is deliberately a RECOVERY/INSPECTION path, not the normal fresh-window critical
+path. `Edit.tsx` first walks the tiny newest-first IndexedDB metadata rows and reads only the first
+unheld candidate. It scans and parses every OPFS document only if the index cannot open anything,
+which still recovers orphaned files without making Safari standalone startup proportional to the
+total size of every local document. Startup calls `listOpfsDocumentsStrict`: a root/enumeration
+failure is unknown storage state and must surface as `StorageReadError`, never masquerade as an
+empty store and authorise a new blank document. The inspector keeps the non-throwing compatibility
+wrapper because it reports the raw recovery inventory rather than deciding what document to open.
 
 ## <a id="opfs-autosave-beat"></a>The autosave beat — phone delay, and the bounded zoom deferral
 
@@ -887,10 +897,14 @@ involved.**
 
 Requires an Azure app registration (a public SPA client id) in `VITE_MS_CLIENT_ID`; the feature is
 hidden until that is configured. The client id is PUBLIC (it appears in OAuth redirects), so it is
-committed as the default and overridable. Redirect URIs registered: `https://iwsolo.me` +
-`https://www.iwsolo.me` + `http://localhost:5173`. Authority `/common` covers personal and
-work/school accounts, and the scope is `Files.ReadWrite` (full drive) so the writer can pick ANY
-folder to sync into — existing AppFolder-only sessions are re-prompted to consent on the next sync.
+committed as the default and overridable. The Azure **Single-page application** redirect list must
+contain the exact origins Inkwave sends: `https://iwzero.me`, `https://www.iwzero.me` if that host is
+served directly, and `http://localhost:5173` for local testing. Microsoft rejects a renamed/missing
+origin before it can return control to Inkwave; the 2026-09-08 `invalid_request redirect_uri`
+screenshot proved the old `iwsolo.me` registration/documentation had drifted from the canonical
+domain. Authority `/common` covers personal and work/school accounts, and the scope is
+`Files.ReadWrite` (full drive) so the writer can pick ANY folder to sync into — existing
+AppFolder-only sessions are re-prompted to consent on the next sync.
 
 MSAL is lazily imported so it is a separate client chunk and never enters the prerender/SSR graph.
 
@@ -900,8 +914,13 @@ different name and create a new file every few seconds instead of overwriting th
 exposed so "Save a copy" can point future syncs at a NEW filename, leaving the previous file
 untouched.
 
-Sign-in is a FULL-PAGE redirect in the same window, which is why `storage/tabDoc.ts` cannot carry the
-document id in the URL (see `#tabdoc-identity`).
+Sign-in is normally a FULL-PAGE redirect in the same window, which is why `storage/tabDoc.ts` cannot
+carry the document id in the URL (see `#tabdoc-identity`). An installed PWA is the deliberate
+exception: it has no browser Back control, so MSAL uses `loginPopup` and keeps the document in the
+parent window. A failed/cancelled attempt returns an in-app **Try again / Back to document** dialog;
+picker auth/error states expose the same two exits. A rejected MSAL initialisation clears the cached
+promise before reporting failure, so Try again actually constructs a fresh client. Popup success
+resumes the precise sync/folder/open/save-copy action that requested authentication.
 
 ## <a id="cloud-status-map"></a>`404 ⇒ absent`, and everything else ⇒ error
 

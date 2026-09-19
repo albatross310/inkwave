@@ -29,7 +29,7 @@ export const SIDE_PILL_TALL_H = 42
 export const SIDE_PILL_FONT = '12px'
 
 /**
- * Distance from the viewport bottom to the footer toolbar's BOTTOM EDGE, in unscaled px.
+ * Distance from the viewport bottom to the footer toolbar's BOTTOM EDGE, in CSS px.
  * 28 → 13 (Peter, 2026-08-20: "lower them all a bit maybe 15px") — lowering the toolbar lowers the
  * side pills with it, because `sidePillBottom()` is measured from this same number. It lived in TWO
  * places (this formula and the footer wrapper's paddingBottom in TiptapEditor.tsx) and a change to
@@ -40,16 +40,16 @@ export const TOOLBAR_BOTTOM_PX = 13
 /**
  * `bottom` for a side pill so its MIDLINE sits on the toolbar pill's midline.
  *
- * The toolbar's bottom edge is `28 * zoom` above the viewport bottom (its wrapper's padding) and its
- * painted height is published live as `--iw-toolbar-h` — so its midline is `28*zoom + toolbarH/2` up.
- * A side pill is anchored by its own bottom edge and rises by its painted height, so centring it
- * means subtracting half of that: both pills carry `transform: scale(zoom * 1.12)`. The optional
- * height argument keeps the exceptional two-line reconnect pill on the same midline too.
+ * The toolbar's bottom edge is `TOOLBAR_BOTTOM_PX` above the viewport bottom and its painted height
+ * is published live as `--iw-toolbar-h`, so its midline is `bottom + toolbarH/2`. A side pill is
+ * anchored by its own bottom edge and rises by its own height, so centring it means subtracting half
+ * of that height. Browser zoom scales all three elements together; no inverse DPR scale is involved.
+ * The optional height keeps the exceptional two-line reconnect pill on the same midline too.
  *
  * `--iw-toolbar-h` is read as a var rather than hard-coded because the toolbar GROWS when its style
  * or review row opens; the pills then re-centre on the taller bar for free.
  */
-export function sidePillBottom(zoom: number, height = SIDE_PILL_H): string {
-  const halfPill = (height * zoom * 1.12) / 2
-  return `calc(${TOOLBAR_BOTTOM_PX * zoom}px + (var(--iw-toolbar-h, 56px) / 2) - ${halfPill.toFixed(2)}px + var(--iw-pdf-room-bottom, 0px))`
+export function sidePillBottom(height = SIDE_PILL_H): string {
+  const halfPill = height / 2
+  return `calc(${TOOLBAR_BOTTOM_PX}px + (var(--iw-toolbar-h, 56px) / 2) - ${halfPill.toFixed(2)}px + var(--iw-pdf-room-bottom, 0px))`
 }

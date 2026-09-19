@@ -94,6 +94,10 @@ const devApi: PluginOption = {
     // POST /api/summarise — Anthropic paragraph-summary relay (key stays server-side).
     // @ts-expect-error - untyped Node-only ESM module
     server.middlewares.use('/api/summarise', webhook(() => import('./api/summarise.mjs')))
+    // @ts-expect-error - untyped Node-only ESM module
+    server.middlewares.use('/api/readalong', webhook(() => import('./api/readalong.mjs')))
+    // @ts-expect-error - local-only Node worker; deliberately absent from deployed api/ functions
+    server.middlewares.use('/api/readalong-local', webhook(() => import('./scripts/readalong-local.mjs')))
     for (const path of ['/api/ots', '/api/session', '/api/sign', '/api/sync-profile']) {
       server.middlewares.use(path, (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed') }

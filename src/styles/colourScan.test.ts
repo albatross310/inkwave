@@ -43,8 +43,19 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
-const FILES = ROOTS.flatMap((r) => walk(r))
-const CENSUS = new Map(FILES.map((f) => [f, scanSource(readFileSync(join(REPO, f), 'utf8'))]))
+// Another boundary test deliberately creates and removes a fake production source while Vitest
+// collects files in parallel. It can disappear in the few microseconds between walk() and read;
+// that transient fixture is not part of the repository census. Snapshot only files that still
+// exist at read time, while continuing to surface every error other than ENOENT.
+const CENSUS = new Map<string, ReturnType<typeof scanSource>>()
+for (const f of ROOTS.flatMap((r) => walk(r))) {
+  try {
+    CENSUS.set(f, scanSource(readFileSync(join(REPO, f), 'utf8')))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+const FILES = [...CENSUS.keys()]
 const bareOf = (f: string) => CENSUS.get(f)!.bare.length
 
 // Opt-in regeneration: UPDATE_COLOUR_BASELINE=1 pnpm vitest run src/styles/colourScan.test.ts

@@ -1,0 +1,10 @@
+{
+  "name": "inkwave-local-narration",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "kokoro-js": "1.2.1",
+    "@huggingface/transformers": "3.8.1"
+  },
+  "packageManager": "pnpm@10.33.2"
+}

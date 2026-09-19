@@ -9,10 +9,19 @@
   },
   "shortcuts": [
     {
-      "name": "New doc",
-      "short_name": "New doc",
+      "name": "New window",
+      "short_name": "New window",
       "description": "Open the next available Inkwave document in another window.",
       "url": "/?new-window=1",
+      "icons": [
+        { "src": "/icon-192.png?v=white-bg-1", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "New doc",
+      "short_name": "New doc",
+      "description": "Create a blank Inkwave document in another window.",
+      "url": "/?new-window=1&blank=1",
       "icons": [
         { "src": "/icon-192.png?v=white-bg-1", "sizes": "192x192", "type": "image/png" }
       ]

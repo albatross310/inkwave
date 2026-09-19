@@ -27,4 +27,19 @@ describe('EmailDraftSaveStatus', () => {
 
     expect(screen.getByText('Saved locally just now')).toBeTruthy()
   })
+
+  it('says synced only for a revision Google actually acknowledged', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-05T05:00:00.000Z'))
+    render(
+      <EmailDraftSaveStatus
+        initialSavedAt="2026-09-05T04:58:00.000Z"
+        lastSyncedAt="2026-09-05T04:59:00.000Z"
+      />,
+    )
+
+    expect(screen.getByText('Last synced 1 minute ago')).toBeTruthy()
+    act(() => window.dispatchEvent(new Event('inkwave:doc-saved')))
+    expect(screen.getByText('Saved locally just now')).toBeTruthy()
+  })
 })

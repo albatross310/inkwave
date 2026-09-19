@@ -22,6 +22,15 @@
 
 export const UNSYNCED_WARN_MS = 5 * 60_000 // "more than 5 minutes" — Peter
 
+/** One wake-up at the warning boundary; polling the whole editor tree before then is pure waste. */
+export function unsyncedNoticeDelay(
+  firstUnsyncedEditAt: number,
+  now: number,
+  warnAfterMs = UNSYNCED_WARN_MS,
+): number {
+  return Math.max(0, firstUnsyncedEditAt + warnAfterMs - now)
+}
+
 export interface UnsyncedInputs {
   /** Is any sync destination live for THIS document (local folder / OneDrive / Google Drive)? */
   syncActive: boolean

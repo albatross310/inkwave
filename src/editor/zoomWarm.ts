@@ -62,9 +62,13 @@ export function planLiveWarm(i: WarmInputs): WarmPlan {
   // the placeholder cache — the exact mixing the two caches exist to prevent.
   if (!i.placeholders) return { warm: false, why: 'not-live' }
   if (i.phone) return { warm: false, why: 'phone' }
-  const dir = i.from === null ? 0 : Math.sign(i.step - i.from)
-  if (!dir) return { warm: false, why: 'no-direction' }
-  const next = i.step + dir
+  // Predict the gesture's OBSERVED stride, not merely its sign. On the old 8% lattice a wheel
+  // notch moved one key, so those happened to be identical. The dense 2% lattice maps the same
+  // physical notch across about four keys; warming step+1 then guarantees a miss at step+4.
+  // Fine trackpad motion still observes stride ±1 and keeps the adjacent prediction naturally.
+  const stride = i.from === null ? 0 : i.step - i.from
+  if (!stride) return { warm: false, why: 'no-direction' }
+  const next = i.step + stride
   if (next < i.minStep || next > i.maxStep) return { warm: false, why: 'out-of-range' }
   if (i.cached) return { warm: false, why: 'cached' }
   // THE CADENCE GATE. `gapMs` is Infinity on a gesture's first notch, so that one always warms —

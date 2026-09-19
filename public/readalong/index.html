@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer"><meta name="color-scheme" content="light dark">
+  <title>Read along · Inkwave</title>
+  <link rel="stylesheet" href="./reader.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+<header class="topbar">
+  <button id="library-toggle" class="icon" aria-label="Show library" aria-expanded="false">☰</button>
+  <div class="brand"><span class="wordmark">inkwave</span><span class="separator">/</span><strong>read along</strong></div>
+  <div class="top-actions"><button id="voice-open">Voice &amp; render</button><button id="appearance" class="icon" aria-label="Toggle night mode">◐</button><button id="close-reader" class="icon" aria-label="Close reader">×</button></div>
+</header>
+<aside id="sidebar" aria-label="Library and chapters">
+  <div class="aside-label">YOUR LISTENING SHELF</div>
+  <button id="import" class="import-button">＋ Open a book</button><input id="file" type="file" hidden>
+  <button id="paste-open" class="quiet">EPUB, PDF, text · or paste</button>
+  <div id="books" class="books"></div>
+  <div class="aside-label chapters-label">IN THIS BOOK</div><nav id="chapters" aria-label="Chapters"></nav>
+  <div class="sidebar-bottom"><button id="export">Export listening book</button><button id="delete-book" class="quiet">Remove book text</button><small>Local to this browser. Export to keep a portable backup.</small></div>
+</aside>
+<main id="main" tabindex="-1">
+  <div id="empty" class="welcome">
+    <div class="eyebrow">A QUIETER WAY TO LISTEN</div>
+    <h1>Keep your place.<br>Hear the writing.</h1>
+    <p>Open an EPUB, PDF or text file, choose a voice, and make a recording to keep. Local narration highlights the current passage; ElevenLabs can provide verified word timings.</p>
+    <button id="empty-import" class="primary">Open a book</button><button id="sample-text" class="quiet">Try a short original sample</button>
+    <div class="welcome-details"><div><strong>Record once</strong><span>Replay saved passages without another generation.</span></div><div><strong>Local voices, free to use</strong><span>Kokoro runs on this Mac with British and American English voices.</span></div><div><strong>Your text stays your text</strong><span>No rewrites, inserted jokes or synthetic stage directions.</span></div></div>
+    <small>AI-generated narration. Local generation keeps text on this Mac. The optional ElevenLabs engine sends selected passages to its API and uses your credits. Opening a file alone sends nothing.</small>
+  </div>
+  <div id="book-view" hidden>
+    <div class="reading-tools"><input id="search" type="search" aria-label="Search this book" placeholder="Find in this book…"><button id="search-next">Next</button><span id="search-count"></span><span class="spacer"></span><label for="font-size">Aa</label><input id="font-size" type="range" min="14" max="28" value="17" aria-label="Reading text size"><button id="focus" aria-pressed="false">Focus</button></div>
+    <div class="chapter-heading"><div id="chapter-number" class="eyebrow"></div><h1 id="chapter-title"></h1><div id="chapter-meta"></div></div>
+    <p id="import-note" class="import-note" hidden></p>
+    <article id="text" aria-label="Book text"></article>
+    <div class="chapter-end"><button id="prev-chapter">← Previous chapter</button><button id="next-chapter">Next chapter →</button></div>
+  </div>
+</main>
+<footer id="dock">
+  <div class="dock-top"><div><strong id="book-title">Nothing open yet</strong><div id="voice-caption">Recorded AI narration · no browser TTS</div></div><div class="dock-options"><button id="follow" aria-pressed="true">Follow voice</button><button id="bookmark" aria-label="Bookmark current position">Bookmark</button><button id="marks-open">Saved places</button></div></div>
+  <div class="transport"><button id="back" aria-label="Back ten seconds">↶ 10</button><button id="play" class="play" aria-label="Play recording">▶</button><button id="forward" aria-label="Forward ten seconds">10 ↷</button><div class="seek-wrap"><input id="seek" type="range" min="0" max="1" step="0.01" value="0" aria-label="Position in this recorded passage"><div class="seek-labels"><span id="elapsed">0:00</span><span id="passage-label">No recording selected</span><span id="duration">0:00</span></div></div><select id="speed" aria-label="Playback speed"><option value="0.75">0.75×</option><option value="0.9">0.9×</option><option value="1" selected>1×</option><option value="1.1">1.1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select><select id="sleep" aria-label="Sleep timer"><option value="0">Sleep off</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">60 min</option></select></div>
+  <div class="render-strip"><span id="render-status">Import text to begin.</span><progress id="render-progress" max="1" value="0" aria-label="Saved narration progress"></progress><button id="render-open">Render…</button><button id="stop-render" hidden>Pause rendering</button><button id="save-recovery" hidden>Save recovered audio</button></div>
+</footer>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="voice-dialog" aria-labelledby="voice-title"><div class="dialog-head"><h2 id="voice-title">The narrator’s desk</h2><button aria-label="Close voice settings">×</button></div>
+  <div class="dialog-body">
+    <p>Start with a voice whose accent and character you already like. Steady delivery reduces variation; it cannot turn an unsuitable voice into the right narrator.</p>
+    <label for="engine">Narration engine</label><select id="engine"><option value="local">Local on this Mac · free</option><option value="eleven">ElevenLabs API · uses credits</option></select>
+    <p id="local-info" class="small" hidden>Kokoro runs on this Mac. Your text stays here; no API key or speech credits are needed. Initial setup downloads the model and voices once, then generation works offline. CPU generation can take a few minutes. British and American English voices are available; they are not Australian. Local audio uses passage highlighting because verified word timings are unavailable.</p><button id="local-voices" type="button" hidden>Load local voices</button>
+    <fieldset id="connection-fields"><legend>Connection · not saved</legend><label for="credential-kind">Connect with</label><select id="credential-kind"><option value="key">My ElevenLabs API key</option><option value="token">Private Inkwave reader token</option></select><label for="credential">Credential</label><div class="field-row"><input id="credential" type="password" autocomplete="off" spellcheck="false" placeholder="Kept only in this open reader"><button id="connect" type="button">Load voices</button></div><small>Never paste keys into a Codex prompt. This field sends your key only to Inkwave’s same-origin relay. Disconnect or reload to forget it.</small><button id="disconnect" type="button" class="quiet">Disconnect</button></fieldset>
+    <label id="voice-select-label" for="voice-select">Available voices</label><select id="voice-select"><option value="">Load voices, or enter a voice ID below</option></select><p id="voice-description" class="small"></p><label for="voice-id">Voice ID</label><input id="voice-id" type="text" spellcheck="false" autocomplete="off" placeholder="A voice available to your ElevenLabs account">
+    <div class="two-fields"><div><label for="model">Speech model</label><select id="model"><option value="kokoro_v1_0">Kokoro v1.0 · local CPU</option><option value="eleven_v3">Eleven v3 · expressive</option><option value="eleven_multilingual_v2">Multilingual v2 · long-form alternative</option></select></div><div><label for="delivery">Delivery</label><select id="delivery"><option value="steady">Steady / understated</option><option value="natural">Natural / more variable</option></select></div></div>
+    <details id="voice-brief"><summary>The voice-design brief</summary><p id="brief" class="small"></p><button id="copy-brief" type="button">Copy brief</button><small>For ElevenLabs Voice Design, not a prompt inserted into your manuscript. Creating a custom voice is done in ElevenLabs.</small></details>
+    <button id="save-profile" type="button" class="primary">Use this voice</button><p id="voice-message" role="status" class="small"></p>
+    <hr><div class="render-intro"><h3>Record ahead. Then settle in.</h3><p id="render-summary">Open a book first.</p></div>
+    <label id="consent-row" class="checkbox"><input id="consent" type="checkbox">I permit these passages to be sent to ElevenLabs and understand that rendering uses my account’s credits.</label>
+    <div class="render-buttons"><button id="render-sample" type="button">Audition one passage</button><button id="render-chapter" type="button">Render this chapter</button><button id="render-book" type="button" class="primary">Render remaining book</button></div>
+    <button id="clear-edition" type="button" class="quiet">Remove this voice edition’s cached audio…</button><small>Keep this reader open while rendering. Pausing finishes the current request and saves it. Reopening reuses completed passages; rendering does not continue after the tab closes.</small><small id="billing-note">ElevenLabs billing depends on your plan and voice.</small>
+  </div>
+</dialog>
+<dialog id="paste-dialog" aria-labelledby="paste-title"><div class="dialog-head"><h2 id="paste-title">Something to read</h2><button aria-label="Close paste dialog">×</button></div><div class="dialog-body"><label for="paste-title-input">Title</label><input id="paste-title-input" placeholder="Untitled reading"><label for="paste-text">Text</label><textarea id="paste-text" rows="12" placeholder="Paste your text here. Nothing is sent to a speech provider until you render."></textarea><button id="paste-add" class="primary">Add to shelf</button></div></dialog>
+<dialog id="marks-dialog" aria-labelledby="marks-title"><div class="dialog-head"><h2 id="marks-title">Saved places</h2><button aria-label="Close saved places">×</button></div><div id="marks" class="dialog-body"></div></dialog>
+<audio id="audio" preload="auto"></audio>
+</body></html>

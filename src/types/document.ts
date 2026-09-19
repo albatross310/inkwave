@@ -224,6 +224,7 @@ export interface DocGoals {
 
 import type { ToolbarConfig } from '../editor/toolbarContract'
 import type { MediaAsset } from '../media/types'
+import type { EmailAttachmentRef } from '../email/attachmentStore'
 // §1's Piece — declared by its owner (`src/music/types.ts`, the contract three lanes read) and
 // imported here, exactly as ToolbarConfig is. The shape belongs to the music module; the fact that
 // a DOCUMENT can be one belongs here.
@@ -264,6 +265,8 @@ export interface InkwaveDocument {
   // ─── Email layer (§B2.1) ─────────────────────────────────────────────────
   docType?: DocType                // absent ⇒ 'note' (docTypeOf). The ledger tags session rows from this.
   email?: EmailHeaders             // present iff docType === 'email' — the body is contentJson
+  /** Local OPFS-backed files included by direct Gmail send. Bytes never live in document JSON. */
+  emailAttachments?: EmailAttachmentRef[]
 
   // ─── Imported media ──────────────────────────────────────────────────────
   // REFERENCES ONLY: the bytes live in OPFS (`library/media/`), as an embedded source PDF's do. A

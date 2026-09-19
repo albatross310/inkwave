@@ -26,6 +26,19 @@ const MAX_AGE_MS = 1000 * 60 * 60 * 24 * 14   // a fortnight; older than that, s
 
 export type ScrollMemory = { top: number; height: number; at: number }
 
+const restoredPositions = new WeakMap<Element, number>()
+export function scrollRestoreRevision(surface: Element): number {
+  return restoredPositions.get(surface) ?? 0
+}
+
+/** A deliberate reading-position restore supersedes any queued pagination clamp correction. */
+export function announceScrollPositionRestored(surface: HTMLElement, before: number): void {
+  restoredPositions.set(surface, scrollRestoreRevision(surface) + 1)
+  window.dispatchEvent(new CustomEvent('inkwave:scroll-position-restored', {
+    detail: { surface, before, after: surface.scrollTop },
+  }))
+}
+
 export function readScrollMemory(docId: string): ScrollMemory | null {
   if (!docId) return null
   try {
@@ -40,7 +53,9 @@ export function readScrollMemory(docId: string): ScrollMemory | null {
 }
 
 export function writeScrollMemory(docId: string, top: number, height: number): void {
-  if (!docId || !Number.isFinite(top) || top < 0) return
+  // A detached scroll element reports height 0. That is unknown geometry, not a valid empty
+  // document, and must never overwrite the last usable reading position during a React remount.
+  if (!docId || !Number.isFinite(top) || top < 0 || !Number.isFinite(height) || height <= 0) return
   try { localStorage.setItem(KEY(docId), JSON.stringify({ top: Math.round(top), height: Math.round(height), at: Date.now() })) }
   catch { /* private mode / quota — a reading position is never worth an error */ }
 }

@@ -114,6 +114,28 @@ for (const theme of ['day', 'night']) {
     slots.overflow > 0 && dead.length === 0,
     `overflow=${slots.overflow} labels=${JSON.stringify(slots.overflowLabels)}`)
 
+  // Desktop geometry is fixed, not viewport-derived: browser zoom must scale the finished pill
+  // normally and the wider style row must never spill through its border.
+  await page.click('[data-iw-bar="style"]'); await page.waitForTimeout(300)
+  for (const width of [1200, 570]) {
+    await page.setViewportSize({ width, height: 900 })
+    const geometry = await page.evaluate(() => {
+      const pill = document.querySelector('.iw-toolbar-outline.iw-touch-guard.flex-col')
+      const rect = pill?.getBoundingClientRect()
+      return pill && rect ? {
+        width: rect.width,
+        clientWidth: pill.clientWidth,
+        scrollWidth: pill.scrollWidth,
+      } : null
+    })
+    check(`[${theme}] fixed desktop pill contains the expanded style row at ${width}px`,
+      !!geometry && Math.abs(geometry.width - 318) <= 1
+        && geometry.scrollWidth <= geometry.clientWidth + 1,
+      JSON.stringify(geometry))
+  }
+  await page.setViewportSize({ width: 1200, height: 900 })
+  await page.click('[data-iw-bar="style"]'); await page.waitForTimeout(300)
+
   // ── HOTKEYS: Alt+N must BE the tap, not a second road ────────────────────
   // The row here is the CURATED order (settings, style, review, …), which is what makes this
   // discriminating: Alt+2 must hit `style` because style is SECOND — not because style is style.
@@ -264,10 +286,10 @@ for (const theme of ['day', 'night']) {
     await reviewBtn.click(); await page.waitForTimeout(700)
     const both = await page.evaluate(() => ({
       style: document.querySelector('[data-iw-bar="style"]')?.getAttribute('aria-pressed'),
-      reviewLit: !!document.querySelector('[data-iw-bar="review"]')?.className.match(/5c2d8a/),
+      review: document.querySelector('[data-iw-bar="review"]')?.getAttribute('aria-pressed'),
     }))
     check(`[${theme}] S closed when R took the bar — never both`,
-      both.style === 'false' && both.reviewLit, JSON.stringify(both))
+      both.style === 'false' && both.review === 'true', JSON.stringify(both))
 
     await reviewBtn.click(); await page.waitForTimeout(400)
   }

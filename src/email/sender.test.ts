@@ -5,6 +5,7 @@ import {
 } from './sender'
 
 const draft = (over: Partial<MailDraft> = {}): MailDraft => ({
+  ...over,
   headers: { to: ['ada@x.com'], subject: 'Hello', ...over.headers },
   body: over.body ?? 'Dear Ada,\n\nRegards',
 })
@@ -96,6 +97,17 @@ describe('fits — the length limits are real, and refusal beats truncation', ()
     const plain = fits('mailto', draft({ body: 'a'.repeat(300) })).length
     const encoded = fits('mailto', draft({ body: '\n'.repeat(300) })).length
     expect(encoded).toBeGreaterThan(plain)
+  })
+
+  it('refuses every compose-link handoff when attachments cannot be transferred', () => {
+    const attached = draft({
+      attachments: [{ filename: 'proposal.pdf', mimeType: 'application/pdf', size: 100 }],
+    })
+    for (const id of ['gmail-handoff', 'outlook-handoff', 'mailto'] as const) {
+      const result = fits(id, attached)
+      expect(result.ok).toBe(false)
+      expect(result.reason).toMatch(/cannot transfer attachments/i)
+    }
   })
 })
 

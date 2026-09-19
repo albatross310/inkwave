@@ -697,8 +697,14 @@ the container.
 - Moving between subdocs saves/flushes the outgoing active subdoc before transferring edit ownership.
   A save failure blocks the switch and reports the failure; it is never interpreted as an empty
   subdoc.
-- Navigation changes the active subdoc in the workspace. It must not mutate browser history and must
-  not require a page reload.
+- A successful move presents as a directional swipe with no opacity fade. Direct manipulation may
+  use bounded, inert neighbour renderings already positioned one viewport to either side; the live
+  editor remains unique. Programmatic moves may use bounded browser snapshots while ownership is
+  handed off. It must not clone or keep a second live document tree. Reduced-motion falls back to
+  an instant switch.
+- Navigation changes the active subdoc in the workspace and adds a same-document panel entry to
+  browser history. Back/Forward traverse those successful panel selections through `popstate` and
+  must not require a page reload. Document identity remains per-tab session state, not history state.
 
 #### D3.2 Trackpad, wheel, touch, and keyboard contract
 
@@ -718,8 +724,9 @@ the container.
 - **Buttons and keyboard:** the visible arrows are the baseline access path. When focus is not inside
   an editable field, Left/Right Arrow may navigate; inside an editor or header field, text-editing
   keys always win. A later settings surface may offer additional remappable shortcuts.
-- Browser back/forward is suppressed only for a gesture that the workspace has positively claimed.
-  Global interception outside the workspace is forbidden.
+- Safari's native swipe back/forward is suppressed only after the live multi-panel workspace has
+  positively identified horizontal intent. The browser's Back/Forward controls themselves traverse
+  Inkwave panel entries. Global interception outside the workspace is forbidden.
 
 #### D3.3 Overview (“manage all”) mode
 
@@ -918,15 +925,40 @@ interface StudioWorkspaceArchiveV2 {
 and historical email snapshots use the same reusable application-surface primitive, the message body
 lives inside the box, application presentation suppresses visual page gaps without forking the editor,
 and the detailed sending/provenance explanation is collapsed behind a concise visible statement.
+The 2026-09-07 refinement keeps email at native layout scale: a 900px preferred frame reflows to a
+narrow window instead of transform-scaling, unmarked text starts at 16px/12pt, and per-email text
+zoom starts at 100% with a visible/resettable percentage. The ordinary StyleBar is embedded in the
+compose frame. Direct Gmail send carries sanitised rich HTML plus plain fallback and verified local
+attachments as multipart MIME; compose-link handoff refuses attachments. Attachment bytes remain
+outside the current provenance hash and portable container until the archive format explicitly
+adds them. Connected Gmail Draft reconciliation is still plain-text-aware; formatted drafts remain
+saved locally and the remote sync is explicitly refused rather than silently flattening them.
 W2's first seam is also implemented: an explicit Focus/Studio switch moves the same live editor and
 email subdoc between isolated application chrome and contextual document paper, without recreating
 the EditorView. The choice is local presentation state scoped to the email document and historical
 snapshots follow it; it never enters document content or provenance. Multi-subdoc contextual pages,
-annotations, selection/preflight, and batch results remain specification only, as do W3–W7.
+annotations, selection/preflight, and batch results remain specification only. W3's first local
+sequence slice is implemented: a per-tab id sequence surviving reload, in-place active-document
+switching with outgoing flush + lock transfer, inert immediate-neighbour previews, accessible arrows,
+and dominance-gated one-item horizontal trackpad/two-finger touch navigation. The gesture latch
+survives the active-editor remount so one physical swipe's WebKit momentum tail cannot count as a
+second gesture; in-place targets auto-reveal after readiness because no loading-tip Continue control
+exists during navigation. Horizontal intent is reserved before Safari can begin its native history
+gesture; browser Back/Forward traverse same-document panel entries, with rapid requests serialised
+  behind the one-live-editor transfer. Direct horizontal gestures now move a prepainted, bounded
+  three-position strip: inert neighbours remain exactly one viewport to either side, the live paper
+  and strip share one level translate3d, and the water stays fixed while its wave marks follow the
+  gesture velocity. The landed preview is held over the one-live-editor transfer and the target
+  reveals instantly with no fade. Buttons/history retain the bounded opaque 240ms same-document View
+  Transition. New items enter left of
+their source, leaving the source on the right. The later shipped zoom contract reserves Shift for
+whole-page/water zoom, superseding W3's older Shift-navigation proposal. The strict local manifest
+store and new-email membership picker are implemented; overview/reorder, portable multi-subdoc
+containers, projection fan-out, and W4–W7 remain specification only.
 Duplicate-as-new is implemented as the next W2 seam: it saves the exact current source first, then
 creates a separate email document with copied headers/body but a new identity and no inherited
-receipts or live SCAS evidence. Until workspace placement lands, the new draft opens as its own
-one-subdoc document rather than appearing beside the source.
+receipts or live SCAS evidence. The local W3 sequence now places that draft immediately left of its
+source while retaining one live editor.
 
 1. **W1 — Isolated surface:** make the default email one centred screen-calibrated pixel-width box
    (900px at a 1728px logical screen width) on desktop and full-width on phone, ending after its content;
@@ -935,7 +967,11 @@ one-subdoc document rather than appearing beside the source.
    complete email subdocs with their bodies inside boxes, distinguish never-sent journal material,
    support duplicate-as-new, and add selection/preflight/per-item batch outcomes.
 3. **W3 — Local sequence:** introduce workspace manifest/index, active-subdoc switching, arrow controls,
-   two-finger/Shift-scroll navigation, outgoing flush, and static neighbour previews.
+   two-finger horizontal navigation, outgoing flush, and static neighbour previews. (Shift remains
+   whole-page/water zoom under the later editor gesture contract.) **Implemented slice:** the local
+   one-live-editor sequence, remount-safe gestures, static neighbours, strict manifest store, and
+   new-email picker that always includes Email plus zero/many explicitly chosen local containers.
+   Archive-v2 projection and later membership editing are not yet implemented.
 4. **W4 — Overview:** add the manage-all shortcut/button, virtualised thumbnails, activation, reorder,
    creation, and remove-from-workspace. Still one container per subdoc by default.
 5. **W5 — Workspace container:** add multi-subdoc `.studio` import/export with independently

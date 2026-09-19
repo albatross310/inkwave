@@ -1,7 +1,6 @@
-// Deterministic rest-scene integration probe. It proves three browser-facing claims:
-//   1. genuine vertical scroll updates mark opacity;
-//   2. scrollTop + the fixed 2240px period reproduces exactly the same scene; and
-//   3. an editor-zoom gesture (including its anchor scroll correction) does not re-phase marks.
+// Low-power rest-water integration probe. It proves that genuine scroll moves the retained wave
+// scene, the two raster backings stay within their 1280×720 visible budget, the old giant DOM fields
+// stay unpainted, and zoom-anchor corrections neither re-phase nor promote the water.
 // Numbers only; no screenshots. Uses the production build through the faithful local wave server.
 import { chromium, webkit } from '@playwright/test'
 import { autoWaveBase } from '../wave-video/autoserve.mjs'
@@ -19,8 +18,16 @@ try {
   process.exit(2)
 }
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+// Reproduce the isolated installed-PWA failure: an old benchmark flag may remain in that storage
+// jar, but production pagination must still mount unless the benchmark marker accompanies it.
+await context.addInitScript(() => {
+  localStorage.setItem('inkwave:pagOff', '1')
+  sessionStorage.removeItem('inkwave:benchmark')
+})
 const page = await context.newPage()
-await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+// The Linux Playwright WebKit port does not expose OPFS. Use the app's explicit blank-document
+// intent so this compositor proof cannot mistake that harness gap for a missing water scene.
+await page.goto(BASE + '/?blank=1', { waitUntil: 'domcontentloaded' })
 
 try {
   await page.waitForFunction(() => {
@@ -28,25 +35,35 @@ try {
       .find((el) => el.querySelector('.ProseMirror') && !el.classList.contains('iw-wave-covered'))
     return surface && !surface.classList.contains('iw-wave-anim')
       && !surface.classList.contains('iw-wave-coast')
-      && surface.querySelectorAll('.iw-scene-scroll').length === 72
+      && window.__iwPaginationReady === true
+      && surface.hasAttribute('data-iw-low-power-water')
+      && surface.querySelectorAll('.iw-low-power-water-canvas').length === 2
   }, null, { timeout: 25_000 })
 } catch (error) {
-  console.error('INCONCLUSIVE: the route never produced a resting editor with the fixed 72-mark scroll scene.', error)
+  console.error('INCONCLUSIVE: the route never produced the resting low-power water scene.', error)
   await browser.close()
   process.exit(2)
 }
 
 // Give the otherwise short new document ample scroll range without changing app state.
 await page.evaluate(() => {
-  const prose = document.querySelector('.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .ProseMirror')
-  if (prose instanceof HTMLElement) prose.style.minHeight = '5200px'
+  const style = document.createElement('style')
+  style.dataset.iwProbeScrollRange = ''
+  style.textContent = '.inkwave-editor-surface.iw-fill:not(.iw-wave-covered) .ProseMirror { min-height: 5200px !important; }'
+  document.head.appendChild(style)
 })
-const enoughRange = await page.evaluate(() => {
-  const surface = document.querySelector('.inkwave-editor-surface.iw-fill:not(.iw-wave-covered)')
-  return surface instanceof HTMLElement && surface.scrollHeight - surface.clientHeight >= 3000
+const range = await page.evaluate(() => {
+  const surface = [...document.querySelectorAll('.inkwave-editor-surface.iw-fill')]
+    .find((el) => el.querySelector('.ProseMirror') && !el.classList.contains('iw-wave-covered'))
+  return surface instanceof HTMLElement
+    ? {
+        scrollHeight: surface.scrollHeight,
+        clientHeight: surface.clientHeight,
+      }
+    : null
 })
-if (!enoughRange) {
-  console.error('INCONCLUSIVE: the probe could not create enough scroll range to compare a full period.')
+if (!range || range.scrollHeight - range.clientHeight < 3000) {
+  console.error(`INCONCLUSIVE: the probe could not create enough scroll range to compare a full period (${JSON.stringify(range)}).`)
   await browser.close()
   process.exit(2)
 }
@@ -58,8 +75,63 @@ const scene = async () => page.evaluate(() => {
   return {
     top: surface.scrollTop,
     zoom: getComputedStyle(surface).getPropertyValue('--iw-editor-zoom').trim(),
+    zoomWaterHold: surface.hasAttribute('data-iw-zoom-water-hold'),
+    waveX: Number.parseFloat(surface.style.getPropertyValue('--wave-x')) || 0,
+    canvasX: [...surface.querySelectorAll('.iw-low-power-water-canvas')]
+      .map((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).m41),
     opacity: [...surface.querySelectorAll('.iw-scene-scroll')]
       .map((el) => Number((el).style.opacity || 0)),
+  }
+})
+
+const layerState = async () => page.evaluate(() => {
+  const surface = [...document.querySelectorAll('.inkwave-editor-surface.iw-fill')]
+    .find((el) => el.querySelector('.ProseMirror') && !el.classList.contains('iw-wave-covered'))
+  if (!(surface instanceof HTMLElement)) throw new Error('no resting live editor surface')
+  const wave = getComputedStyle(surface, '::before')
+  const fields = [...surface.querySelectorAll('.iw-twk-field')]
+  const canvases = [...surface.querySelectorAll('.iw-low-power-water-canvas')]
+  const paper = surface.querySelector('.iw-magnify-box > div')
+  const paperStyle = paper ? getComputedStyle(paper) : null
+  const paperRect = paper?.getBoundingClientRect()
+  return {
+    top: surface.scrollTop,
+    active: surface.hasAttribute('data-iw-scroll-active'),
+    threaded: surface.hasAttribute('data-iw-threaded-scroll-water'),
+    waveWillChange: wave.willChange,
+    waveTransform: wave.transform,
+    magnify: getComputedStyle(surface).getPropertyValue('--iw-magnify').trim() || '1',
+    shiftFrozen: surface.hasAttribute('data-iw-shift-scroll-frozen'),
+    overflowY: getComputedStyle(surface).overflowY,
+    paper: paper && paperStyle && paperRect ? {
+      transform: paperStyle.transform,
+      zoom: paperStyle.zoom,
+      clientWidth: paper.clientWidth,
+      rectWidth: paperRect.width,
+      rectLeft: paperRect.left,
+      rectTop: paperRect.top,
+    } : null,
+    fieldWillChange: fields.map((field) => getComputedStyle(field).willChange),
+    fieldInlineTransform: fields.map((field) => field.style.transform),
+    fieldSetDisplay: getComputedStyle(surface.querySelector('.iw-twk-set')).display,
+    canvasWillChange: canvases.map((canvas) => getComputedStyle(canvas).willChange),
+    canvasTransforms: canvases.map((canvas) => canvas.style.transform),
+    canvasAnimations: canvases.map((canvas) => {
+      const style = getComputedStyle(canvas)
+      return {
+        name: style.animationName,
+        duration: style.animationDuration,
+        iterations: style.animationIterationCount,
+        timeline: style.animationTimeline,
+        currentTime: canvas.getAnimations()[0]?.currentTime?.toString() ?? null,
+      }
+    }),
+    canvasBacking: canvases.map((canvas) => ({
+      width: canvas.width,
+      height: canvas.height,
+      cssWidth: Number.parseFloat(canvas.style.width),
+      cssHeight: Number.parseFloat(canvas.style.height),
+    })),
   }
 })
 
@@ -75,9 +147,32 @@ const scrollTo = async (top) => {
 
 const zero = await scrollTo(0)
 const first = await scrollTo(360)
-const repeated = await scrollTo(360 + 2240)
-const changed = first.opacity.some((value, index) => Math.abs(value - zero.opacity[index]) > 1e-8)
-const periodic = first.opacity.every((value, index) => Math.abs(value - repeated.opacity[index]) < 1e-8)
+const activeLayers = await layerState()
+const repeated = await scrollTo(360 + 140 / 0.06)
+const changed = first.canvasX.some((value, index) => Math.abs(value - zero.canvasX[index]) > 0.1)
+const periodicMaxDelta = first.canvasX.reduce((max, value, index) => Math.max(max, Math.abs(value - repeated.canvasX[index])), 0)
+const periodic = periodicMaxDelta < 0.2
+const scrollMotionPolicy = ENGINE === 'webkit'
+  ? (activeLayers.threaded ? changed && periodic : !changed)
+  : changed && periodic
+const marksStayedStatic = first.opacity.every((value, index) => Math.abs(value - zero.opacity[index]) < 1e-8)
+await page.waitForTimeout(1550)
+const finalRestLayers = await layerState()
+const idleLayersReleased = !finalRestLayers.active
+  && finalRestLayers.waveWillChange === 'auto'
+  && finalRestLayers.waveTransform === 'none'
+  && finalRestLayers.fieldWillChange.every((value) => value === 'auto')
+  && finalRestLayers.fieldSetDisplay === 'none'
+  && finalRestLayers.canvasWillChange.every((value) => value === 'auto')
+const activeLayersPromoted = activeLayers.active
+  && activeLayers.waveWillChange === 'auto'
+  && activeLayers.fieldWillChange.every((value) => value === 'auto')
+  && activeLayers.canvasWillChange.every((value) => value === (ENGINE === 'webkit' && !activeLayers.threaded ? 'auto' : 'transform'))
+const lowResolution = finalRestLayers.canvasBacking.length === 2
+  && finalRestLayers.canvasBacking.every((canvas) => {
+    const visibleBackingWidth = canvas.width * 1280 / canvas.cssWidth
+    return visibleBackingWidth <= 1280.5 && canvas.height <= 720 && canvas.cssHeight === 800
+  })
 
 // Geometry behind the visible "dash not parallel" regression: x/y is the dash centre and the
 // field origin must be congruent with the viewport-anchored 140px SVG tile.
@@ -142,14 +237,104 @@ await page.keyboard.up('Control')
 await page.waitForTimeout(120)
 const afterZoom = await scene()
 const zoomed = afterZoom.zoom !== beforeZoom.zoom
-const zoomStable = beforeZoom.opacity.every((value, index) => Math.abs(value - afterZoom.opacity[index]) < 1e-8)
+const zoomStable = beforeZoom.canvasX.every((value, index) => Math.abs(value - afterZoom.canvasX[index]) < 0.2)
 
-console.log(`── ${ENGINE} deterministic scroll scene ──`)
-console.log(`genuine scroll changed marks : ${changed ? '✓' : '✗'}`)
-console.log(`+2240px repeated scene       : ${periodic ? '✓' : '✗'}`)
+// Magnify's cursor-anchor correction also emits scroll. It must not wake the enormous decorative
+// water layers: the sway is intentionally held for zoom, so promotion there buys no visual work.
+await page.waitForTimeout(700)
+await scrollTo(1200)
+await page.waitForTimeout(1550)
+const beforeMagnify = await layerState()
+await page.keyboard.down('Shift')
+const armedMagnify = await layerState()
+await page.mouse.wheel(0, -120)
+await page.waitForTimeout(50)
+await page.mouse.wheel(0, -120)
+await page.waitForTimeout(50)
+const movingMagnify = await layerState()
+await page.keyboard.up('Shift')
+await page.waitForTimeout(320)
+const afterMagnify = await layerState()
+const magnified = afterMagnify.magnify !== beforeMagnify.magnify
+const shiftStoppedScroll = armedMagnify.shiftFrozen && armedMagnify.overflowY === 'hidden'
+const supportsCssZoom = await page.evaluate(() => CSS.supports('zoom', '1'))
+const settledTextRaster = !supportsCssZoom || !!afterMagnify.paper
+  && afterMagnify.paper.transform === 'none'
+  && Math.abs(Number(afterMagnify.paper.zoom) - Number(afterMagnify.magnify)) < 0.001
+  && Math.abs(afterMagnify.paper.rectWidth / afterMagnify.paper.clientWidth - Number(afterMagnify.magnify)) < 0.002
+const settledPoseStable = !!movingMagnify.paper && !!afterMagnify.paper
+  && Math.abs(movingMagnify.top - afterMagnify.top) < 0.6
+  && Math.abs(movingMagnify.paper.rectLeft - afterMagnify.paper.rectLeft) < 0.2
+  && Math.abs(movingMagnify.paper.rectTop - afterMagnify.paper.rectTop) < 0.6
+  && Math.abs(movingMagnify.paper.rectWidth - afterMagnify.paper.rectWidth) < 0.2
+const zoomKeptWaterReleased = !afterMagnify.active
+  && afterMagnify.waveWillChange === 'auto'
+  && afterMagnify.waveTransform === 'none'
+  && afterMagnify.fieldWillChange.every((value) => value === 'auto')
+  && afterMagnify.canvasWillChange.every((value) => value === 'auto')
+
+// Start a real native scroll before the post-zoom hold would naturally expire. The input boundary
+// must restore Safari's threaded timeline before native scrolling begins, rather than attaching it
+// in the middle of the gesture and hitching the signature water.
+const beforePostZoomScroll = await scene()
+await page.mouse.wheel(0, 180)
+await page.waitForTimeout(100)
+const afterPostZoomScroll = await scene()
+const postZoomScrollResumed = afterPostZoomScroll.top > beforePostZoomScroll.top
+  && !afterPostZoomScroll.zoomWaterHold
+  && afterPostZoomScroll.canvasX.some((value, index) => Math.abs(value - beforePostZoomScroll.canvasX[index]) > 0.1)
+
+// A real multi-page document must still paginate with the stale PWA-only `pagOff` key seeded at
+// startup. This is not satisfied merely by the readiness event: require actual tall gap widgets.
+await page.evaluate(() => {
+  localStorage.setItem('inkwave:gappedPages', '1')
+  const sentence = 'A measured paragraph keeps enough ordinary words to cross several canonical page boundaries. '
+  const content = Array.from({ length: 120 }, (_, index) => ({
+    type: 'paragraph',
+    content: [{ type: 'text', text: `${index + 1}. ${sentence.repeat(4)}` }],
+  }))
+  const now = new Date().toISOString()
+  const doc = {
+    id: `pwa-pagination-${Date.now()}`,
+    title: 'PWA pagination proof',
+    contentJson: { type: 'doc', content },
+    createdAt: now,
+    updatedAt: now,
+    schemaVersion: '0.1.0',
+    scasLimitN: 'infinite',
+    scasSessionSeed: '00000000-0000-4000-8000-000000000000',
+  }
+  window.dispatchEvent(new CustomEvent('inkwave:open-doc', { detail: { id: doc.id, doc } }))
+})
+let paginationRecovered = false
+let paginationGapCount = 0
+try {
+  await page.waitForFunction(() => window.__iwPaginationReady === true
+    && document.querySelectorAll('.inkwave-page-gap:not(.iw-break-marker)').length >= 3, null, { timeout: 25_000 })
+  paginationGapCount = await page.locator('.inkwave-page-gap:not(.iw-break-marker)').count()
+  paginationRecovered = paginationGapCount >= 3
+} catch { /* a missing page set is a product failure reported below */ }
+
+console.log(`── ${ENGINE} low-power scroll scene ──`)
+console.log(`engine scroll-water policy   : ${scrollMotionPolicy ? '✓' : '✗'} (${activeLayers.threaded ? 'threaded timeline' : ENGINE === 'webkit' ? 'static fallback' : '30 Hz motion'})`)
+if (activeLayers.threaded) console.log(`threaded state               : ${JSON.stringify({ zero: zero.canvasX, first: first.canvasX, repeated: repeated.canvasX, animations: activeLayers.canvasAnimations })}`)
+console.log(`one wave period repeats      : ${!changed || periodic ? '✓' : '✗'} (${first.top} → ${repeated.top}, max Δ ${periodicMaxDelta.toFixed(3)}px)`)
+console.log(`DOM marks stayed static      : ${marksStayedStatic ? '✓' : '✗'}`)
+console.log(`visible backing ≤1280×720  : ${lowResolution ? '✓' : '✗'} (${JSON.stringify(finalRestLayers.canvasBacking)})`)
+console.log(`idle layers released         : ${idleLayersReleased ? '✓' : '✗'}`)
+console.log(`scroll layer policy correct  : ${activeLayersPromoted ? '✓' : '✗'}`)
 console.log(`dashes below + parallel       : ${parallel ? '✓' : '✗'} (${geometry.count} dashes, ${geometry.offsetCount} gaps, angle error ${geometry.maxAngleError.toFixed(3)}°, y error ${geometry.maxYError.toFixed(3)}px)`)
 console.log(`editor zoom committed        : ${zoomed ? '✓' : '✗'} (${beforeZoom.zoom || '1'} → ${afterZoom.zoom || '1'})`)
-console.log(`zoom left marks unchanged    : ${zoomStable ? '✓' : '✗'} (scrollTop ${beforeZoom.top} → ${afterZoom.top})`)
+console.log(`zoom left water unchanged    : ${zoomStable ? '✓' : '✗'} (scrollTop ${beforeZoom.top} → ${afterZoom.top})`)
+console.log(`water magnify committed       : ${magnified ? '✓' : '✗'} (${beforeMagnify.magnify} → ${afterMagnify.magnify})`)
+console.log(`Shift froze native scroll     : ${shiftStoppedScroll ? '✓' : '✗'} (${armedMagnify.overflowY})`)
+console.log(`settled text re-rasterised    : ${settledTextRaster ? '✓' : '✗'} (${JSON.stringify(afterMagnify.paper)})`)
+console.log(`settled raster kept its pose  : ${settledPoseStable ? '✓' : '✗'}`)
+console.log(`zoom kept water unpromoted   : ${zoomKeptWaterReleased ? '✓' : '✗'}`)
+console.log(`post-zoom scroll starts live : ${postZoomScrollResumed ? '✓' : '✗'} (${beforePostZoomScroll.top} → ${afterPostZoomScroll.top})`)
+console.log(`stale PWA flag cannot unpage : ${paginationRecovered ? '✓' : '✗'} (${paginationGapCount} real gaps)`)
 
 await browser.close()
-process.exit(changed && periodic && parallel && zoomed && zoomStable ? 0 : 1)
+process.exit(scrollMotionPolicy && marksStayedStatic && lowResolution && idleLayersReleased && activeLayersPromoted && parallel
+  && zoomed && zoomStable && magnified && shiftStoppedScroll && settledTextRaster && settledPoseStable
+  && zoomKeptWaterReleased && postZoomScrollResumed && paginationRecovered ? 0 : 1)

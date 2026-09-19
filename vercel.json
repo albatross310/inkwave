@@ -2,27 +2,79 @@
   "buildCommand": "pnpm build",
   "outputDirectory": "build/client",
   "functions": {
-    "api/pdf.mjs": { "memory": 1536, "maxDuration": 60 }
+    "api/pdf.mjs": {
+      "memory": 1536,
+      "maxDuration": 60
+    },
+    "api/readalong.mjs": {
+      "maxDuration": 300
+    }
   },
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/__spa-fallback.html" }
+    {
+      "source": "/((?!api/|readalong/).*)",
+      "destination": "/__spa-fallback.html"
+    }
   ],
   "headers": [
     {
       "source": "/whisper-probe.html",
       "headers": [
-        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
-        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" }
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "require-corp"
+        }
       ]
     },
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
-        { "key": "Permissions-Policy", "value": "camera=(self), microphone=(), geolocation=(), payment=(self \"https://js.stripe.com\")" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(self), microphone=(), geolocation=(), payment=(self \"https://js.stripe.com\")"
+        }
+      ]
+    },
+    {
+      "source": "/((?!readalong/).*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        }
+      ]
+    },
+    {
+      "source": "/readalong/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; form-action 'none'"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
       ]
     }
   ]

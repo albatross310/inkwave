@@ -2,13 +2,11 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { listFolders, listOneDriveFiles, getRecentFolders, createOneDriveFolder, startOneDriveSignIn, type DriveFolder, type OneDriveFolder, type OneDriveFileEntry } from '../storage/onedrive'
 import { getListing, putListing, listingKey, type CachedListing } from '../storage/openCache'
+import { ONE_DRIVE_BLUE as ONE, ONE_DRIVE_HOVER as ONE_HOVER } from './oneDriveBrand'
 
 // Open a .studio/.inkwave file FROM OneDrive (for phones, where OneDrive isn't a mounted Explorer
 // folder). Browse folders, pick a file → the caller downloads it, opens it, and adopts it as the
 // sync target so it keeps syncing there. OneDrive-branded, matches the folder picker.
-const ONE = '#0364B8'
-const ONE_HOVER = '#f1f7fc'
-
 function OneDriveCloud() {
   return (
     <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" style={{ display: 'block' }}>
@@ -33,6 +31,8 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
   // Silent token gone (expired session, private-window storage) → an explicit sign-in INSIDE the
   // picker, never an empty/broken list. The tap is a user gesture, so the redirect flow is fine.
   const [needsAuth, setNeedsAuth] = useState(false)
+  const [authMessage, setAuthMessage] = useState<string | null>(null)
+  const [authBusy, setAuthBusy] = useState(false)
   const [opening, setOpening] = useState(false)
   const [recent, setRecent] = useState<OneDriveFolder[]>([])
   const [reload, setReload] = useState(0)
@@ -87,6 +87,21 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
     setBusy(true)
     try { await createOneDriveFolder(currentId, name); setCreating(false); setNewName(''); setReload((r) => r + 1) }
     finally { setBusy(false) }
+  }
+
+  async function retryAuth() {
+    setAuthBusy(true)
+    setAuthMessage(null)
+    const result = await startOneDriveSignIn()
+    setAuthBusy(false)
+    if (!result.ok) {
+      setAuthMessage(result.error)
+      return
+    }
+    if (result.mode === 'popup') {
+      setNeedsAuth(false)
+      setReload((value) => value + 1)
+    }
   }
 
   useEffect(() => {
@@ -162,14 +177,28 @@ export function OneDriveFileOpener({ onOpen, onClose }: {
         )}
 
         <div className="border rounded-lg max-h-72 overflow-auto" style={{ borderColor: '#e6eef5' }}>
-          {error && <p className="text-xs text-red-700 p-3">⚠ {error}</p>}
+          {error && (
+            <div className="p-4">
+              <p className="text-xs text-red-700 mb-3">⚠ {error}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setReload((value) => value + 1)}
+                  className="text-sm font-sans text-white px-3 py-2 rounded" style={{ background: ONE }}>Try again</button>
+                <button type="button" onClick={onClose}
+                  className="text-sm font-sans px-3 py-2 rounded border text-stone-600">Back to document</button>
+              </div>
+            </div>
+          )}
           {needsAuth && (
             <div className="p-4 text-center">
-              <p className="text-sm text-stone-500 mb-3 font-sans">Your OneDrive session has ended — sign in again to browse your files.</p>
-              <button type="button" onClick={() => void startOneDriveSignIn()}
-                className="text-sm font-sans text-white px-4 py-1.5 rounded" style={{ background: ONE }}>
-                Sign in to OneDrive
-              </button>
+              <p className="text-sm text-stone-500 mb-3 font-sans">{authMessage ?? 'Your OneDrive session has ended — sign in again to browse your files.'}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" disabled={authBusy} onClick={() => void retryAuth()}
+                  className="text-sm font-sans text-white px-3 py-2 rounded disabled:opacity-60" style={{ background: ONE }}>
+                  {authBusy ? 'Opening…' : 'Try again'}
+                </button>
+                <button type="button" onClick={onClose}
+                  className="text-sm font-sans px-3 py-2 rounded border text-stone-600">Back to document</button>
+              </div>
             </div>
           )}
           {!error && !needsAuth && (folders === null || files === null) && <p className="text-sm text-stone-400 p-3">{opening ? 'Opening…' : 'Loading…'}</p>}

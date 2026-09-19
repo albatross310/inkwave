@@ -1270,7 +1270,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               enabled: (window as unknown as { __iwLiveWarm?: boolean }).__iwLiveWarm !== false, // live known-negative
               placeholders, phone: phoneLike(), step, from, gapMs,
               delayMs: LIVE_WARM_DELAY_MS, lastWarmMs,
-              minStep: ZOOM_STEP_MIN, maxStep: ZOOM_STEP_MAX, cached: liveCache.has(step + Math.sign(step - (from ?? step))),
+              minStep: ZOOM_STEP_MIN,
+              maxStep: ZOOM_STEP_MAX,
+              cached: from !== null && liveCache.has(step + (step - from)),
             })
             if (!plan.warm) return
             const k = plan.step
@@ -1352,31 +1354,20 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             scheduleLiveWarm(d.step, from, gap, placeholders, d.z0 ?? stepToZoom(d.step))
           }
           window.addEventListener('inkwave:zoom-step', onZoomStep)
-          // Idle precompute: one step per frame, nearest-first, until the WHOLE lattice is warm (it
-          // is only ~18 steps and a miss costs a synchronous mid-gesture reflow). Each measure is
-          // the canonicalMeasure trick on the LIVE zoom var — set, read, restore, one task, never
-          // painted. ⚠ STRICTLY DESKTOP AND GENUINELY IDLE: never during a gesture, never in a
-          // typing pause, never on phone, never while hidden. Each step is a full-document
-          // hypothetical reflow, and the old 350ms start landed ~18 long frames right on the reveal
-          // chain. A zoom during the cold window stays CORRECT — a miss measures live.
+          // POWER FLOOR: do not speculatively sweep the dense zoom lattice at rest. Every candidate
+          // is a FULL-DOCUMENT hypothetical reflow; at 2% steps the former ±12 warm window meant up
+          // to 25 whole-document layouts after reveal and after an edit invalidated the cache. That
+          // work scaled directly with document size and made an apparently idle editor burn power.
+          // Correctness never depended on the sweep: the current step is cached by paint(), a miss
+          // measures exactly, and scheduleLiveWarm predicts only the next step while a writer is
+          // actively zooming. The quiet gate below remains solely for the one idle exactness verify.
           // → docs/archive/pagination-rounds.md#step-cache
-          let preTimer: ReturnType<typeof setTimeout> | undefined
-          let preRaf = 0
           let quietUntil = 0
-          // ⚠ The raw last-input timestamp is kept ALONGSIDE `quietUntil`, not derived from it:
-          // quietUntil is a POLICY (a 1500ms hold tuned for the full-lattice sweep) and the early
-          // warm needs the underlying FACT so it can apply its own, much shorter hold (R9).
-          let lastInputAt = 0
           const bumpQuiet = (ms: number) => {
             quietUntil = Math.max(quietUntil, performance.now() + ms)
           }
           const onPreActivity = () => {
-            lastInputAt = performance.now()
             bumpQuiet(1500)
-            // ⚠ CANCEL the zoom-scoped warm on ANY input (Peter: "scrolling is jittery") — each warm
-            // step is a full-document hypothetical reflow. The 150ms grace exempts the settle's OWN
-            // scroll events; anything later is a real user input (R9).
-            if (performance.now() > zoomWarmStart + 150) zoomWarmUntil = 0
           }
           const onPreChoreo = () => bumpQuiet(3000)
           const PRE_ACT_EVS = ['pointerdown', 'wheel', 'keydown', 'touchmove', 'scroll'] as const
@@ -1384,117 +1375,12 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           PRE_ACT_EVS.forEach((ev) => window.addEventListener(ev, onPreActivity, { passive: true, capture: true }))
           PRE_CHOREO_EVS.forEach((ev) => window.addEventListener(ev, onPreChoreo))
           bumpQuiet(3000) // the mount itself is a choreography
-          // ZOOM-SCOPED WARM WINDOW (Peter: "build/refresh the step cache only on zoom-zone entry /
-          // first step / idle after settle — never on the typing path"). The idle gate's activity
-          // events include 'wheel'/'scroll', so a zoom session pushed its own warm-up out 1.5s
-          // forever and the cache was measured COLD through whole gestures. A settle opens this
-          // window: inside it the quietUntil gate is bypassed (typing and the gesture hold still
-          // block) and the warm is RADIUS-LIMITED, so the next notches hit without a full-lattice
-          // reflow burst on every settle. → docs/archive/pagination-rounds.md#step-cache
-          let zoomWarmUntil = 0
-          let zoomWarmStart = 0 // grace anchor: inputs within 150ms of the settle are our own
-          const ZOOM_WARM_RADIUS = 5
-          const preBusy = () =>
+          const backgroundBusy = () =>
             (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
             || editDebounce !== undefined
             || bibDebounce !== undefined
-            || (performance.now() < quietUntil && performance.now() >= zoomWarmUntil)
+            || performance.now() < quietUntil
             || document.visibilityState === 'hidden'
-          const nextUncached = (): number | null => {
-            const k0 = currentStep()
-            const radius = performance.now() < zoomWarmUntil ? ZOOM_WARM_RADIUS : ZOOM_STEP_MAX - ZOOM_STEP_MIN
-            for (let d = 0; d <= radius; d++) {
-              for (const k of d === 0 ? [k0] : [k0 + d, k0 - d]) {
-                if (k < ZOOM_STEP_MIN || k > ZOOM_STEP_MAX) continue
-                if (!stepCache.has(k)) return k
-              }
-            }
-            return null
-          }
-          const measureStep = (k: number) => {
-            const surface = surfaceOf()
-            if (!surface || !sheet || !layer) return
-            // The hypothetical layout can be shorter than the live one → the browser would clamp
-            // the scroll; save/restore exactly (same pattern as the canonical measure window).
-            const scroller = surface.classList.contains('iw-fill') && !surface.classList.contains('is-phone') ? surface : null
-            const savedTop = scroller ? scroller.scrollTop : window.scrollY
-            const savedLeft = scroller ? scroller.scrollLeft : window.scrollX
-            const prev = surface.style.getPropertyValue('--iw-editor-zoom')
-            surface.style.setProperty('--iw-editor-zoom', String(stepToZoom(k)))
-            let geo: BandGeo | null = null
-            try {
-              geo = readBands() // forces the hypothetical layout; set → read → restore never paints
-            } finally {
-              if (prev) surface.style.setProperty('--iw-editor-zoom', prev)
-              else surface.style.removeProperty('--iw-editor-zoom')
-              if (scroller) { scroller.scrollTop = savedTop; scroller.scrollLeft = savedLeft }
-              else window.scrollTo(savedLeft, savedTop)
-            }
-            if (geo) { stepCache.set(k, geo); cacheStats.precomputed++ }
-          }
-          const precomputeTick = () => {
-            preRaf = 0
-            if (destroyed || !gapped || phoneLike()) return
-            if (preBusy()) { schedulePrecompute(500); return } // back off, retry when quiet
-            const k = nextUncached()
-            if (k == null) return // the whole lattice is warm
-            const preT0 = performance.now() // perflog: each step is a full hypothetical reflow
-            measureStep(k)
-            notePerf('precompute-step', performance.now() - preT0)
-            preRaf = requestAnimationFrame(precomputeTick) // spread: one hypothetical reflow per frame
-          }
-          const schedulePrecompute = (delay = 350) => {
-            if (!gapped) return // panels are the cache's only consumer; markers repaint live
-            if (preTimer) clearTimeout(preTimer)
-            preTimer = setTimeout(() => {
-              preTimer = undefined
-              if (!preRaf) preRaf = requestAnimationFrame(precomputeTick)
-            }, delay)
-          }
-          // EARLY WARM (Peter: "are we warm loading the first few levels of zoom in and out… it
-          // feels slow coz its lagging, not the actual distance"). Every reveal-chain event bumps
-          // `preBusy()`'s quietUntil by 3000ms, so the FULL warm cannot start until seconds after
-          // the page is interactive — and a writer who opens a document and reaches for zoom hits a
-          // stone-cold cache, which reads as "laggy" rather than "needs more finger travel".
-          // ⚠ IT DOES NOT TOUCH quietUntil OR preBusy — a SEPARATE warm, fired once a short beat
-          // after the reveal, that skips only the part of preBusy protecting the reveal's own
-          // settling from a much bigger sweep. It still defers behind a genuine gesture or edit.
-          // → docs/archive/pagination-rounds.md#step-cache
-          let earlyWarmDone = false
-          const earlyWarmTick = (remaining: number[]) => {
-            if (destroyed || !gapped || phoneLike() || earlyWarmDone) return
-            if (remaining.length === 0) { earlyWarmDone = true; return }
-            // Defer while anything real is happening: __iwZoomHold covers an in-flight gesture, the
-            // debounces cover typing, and `lastInputAt` covers scroll/pointer work nothing else here
-            // would catch. ⚠ 250ms, deliberately far shorter than the full sweep's 1500ms hold —
-            // this warm must resume promptly BETWEEN a writer's interactions (R9).
-            const busy = (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold === true
-              || editDebounce !== undefined || bibDebounce !== undefined
-              || document.visibilityState === 'hidden'
-              || performance.now() - lastInputAt < 250
-            if (busy) { setTimeout(() => earlyWarmTick(remaining), 300); return }
-            const [k, ...rest] = remaining
-            if (!stepCache.has(k)) measureStep(k)
-            requestAnimationFrame(() => earlyWarmTick(rest))
-          }
-          const onEarlyWarm = () => {
-            if (earlyWarmDone) return
-            window.removeEventListener('inkwave:editor-revealed', onEarlyWarm)
-            // ⚠ WARM THE WHOLE LATTICE, nearest-first (Peter: "goes like three zooms then stops then
-            // another three"). That symptom IS a five-step radius: the gesture walks off the warm
-            // edge into cold steps that each cost a synchronous full-document reflow. The lattice is
-            // only ~20 steps, so warming all of it removes the cliff rather than moving it. Cost
-            // stays bounded and paced — one reflow per frame, each deferred by the busy check.
-            const k0 = currentStep()
-            const steps: number[] = []
-            for (let d = 0; d <= ZOOM_STEP_MAX - ZOOM_STEP_MIN; d++) {
-              for (const k of d === 0 ? [k0] : [k0 + d, k0 - d]) {
-                if (k >= ZOOM_STEP_MIN && k <= ZOOM_STEP_MAX && !steps.includes(k)) steps.push(k)
-              }
-            }
-            setTimeout(() => earlyWarmTick(steps), 400)
-          }
-          window.addEventListener('inkwave:editor-revealed', onEarlyWarm)
 
           // Latch + announce the FIRST successful measure — the editor's one-paint reveal gate
           // (TiptapEditor `settled`) waits for it so text and page marks appear together. Plus the
@@ -1506,7 +1392,6 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               window.dispatchEvent(new Event('inkwave:pagination-ready'))
             }
             window.dispatchEvent(new Event('inkwave:pagination-measured'))
-            schedulePrecompute() // idle re-warm of the step lattice (no-op when already warm)
           }
           const recompute = () => {
             raf = 0
@@ -1857,7 +1742,13 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
             if (scrollerRef) {
               if (scrollerRef.scrollTop !== savedTopRef) scrollerRef.scrollTop = savedTopRef
               const el2 = scrollerRef, want = savedTopRef
-              requestAnimationFrame(() => { if (Math.abs(el2.scrollTop - want) > 1) el2.scrollTop = want })
+              const restoreRevision = scrollRestoreRevision(el2)
+              requestAnimationFrame(() => {
+                // announceMeasured below lets a returning workspace panel restore its reading
+                // position. That newer owner supersedes our pre-measure offset (often zero).
+                if (scrollRestoreRevision(el2) === restoreRevision && Math.abs(el2.scrollTop - want) > 1)
+                  el2.scrollTop = want
+              })
             }
             tDispatch = performance.now() - tPhase
             // Re-measure & reposition the sheet panels after the decorations land (DOM settled).
@@ -1905,14 +1796,14 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           let idleFullTimer: ReturnType<typeof setTimeout> | undefined
           // LAZY EXACT REFRESH: after every scoped measure, a genuine-idle full measure re-verifies
           // the whole document quietly (sig-guard → no visible change when the scoped result was
-          // exact) and refreshes the incremental base. Input-gated by the same recency signal the
-          // step-cache precompute uses (preBusy), so it never lands in a typing pause.
+          // exact) and refreshes the incremental base. Input-gated, so it never lands in a typing
+          // pause. This is ONE correctness verification, not a zoom-step cache sweep.
           const scheduleIdleFull = (delay = 2500) => {
             if (idleFullTimer) clearTimeout(idleFullTimer)
             idleFullTimer = setTimeout(function idleFull() {
               idleFullTimer = undefined
               if (destroyed) return
-              if (preBusy()) { idleFullTimer = setTimeout(idleFull, Math.min(1200, delay)); return }
+              if (backgroundBusy()) { idleFullTimer = setTimeout(idleFull, Math.min(1200, delay)); return }
               forceFullOnce = true
               forceRecompute()
             }, delay)
@@ -1973,17 +1864,14 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
           // EXIT already applied full-regime band geometry in the exit task — so ⚠ BOTH PLATFORMS
           // DEFER EVERYTHING HEAVY OFF THE SETTLE (Peter: "text reflow should be no slower than
           // before; pages painted instantly from the math"): no immediate measure, no immediate
-          // paint. The full verify runs at genuine idle and the zoom-scoped warm in the same quiet
-          // gaps, both cancelled by any input.
+          // paint. The one full verify runs at genuine idle; step warming happens only inside a live
+          // zoom gesture, never as background work.
           // → docs/archive/pagination-rounds.md#step-cache
           const zoomCb = () => {
             if (destroyed) return
             liveCache.clear() // gesture over — placeholder-regime geometry is stale for the next gesture
             if (phoneLike()) return // exit already applied exact bands; nothing settles-time on phone
-            zoomWarmStart = performance.now()
-            zoomWarmUntil = zoomWarmStart + 2000
             scheduleIdleFull(600)
-            schedulePrecompute(250)
           }
           window.addEventListener('inkwave:zoom-settled', zoomCb)
           // PRINT FLOOR (round-6, Peter: "render it all properly at time of print"): canonical
@@ -2031,12 +1919,9 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
               window.removeEventListener('inkwave:measure-now', measureNowCb)
               window.removeEventListener('inkwave:zoom-step', onZoomStep)
               window.removeEventListener('inkwave:arith-exit', onArithExit)
-              window.removeEventListener('inkwave:editor-revealed', onEarlyWarm)
               view.dom.removeEventListener(GAPPED_MODE_EVENT, gappedModeCb)
               PRE_ACT_EVS.forEach((ev) => window.removeEventListener(ev, onPreActivity, { capture: true } as EventListenerOptions))
               PRE_CHOREO_EVS.forEach((ev) => window.removeEventListener(ev, onPreChoreo))
-              if (preTimer) clearTimeout(preTimer)
-              if (preRaf) cancelAnimationFrame(preRaf)
               cancelLiveWarm()
               if (idleFullTimer) clearTimeout(idleFullTimer)
               layer?.remove()
@@ -2053,3 +1938,4 @@ export const PaginationExtension = Extension.create<PaginationOptions>({
     ]
   },
 })
+import { scrollRestoreRevision } from '../scrollMemory'

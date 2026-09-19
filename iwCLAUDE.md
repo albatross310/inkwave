@@ -149,6 +149,9 @@ keep them out of the conversation by default so earlier chat remains readable.
   `storage/folder.ts` (File System Access). All three write the self-contained `.studio` bundle, and
   all three are governed by the data-loss rules immediately below — read those before touching any
   write path.
+  OneDrive's Azure SPA registration must contain the exact current origins (`https://iwzero.me` and
+  `http://localhost:5173`); an installed PWA uses MSAL popup login so a provider error cannot replace
+  its chrome-less document window. Failure returns to explicit Try again / Back to document actions.
 - **⚠ THE DATA-LOSS FAMILY — SIX INCIDENTS ON PETER'S REAL THESIS, ONE SHAPE. These rules are the
   most load-bearing text in this file. The forensics are in `docs/archive/data-loss-incidents.md`;
   read them before deciding a new code path is not an instance.**
@@ -190,7 +193,8 @@ keep them out of the conversation by default so earlier chat remains readable.
     a null-on-failure read makes `localHash` null ⇒ `incoming-newer` ⇒ blind overwrite**, so the
     read rule above is load-bearing for this guard.
   - **Document identity is PER TAB** (`storage/tabDoc.ts`), carried in sessionStorage, never the URL
-    — OneDrive sign-in returns to a bare `/` and any `?doc=` is gone. Precedence: `?doc=` ??
+    — browser-tab OneDrive sign-in returns to a bare `/` and any `?doc=` is gone (an installed PWA
+    uses a popup so failure cannot strand its chrome-less window). Precedence: `?doc=` ??
     sessionStorage ?? fresh blank; the URL is a reflection, never load-bearing.
   - **ONE LIVE TAB PER DOCUMENT**, via Web Locks, name from the ONE exported `DOC_LOCK_PREFIX` (the
     OpfsInspector badge queries it; a private copy of that string would put the badge silently to
@@ -201,6 +205,10 @@ keep them out of the conversation by default so earlier chat remains readable.
     paragraph, `Edit.tsx` mints a different blank id silently. The original remains held and
     untouched. Title alone never bypasses the guard: an `Untitled` containing writing still gets
     the full switch/copy/take-over screen.
+  - **A `?blank=1` launch crosses a StrictMode cancellation boundary before consuming the URL or
+    minting an id.** The startup effect is replayed: a synchronous first pass minted blank A and
+    removed the flag, then the surviving pass found A's session identity before its bytes existed
+    and minted blank B. Yield, check `cancelled`, then delete the one-shot flag and call `openFresh`.
   - **An effect that takes a lock needs a cancellation token that also RELEASES it.** React's
     StrictMode double-invoke is a real second claimant: skipping the stale `setState` alone still
     leaks the lock.
@@ -328,20 +336,59 @@ keep them out of the conversation by default so earlier chat remains readable.
   prop (live editor only; SnapshotView reuses `<Scroll>` in-flow inside its split pane — do NOT make
   it fixed there or it covers the diff panel). Solid styled scrollbar + inset `::before` so the fixed
   waves don't bleed over it. `StyleBar.tsx` = the formatting bar (font/size/B/H/align/list/∀).
+- **Snapshot text marks.** `DocView.applySnapshotMarks` is the single non-EditorView renderer for
+  persisted inline marks and is shared by `RichDiffView`. It must carry `textStyle` font family,
+  font size and colour (plus highlight) or history silently falls back to EB Garamond even though
+  the snapshot stored another face. Do not copy this mark loop into the diff renderer.
 - **Hybrid zoom (SHIPPED 2026-07-09).** TWO zooms, one owner module `src/editor/magnify.ts`:
   Ctrl/⌘+wheel over the PAGE = font-reflow zoom (`--iw-editor-zoom`, `inkwave:editorZoom`); over the
-  WATER (or a page gap) = GPU transform-magnify of the whole page (`--iw-magnify` on a dedicated
-  `.iw-magnify-box` wrapper, top-left origin, NO transform at scale 1). Fit-to-width: when the window
-  is narrower than the page, the fit scale binds — never a partial page horizontally; it CAPS zoom-in
-  and user magnify can go far below (infinite zoom-out). The wrapper is sized to the page's VISUAL
-  dims (height set imperatively from a paper RO) so scroll range == visual content exactly.
+  WATER (or a page gap) = GPU transform-magnify while moving (`--iw-magnify` on a dedicated
+  `.iw-magnify-box` wrapper, top-left origin, NO transform at scale 1). Track value 1 remains a
+  responsive fit-to-width baseline on narrow windows, but GPU zoom has NO page-edge hard cap.
+  `magnify.ts` maps log track distance continuously through two magnetic wells: 2.5% outside
+  the paper-fit boundary, then 1.5% outside the current text-area boundary (page width minus both
+  side margins), and continues beyond. Each well attracts inside a broad, non-overlapping
+  neighbourhood (up to ±13% in log scale, narrowed only where the two wells approach)
+  and has a deliberately tiny ±0.45% hidden-track plateau at its exact centre—the latent-heat
+  distance a scroll crosses before visual zoom resumes. Exact setters centre that plateau so its
+  resistance is symmetric, never one-sided. Finger or
+  wheel inactivity for 82ms anywhere inside that well starts a 112ms critically damped
+  quadratic-well trajectory and lands on the exact point
+  without overshoot; Shift-up is not the gesture boundary. A new physical wheel sample cancels the
+  fall immediately. A release inside a well snaps directly; outside the wells fine-delta gestures
+  get one short analytic coast capped below one old 8% step. Mouse notches settle directly. Text zoom uses the same well
+  idea on its integral cache lattice: the ±1/±2/±3
+  neighbours bend toward exact 100%, and release from any of them falls to step zero.
+  The wrapper is
+  sized to the page's VISUAL dims (height set imperatively from a paper RO) so scroll range == visual
+  content exactly. Above paper-fit, ordinary auto margins collapse; `Scroll` explicitly carries
+  half the horizontal overflow in `scrollLeft` so both sides crop equally and the page stays centred.
+  Horizontal targeting remains fully centred through the page well and the entire interval up to
+  the inner/text-margin well. At that inner point it acquires the page-local X currently under the
+  cursor and becomes fully cursor-anchored beyond it. That point is calculated at the exact inner
+  detent, so a large sample crossing the boundary picks the same anchor as small samples. Before Shift changes WebKit's scrollbar geometry,
+  capture the subscriber's centred screen baseline. Every live frame is pure arithmetic; never add
+  a delayed face-origin calibration, which can make the dynamic path kick even when an endpoint
+  measurement is exact.
+  WebKit's mirrored `scrollbar-gutter` is not included in `clientWidth`; pass the physical
+  `offsetWidth - clientWidth` gutter into `fitAvailableWidth` so the centre is not half a gutter off.
+  While `data-iw-shift-scroll-frozen` is present, ResizeObserver must update neither the centring
+  width nor the fit/detent width: hiding overflow to cancel WebKit momentum temporarily removes the
+  gutter, and a late recentre must not overwrite the active cursor target.
   **Coordinate convention:** getBoundingClientRect under the transform returns VISUAL px — convert
   via `scaleFor(el)`/`unscale()` from magnify.ts, NEVER ad-hoc reads. Pagination measures in the
   canonical window where magnify is forced to 1, so breaks are magnify-independent by construction.
-  Do NOT use CSS `zoom` on the parchment — it inflates clientWidth and breaks the paginator. Phone
+  At rest, Chromium may use `@supports(zoom:1)` to re-rasterise the same final visual scale.
+  WebKit stays on the transform face both at rest and in motion: switching CSS zoom off on the
+  first gesture frame visibly changed its glyph texture/size despite identical document layout.
+  Shift-armed-before-motion is therefore visually inert in both engines.
+  Canonical measurement drops
+  `.iw-magnified`, disabling both. Phone
   zoom = pinch → the font-reflow pipeline (Scroll.tsx touch handlers); browser-native zoom is
   suppressed app-wide on phone (universal `touch-action: pan-x pan-y` — NB touch-action does NOT
   inherit, hence the `*` rule — + gesture*/two-finger-touchmove preventDefault + 16px input floor).
+  On desktop, the pointer-transparent `BrowserZoomIndicator` reports an estimated percentage at
+  top-right from DPR relative to the device's saved 100% reference. It is diagnostic only.
 - **Review layer — MERGED AND LIVE ON MASTER (probed 2026-07-17: `origin/feat/review` is an
   ancestor of `origin/master`, ZERO commits ahead; ReviewBar.tsx and the R button ship on master).
   This entry said "IN PROGRESS, unmerged" long after it landed** — a lane that refactors "under"
@@ -424,8 +471,8 @@ keep them out of the conversation by default so earlier chat remains readable.
 
 Session capture → a per-month attested ledger → §A3.3 rollups → charts and an AI report the WRITER
 runs in their own AI and pastes back. Surface is the toolbar's **clock drop-up** (`ClockMenu.tsx`, a
-5-button nav shell); `/ledger` and `/productivity` the routes are GONE. Email compose is live behind
-`?email` (send blocked on Google verification).
+5-button nav shell); `/ledger` and `/productivity` the routes are GONE. Email compose/mailbox is live
+by default; `?email=off` remains only as an explicit compatibility opt-out.
 
 Spec: `docs/specs/Inkwave-Productivity-Email-BuildSpec-v0.2.md` — **cite the version**, since a spec
 edit silently re-points an unversioned § reference. **Build log:
@@ -444,16 +491,120 @@ or the tone.
   subtree. The per-email choice lives only under `inkwave:applicationSurface:email:mode:<docId>`;
   it is absent from snapshots, export bundles and provenance hashes. Historical email snapshots read
   that local choice for presentation only. Spec: Productivity & Email v0.5, §D2.
+- **Email renders at one native layout scale.** Isolated email keeps the screen-calibrated 900px
+  preferred width, but `nativeFit` reflows it down to the available window width instead of
+  transform-scaling its pixels. Its unmarked body is 16px/12pt, not the document page's 18px.
+  Text zoom is stored per email under `inkwave:editorZoom:email:<docId>` and therefore starts at
+  100% instead of inheriting a manuscript zoom. The visible `Text N% · Fit 100%` control resets
+  text zoom through Scroll's ordinary anchored reflow path. Do not restore a second hidden fit
+  transform to email; it recreated both size ambiguity and soft fractional rasterisation.
+- **Email formatting is the ordinary StyleBar, not a reduced imitation.** The always-visible bar
+  inside `EmailComposePanel` receives the same live Editor and all usual font/size/character,
+  highlight/colour, alignment, list and indent controls. Direct Gmail send sanitises that live
+  Tiptap HTML to the exposed formatting vocabulary and emits multipart/alternative with the same
+  plain-text fallback as before. Provider compose links remain plain text. Connected Gmail Draft
+  reconciliation still compares plain text; when writer-applied formatting exists, save locally and
+  refuse that remote sync with an explicit message rather than reporting success after flattening it.
+- **Outgoing attachments are OPFS references with verified bytes.** `EmailAttachmentBar` accepts
+  arbitrary files up to an 18MB total, while `email/attachmentStore.ts` records name/type/size/hash
+  on the document and keeps bytes under `library/email-attachments/`. Gmail send and Gmail Draft
+  sync hydrate, size-check and SHA-256-check every file before building multipart MIME. Compose-link
+  handoff refuses rather than silently dropping files. Attachment bytes are NOT yet committed by
+  the v:3 email timestamp record or embedded into exported `.studio`; the always-visible email copy
+  states that boundary. Removing a chip removes the document reference, not shared/recovery bytes.
 - **Duplicate-as-new is a new identity, never copied evidence.** `email/duplicateEmail.ts` copies the
   current headers/body and ordinary editor configuration only after the source flushes successfully;
   the new email gets a new document/session/SCAS identity and inherits no receipts, verdict state, or
-  green anchors. Today it opens as a separate one-subdoc draft. The future workspace must reuse this
-  constructor and place its result; it must not grow a second cloning path.
+  green anchors. The local workspace reuses this constructor and places the new draft immediately
+  left of its source; it must not grow a second cloning path.
+- **The local workspace sequence is presentation over ordinary documents, not a second store.**
+  `workspace/sequence.ts` persists only an ordered id list + active id in this tab's
+  `sessionStorage`, so it survives reload/OAuth but independent windows cannot silently reorder one
+  another. A newly opened email/draft/document enters immediately LEFT of the active item—the source
+  remains its right neighbour. `Edit.tsx` flushes the outgoing save, claims the target document lock,
+  releases the old lock, and remounts exactly one live editor without a page reload. Immediate
+  neighbours in `WorkspaceNavigation` are inert bounded last-painted viewport previews; an unvisited
+  or layout-invalidated neighbour still uses the first-12,000-character static fallback:
+  never mount a second Tiptap, signer, SCAS controller, pagination engine, or autosave loop.
+  Unmodified deliberate horizontal wheel/two-finger touch moves exactly one item per physical
+  gesture and consumes the tail/edge hit;
+  vertical scroll, Command/Control text zoom, and Shift water zoom remain owned by `Scroll`. This is
+  an intentional update to the older v0.2 W3 wording that assigned Shift to navigation. While a
+  sequence has neighbours, `html.iw-no-swipe-nav` contains browser back/forward swipe chaining; do
+  not replace it with permanent global wheel cancellation. The component's window-capture listener
+  exists only for a live multi-panel workspace and reserves clearly horizontal intent at 6px, before
+  Safari can start native history navigation; the 34px threshold still decides whether a panel moves.
+  Successful panel switches project onto same-document History API entries. Browser Back/Forward
+  follows those panel selections through `popstate` without reload, while unrelated history entries
+  remain native. Rapid traversal queues only the latest requested panel during lock/reveal transfer.
+  **The transfer is a swipe, never a fade.** During direct manipulation, both inert neighbours are
+  already present at exactly `-100vw` and `+100vw`. One flat compositor translation is written to
+  their shared strip and the live `.iw-magnify-box`, so the page follows the fingers one-for-one,
+  stays level, and the incoming viewport begins exactly where the current one ends. The water
+  surface never moves; its marks receive the same input velocity at the ordinary 0.06 sway ratio
+  and decay with the input stream (or an immediate short exponential touch coast). The
+  landed preview is frozen while the save/lock/one-editor remount completes, then uncovers the
+  instant-revealed live target after its remembered view is restored. No clip reveal, rotation, or
+  opacity animation is allowed. GPU magnify, manuscript text zoom and horizontal/vertical position
+  are per-panel local view state. Restoring magnify uses `restoreUserMagnify`, which applies the
+  settled face immediately without scheduling a second gesture-settle remeasure.
+  Arrow/history navigation retains `workspace/transition.ts`'s bounded 240ms same-document View
+  Transition. It names the outgoing and incoming PAPER separately, so the browser cannot stretch
+  one page's snapshot to the other page's size or slide the water with it. No API or reduced-motion
+  preference falls back to instant switching. Do not await a paint frame inside a View Transition
+  update callback: the browser has paused rendering while it waits for that very callback.
+  A bounded cache retains at most two inert last-painted neighbours, cropped to viewport-intersecting
+  blocks before retention; up to 250,000 HTML characters per viewport also survive this tab's reload
+  in sessionStorage. Capture happens BEFORE the first swipe transform, not only on React rerenders,
+  so scrolling since the last render is included. The clone preserves the source surface CSS scope
+  and crops block positions in editor-local coordinates via `scaleFor`, never a different ancestor's
+  `offsetTop`. Content revision and local layout settings invalidate it; fixed-page views recenter
+  on resize, while native-fit email resize invalidates because its text really reflows. Unseen or
+  invalidated documents still use the approximate static fallback; exact parity is not claimed for
+  that path. Never retain an unbounded duplicate document tree.
+  **Its gesture latch must survive the active editor remount.** WebKit redirects the same physical
+  swipe's momentum tail to the newly mounted surface; effect-local state re-armed there and bounced
+  straight back. `WorkspaceNavigation` owns the latch in a component-lifetime ref. An in-place
+  switch also passes `autoReveal`: there is no loading-tip/Continue owner during panel navigation,
+  so waiting for that event strands the new editor water-only. The switch promise resolves on the
+  target document's own `inkwave:workspace-view-ready` event after reveal and position restore
+  (4s is a backstop), preventing overlapping
+  arrow/gesture transfers. `prove:workspacenav` proves the prepainted ±viewport geometry, identical
+  flat transforms, fixed water, wave input coupling, and exactly one move plus a visible editor at
+  both ends, including non-default text/GPU zoom and a deeply scrolled paragraph's actual coordinates,
+  font, line height and ink. Pagination's next-frame scroll reassert records `scrollRestoreRevision`:
+  a newer explicit workspace restore supersedes the offset sampled before measurement. Without this
+  ownership guard, Chromium restored the right 1820px offset and then pagination put it back at zero.
+- **Every new email has an explicit many-to-many placement step.** The reserved provider-neutral
+  `Email` manifest is always included; connected Gmail keeps the provider copy once draft sync
+  succeeds. Before the blank draft is
+  opened, `NewEmailPlacementDialog` reads local documents directly from OPFS and lets the writer add
+  zero, one, or many other `.studio` containers. Nothing is inferred from subject, recipients, or
+  the current document. The canonical email is saved first, then one atomic manifest-store rewrite
+  records the exact memberships; if that write fails the same saved email identity is retained for
+  Retry rather than minting duplicate drafts. This is the first local D4/D5 slice only: archive-v2
+  projections, later membership management, overview, and multi-target sync fan-out remain unbuilt.
 - **Email save status distinguishes persistence from provider sync.** The bottom-right message says
-  `Saved locally …` only after the local save acknowledgement. `Last synced …` is reserved for a
-  future Gmail Draft revision Google has acknowledged. `EmailDraftSaveStatus` owns its own tiny
+  `Saved locally …` only after the local save acknowledgement. `Last synced …` appears only for a
+  Gmail Draft revision Google has acknowledged. `EmailDraftSaveStatus` owns its own tiny
   event/timer state so autosave does not re-render the full editor tree. “Snapshot this draft” is the
   separate explicit provenance action; direct send snapshots automatically before transmission.
+- **Connected Gmail is consent-first and memory-only.** Email is live by default; the mailbox
+  action still appears only when Google is configured. `ConnectedMailboxConsentDialog` must precede
+  `authoriseGmailMailbox`; that separate client requests exactly `gmail.readonly gmail.compose`,
+  never inherits/caches the send-only token, and never persists its token. `GmailMailboxPanel` keeps
+  list/full-body state in memory, reads full content only on deliberate open, and never renders HTML.
+  Attachment metadata is inert until its own Open action; then only that attachment is fetched,
+  byte-count checked, and either opened as a signature-checked passive browser format or downloaded
+  for the operating system. The initial consent's mutation limits describe THIS phase: the later
+  Outlook-like track may separately request `gmail.modify`, but must never widen consent silently.
+  Inbox is Gmail Primary (`INBOX` + `category:primary`); Promotions is `INBOX` +
+  `CATEGORY_PROMOTIONS`; Spam is `SPAM` + `includeSpamTrash=true`. These are Gmail-native
+  classifications from lightweight list filters—never infer categories from message content.
+- **Gmail draft identity is local-only sync metadata.** `gmailDraftBinding.ts` stores one binding per
+  document outside `InkwaveDocument`, so account hashes/provider IDs never travel in `.studio` or
+  provenance. Local persistence completes before `syncGmailDraft`; stable `draft.id` is authority,
+  `messageId` may change, and ancestry hashes—not timestamps—decide update vs preserve-both.
 - **Email owns no snapshot mechanism or snapshot state.** “Snapshot this draft”, global “save
   version”, and Gmail's mandatory pre-send snapshot all use TiptapEditor's one
   `createManualSnapshot` queue. It updates the ordinary ◈ history/counter, OTS state, mirrors and diff
@@ -648,21 +799,26 @@ angled at CSS `165deg` (75° downward declension from the left-to-right horizont
 flat warm-ivory `#f3edcf` shared by wave marks, specks and sparkles. The wave SVGs contain no vertical
 colour gradient; line weight and opacity alone provide depth. The early indigo reflection keeps the surface glossy, while
 holding the blue-teal arrival until 88% lets the indigo influence extend roughly a third farther into
-the teal. Before the atomic water reveal, day mode paints pure white (not parchment or a partial
-gradient). Keep every day-water consumer on the shared token; do not reintroduce per-surface gradient
+the teal. Before the atomic scene is ready, day mode paints plain white—not a premature blue
+gradient. The gradient, signature wave pair, chosen tip and twinkles are prepared paint-hidden and paused, then appear already moving
+together at their shared tip+twinkle gate. Keep every day-water consumer on the shared token; do not reintroduce per-surface gradient
 copies. **The load animation is precomputed and
 playback is COMPOSITOR-ONLY — no per-frame JS, so main-thread starvation cannot touch it.** Exactly
-two control events cross from the app into it: START (implicit, the prerendered `.iw-wave-anim`
-class) and SETTLE (`inkwave:reveal-imminent`).
+two control events cross from the app into it: START (`inkwave:water-ready`, once the tip and
+twinkles are mounted) and SETTLE (`inkwave:reveal-imminent`).
 
 The atomic gate must not release healthy water on a short wall-clock cap. Warm same-tab reloads can
 take longer than 1.5s to hydrate and mount the twinkle field; the former 1.5s escape hatch therefore
 painted gradient/waves first and late specks second. The only fallback is now a loud 30s failure
 backstop, and `window.__iwWaterGate.reason` records `complete`, `no-surface`, or `timeout` for probes.
+Safari measured 636ms cold versus 221–272ms warm on a blank launch (2026-09-08), almost entirely to
+hydrate and mount the 192-mark field. The closed gate therefore remains white; the gradient,
+animated pseudos and marks stay hidden/paused until they can start atomically.
 
 The marks are one immutable, checked-in scene (`waveSceneData.ts`), generated offline by the fixed-seed
-`scripts/generate-wave-scene.mjs`. Runtime randomness, canvas rasterisation, asynchronous art decode,
-server-fed instructions, respawn and duplicate blink/rest populations are forbidden. The generator
+`scripts/generate-wave-scene.mjs`. Runtime randomness, asynchronous art decode, server-fed
+instructions, respawn and duplicate blink/rest populations are forbidden. The rich load scene stays
+DOM/CSS-clocked; settled live-editor waves are the one deliberate canvas exception described below. The generator
 enforces ≥180px horizontal separation per wave band; every dash stores the exact local wave tangent.
 The browser mounts the whole table synchronously before the atomic gate opens. A dash's generated x/y
 is its CENTRE: render it with `translate(-50%, -50%)` before its rotation. Treating x as CSS `left`
@@ -687,7 +843,7 @@ reasserts after both pending CSS animations resolve; this closes WebKit's provis
 rewrite without any per-frame correction. Do not remove either the paused-at-zero gate or the
 resolved-clock reassertion.
 
-The overlapping rest population is a pure spatial loop: `scrollTop mod 2240px`. That fixed period is
+The overlapping DOM rest population is a pure spatial loop: `scrollTop mod 2240px`. That fixed period is
 deliberately independent of time, velocity, viewport, page geometry and editor zoom. Scroll.tsx calls
 `setScrollScene` only for genuine user/PDF scroll; zoom-held correction scrolls do not reach it.
 Returning to the same absolute scrollTop must reproduce the same state. Resize clips the fixed 2800px
@@ -695,12 +851,71 @@ Returning to the same absolute scrollTop must reproduce the same state. Resize c
 exact two-tile offset from the viewport origin. Centring changes the 140px phase with viewport width
 and makes a correct stored tangent visibly non-parallel to the painted SVG.
 
+**Settled live-editor water is resolution-capped (2026-09-07 power correction).** After load/coast,
+the full-resolution pseudo and 2800×1680 DOM mark fields stop painting. Two transparent canvases
+pre-render the exact A/B wave geometry once per resize/theme at at most DPR1-equivalent 1280×720
+visible backing (plus four exact 140px slack tiles); scroll never redraws their pixels. Chromium
+moves only their opposing transforms at no more than 30Hz. Safari 26.4+ uses a named CSS scroll
+timeline: WebKit resolves the canvas transforms on its threaded scroll-animation path with no
+per-frame JS; older WebKit keeps the same artwork static. Zoom temporarily removes the timeline at
+its current pose and rebases anchor correction scrolls. A genuine unmodified wheel after GPU zoom
+restores it synchronously before native scroll begins, avoiding a mid-scroll WebKit reattachment;
+text reflow keeps its stricter remeasure hold. Load
+choreography stays rich and unchanged. `data-iw-scroll-active` remains imperative scrollbar/activity
+state; React className writes must never own it.
+
+**Loading coast keyframes must be final before the coast class mounts.** Resolve the future anchor
+from the still-running drift, snap the endpoint and inject the final literal-px brake first; then
+switch `iw-wave-anim` → `iw-wave-coast`. Rewriting provisional keyframes on the next rAF made Safari
+present one backwards frame at the exact start of the slowdown. The post-class path is fallback only
+for an animation whose startTime was genuinely unresolved.
+
+**GPU zoom is pre-armed only by physical Shift.** Resting at magnify 1 keeps no parchment transform
+layer; `data-iw-magnify-armed` adds a transient `will-change: transform` hint between Shift-down and
+Shift-up/blur so Safari can prepare the layer before the first wheel frame. Never make that promotion
+permanent: the point is fast pickup without restoring full-document idle GPU residency. Arming does
+not change WebKit's transform face. Chromium switches from its optional resting CSS zoom on the
+first actual magnify write. Both engines coalesce interaction input on the next display frame;
+there is no WebKit timer in front of rAF that can repeatedly miss the next refresh.
+
+**Shift hard-stops native scroll before GPU zoom.** On physical Shift-down, the live desktop
+scroller is synchronously set to `overflow-y:hidden` after a same-position scroll cancellation.
+Programmatic cursor-anchor corrections remain legal, but Safari's compositor can no longer advance
+the old kinetic scroll. The first modified sample starts GPU zoom immediately, with no timed dead
+zone. The final queued sample is flushed before key-up. WebKit does not expose a reliable finger-up
+phase, so its release boundary is measured as input inactivity; a browser's explicit momentum bit,
+when available, starts the release directly. Shift-down also discards pending fractional text-wheel input and cancels a
+queued 100% text well; physical Shift remains authoritative over WebKit's wheel modifier tuple, so
+one gesture cannot leak into font size. Shift-up/blur/unmount restores the CSS-owned overflow.
+
+**The editor caret has its own paint colour at the actual containing element.** `.ProseMirror` and
+every descendant set `caret-color` from `--iw-ink` (the descendant declaration is `!important`). A
+focused SCAS decoration and review insertions intentionally use transparent glyph/text-fill paint;
+WebKit chooses caret paint from that inline containing element, not reliably from the root editable,
+so a root-only declaration still lost a word-start caret. `.scas-focused` is also `position:static`
+while active, avoiding WebKit's position-relative contenteditable caret failure; its hidden pseudos
+regain their normal relative host when focus drops. Never couple caret visibility back to a decorated
+run's colour or transparent text fill.
+
+**A persisted pagination ablation is never production authority.** `inkwave:pagOff=1` is honoured
+only alongside the benchmark harness marker `inkwave:benchmark=1`. Safari installed apps use an
+independent storage jar; a forgotten durable test flag previously left only the PWA unpaginated.
+
 **DESKTOP SHELL → EDITOR IS AN ATOMIC WATER-OWNERSHIP SWAP, NEVER A CROSS-FADE.** The editor's paper
 may fade in, but two translucent copies of the waves/marks may not be visible together: they change
 brightness as they composite. Hiding the second copy while fading the first is equally wrong — the
 marks disappear with the shell and return when it unmounts. `inkwave:editor-revealed` is dispatched
 in the same task as `setSettled(true)`, so Edit.tsx drops the shell in that batched commit while the
 phase-synchronised editor water uncovers. Phone retains its separate keep-shell-until-rest rule.
+Desktop readiness starts the brake immediately, but page/text reveal waits for both Continue and a
+420ms visible coast beat; if Continue arrives later, that already-observed beat satisfies the gate.
+
+**VISIBLE WATER STARTS WITH THE TIP + TWINKLES, NEVER FROZEN.** The first paint is white. The
+gradient, prerendered `.iw-wave-anim` pseudos, chosen tip and hydrated twinkle/mark ornaments remain
+paint-hidden and paused until both tip and twinkle readiness arrive; pills and a separate hydration
+signal do not gate them. `waveTwinkle.ts` aligns the prepared zero-time clocks before gate removal,
+so the complete visible scene starts together. The SPA fallback also begins white; its no-surface
+gate opens the complete boot water once entry.client executes.
 
 **The rebuild's rounds, the wave-video ladder, and the refuted desync hypothesis are in
 `docs/archive/wave-system-rounds.md`. EVERY RULE BELOW WAS A LIVE BUG** — none is preference.
@@ -1004,6 +1219,23 @@ write shim, so metadata can say a PDF exists with no local bytes).
   follow-up: per-run canvas advances + greedy breaking feeding computeBreaks as a third
   acquisition path, DOM full measure as idle verifier, pagCheck as prover, gated on
   document.fonts.ready + certified fonts only.
+- **FONT PALETTE ROUND 11 (2026-09-07).** The first group is now **Recommended**, in this order:
+  Inter, Open Sans, Noto Sans, Romans (TeX Gyre Termes), Garamond (EB Garamond). Fell moved to
+  Display. Open/Noto are self-hosted but never preloaded; unicode-range means a selected face fetches
+  only the script/weight/style it actually uses. The final real-context grid passed both Chromium
+  and WebKit for all 19 selectable families, and every canonical DOM line-start array was
+  cross-engine identical. Zilla Slab is no longer selectable/certified: current WebKit canvas↔DOM
+  missed 0.16–0.22px at ordinary small sizes. Its pinned bytes remain hosted so legacy marks render
+  unchanged and arithmetic layout defers. `fetch-fonts.mjs` now preserves every already-hosted face
+  byte-for-byte and downloads only absent families; adding a family must never renumber or silently
+  refresh canonical fonts. The cross-engine prover now exits nonzero for any excluded picker family.
+- **SETTLED TEXT INK (2026-09-07).** A live Chromium/WebKit computed-style probe found no surviving
+  transform, non-unit opacity, `will-change`, CSS zoom, or content-visibility layer at magnify 1;
+  both engines were already using native smoothing. ChatGPT's comparable Mac body text paints at
+  `rgb(13,13,13)`, while Inkwave was `#1a1a1a`. The light-page `.ProseMirror` and clean print path now
+  use `#0d0d0d`: paint-only contrast, so font advances, cross-engine wraps, pagination, and downloads
+  are untouched. Do not reintroduce `-webkit-font-smoothing:antialiased`; it previously made Safari
+  artificially thin.
 - **⚠ `?arithLayout` — DO NOT GRADUATE. The engine no longer agrees with live pagination, and the
   "0 divergences" below it is STALE (measured 2026-08-30).** The reflow-free canvas-advance engine
   was parked 2026-07-15, unparked in rationale 2026-07-18 (`96b0edb`) on `prove:arith` reporting
@@ -1063,29 +1295,27 @@ write shim, so metadata can say a PDF exists with no local bytes).
   Page/Guide/Math all carry the class) while the editor owns focus; real form fields
   (input/textarea/select/contenteditable) are exempt. New footer drop-ups MUST carry
   `iw-touch-guard` or their taps will retract the keyboard.
-- **THE FOOTER BAND IS THREE INDEPENDENT FIXED ELEMENTS, AND THEY COLLIDE (2026-08-21).** The
+- **THE FOOTER BAND IS THREE INDEPENDENT FIXED ELEMENTS (2026-09-08).** The
   toolbar is CENTRED (`fixed left-0 right-0 flex justify-center`) while the sync pill (SyncStatus,
   `right:0`) and the snaps pill (ReceiptPanel, `left:0`) are EDGE-anchored — nothing made them aware
-  of each other, and below ~650px of viewport width the toolbar simply grew into the sync pill.
-  **It is invisible above ~700px, which is why several "fixes" verified clean and were not**: Peter
-  runs a ~570px window (half-screen on a Retina Mac) and every check had been run at 900-2000px.
-  Sweep the WIDTH RANGE, not a point.
-  - **ONE BUDGET, TWO CONSUMERS.** `--iw-bar-budget` (written on the pill in TiptapEditor.tsx,
-    inherited by `.iw-desktop-toolbar`) caps the box AND drives the circle-shrink clamp. Capping only
-    the BOX leaves the circles at full size spilling past the rounded border ("the right button is
-    falling off"); capping neither lets the centred box reach the sync pill. Two constraints computed
-    from slightly different budgets is what produced a dead width-range where both were true at once.
-  - **CIRCLE SIZE IS COMPUTED FIRST; GAPS TAKE THE REMAINDER.** The reverse (sizing gaps from the
-    budget, circles from the leftovers) produced both complaints simultaneously — on a wide window
-    the gaps grew until the bar spanned the page, on a narrow one the circles collapsed to ~23px.
+  of each other. Do not solve a narrow-window collision by responsively resizing the centre pill:
+  browser zoom changes the CSS viewport, so the former `--iw-bar-budget` circle/gap clamps partially
+  counter-scaled normal zoom, grew until 100% then shrank, and let the independently sized style row
+  overflow. Desktop is one fixed 318px border box. Its two rows share exact 316px content arithmetic:
+  main = 8×30 + 7×8 + 2×10; style = 2×36 + 7×28 + 8×4 + 2×8. Browser zoom scales that finished box
+  normally. Phone alone retains responsive sizing. If side-pill collision again matters, move or
+  stack the side pills; do not reintroduce viewport-relative centre geometry.
   - **A COLLAPSED `max-height: 0` ROW STILL HAS A WIDTH**, and this was the real cause of the
     proportions repeatedly drifting back. The pill is a flex COLUMN, so its width is the widest
     child's max-content — and the hidden style bar is wider than the circle row, so it had been
     sizing the pill (measured: 86px of dead pill past the last circle). `width: 0; min-width: 100%`
     while collapsed drops its contribution without breaking its layout when it expands.
-  - `TOOLBAR_SIDE_RESERVE_PX` (TiptapEditor.tsx) reserves space per side for the edge pills; the
-    reserve is divided by the transform scale because max-width is a LAYOUT property while the
-    collision happens in PAINTED px (a 421px pill paints 471 at ×1.12).
+  - **DO NOT COUNTER-SCALE FOOTER CHROME AGAIN (2026-09-08).** `useZoomScale` was introduced on
+    2026-06-13 to make browser page zoom act like document zoom; the dedicated GPU/text zoom arrived
+    on 2026-07-09. The old inverse-`devicePixelRatio` layer had become redundant: most DOM changed
+    size under browser zoom while the centre, sync and provenance pills did not, and their layout
+    boxes disagreed with their transformed paint. Browser zoom now deliberately sizes the whole UI;
+    document zoom remains independent, and PDF/tool-specific sizing stays scoped to those tools.
   - **THE TWO SIDE PILLS ARE ONE PAIR — `components/sidePill.ts` owns their height, font and offset.**
     They are separate components that never reference each other, which is exactly how they drifted:
     the right pill had been given a height tracking the TOOLBAR's (56px vs the left's 30.8px) and the
@@ -1280,8 +1510,10 @@ now allots 11GB + 8GB swap, and **6 lanes is the observed safe ceiling**. So the
 - **Genuinely-unfinished stay gated for now** (updated 2026-07-19): the wave video (`?waveVideo`,
   unresolved desync), the parked arithmetic layout (`?arithLayout`, held because the engine does not
   implement `8f5ae9d`'s mid-line snap and now diverges from the DOM measure on EVERY break — see the
-  ⚠ entry in the iOS/WebKit section; the WebKit pass is no longer the first blocker), email send
-  (`?email`, blocked on Google verification). Name the reason when you touch them.
+  ⚠ entry in the iOS/WebKit section; the WebKit pass is no longer the first blocker). Name the
+  reason when you touch them. Email is no longer on this list: provider-specific controls gate
+  themselves on configuration and explicit consent, and a default-off flag made email disappear
+  completely in Safari PWA's fresh storage partition.
   ~~The experimental scrub renderer (`?textRender`)~~ **GRADUATED 2026-07-18 (`ef96306`)** — see the
   "graduate textRender to default-ON" entry in round 14/15 of the canonical-pagination section below;
   it no longer belongs on this still-gated list.
@@ -1373,6 +1605,16 @@ why. Most of the time it is the assertion.
 
 ## Theming / colour schemes (MANDATORY for every new panel — 2026-07-07)
 
+**Read along (2026-09-14, integrated locally; deployment and live voice audition pending).**
+Options opens `src/readalong/launch.ts`'s lazy dialog while the editor stays mounted. Its wrapper
+uses `iw-nightable` and existing reader tokens. The same-origin static frame has its own scoped
+stylesheet and saved appearance choice, inheriting the host theme on first use. Text, audio and
+places use only IndexedDB `inkwave-readalong-v1`; editor OPFS and provenance are untouched.
+Credentials are memory-only. Paid requests use `/api/readalong` with explicit consent; close/pause
+finishes the current request without scheduling another or starting hidden playback. Read
+`docs/READALONG.md` for the architecture, backup format and remaining live-release checks.
+`pnpm gate` includes the isolated Node reader tests; the mocked cross-browser flow is separate.
+
 Night mode (and future colour schemes) is driven by ONE switch: `src/editor/theme.ts` sets
 `<html data-theme="night">` (applied pre-hydration in `entry.client.tsx`; toggled from Settings). All
 colours live as CSS custom properties in the **NIGHT MODE block at the bottom of `src/styles/index.css`**
@@ -1409,8 +1651,9 @@ panel-ified, opened from the clock drop-up), the ledger CLOCK DROP-UP restructur
 gone; its READING indicator + POST-HOC ADD sections are inside it, screenshotted day+night by
 `scripts/pdfposthoc.prove.mjs`), OpfsInspector (`components/OpfsInspector.tsx` — the hamburger's "Storage" item: every
 document actually in OPFS, with orphan/this-tab/busy badges + Open/Download recovery),
-EmailComposePanel (+ its provider drop-up), LessonPanel (`src/music/lesson/`, flag
-`?lesson`, DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
+EmailComposePanel (+ its provider drop-up), ConnectedMailboxConsentDialog (`src/email/`, the
+explicit Gmail restricted-capability step-up), LessonPanel (`src/music/lesson/`, flag `?lesson`,
+DEFAULT OFF — its three screens: consent gate, bar-pinned notes, teacher recap),
 MusicPanel + ScoreView (opened via the toolbar's ♪ bar as "Import a score" — the `/music` route and
 its `?musicXml=1` param are GONE since 2026-07-18; the music module itself is DEFAULT ON since
 2026-07-19), the music studio (`music/MusicStudio.tsx` — its footer toolbar + symbol drop-up carry `iw-touch-guard`,
@@ -1605,6 +1848,13 @@ bodies.
   non-touch, OFF on touch (never intercept the virtual keyboard/autocorrect). Guards: no
   modifiers, no composition, no open word-cycle, TextSelection only. Measured (4× throttle,
   20k words): median keydown→paint 80ms → 48ms. perflog label: kd-sync.
+- **WebKit's pale suffix after the caret is native prediction, not document text (2026-09-08).**
+  Peter's recording caught `consis|tently`: `consis` was real black text and `tently` was WebKit's
+  grey inline completion, making the caret look stranded mid-word. The editor attributes set
+  `writingsuggestions=false`, `autocorrect=off`, `autocomplete=off`, and `spellcheck=false` through
+  `editor/writingAssistance.ts`. This disables browser-authored ghost text only; SCAS suggestions
+  remain explicit Inkwave UI. Do not remove one attribute because a different Safari generation may
+  honour a different member of the defensive set.
 - **Enter-caret reveal (2026-07-11).** PM's scrollIntoView IGNORES CSS scroll-padding — Enter
   scrolled the new empty line to the scroller's raw bottom edge, exactly behind the toolbar
   reserve; the caret "appeared when you type" because the browser's native caret-reveal DOES
@@ -1622,14 +1872,15 @@ bodies.
   `--wave-x: inherit` — frozen sway) and (b) twinkle fields take LITERAL transforms per sway frame
   (`swayFields`) instead of consuming the var (kept ~300 instance leaves in the invalidation set).
   Dashes no longer respawn at all: both the old `toDataURL` redraw (~150ms/frame) and its later
-  lattice-relocation replacement are gone. A new var(--wave-x) consumer must not sit under the
-  firebreak roots.
-- **Zoom step-cache precompute waits for GENUINE idle (2026-07-11).** Each precompute step is a
-  full-document hypothetical reflow (~100-200ms of layout on a long doc); it used to start 350ms
-  after the mount measure — ~18 consecutive long frames exactly while the reveal/coast and the
-  writer's first scrolls ran (the post-open jank). PaginationExtension now also holds it while any
-  input (pointer/wheel/key/scroll, 1.5s) or reveal-chain event (open-begin/reveal-imminent/
-  editor-revealed, 3s) is recent. A cold cache stays CORRECT — onZoomStep measures a miss live.
+  lattice-relocation replacement are gone. The settled live surface now bypasses these fields via
+  `lowPowerWaterCanvas.ts`; a new var(--wave-x) consumer must not sit under the firebreak roots.
+- **The zoom step cache must never sweep at rest (2026-09-07 power-floor correction).** Each
+  candidate is a full-document hypothetical reflow. With dense 2% steps, the old bounded ±12
+  precompute still ran as many as 25 whole-document layouts after reveal and again after edits,
+  scaling directly with document size while the editor appeared idle. The current step is cached
+  by the normal paint, a miss stays exact, and only the next observed step may be predicted between
+  notches while a zoom gesture is active. Do not reintroduce startup, post-edit or post-settle
+  lattice sweeps; a cold cache is a performance miss, never a correctness failure.
 
 ## Typing performance invariants (2026-07-11 ablation overhaul — measure before touching)
 

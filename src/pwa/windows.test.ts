@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   NEW_INKWAVE_WINDOW_URL,
   NEW_BLANK_INKWAVE_WINDOW_URL,
+  WINDOW_ALIVE_MS,
+  WINDOW_HEARTBEAT_MS,
   adjacentInkwaveWindowId,
   inkwaveWindowCycleDirection,
   lowestAvailableWindowSlot,
@@ -19,12 +21,13 @@ describe('openNewInkwaveWindow', () => {
     expect(open).toHaveBeenCalledWith(NEW_INKWAVE_WINDOW_URL, '_blank', 'noopener')
   })
 
-  it('keeps the installed-app launch and Dock shortcut on the same new-window route', () => {
+  it('offers distinct New window and blank New doc installed-app shortcuts', () => {
     const manifest = JSON.parse(readFileSync(new URL('../../public/manifest.webmanifest', import.meta.url), 'utf8'))
 
     expect(manifest.launch_handler).toEqual({ client_mode: 'navigate-new' })
     expect(manifest.shortcuts).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: 'New doc', url: NEW_INKWAVE_WINDOW_URL }),
+      expect.objectContaining({ name: 'New window', url: NEW_INKWAVE_WINDOW_URL }),
+      expect.objectContaining({ name: 'New doc', url: NEW_BLANK_INKWAVE_WINDOW_URL }),
     ]))
     expect(manifest.file_handlers).toEqual([
       expect.objectContaining({
@@ -69,5 +72,10 @@ describe('openNewInkwaveWindow', () => {
     expect(inkwaveWindowCycleDirection(key({ key: 'ArrowRight', altKey: true, ctrlKey: true }))).toBe(1)
     expect(inkwaveWindowCycleDirection(key({ key: 'ArrowLeft', altKey: true, ctrlKey: true }))).toBe(-1)
     expect(inkwaveWindowCycleDirection(key({}))).toBe(0)
+  })
+
+  it('uses a low-wake presence cadence with three missed-heartbeat tolerance', () => {
+    expect(WINDOW_HEARTBEAT_MS).toBe(30_000)
+    expect(WINDOW_ALIVE_MS).toBe(3 * WINDOW_HEARTBEAT_MS)
   })
 })

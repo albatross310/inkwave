@@ -1,15 +1,14 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listFolders, listQuickFolders, getRecentFolders, createOneDriveFolder, type DriveFolder, type OneDriveFolder } from '../storage/onedrive'
+import { listFolders, listOneDriveFiles, listQuickFolders, getRecentFolders, createOneDriveFolder, startOneDriveSignIn, type DriveFolder, type OneDriveFolder, type OneDriveFileEntry } from '../storage/onedrive'
+import { ONE_DRIVE_BLUE as ONE, ONE_DRIVE_HOVER as ONE_HOVER } from './oneDriveBrand'
+import { cloudPickerFileRows } from './cloudPickerFiles'
 
 // A small folder browser for OneDrive: drill into folders from the root, create new ones, then
 // "Sync here" to choose the destination for the .trace.json. Reads folders live via Microsoft Graph
 // (the writer must be signed in). Returns { id, path } — id '' means the OneDrive root.
 // Styled to read as OneDrive (Microsoft blue + cloud mark), the way the Insignia PayPal button reads
 // as PayPal.
-const ONE = '#0364B8'        // OneDrive brand blue
-const ONE_HOVER = '#f1f7fc'  // pale blue row hover
-
 // A clean blue cloud — the OneDrive mark, paired with the wordmark below.
 function OneDriveCloud() {
   return (
@@ -33,13 +32,16 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
   const [renaming, setRenaming] = useState(false)
   const [crumbs, setCrumbs] = useState<Crumb[]>([]) // [] = root
   const [folders, setFolders] = useState<DriveFolder[] | null>(null)
+  const [files, setFiles] = useState<OneDriveFileEntry[] | null>(null)
   const [quick, setQuick] = useState<DriveFolder[]>([])
   const [recent, setRecent] = useState<OneDriveFolder[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [needsAuth, setNeedsAuth] = useState(false)
   const [reload, setReload] = useState(0)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [authBusy, setAuthBusy] = useState(false)
 
   const currentId = crumbs.length ? crumbs[crumbs.length - 1].id : null
   const currentPath = crumbs.map((c) => c.name).join('/')
@@ -57,12 +59,21 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
 
   useEffect(() => {
     let cancelled = false
-    setFolders(null); setError(null)
-    listFolders(currentId)
-      .then((f) => { if (!cancelled) setFolders(f) })
-      .catch((e) => { if (!cancelled) setError((e as Error).message) })
+    setFolders(null); setFiles(null); setError(null); setNeedsAuth(false)
+    Promise.all([listFolders(currentId), listOneDriveFiles(currentId)])
+      .then(([nextFolders, nextFiles]) => {
+        if (!cancelled) { setFolders(nextFolders); setFiles(nextFiles) }
+      })
+      .catch((e) => {
+        if (cancelled) return
+        const message = (e as Error).message
+        setNeedsAuth(message === 'not signed in')
+        setError(message)
+      })
     return () => { cancelled = true }
   }, [currentId, reload])
+
+  const fileRows = cloudPickerFileRows(files ?? [], currentName ?? '')
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -95,6 +106,25 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
       setError((e as Error).message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function retryLoad() {
+    if (!needsAuth) {
+      setReload((value) => value + 1)
+      return
+    }
+    setAuthBusy(true)
+    const result = await startOneDriveSignIn()
+    setAuthBusy(false)
+    if (!result.ok) {
+      setNeedsAuth(true)
+      setError(result.error)
+      return
+    }
+    if (result.mode === 'popup') {
+      setNeedsAuth(false)
+      setReload((value) => value + 1)
     }
   }
 
@@ -163,17 +193,45 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
         )}
 
         <div className="border rounded-lg max-h-64 overflow-auto" style={{ borderColor: '#e6eef5' }}>
-          {error && <p className="text-xs text-red-700 p-3">⚠ {error}</p>}
-          {!error && folders === null && <p className="text-sm text-stone-400 p-3">Loading…</p>}
-          {!error && folders?.length === 0 && <p className="text-sm text-stone-400 p-3">No sub-folders here.</p>}
+          {error && (
+            <div className="p-4">
+              <p className="text-xs text-red-700 mb-3">⚠ {needsAuth ? 'OneDrive sign-in did not finish.' : error}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" disabled={authBusy} onClick={() => void retryLoad()}
+                  className="text-sm font-sans text-white px-3 py-2 rounded disabled:opacity-60" style={{ background: ONE }}>
+                  {authBusy ? 'Opening…' : 'Try again'}
+                </button>
+                <button type="button" onClick={onClose}
+                  className="text-sm font-sans px-3 py-2 rounded border text-stone-600">Back to document</button>
+              </div>
+            </div>
+          )}
+          {!error && (folders === null || files === null) && <p className="text-sm text-stone-400 p-3">Loading…</p>}
+          {!error && folders?.length === 0 && <p className="text-sm text-stone-400 p-3 border-b" style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}>No sub-folders here.</p>}
           {folders?.map((f) => (
             <button key={f.id} type="button" onClick={() => setCrumbs([...crumbs, { id: f.id, name: f.name }])}
-              className="w-full text-left px-3 py-2 text-sm font-sans border-b last:border-b-0 flex items-center gap-2"
-              style={{ borderColor: '#f0f4f8', color: '#33414f' }}
+              className="w-full text-left px-3 py-2 text-sm font-sans font-medium border-b flex items-center gap-2"
+              style={{ borderColor: '#f0f4f8', color: '#263746' }}
               onMouseEnter={(e) => (e.currentTarget.style.background = ONE_HOVER)}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
               <span aria-hidden="true">🗁</span>{f.name}
             </button>
+          ))}
+          {files !== null && (
+            <div className="px-3 py-1.5 text-[11px] uppercase tracking-wide text-stone-400 border-b" style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}>
+              Studio files already here
+            </div>
+          )}
+          {files !== null && fileRows.map(({ file, current, existsHere }) => (
+            <div key={`${file.id}-${file.name}`}
+              className="w-full px-3 py-2 text-sm font-sans font-medium border-b last:border-b-0 flex items-center gap-2"
+              style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)', color: current ? ONE : 'var(--iw-ink, #302438)', background: current ? ONE_HOVER : 'transparent' }}>
+              <span aria-hidden="true">📄</span>
+              <span className="truncate">{file.name}</span>
+              <span className="ml-auto shrink-0 text-[10px] font-normal" style={{ color: current ? ONE : 'var(--iw-pill-fg, #78716c)' }}>
+                {current ? (existsHere ? 'current sync file' : 'will be created here') : 'existing file'}
+              </span>
+            </div>
           ))}
         </div>
 
@@ -197,7 +255,7 @@ export function OneDriveFolderPicker({ currentName, onRename, onPick, onClose }:
           </div>
         )}
 
-        <button type="button" disabled={syncing}
+        <button type="button" disabled={syncing || !!error || folders === null || files === null}
           onClick={async () => { setSyncing(true); try { await onPick({ id: currentId ?? '', path: currentPath }) } finally { onClose() } }}
           className="mt-4 px-4 py-2.5 font-sans font-medium text-white hover:brightness-105 transition disabled:opacity-70" style={{ background: ONE, borderRadius: 10 }}>
           {syncing ? 'Loading…' : `Sync here${currentPath ? ` — ${currentPath}` : ' — OneDrive (root)'}`}

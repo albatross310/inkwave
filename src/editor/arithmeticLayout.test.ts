@@ -38,8 +38,8 @@ describe('shaping gate', () => {
 })
 
 describe('certification', () => {
-  it('has the 18 cross-engine-verified families', () => {
-    expect(CERTIFIED_FAMILIES.size).toBe(18)
+  it('has the 19 currently selectable cross-engine-verified families', () => {
+    expect(CERTIFIED_FAMILIES.size).toBe(19)
     expect(CERTIFIED_FAMILIES.has('EB Garamond')).toBe(true)
     expect(CERTIFIED_FAMILIES.has('Times New Roman')).toBe(false)
   })
@@ -48,12 +48,13 @@ describe('certification', () => {
     // size axis; the shipped fetch never requests opsz. Re-measured: identical in both engines.
     expect(CERTIFIED_FAMILIES.has('Inter')).toBe(true)
   })
-  it('excludes Lora/Gelasio — no longer served, so their marks fall back to system fonts', () => {
+  it('excludes retired faces from arithmetic even while their bytes remain hosted for legacy marks', () => {
     expect(CERTIFIED_FAMILIES.has('Lora')).toBe(false)
     expect(CERTIFIED_FAMILIES.has('Gelasio')).toBe(false)
+    expect(CERTIFIED_FAMILIES.has('Zilla Slab')).toBe(false)
   })
   it('includes the newly-verified faces', () => {
-    for (const f of ['Libre Baskerville', 'Caladea', 'Zilla Slab', 'Courier Prime']) {
+    for (const f of ['Libre Baskerville', 'Caladea', 'Courier Prime', 'Open Sans', 'Noto Sans']) {
       expect(CERTIFIED_FAMILIES.has(f), f).toBe(true)
     }
   })

@@ -190,6 +190,23 @@ describe('the visible text is cur’s document', () => {
     expect(stripTags(render(cur, null))).toContain('(Leibniz, 1686)')
   })
 
+  it('renders the snapshot’s stored font family, size, colour and highlight in both paths', () => {
+    const styled = doc(p({
+      type: 'text', text: 'styled words', marks: [
+        { type: 'textStyle', attrs: { fontFamily: "'Inter', ui-sans-serif, sans-serif", fontSize: '1.3333em', color: '#123456' } },
+        { type: 'highlight', attrs: { color: '#ffe08a' } },
+      ],
+    }))
+    const plain = renderToStaticMarkup(<DocView doc={styled} />)
+    const diff = render(styled, opsFor(doc(p(t('old words'))), styled))
+    for (const markup of [plain, diff]) {
+      expect(markup).toContain("font-family:&#x27;Inter&#x27;, ui-sans-serif, sans-serif")
+      expect(markup).toContain('font-size:1.3333em')
+      expect(markup).toContain('color:#123456')
+      expect(markup).toContain('background-color:#ffe08a')
+    }
+  })
+
   it('an unchanged document emits no marks at all', () => {
     const d = doc(p(t('identical text')), h(2, 'Same'))
     const markup = render(d, opsFor(d, d))

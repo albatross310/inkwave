@@ -21,6 +21,7 @@ import { isTouchDevice } from '../editor/isTouchDevice'
 import { pageBoxPx } from '../editor/pageModel'
 import { getPaperSize, getOrientation } from '../editor/pageSettings'
 import { tabDocId } from '../storage/tabDoc'
+import { PDF_DOCK_ROOM_CHANGED_EVENT } from './dockLayout'
 
 const INK = '#302438'
 
@@ -228,6 +229,7 @@ export function PdfSidePanel() {
       root.style.setProperty('--iw-pdf-room-left', left)
       root.style.setProperty('--iw-pdf-room-bottom', bottom)
       root.style.setProperty('--iw-pdf-room-top', top)
+      window.dispatchEvent(new Event(PDF_DOCK_ROOM_CHANGED_EVENT))
     }
     if (!open || fullscreen) set('0px', '0px', '0px')
     else if (orientation === 'top') set('0px', '0px', '0px', PHONE_TOP_H) // phone: editor keeps the bottom half

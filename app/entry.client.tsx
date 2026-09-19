@@ -128,8 +128,8 @@ void bootstrap()
 
 // ─── Blank white until the wave video comes up (Peter, 2026-07-17) ────────────────────────────
 // "we have to just have blank white screen until the video comes up and play the video every time".
-// The CSS water paints from the PRERENDERED `.iw-wave-anim` class (that is the design — it runs
-// from first paint), so with the video flag on a load shows CSS water and then swaps to the video:
+// The CSS water is prepared from the PRERENDERED `.iw-wave-anim` class and begins at the atomic
+// tip+twinkle gate, so with the video flag on a load can show CSS water and then swap to the video:
 // two waters in one load. `.iw-wave-video-wait` holds the surface white until waveVideo.ts either
 // becomes master or bails.
 //
@@ -148,26 +148,26 @@ function armWaveVideoWait(): void {
   setTimeout(() => document.documentElement.classList.remove('iw-wave-video-wait'), 4000)
 }
 
-// ─── Atomic water reveal ───
-// The water (shared gradient + wave tiles + ALL twinkle instances) is gated behind .iw-water-ready
-// and appears in ONE paint. TWO conditions open the gate (2026-07-10, Peter: "glimmers and short
-// lines … need to start atomically even if it takes longer"):
-//   1. every wave-tile data-URI has decoded;
+// ─── Atomic loading animation reveal ───
+// The first frame is white. The gradient, two signature wave tiles, chosen tip and every twinkle
+// appear and begin moving together when TWO conditions hold:
+//   1. LoadingTip has selected and mounted its chosen checked-in line;
 //   2. the complete checked-in mark scene has mounted synchronously (paint-hidden and paused at
 //      currentTime 0 by the not-ready CSS) — waveTwinkle.ts announces 'inkwave:twinkles-ready'
 //      (+ the __iwTwinklesReady flag for the fired-before-we-listened race).
-// Until both, day mode holds pure white; then colour, waves and twinkles land in the
-// same style recalc. The old single-condition gate let the twinkle layers mount LATER, mid-drift —
+// Hydration is not a separate gate (both signals already imply the relevant React commit), and
+// pills never participate. Until both, all moving decoration is paint-hidden rather than exposed
+// motionless. At gate-open the aligned wave/twinkle clocks start in the same style change. The old
+// single-condition gate let the twinkle layers mount later, mid-drift —
 // on Firefox that late mount re-rastered the wave layers (a blank flash at a consistent moment)
 // and the field popped in non-atomically. Only the loud 30s failure backstop opens an incomplete
 // gate; healthy loads wait for both conditions. On gate-open we dispatch
-// 'inkwave:water-ready': THAT style recalc creates the wave pseudos and deterministic mark fields'
-// identical named CSS drift animations in the same first-visible frame. Individual marks own
-// opacity only, so there is no second spatial clock to align after reveal.
+// 'inkwave:water-ready': THAT style recalc reveals the deterministic mark fields; their identical
+// named CSS drift animations are rebound to the live wave clocks by waveTwinkle.ts. Individual
+// marks own opacity only, so there is no second independent spatial clock.
 // REFRESH: the old localStorage pre-stamp (root.tsx head script) opened the gate pre-paint on
 // warm clients — which would let the water paint long before the twinkles mount. Removed: every
-// load gates identically now (the tiles are data URIs, so "warm" never made decoding faster
-// anyway — the wait is hydration-bound either way, and atomicity wins per Peter's directive).
+// load gates the scene identically now.
 {
   const WATER_GATE_TIMEOUT_MS = 30_000
   let stamped = false
@@ -221,15 +221,11 @@ function armWaveVideoWait(): void {
     const surface = document.querySelector('.inkwave-editor-surface')
     if (!surface) ready('no-surface') // no water on this page — nothing to gate
     else {
-      // Condition 1 — the wave tiles. Decode every tile var the water uses (the sparkle tile
-      // taught us: any wave layer the gate does NOT decode pops in a few frames late).
-      const urls: string[] = []
-      const cs = getComputedStyle(surface)
-      for (const v of ['--iw-wave-a', '--iw-wave-b']) {
-        const m = cs.getPropertyValue(v).match(/url\("(.+)"\)/)
-        if (m) urls.push(m[1])
-      }
-      const tiles = Promise.all(urls.map((u) => { const img = new Image(); img.src = u; return img.decode() })).catch(() => {})
+      // Condition 1 — the chosen tip, but only on a route that actually rendered LoadingTip.
+      const tipHost = document.querySelector('.iw-loading-tip')
+      const tip = !tipHost || (window as unknown as { __iwLoadingTipReady?: boolean }).__iwLoadingTipReady
+        ? Promise.resolve()
+        : new Promise<void>((res) => window.addEventListener('inkwave:loading-tip-ready', () => res(), { once: true }))
       // Condition 2 — the twinkle field, but only where one will mount: the live-editor (iw-fill)
       // surface's host div. /about, /verify etc. have no twinkles and must not wait for them.
       const host = document.querySelector('.inkwave-editor-surface.iw-fill .iw-wave-twinkles')
@@ -248,7 +244,7 @@ function armWaveVideoWait(): void {
         console.error(`[inkwave] atomic water gate exceeded ${WATER_GATE_TIMEOUT_MS / 1000}s; releasing incomplete water`)
         ready('timeout')
       }, WATER_GATE_TIMEOUT_MS)
-      void Promise.all([tiles, twinkles]).then(() => { clearTimeout(t); ready('complete') })
+      void Promise.all([tip, twinkles]).then(() => { clearTimeout(t); ready('complete') })
     }
   }
 }

@@ -1,10 +1,14 @@
-// The email layer's feature flag — DEFAULT OFF (P1b ships dark; send is blocked on Google
-// verification, so the flag has not earned graduation).
+// The email layer's compatibility flag — DEFAULT ON. A Safari installed web app has its own fresh
+// storage partition, so the former default-OFF rule made every email surface and creation action
+// disappear there even after the writer had enabled email in the browser. The compose/mailbox layer
+// is now real and tested; Google-dependent controls already gate themselves on configuration and
+// consent, so public availability no longer depends on Google verification.
 //
 //   ?email / ?email=1   enable (sticky)
-//   ?email=off          disable + clear
+//   ?email=off          explicitly disable (sticky)
 //
-// UNSET ⇒ OFF. SSR/prerender has no localStorage/location → false.
+// UNSET ⇒ ON in a browser/PWA. SSR/prerender remains false so static HTML does not bake client-only
+// editor controls into the document shell.
 //
 // Enables on PRESENCE, so `?email=yes` is on too — matching `?auth` and `?lesson`, and differing
 // from `?music`/`?musicXml`/`?prod*`, which want an exact '1'. Persisting is what makes it survive
@@ -18,8 +22,9 @@ import { stickyFlag } from '../flags/stickyFlag'
 const flag = stickyFlag({
   key: 'inkwave:email',
   param: 'email',
-  defaultOn: false,
+  defaultOn: true,
   onParam: 'present',
+  onNoWindow: false,
   cache: false,
 })
 

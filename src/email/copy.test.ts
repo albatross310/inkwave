@@ -116,4 +116,24 @@ describe('the copy makes the claims §B2.2 REQUIRES it to make', () => {
   it('the handoff copy states we never touch the inbox (§B5 minimal scope)', () => {
     expect(copy.HANDOFF_EXPLAINER).toMatch(/never connects to your inbox/i)
   })
+
+  it('does not imply the current timestamp record includes attachment bytes', () => {
+    expect(copy.ATTACHMENT_PROVENANCE_NOTE).toMatch(/not yet included in the timestamp record/i)
+    expect(copy.ATTACHMENT_PROVENANCE_NOTE).toMatch(/cannot transfer attachments/i)
+  })
+
+  it('the connected-mailbox consent states both added capabilities and their limits (§B3.1)', () => {
+    expect(copy.MAILBOX_CONSENT_INTRO).toMatch(/separate from Send with Gmail/i)
+    expect(copy.MAILBOX_READ_CAPABILITY).toMatch(/Inbox and Sent/i)
+    expect(copy.MAILBOX_DRAFT_CAPABILITY).toMatch(/create, read, replace and send Gmail drafts/i)
+    expect(copy.MAILBOX_PERMISSION_LIMIT).toMatch(/first mailbox connection does not let Inkwave mark messages read or unread/i)
+    expect(copy.MAILBOX_PERMISSION_LIMIT).toMatch(/does not grant full Gmail access/i)
+  })
+
+  it('the connected-mailbox consent states the direct transport and disconnect boundaries', () => {
+    expect(copy.MAILBOX_TRANSPORT_BOUNDARY).toMatch(/directly between this browser and Google/i)
+    expect(copy.MAILBOX_TRANSPORT_BOUNDARY).toMatch(/do not pass through or stay on Inkwave servers/i)
+    expect(copy.MAILBOX_CONTENT_BOUNDARY).toMatch(/Browsing mail does not create an Inkwave document/i)
+    expect(copy.MAILBOX_DISCONNECT_BOUNDARY).toMatch(/does not delete your Inkwave documents or anything in Gmail/i)
+  })
 })

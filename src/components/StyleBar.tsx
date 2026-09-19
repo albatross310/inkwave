@@ -11,7 +11,7 @@ import { createPortal } from 'react-dom'
 import type { Editor } from '@tiptap/react'
 
 const INK = '#302438'
-const BASE_SIZE = 18       // editor root px (matches .ProseMirror { font-size: 1.125rem })
+const DOCUMENT_BASE_SIZE = 18 // editor root px (matches .ProseMirror { font-size: 1.125rem })
 const PT_TO_PX = 96 / 72  // 1pt = 1.3333px at 96 DPI
 
 // MATH-CERTIFIED FONTS ONLY (2026-07-12, round-7, Peter's call: "test all the fonts independently
@@ -24,9 +24,13 @@ const PT_TO_PX = 96 / 72  // 1pt = 1.3333px at 96 DPI
 // as its fallback tail, and an old mark's own stack resolves exactly as before (no @font-face ever
 // existed for those names).
 export const FONTS = [
-  // Identity
-  { group: 'Identity', label: 'Fell',      css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
-  { group: 'Identity', label: 'Garamond',  css: "'EB Garamond', Georgia, serif" },
+  // Recommended — familiar, highly readable web/editor voices. Peter moved the old identity pair
+  // out: "Recommended" is a practical starting point, not a claim about Inkwave's branding.
+  { group: 'Recommended', label: 'Inter',    css: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  { group: 'Recommended', label: 'Open',     css: "'Open Sans', system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  { group: 'Recommended', label: 'Noto',     css: "'Noto Sans', system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  { group: 'Recommended', label: 'Romans',   css: "'TeX Gyre Termes', 'Times New Roman', Times, serif" },
+  { group: 'Recommended', label: 'Garamond', css: "'EB Garamond', Georgia, serif" },
   // Serif — 'Times' and 'Arial' are certified CLONES (TeX Gyre Termes/Heros, GUST licence);
   // labels are display-only and decoupled from the css stack (Peter: "call it Times").
   // 'Romans', not 'Times' (Peter, 2026-07-16): "Times"/"Times New Roman" are Monotype trademarks and
@@ -34,7 +38,6 @@ export const FONTS = [
   // upright type — nobody owns it — and it's honest: TeX Gyre Termes descends from Nimbus Roman.
   // ('Arial' below is the same exposure, and arguably worse: a coined word is inherently the stronger
   // mark. Left as-is on Peter's call; the safe labels there are Heros / Grotesque / Swiss.)
-  { group: 'Serif', label: 'Romans',   css: "'TeX Gyre Termes', 'Times New Roman', Times, serif" },
   { group: 'Serif', label: 'Crimson',  css: "'Crimson Pro', 'Times New Roman', serif" },
   { group: 'Serif', label: 'Spectral', css: "'Spectral', 'Times New Roman', Times, serif" },
   { group: 'Serif', label: 'Gentium',  css: "'Gentium Plus', 'Palatino Linotype', serif" },
@@ -51,14 +54,14 @@ export const FONTS = [
   { group: 'Serif', label: 'Baskerville', css: "'Libre Baskerville', Baskerville, 'Times New Roman', serif" },
   { group: 'Serif', label: 'Caladea',     css: "'Caladea', Cambria, 'Palatino Linotype', Georgia, serif" },
   // Display — headings/titles
+  { group: 'Display', label: 'Fell',      css: "'IM Fell DW Pica', 'EB Garamond', Georgia, serif" },
   { group: 'Display', label: 'Cormorant', css: "'Cormorant Garamond', 'EB Garamond', serif" },
   { group: 'Display', label: 'Fraunces',  css: "'Fraunces', Georgia, serif" },
   // Slab
   { group: 'Slab', label: 'Bitter', css: "'Bitter', 'Roboto Slab', Georgia, serif" },
-  // Zilla Slab over Roboto Slab/Aleo/Arvo (2026-07-16): furthest from Bitter (x/cap 0.682 vs 0.771)
-  // AND it has real italics — Roboto Slab synthesises both obliques and is literally Bitter's own
-  // fallback tail (maximum overlap); Arvo genuinely FAILS certification (Δ12px at 96px).
-  { group: 'Slab', label: 'Zilla',  css: "'Zilla Slab', 'Roboto Slab', Georgia, serif" },
+  // Zilla was retired from new selection on 2026-09-07: current WebKit measured DOM↔canvas
+  // divergence of 0.16–0.22px at ordinary small sizes. Its pinned files remain hosted so legacy
+  // marks render identically; arithmetic layout defers for it instead of computing a false wrap.
   // Sans
   // 'Swiss', not 'Arial' (Peter, 2026-07-16). Arial was the worse trademark exposure of the two: a
   // coined word is inherently the stronger mark. 'Swiss' names the genre/movement (the International
@@ -66,10 +69,6 @@ export const FONTS = [
   // honest: TeX Gyre Heros is a neo-grotesque descending from Nimbus Sans, the Helvetica clone.
   { group: 'Sans', label: 'Swiss',    css: "'TeX Gyre Heros', Helvetica, Arial, sans-serif" },
   { group: 'Sans', label: 'Carlito',  css: "'Carlito', system-ui, -apple-system, 'Segoe UI', sans-serif" },
-  // Inter (2026-07-16) — shipped for QUALITY, not contrast: measured x/cap 0.712 is IDENTICAL to
-  // Heros, i.e. the same neo-grotesque voice, just better drawn and screen-optimised with far wider
-  // coverage. Carlito (0.738) + Atkinson (0.735) are the humanists already covering the other voice.
-  { group: 'Sans', label: 'Inter',    css: "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif" },
   { group: 'Sans', label: 'Atkinson', css: "'Atkinson Hyperlegible', system-ui, sans-serif" },
   // Mono — code / logic notation
   { group: 'Mono', label: 'JetBrains', css: "'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace" },
@@ -138,11 +137,13 @@ const INDENT_ITEMS: Array<{ action: IndentAction; label: string; preview: string
 ]
 
 
-export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
+export function StyleBar({ editor, onActivity, phone, barVisible = true, baseSizePx = DOCUMENT_BASE_SIZE }: {
   editor: Editor
   onActivity?: () => void
   phone?: boolean
   barVisible?: boolean // the bar row's expanded state — pickers close WITH the bar (they portal to body)
+  /** Root text size for this presentation. Email uses 16px/12pt; document paper uses 18px. */
+  baseSizePx?: number
 }) {
   const [, force] = useState(0)
   const [fontOpen,   setFontOpen]   = useState(false)
@@ -227,9 +228,9 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   // ── Derived ──────────────────────────────────────────────────────────────
   const ts = editor.getAttributes('textStyle')
   const rawSize = ts.fontSize ?? ''
-  const curSizePx = rawSize.endsWith('em') ? parseFloat(rawSize) * BASE_SIZE : parseInt(rawSize, 10) || BASE_SIZE
+  const curSizePx = rawSize.endsWith('em') ? parseFloat(rawSize) * baseSizePx : parseInt(rawSize, 10) || baseSizePx
   const curSize = Math.round(curSizePx / PT_TO_PX)
-  const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Fell'
+  const curFont = FONTS.find(f => f.css === ts.fontFamily)?.label ?? 'Garamond'
   const curAlign: Align = (['left', 'center', 'right', 'justify'] as const).find(a => editor.isActive({ textAlign: a })) ?? 'left'
   const curHlColor = (editor.getAttributes('highlight') as { color?: string }).color ?? null
   const curTxtColor = (ts as { color?: string }).color ?? null
@@ -239,7 +240,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   const setFont = (css: string) => { ping(); setLastFont(css); editor.chain().focus().setFontFamily(css).run(); setFontOpen(false) }
   const setSize = (pt: number) => {
     ping(); setLastSize(pt)
-    editor.chain().focus().setMark('textStyle', { fontSize: `${+((pt * PT_TO_PX) / BASE_SIZE).toFixed(4)}em` }).run()
+    editor.chain().focus().setMark('textStyle', { fontSize: `${+((pt * PT_TO_PX) / baseSizePx).toFixed(4)}em` }).run()
     setSizeOpen(false)
   }
   function applyFmt(fmt: CharFmt) {
@@ -407,7 +408,7 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   }
   const box = (w: number): React.CSSProperties => ({ border: `1px solid ${INK}55`, borderRadius: 12, width: w })
 
-  // Font panel is MULTI-COLUMN (Peter, 2026-07-16): 2 columns on desktop, 3 on phone — 17 families
+  // Font panel is MULTI-COLUMN (Peter, 2026-07-16): 2 columns on desktop, 3 on phone — 19 families
   // in one column was a long scroll. Group headers span the full row (gridColumn 1/-1) so they stay
   // readable separators rather than becoming cells. It's the only popup wider than its button, so
   // its left edge is clamped to the viewport (above() anchors to the button and would overflow the
@@ -427,12 +428,12 @@ export function StyleBar({ editor, onActivity, phone, barVisible = true }: {
   // Circular badge buttons everywhere. Phone: same circles as desktop, ~19% bigger (38px — the max
   // nine controls fit a 360px row with the tightened spacing) for comfortable tapping. flex-shrink-0
   // keeps them true circles — without it a tight row squeezes them oval.
-  const circleSize = phone ? 'w-[38px] h-[38px] flex-shrink-0' : 'w-8 h-8'
+  const circleSize = phone ? 'w-[38px] h-[38px] flex-shrink-0' : 'w-7 h-7 flex-shrink-0'
   const pill = (open: boolean, hl = false): string =>
     `flex items-center justify-center ${circleSize} rounded-full border transition-colors ${open || hl ? 'border-[#302438] text-[#302438]' : 'border-stone-200 text-stone-500 hover:border-stone-400'}`
 
-  const fontClass = `flex items-center justify-center ${phone ? 'h-[38px]' : 'h-8'} px-1.5 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-left whitespace-nowrap text-xs min-w-[2.5rem]`
-  const sizeClass = `flex items-center justify-center ${phone ? 'h-[38px]' : 'h-8'} px-2 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors cursor-pointer text-xs tabular-nums min-w-[2.5rem]`
+  const fontClass = `flex items-center justify-center ${phone ? 'h-[38px] min-w-[2.5rem]' : 'h-7 min-w-9'} px-1.5 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors text-left whitespace-nowrap text-xs flex-shrink-0`
+  const sizeClass = `flex items-center justify-center ${phone ? 'h-[38px] min-w-[2.5rem]' : 'h-7 min-w-9'} px-2 rounded-full border border-stone-200 text-stone-500 hover:border-stone-400 transition-colors cursor-pointer text-xs tabular-nums flex-shrink-0`
 
   return (
     <div

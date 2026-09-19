@@ -29,7 +29,8 @@ import { MARGIN_BOTTOM } from './pageSettings'
 // ⚠ Certification is by PRIMARY family; the fallback tail only matters if the primary fails to
 // load, and `document.fonts.check` then defers anyway (R9).
 export const CERTIFIED_FAMILIES: ReadonlySet<string> = new Set([
-  // ROUND-10 — all 18 verified on BOTH Chromium and WebKit in the editor's real context, and (the
+  // ROUND-11 — all selectable families verified on BOTH Chromium and WebKit in the editor's real
+  // context, and (the
   // load-bearing bit) their Chromium DOM wrap == their WebKit DOM wrap byte-for-byte at the
   // canonical width. → docs/archive/pagination-rounds.md#fonts-certified
   'IM Fell DW Pica',
@@ -44,13 +45,14 @@ export const CERTIFIED_FAMILIES: ReadonlySet<string> = new Set([
   'Cormorant Garamond',
   'Fraunces',
   'Bitter',
-  'Zilla Slab',
   'Carlito',
   'Atkinson Hyperlegible',
   'JetBrains Mono',
   'Courier Prime',
   'Inter',
-  // ⚠ A RETIRED FACE STAYS SERVED BUT UNLISTED (Lora, Gelasio). Deleting its woff2 would drop legacy
+  'Open Sans',
+  'Noto Sans',
+  // ⚠ RETIRED FACES STAY SERVED BUT UNLISTED (Lora, Gelasio, Zilla Slab). Deleting their woff2 would drop legacy
   // marks to SYSTEM fonts, whose metrics vary by device — silently repaginating old docs
   // phone-vs-print; unlisted, the engine DEFERS rather than computes their wrap (R8).
   // ⚠ NEVER SHIP AN OPTICAL-SIZE FONT. Chromium resolves opsz from font-size and WebKit does not,

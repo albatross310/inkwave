@@ -50,7 +50,13 @@ const PM_CSS = (() => {
 if (!PM_CSS.includes('break-spaces')) { console.error('FATAL: real prosemirror.css not found'); process.exit(2) }
 const CALIB_CSS = existsSync(join(CALIB, 'calib-fonts.css')) ? readFileSync(join(CALIB, 'calib-fonts.css'), 'utf8') : ''
 
+const marginSource = readFileSync(join(ROOT, 'src/editor/pageSettings.ts'), 'utf8')
+const marginBottom = Number(marginSource.match(/export const MARGIN_BOTTOM\s*=\s*(\d+)/)?.[1])
+if (!Number.isFinite(marginBottom)) throw new Error('could not read MARGIN_BOTTOM from pageSettings.ts')
+// transformWithEsbuild transpiles but does not bundle; replace the leaf import with its source-read
+// value so the browser harness cannot emit a CommonJS `require` (which browsers rightly reject).
 const tsSrc = readFileSync(join(ROOT, 'src/editor/arithmeticLayout.ts'), 'utf8')
+  .replace("import { MARGIN_BOTTOM } from './pageSettings'", `const MARGIN_BOTTOM = ${marginBottom}`)
 const { code: AL_JS } = await transformWithEsbuild(tsSrc, 'arithmeticLayout.ts', { loader: 'ts', format: 'iife', globalName: 'AL' })
 
 const MIME = { '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.otf': 'font/otf', '.ttf': 'font/ttf' }
@@ -77,14 +83,15 @@ const server = createServer((req, res) => {
 })
 await new Promise((r) => server.listen(port, r))
 
-// THE FULL SHIPPED PICKER (18) — label → family.
+// THE FULL SHIPPED PICKER (19) — label → family.
 const PICKER = [
   ['Fell', 'IM Fell DW Pica'], ['Garamond', 'EB Garamond'],
   ['Romans', 'TeX Gyre Termes'], ['Crimson', 'Crimson Pro'], ['Spectral', 'Spectral'],
   ['Gentium', 'Gentium Plus'], ['Baskerville', 'Libre Baskerville'], ['Caladea', 'Caladea'],
   ['Cormorant', 'Cormorant Garamond'], ['Fraunces', 'Fraunces'],
-  ['Bitter', 'Bitter'], ['Zilla', 'Zilla Slab'],
+  ['Bitter', 'Bitter'],
   ['Swiss', 'TeX Gyre Heros'], ['Carlito', 'Carlito'], ['Inter', 'Inter'], ['Atkinson', 'Atkinson Hyperlegible'],
+  ['Open', 'Open Sans'], ['Noto', 'Noto Sans'],
   ['JetBrains', 'JetBrains Mono'], ['Courier Prime', 'Courier Prime'],
 ]
 const FAMILIES = PICKER.map(([, f]) => f)
@@ -99,7 +106,15 @@ async function runEngine(engine, name, args) {
   const errs = []
   page.on('pageerror', (e) => errs.push(String(e).slice(0, 160)))
   await page.goto(`http://localhost:${port}/c.html`, { waitUntil: 'load' })
-  await page.addScriptTag({ content: AL_JS })
+  // esbuild's IIFE declares `var AL` in the injected script realm. Chromium used to reflect that
+  // as window.AL implicitly; current Playwright isolates the binding, so publish it explicitly or
+  // the harness measures nothing and fails before the first font.
+  await page.addScriptTag({ content: `${AL_JS}\nglobalThis.AL = AL;` })
+  const alVisible = await page.evaluate(() => ({
+    type: typeof window.AL,
+    scriptCount: document.scripts.length,
+  }))
+  if (alVisible.type !== 'object') throw new Error(`${name}: arithmetic layout bundle did not publish (${JSON.stringify(alVisible)}; page errors: ${errs.join(' | ')})`)
   const out = await page.evaluate(async (families) => {
     const AL = window.AL
     const pm = document.getElementById('pm')
@@ -277,6 +292,8 @@ for (const fam of FAMILIES) {
     let k = 0; while (k < cw.length && k < ww.length && cw[k] === ww[k]) k++
     note = `lines ${cw.length}vs${ww.length} div@${k}(C ${cw[k]} W ${ww[k]})`
     crossFails.push({ fam, c: cw, w: ww, k })
+  } else if (c.verdict !== 'CERTIFIED' || w.verdict !== 'CERTIFIED') {
+    note = [...(c.advFails || []), ...(c.wrapFails || []), ...(w.advFails || []), ...(w.wrapFails || [])].join(' | ')
   } else if (c.synth.length || w.synth.length) note = `⚠ synth ${[...new Set([...c.synth, ...w.synth])].join(',')}`
   const ok = c.verdict === 'CERTIFIED' && w.verdict === 'CERTIFIED' && domSame
   if (ok) both.push(fam)
@@ -304,3 +321,4 @@ console.log('  ' + (both.length ? both.join(', ') : 'none'))
 const excluded = FAMILIES.filter((f) => !both.includes(f))
 console.log('  EXCLUDED: ' + (excluded.length ? excluded.map((f) => `${f}(C:${C[f].verdict}/W:${W[f].verdict})`).join(', ') : 'none'))
 server.close()
+process.exit(excluded.length || wsMismatch ? 1 : 0)

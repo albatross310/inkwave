@@ -51,8 +51,9 @@ import { simpleInText } from '../citations/format'
 import { buildFlatMap, anchorOps, opsInRange, type AnchoredOp, type FlatSeg } from '../provenance/textMap'
 import type { DiffOp } from '../provenance/diff'
 import { StoredMediaFigureContents, storedMediaFigureStyle, type StoredMediaImageAttrs } from './StoredMediaImage'
+import { applySnapshotMarks, type SnapshotMark } from './DocView'
 
-type Node = { type?: string; text?: string; marks?: Array<{ type: string }>; attrs?: Record<string, unknown>; content?: Node[] }
+type Node = { type?: string; text?: string; marks?: SnapshotMark[]; attrs?: Record<string, unknown>; content?: Node[] }
 
 // Byte-for-byte the styles FullDiffView uses — the two renderers must be indistinguishable in
 // everything except structure, or switching them would read as a visual change rather than a layout one.
@@ -82,18 +83,6 @@ function runNode(op: AnchoredOp, key: string, hooks: RichDiffHooks): ReactNode {
       title={hooks.onOpClick ? 'Jump to this change in diff panel' : undefined}
     >{op.text}</span>
   )
-}
-
-/** Wrap a rendered inline in its PM marks — identical to DocView's applyMarks. */
-function applyMarks(el: ReactNode, marks: Node['marks']): ReactNode {
-  for (const m of marks ?? []) {
-    if (m.type === 'bold') el = <strong>{el}</strong>
-    else if (m.type === 'italic') el = <em>{el}</em>
-    else if (m.type === 'underline') el = <u>{el}</u>
-    else if (m.type === 'strike') el = <s>{el}</s>
-    else if (m.type === 'code') el = <code>{el}</code>
-  }
-  return el
 }
 
 interface Ctx {
@@ -140,7 +129,7 @@ function inline(nodes: Node[] | undefined, base: number[], ctx: Ctx): ReactNode 
     const path = [...base, i]
     const key = pathKey(path)
     if (n.type === 'hardBreak') return <br key={key} />
-    if (n.type === 'text') return <Fragment key={key}>{applyMarks(splitLeaf(n.text ?? '', path, ctx, key), n.marks)}</Fragment>
+    if (n.type === 'text') return <Fragment key={key}>{applySnapshotMarks(splitLeaf(n.text ?? '', path, ctx, key), n.marks)}</Fragment>
     if (n.type === 'citation') return citationInline(n, path, ctx, key)
     return <Fragment key={key}>{inline(n.content, path, ctx)}</Fragment>
   })

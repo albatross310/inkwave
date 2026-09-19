@@ -10,6 +10,8 @@
 // test, which is exactly why the decision is a pure function rather than four conditions inline in
 // an event handler.
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { planLiveWarm, WARM_COST_MARGIN, type WarmInputs } from './zoomWarm'
 
 // A gesture mid-flow on a desktop: notch 4 arrived 260ms after notch 3, zooming IN.
@@ -25,6 +27,11 @@ describe('planLiveWarm — when a zoom step may be warmed between notches', () =
   it('warms the NEXT step in the direction of travel', () => {
     expect(plan()).toEqual({ warm: true, step: 5 })
     expect(plan({ step: 3, from: 4 })).toEqual({ warm: true, step: 2 }) // zooming out
+  })
+
+  it('learns a dense-lattice multi-step stride instead of warming the old adjacent key', () => {
+    expect(plan({ step: 8, from: 4, maxStep: 20 })).toEqual({ warm: true, step: 12 })
+    expect(plan({ step: -4, from: 0 })).toEqual({ warm: true, step: -8 })
   })
 
   it('warms the FIRST notch of a gesture, where there is no cadence yet', () => {
@@ -96,5 +103,17 @@ describe('planLiveWarm — when a zoom step may be warmed between notches', () =
     // diagnosing "the warm never fires", so it has to name the first thing to fix.
     expect(plan({ enabled: false, phone: true, from: null })).toEqual({ warm: false, why: 'disabled' })
     expect(plan({ placeholders: false, phone: true })).toEqual({ warm: false, why: 'not-live' })
+  })
+})
+
+describe('idle zoom-cache power floor', () => {
+  it('warms only from an active gesture, never by sweeping full-document layouts at rest', () => {
+    const pagination = readFileSync(resolve(__dirname, 'extensions/PaginationExtension.ts'), 'utf8')
+
+    expect(pagination).toContain('scheduleLiveWarm(')
+    expect(pagination).not.toContain('ZOOM_WARM_RADIUS')
+    expect(pagination).not.toContain('schedulePrecompute')
+    expect(pagination).not.toContain('earlyWarmTick')
+    expect(pagination).not.toContain('precomputeTick')
   })
 })

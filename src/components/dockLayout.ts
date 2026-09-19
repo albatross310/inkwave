@@ -21,6 +21,7 @@ export const DOCK_MIN_H = 200
  *  separate key would make that true only until he moved one of them. */
 export const DOCK_ORIENT_KEY = 'inkwave:pdfPanelOrientation'
 export const DOCK_SIDE_KEY = 'inkwave:pdfDockSide'
+export const PDF_DOCK_ROOM_CHANGED_EVENT = 'inkwave:pdf-room-changed'
 /** Phone top dock height: dvh tracks iOS's dynamic URL bar (vh fallback for old WebKit). */
 export const PHONE_TOP_H =
   typeof CSS !== 'undefined' && CSS.supports?.('height', '50dvh') ? '50dvh' : '50vh'
@@ -77,6 +78,7 @@ export function applyDockRoom(room: DockRoom): void {
   root.style.setProperty('--iw-pdf-room-left', room.left)
   root.style.setProperty('--iw-pdf-room-bottom', room.bottom)
   root.style.setProperty('--iw-pdf-room-top', room.top)
+  window.dispatchEvent(new Event(PDF_DOCK_ROOM_CHANGED_EVENT))
 }
 
 export const NO_DOCK_ROOM: DockRoom = { right: '0px', left: '0px', bottom: '0px', top: '0px' }

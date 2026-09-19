@@ -56,6 +56,16 @@ export function recognisedSaveIsLive(docId: string, now = Date.now()): boolean {
   return now - dirtyAt <= RECOGNISED_SAVE_LIVE_MS
 }
 
+/** The Change-doc warning protects work created in this editor session; absence or age of an
+ * external destination is not itself a change and must never interrupt an untouched document. */
+export function shouldWarnBeforeDocumentChange(
+  docId: string,
+  changedSinceLoad: boolean,
+  now = Date.now(),
+): boolean {
+  return changedSinceLoad && !recognisedSaveIsLive(docId, now)
+}
+
 export function forgetDocSource(docId: string): void {
   try {
     localStorage.removeItem(key(docId))

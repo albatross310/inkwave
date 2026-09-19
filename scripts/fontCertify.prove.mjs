@@ -58,7 +58,11 @@ if (!PM_CSS.includes('break-spaces') || !PM_CSS.includes('liga')) {
 }
 const CALIB_CSS = existsSync(join(CALIB, 'calib-fonts.css')) ? readFileSync(join(CALIB, 'calib-fonts.css'), 'utf8') : ''
 
+const marginSource = readFileSync(join(ROOT, 'src/editor/pageSettings.ts'), 'utf8')
+const marginBottom = Number(marginSource.match(/export const MARGIN_BOTTOM\s*=\s*(\d+)/)?.[1])
+if (!Number.isFinite(marginBottom)) throw new Error('could not read MARGIN_BOTTOM from pageSettings.ts')
 const tsSrc = readFileSync(join(ROOT, 'src/editor/arithmeticLayout.ts'), 'utf8')
+  .replace("import { MARGIN_BOTTOM } from './pageSettings'", `const MARGIN_BOTTOM = ${marginBottom}`)
 const { code: AL_JS } = await transformWithEsbuild(tsSrc, 'arithmeticLayout.ts', { loader: 'ts', format: 'iife', globalName: 'AL' })
 
 const MIME = { '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff', '.otf': 'font/otf', '.ttf': 'font/ttf' }
@@ -111,7 +115,7 @@ const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1400, height: 2400 } })
 page.on('pageerror', (e) => console.log('PAGE-THROW', String(e).slice(0, 200)))
 await page.goto(`http://localhost:${port}/c.html`, { waitUntil: 'load' })
-await page.addScriptTag({ content: AL_JS })
+await page.addScriptTag({ content: `${AL_JS}\nglobalThis.AL = AL;` })
 
 const results = await page.evaluate(async (families) => {
   const AL = window.AL

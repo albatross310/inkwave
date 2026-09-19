@@ -3,12 +3,26 @@ import { gappedPagesEnabled } from './pageView'
 import { getSideMarginPx, getTopMarginPx, getBtmMarginPx, getParaSpacingEm, getColumns, getPaperSize, getOrientation, MARGIN_BOTTOM } from './pageSettings'
 import { pageBoxPx, paperCssSize } from './pageModel'
 import { syncPrintPageStyle } from './printPageStyle'
-import { getMagnify, setUserMagnify, persistMagnify, setFitContext, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY, WATER_MARGIN_PX } from './magnify'
+import { advanceUserMagnify, centredMagnifyScrollLeft, fitAvailableWidth, getMagnify, getMagnifyDetentScales, getMagnifySnapTarget, magnifyHorizontalFocus, persistMagnify, setFitContext, setUserMagnify, subscribe as subscribeMagnify, scaleFor, MIN_MAGNIFY } from './magnify'
 import { presentedPaperWidth, usesTransformMagnify, type SurfacePresentation } from './surfacePresentation'
-import { stepToZoom, zoomToStep, ZOOM_STEP_RATIO } from './zoomStep'
-import { createZoomLatch, omnidirectionalZoomDelta, projectedZoomDelta, zoomModeForWheel } from './zoomZone'
+import { stepToZoom, textZoomSnapTarget, zoomToStep, ZOOM_STEP_RATIO, ZOOM_STEPS_PER_NOTCH } from './zoomStep'
+import { criticallyDampedWellValue, exponentialCoastOffset, ZOOM_WELL_DURATION_MS } from './zoomWell'
+import {
+  anchoredScrollTarget,
+  createWheelMomentumRouter,
+  createZoomLatch,
+  cursorZoomAnchor,
+  omnidirectionalZoomDelta,
+  readingZoomAnchor,
+  textZoomDelta,
+  wheelIsMomentum,
+  zoomModeForWheel,
+} from './zoomZone'
 import { probePerf, notePerf } from './perflog'
 import { syncTwinkles, setScrollScene, swayFields } from './waveTwinkle'
+import { isWebKitEngine, scrollWaterMovesFor, threadedScrollWaterFor } from './browserCadence'
+import { resolveWaveCoast } from './waveCoast'
+import { peekWorkspaceWaterMotion, registerWorkspaceWaterReader } from '../workspace/waterMotion'
 
 // Re-exported so the callers that want BOTH this and <Scroll> are unchanged. It lives in its own
 // leaf module because fourteen of its seventeen importers want nothing else from this file — see
@@ -19,13 +33,25 @@ export { isTouchDevice }
 // ── Zoom input sensitivity — RETUNE THESE FOUR, never the formulas they feed ──────────────────
 // Each was measured against a real gesture on Peter's own hardware; the reasoning and the numbers
 // they replaced are in → docs/archive/editor-surface.md#scroll-zoom-tuning
-const TRACKPAD_ZOOM_SENSITIVITY = 4 // fine-delta fraction per 100px of deltaY; a full notch is always 1 step
-const FIRST_STEP_BONUS = 0.92 // one-time head start on a gesture's first event, so it needs no warm-up
+const TRACKPAD_ZOOM_SENSITIVITY = 4 // fine-delta in legacy 8%-step units; converted to the dense lattice below
+const WATER_ZOOM_SENSITIVITY = 0.5 // smaller compositor steps make whole-page zoom visually continuous
+const FIRST_TEXT_STEP_BONUS = 0.85 // dense steps: instant response without recreating an 8% first-frame jump
 // ⚠ The SETTLE is the heavy half of zooming (exit the live window, re-measure canonically,
 // re-anchor), so this must sit PAST a deliberate notch cadence (~400ms) or every notch outruns the
 // debounce and pays its own re-measure — the felt "three zooms then stops".
 const ZOOM_SETTLE_MS = 450
+const ZOOM_WELL_IDLE_MS = 82
+const WATER_COAST_TAU_MS = 44
+const WATER_COAST_DURATION_MS = 112
+const WATER_COAST_MAX_STEPS = 0.34
+const TRACKPAD_NOTCH_CUTOFF = 80
 const PINCH_ZOOM_SENSITIVITY = 2.5 // finger-distance ratio → steps; higher = fewer cm of pinch per step
+
+// Decorative water never needs display-refresh cadence. A 30 Hz pose is still fluid behind sharp
+// 60/120 Hz text scrolling, halves style/compositor churn on common displays, and is especially
+// important on WebKit where changing the fixed wave paint can otherwise dominate a scroll frame.
+export const WAVE_SCROLL_HZ = 30
+const WAVE_SCROLL_FRAME_MS = 1000 / WAVE_SCROLL_HZ
 
 // ── Deep-zoom-out scroll acceleration ─────────────────────────────────────────────────────────
 // A content-proportional notch (delta × scale) goes GLACIAL at tiny scales, so below the knee the
@@ -154,9 +180,11 @@ export function Scroll({
   fill = false,
   presentation = 'document',
   revealed = true,
+  instantReveal = false,
   fadingOut = false,
   covered = false,
   loadingTwinkles = false,
+  zoomStorageKey = 'inkwave:editorZoom',
 }: {
   children: ReactNode
   paperRef?: RefObject<HTMLDivElement>
@@ -168,6 +196,8 @@ export function Scroll({
       fixed transform-scaled paper with a responsive tool surface. Email is the first consumer. */
   presentation?: SurfacePresentation
   revealed?: boolean
+  /** Workspace panel swaps slide browser snapshots; their live replacement must not fade in. */
+  instantReveal?: boolean
   /** The live editor while the OPAQUE loading shell still covers it: its water must not paint —
       the two wave copies are never pixel-identical mid-boot (the editor's fixed pseudos anchor to
       its still-shifting flow box), and the double-paint visibly smears/dims the lines (measured:
@@ -178,6 +208,9 @@ export function Scroll({
   /** Keep only the sparkle population looping over the stationary loading water. The loading
       owner drops this at the exact frame the page starts revealing. */
   loadingTwinkles?: boolean
+  /** Separate application zoom preferences so a large document-reading zoom cannot silently make
+   * a newly created email enormous. */
+  zoomStorageKey?: string
   /** 0.5s opacity fade-out of the WHOLE surface (the loading shell's atomic cross-fade reveal). */
   fadingOut?: boolean // one-paint load: false hides the whole PARCHMENT (waves only) while fonts/
                      // pagination settle — visibility, not display, so layout + measurement still run.
@@ -204,10 +237,54 @@ export function Scroll({
   // exactly constant through gesture, settle, re-measure and clamp.
   // → docs/archive/editor-surface.md#scroll-wave-hold
   const WAVE_SWAY = 0.06 // 2/3 of the old 0.09 sway speed — shared by the sway + the rebases
-  const waveBaseRef = useRef(0)
+  const waveBaseRef = useRef(instantReveal ? peekWorkspaceWaterMotion()?.pose ?? 0 : 0)
   const zoomHoldUntilRef = useRef(0)
+  const threadedHoldTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const threadedHoldRafRef = useRef(0)
+  const threadedHoldScrollTopRef = useRef(0)
+  const releaseZoomWaterHoldForScroll = () => {
+    // Text reflow still has a pending canonical remeasure; an ordinary wheel during that window is
+    // not safe evidence that all zoom-owned clamps have landed. Whole-page magnify has no such
+    // live-layout window, so its next genuine wheel can resume the signature water immediately.
+    if ((window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold) return
+    zoomHoldUntilRef.current = 0
+    const surface = surfaceRef.current
+    if (!surface?.hasAttribute('data-iw-zoom-water-hold')) return
+    if (threadedHoldTimerRef.current) clearTimeout(threadedHoldTimerRef.current)
+    if (threadedHoldRafRef.current) cancelAnimationFrame(threadedHoldRafRef.current)
+    threadedHoldTimerRef.current = undefined
+    threadedHoldRafRef.current = 0
+    // Fold any last zoom correction whose scroll rAF has not run yet into the base before the
+    // timeline is restored. This happens in the wheel event, before native scrolling changes top.
+    const top = surface.scrollTop
+    waveBaseRef.current -= (top - threadedHoldScrollTopRef.current) * WAVE_SWAY
+    threadedHoldScrollTopRef.current = top
+    swayFields(surface, waveBaseRef.current)
+    surface.removeAttribute('data-iw-zoom-water-hold')
+  }
   const holdWavesFor = (ms: number) => {
     zoomHoldUntilRef.current = Math.max(zoomHoldUntilRef.current, performance.now() + ms)
+    const surface = surfaceRef.current
+    if (!surface?.hasAttribute('data-iw-threaded-scroll-water')) return
+    // Remove the scroll timeline at its CURRENT visual pose before zoom changes scrollTop. During
+    // the hold, the lightweight scroll listener rebases waveBaseRef but paints nothing. Re-enable
+    // the timeline with that new base in the same frame: base + new scroll phase = old visual pose.
+    if (!surface.hasAttribute('data-iw-zoom-water-hold')) {
+      swayFields(surface, waveBaseRef.current + surface.scrollTop * WAVE_SWAY)
+      threadedHoldScrollTopRef.current = surface.scrollTop
+      surface.setAttribute('data-iw-zoom-water-hold', '')
+    }
+    if (threadedHoldTimerRef.current) clearTimeout(threadedHoldTimerRef.current)
+    threadedHoldTimerRef.current = setTimeout(() => {
+      threadedHoldTimerRef.current = undefined
+      if (threadedHoldRafRef.current) cancelAnimationFrame(threadedHoldRafRef.current)
+      threadedHoldRafRef.current = requestAnimationFrame(() => {
+        threadedHoldRafRef.current = 0
+        if (!surface.isConnected) return
+        swayFields(surface, waveBaseRef.current)
+        surface.removeAttribute('data-iw-zoom-water-hold')
+      })
+    }, ms)
   }
   // Gapped mode draws a per-break drop shadow (PaginationExtension's rounded caps), so the single
   // tall outer shadow is dropped here — it would bleed down the edges and through the gaps.
@@ -221,9 +298,22 @@ export function Scroll({
   }, [])
 
   // HYBRID ZOOM scope: only the desktop LIVE editor (fill) with a fixed-size paper gets the
-  // transform-magnify + fit-to-width cap. Isolated applications own their equivalent fit wrapper;
+  // transform-magnify + responsive fit baseline/magnetic detents. Isolated applications own their equivalent fit wrapper;
   // phone, SnapshotView's in-flow Scroll, and fluid paper stay plain.
   const hybrid = usesTransformMagnify({ fill, phone, paperSize: getPaperSize(), presentation })
+
+  // A workspace slide moves the paper over one continuous water field. A remounted target surface
+  // therefore adopts the outgoing field's last absolute pose before its first paint; starting a
+  // fresh Scroll at zero is the visible water reset Peter identified.
+  useLayoutEffect(() => {
+    const el = surfaceRef.current
+    const motion = peekWorkspaceWaterMotion()
+    if (!el || !motion || !instantReveal) return
+    waveBaseRef.current = motion.pose
+    el.toggleAttribute('data-iw-workspace-wave', motion.active)
+    el.style.setProperty('--wave-x', `${motion.pose}px`)
+    swayFields(el, motion.pose)
+  }, [])
 
   // ── Magnify plumbing (hybrid only) ──────────────────────────────────────────────────────────
   // ONE subscriber applies the effective magnify to the DOM: the --iw-magnify var, the
@@ -234,24 +324,44 @@ export function Scroll({
   useLayoutEffect(() => {
     const el = surfaceRef.current
     if (!el || !hybrid) return
+    const webkit = isWebKitEngine(navigator.userAgent)
+    // WebKit must use one presentation face for the whole gesture. Switching from CSS `zoom` at
+    // rest to `transform` on the first wheel frame changes glyph rasterisation and can even move
+    // subpixel line geometry although the document layout is unchanged. The marker keeps Safari
+    // on the compositor-transform face both while still and while moving; Chromium retains the
+    // sharper CSS-zoom rest face because it does not exhibit the hand-off.
+    el.toggleAttribute('data-iw-webkit-transform-magnify', webkit)
     const box = magnifyBoxRef.current
     const paper = paperElRef.current
+    // Water magnify never changes the paper's layout height; reading offsetHeight on every scale
+    // frame forced layout before the transform could reach the compositor. Refresh this cache only
+    // when the paper's own ResizeObserver says its layout actually changed.
+    let paperLayoutHeight = paper?.offsetHeight ?? 0
     const pageW = () => pageBoxPx({
       paperSize: getPaperSize() === 'letter' ? 'letter' : 'a4',
       orientation: getOrientation(),
       topMarginPx: getTopMarginPx(),
       bottomMarginPx: MARGIN_BOTTOM,
     }).pageWidthPx
+    // Auto margins centre the wrapper only while it fits. Above that boundary CSS collapses them
+    // to zero, so apply() explicitly carries half the overflow in scrollLeft. Keep the usable
+    // viewport cached with the fit context; no geometry read belongs in a GPU zoom frame.
+    let availableWidth = 0
+    let centringWidth = 0
     const apply = () => {
       const s = getMagnify()
       el.style.setProperty('--iw-magnify', String(s))
       el.classList.toggle('iw-magnified', s !== 1)
       if (box) {
+        const pageWidth = pageW()
         // s=1 → restore the mm width React rendered (layout identical to master) + natural height.
         box.style.width = s === 1
           ? paperCssSize(getPaperSize() === 'letter' ? 'letter' : 'a4', getOrientation()).width
-          : `${pageW() * s}px`
-        box.style.height = s === 1 || !paper ? '' : `${paper.offsetHeight * s}px`
+          : `${pageWidth * s}px`
+        box.style.height = s === 1 || !paper ? '' : `${paperLayoutHeight * s}px`
+        // Crossing page-fit must crop BOTH sides evenly instead of pinning the left edge and
+        // consuming only the right. This hot path remains write-only; RO owns the measurement.
+        el.scrollLeft = centredMagnifyScrollLeft(s, pageWidth, centringWidth)
       }
     }
     // Settle: persist the INTENT + fire the settle event (PageGuides/panels repaint; the breaks
@@ -261,6 +371,10 @@ export function Scroll({
     const armSettle = () => {
       if (settle) clearTimeout(settle)
       settle = setTimeout(() => {
+        // Moving uses a compositor transform; rest uses layout zoom where supported so WebKit
+        // re-rasterises glyphs at the final scale instead of indefinitely displaying the gesture
+        // texture. Attribute removal is one style boundary after the 200ms quiet period.
+        el.removeAttribute('data-iw-magnify-moving')
         persistMagnify()
         holdWavesFor(800) // the settle re-measure (+ any clamp it causes) must not sway the waves
         window.dispatchEvent(new Event('inkwave:zoom-settled'))
@@ -268,9 +382,21 @@ export function Scroll({
     }
     // holdWavesFor: a new scale resizes the wrapper and the browser may CLAMP scrollTop against
     // the new extent ASYNCHRONOUSLY, at the next layout — scroll the sway must absorb.
-    const unsub = subscribeMagnify(() => { holdWavesFor(350); apply(); armSettle() })
-    // FIT CAP: recompute from the surface's clientWidth (excludes the scrollbar, so the fit page
-    // never sits under it) on every resize and page-settings change.
+    const unsub = subscribeMagnify((change) => {
+      if (change === 'restore') {
+        if (settle) clearTimeout(settle)
+        settle = undefined
+        el.removeAttribute('data-iw-magnify-moving')
+        apply()
+        return
+      }
+      el.setAttribute('data-iw-magnify-moving', '')
+      holdWavesFor(350)
+      apply()
+      armSettle()
+    })
+    // FIT/DETENT CONTEXT: recompute from the surface's clientWidth (excludes the scrollbar, so the
+    // fitted baseline never sits under it) on every resize and page-settings change.
     // SCROLL LOCK THROUGH THE SQUEEZE: a width change re-binds the cap, so the wrapper's height
     // changes and the reading position would scroll away. Anchor the top-visible TEXT line and
     // displacement-correct per RO tick, so a 0.18s panel transition's stream of small changes each
@@ -291,9 +417,31 @@ export function Scroll({
       return null
     }
     const computeFit = () => {
+      const style = getComputedStyle(el)
+      const measuredAvailableWidth = fitAvailableWidth(
+        el.clientWidth,
+        parseFloat(style.paddingLeft),
+        parseFloat(style.paddingRight),
+        // WebKit reports clientWidth after the real scrollbar but not after the matching start-side
+        // gutter reserved by `scrollbar-gutter: stable both-edges`. Blink overlay scrollbars report
+        // zero here. Subtract exactly the physical gutter each engine leaves outside clientWidth.
+        Math.max(0, el.offsetWidth - el.clientWidth),
+      )
+      const centringChanged = measuredAvailableWidth !== centringWidth
+      // Shift temporarily sets overflow-y:hidden to cancel compositor momentum. WebKit then
+      // reports a wider clientWidth (the scrollbar gutter disappears) and fires ResizeObserver.
+      // That is NOT a real viewport resize: rebinding the detents here changes scale at a fixed
+      // track position and makes a forward/reverse gesture miss. Keep BOTH fit and centring
+      // geometry from before Shift for the whole transaction; a late RO recenter otherwise
+      // overwrites the cursor anchor after WebKit removes its gutter.
+      if (el.hasAttribute('data-iw-shift-scroll-frozen')) return
+      centringWidth = measuredAvailableWidth
       const anchor = pickTopAnchor()
       const topBefore = anchor ? anchor.getBoundingClientRect().top : 0
-      setFitContext(Math.max(60, el.clientWidth - 2 * WATER_MARGIN_PX), pageW())
+      const pageWidth = pageW()
+      availableWidth = measuredAvailableWidth
+      setFitContext(availableWidth, pageWidth, Math.max(1, pageWidth - 2 * getSideMarginPx()))
+      if (centringChanged) apply()
       if (anchor && anchor.isConnected) {
         const topAfter = anchor.getBoundingClientRect().top // forces layout at the new wrapper size
         if (topAfter !== topBefore) el.scrollTop += topAfter - topBefore
@@ -304,20 +452,18 @@ export function Scroll({
     // Wrapper height must track the paper's (unscaled) height through reflows — font zoom,
     // typing, pagination. offsetHeight is layout px (transform-invariant), × s = visual height.
     const roPaper = paper ? new ResizeObserver(() => {
+      paperLayoutHeight = paper.offsetHeight
       const s = getMagnify()
       // ⚠ NO holdWavesFor here. This RO fires on EVERY paper resize — open-ended, unlike a bounded
       // gesture — so a hold per fire never lapses at s≠1 and the scroll sway freezes permanently.
       // A clamp from an ordinary reflow is genuine content motion the sway SHOULD follow; the
       // gesture path already holds the zoom-induced ones.
-      if (s !== 1 && box && paper) box.style.height = `${paper.offsetHeight * s}px`
-      // SELF-HEAL, belt-and-braces beside the className-keyed effect below (that one is the actual
-      // root cause). The var and the class are independently mutable and `apply()` keeps them in
-      // lockstep on ITS OWN writes only, so re-asserting both on every paper reflow is a standing
-      // correction rather than a fix for one cause. → docs/archive/editor-surface.md#scroll-classname
+      if (s !== 1 && box) box.style.height = `${paperLayoutHeight * s}px`
+      // SELF-HEAL, belt-and-braces beside the className-keyed effect below.
       if (el) { el.style.setProperty('--iw-magnify', String(s)); el.classList.toggle('iw-magnified', s !== 1) }
     }) : null
     if (paper && roPaper) roPaper.observe(paper)
-    // Settings change: recompute the fit cap for the new page width, and re-apply AFTER React's own
+    // Settings change: recompute the page/text-edge detents for the new width/margins, and re-apply AFTER React's own
     // settings rerender commits (rAF lands post-commit, pre-paint) — otherwise React's fresh mm
     // width on the wrapper would clobber the imperative pageWidth·s px while magnified.
     const onSettings = () => { computeFit(); requestAnimationFrame(apply) }
@@ -331,9 +477,11 @@ export function Scroll({
       window.removeEventListener('inkwave:page-settings-changed', onSettings)
       if (settle) clearTimeout(settle)
       el.classList.remove('iw-magnified')
+      el.removeAttribute('data-iw-magnify-moving')
+      el.removeAttribute('data-iw-webkit-transform-magnify')
       el.style.removeProperty('--iw-magnify')
-      // ⚠ The module's fit cap is deliberately NOT reset here: shell and editor are BOTH hybrid
-      // surfaces during the load handoff, so the shell unmounting must not yank the cap from under
+      // ⚠ The module's fit/detent context is deliberately NOT reset here: shell and editor are BOTH hybrid
+      // surfaces during the load handoff, so the shell unmounting must not yank the mapping from under
       // the editor. A remount recomputes it immediately.
     }
   }, [hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -346,23 +494,25 @@ export function Scroll({
     if (fill && !hybrid) magnifyBoxRef.current?.style.removeProperty('width')
   }, [fill, hybrid])
 
-  // In-app editor zoom: natural pinch OR Shift+any two-finger movement (desktop), and two-finger
-  // pinch (phone), scale the font so text REFLOWS. Command+scroll/pinch magnifies the whole page.
+  // In-app editor zoom: natural pinch OR Command+two-finger movement (desktop), and two-finger
+  // pinch (phone), scale the font so text REFLOWS. Shift+movement magnifies the whole page.
   // Both are isolated from the PDF panel because we
   // preventDefault the browser zoom. Persisted; both inputs share the same key + pipeline.
   // LATTICE (predictive step cache): the level is always a zoomStep.ts lattice point — legacy
   // persisted floats snap to the nearest step on load, so every rendered zoom is a cacheable one.
   const [editorZoom, setEditorZoom] = useState(() => {
-    try { return stepToZoom(zoomToStep(Number(localStorage.getItem('inkwave:editorZoom')) || 1)) } catch { return 1 }
+    try { return stepToZoom(zoomToStep(Number(localStorage.getItem(zoomStorageKey)) || 1)) } catch { return 1 }
   })
   // ⚠ THE REF IS THE AUTHORITATIVE LIVE ZOOM; React state only trails it. Never re-assign the ref
   // from state on render — a re-render landing MID-GESTURE resets it to the stale state and the
   // next commit steps from zoom 1 (probed: a −9-step snap-back mid-pinch).
   const editorZoomRef = useRef(editorZoom)
   // Anchor the font zoom SYNCHRONOUSLY (no flicker): set the zoom var, force layout by reading the
-  // anchored element's new position, correct scrollTop in the SAME frame, all before paint. The
-  // anchor is the real element under the cursor — a fraction estimate drifts badly down the page,
-  // because reflow does not grow uniformly. → docs/archive/editor-surface.md#scroll-anchor
+  // anchored element's new position, correct scrollTop in the SAME frame, all before paint. On
+  // desktop the stable anchor is the reading line 25% down the viewport; near the document start
+  // its existing top offset is held instead. Phone keeps the physical pinch midpoint. A fraction
+  // estimate drifts badly down the page because reflow does not grow uniformly.
+  // → docs/archive/editor-surface.md#scroll-anchor
   useEffect(() => {
     const el = surfaceRef.current
     if (!el) return // desktop: modifier+pinch on the surface; phone: two-finger pinch (body-scroll, below)
@@ -372,11 +522,22 @@ export function Scroll({
     // BOTH accumulators are FRACTIONAL and commit WHOLE lattice steps (the remainder carries), so
     // every input quantizes onto the shared zoomStep lattice — which is what makes zoom levels
     // precomputable at all. → docs/archive/editor-surface.md#scroll-anchor
-    let steps = 0 // natural pinch or Shift+two-finger movement: font reflow
-    let mSteps = 0 // Command+scroll/pinch: whole-page magnify
+    let steps = 0 // natural pinch or Command+two-finger movement: font reflow
+    let mSteps = 0 // Shift+two-finger movement: whole-page magnify
     let raf = 0
     let rafQueuedAt = 0
+    let rafFallback: ReturnType<typeof setTimeout> | undefined
     let settle: ReturnType<typeof setTimeout> | undefined
+    let textWellTimer: ReturnType<typeof setTimeout> | undefined
+    let textWellRaf = 0
+    let textNeedsKickstart = true
+    let magnifyWellTimer: ReturnType<typeof setTimeout> | undefined
+    let magnifyWellRaf = 0
+    let magnifyCoastRaf = 0
+    let physicalControlHeld = false
+    let physicalMetaHeld = false
+    let physicalShiftHeld = false
+    const keyboardZoomHeld = () => physicalControlHeld || physicalMetaHeld || physicalShiftHeld
     // Phone is BODY-scroll: the anchor correction must move window.scrollY — the surface itself
     // never scrolls there. ONE pair of helpers keeps every path identical for both scrollers (R2).
     const getScrollTop = () => (phone ? window.scrollY : el.scrollTop)
@@ -407,6 +568,8 @@ export function Scroll({
     let anchorNode: Node | null = null // text node of the caret anchor (null → block-top fallback)
     let anchorOff = 0
     let anchorTop0 = 0 // the anchor's viewport top when picked — the gesture's PIN position
+    let anchorTopLocked = false // near doc start: hold its current scrollTop rather than a text line
+    let anchorScrollTop0 = 0
     // Viewport top of a held anchor: the caret's line-box top when alive, else the block top, else
     // null (the caller falls back to the ratio). R1: a skipped block yields a degenerate 0×0 caret
     // rect at the origin — fall through to the block-top box rather than trust it as a position.
@@ -478,33 +641,253 @@ export function Scroll({
       }
       if (anchorEl) anchorTop0 = anchorEl.getBoundingClientRect().top // the gesture's pin position
     }
-    // MAGNIFY frame (hybrid, Command+scroll/pinch): scale the page about the VIEWPORT CENTRE.
-    // The wrapper box's rect IS the page's
-    // visual bounds, so the content point at the centre is (centre − box.top) into the page and
-    // lands at box'.top + offset·(after/before). → docs/archive/editor-surface.md#scroll-anchor
-    const applyMagnifyFrame = () => {
-      const net = Math.trunc(mSteps) // whole steps only; the fractional remainder carries
-      mSteps -= net
-      if (!net) return
-      const box = magnifyBoxRef.current
-      const before = getMagnify()
-      const r0 = box?.getBoundingClientRect()
+    const beginDesktopTextAnchor = (): void => {
       const vr = el.getBoundingClientRect()
-      const cX = vr.left + vr.width / 2, cY = vr.top + vr.height / 2
-      const factor = net > 0 ? Math.pow(1.08, net) : Math.pow(0.926, -net)
-      // ⚠ Multiply the EFFECTIVE scale, never the raw intent: while the fit cap binds, intent
-      // hovers just above it instead of running to 2.5 and snapping huge when the window widens.
-      const after = setUserMagnify(before * factor) // subscriber applied var + wrapper sizes synchronously
-      if (box && r0 && after !== before) {
-        const r1 = box.getBoundingClientRect() // one forced layout, same frame — pre-paint
-        el.scrollTop += r1.top + (cY - r0.top) * (after / before) - cY
-        el.scrollLeft += r1.left + (cX - r0.left) * (after / before) - cX
+      anchorScrollTop0 = getScrollTop()
+      const reading = readingZoomAnchor(vr.top, vr.height, anchorScrollTop0)
+      anchorTopLocked = reading.topLocked
+      anchorEl = null
+      anchorNode = null
+      if (!anchorTopLocked) pickAnchor(vr.left + vr.width / 2, reading.y)
+    }
+    // MAGNIFY frame (hybrid, Shift+two-finger movement): continuously scale about the cursor's
+    // VERTICAL position. Horizontal placement stays centred until the inner/text well, then keeps
+    // the page point acquired there under the cursor. The wrapper box's rect IS the page's
+    // visual bounds, so the content point at cursorY is (cursorY − box.top) into the page and lands
+    // at box'.top + offset·(after/before). → docs/archive/editor-surface.md#scroll-anchor
+    let magnifyAnchorY: number | null = null
+    let magnifyAnchorLocalY: number | null = null
+    let magnifyBoxDocumentTop: number | null = null
+    let magnifyAnchorX: number | null = null
+    let magnifyAnchorLocalX: number | null = null
+    let magnifyPreShiftBoxLeft: number | null = null
+    let magnifyHorizontalCentreX: number | null = null
+    let magnifyHorizontalPageWidth: number | null = null
+    const captureMagnifyHorizontalGeometry = (boxLeft: number, scale: number): void => {
+      const pageWidth = pageBoxPx({
+        paperSize: getPaperSize() === 'letter' ? 'letter' : 'a4',
+        orientation: getOrientation(),
+        topMarginPx: getTopMarginPx(),
+        bottomMarginPx: MARGIN_BOTTOM,
+      }).pageWidthPx
+      const style = getComputedStyle(el)
+      const availableWidth = fitAvailableWidth(
+        el.clientWidth,
+        parseFloat(style.paddingLeft),
+        parseFloat(style.paddingRight),
+        Math.max(0, el.offsetWidth - el.clientWidth),
+      )
+      const centred = centredMagnifyScrollLeft(scale, pageWidth, availableWidth)
+      magnifyPreShiftBoxLeft = boxLeft
+      magnifyHorizontalPageWidth = pageWidth
+      // Infer the screen-space centre used by the subscriber's centred target. The entire live
+      // path can then be calculated without reading WebKit's transient post-Shift transform rect.
+      magnifyHorizontalCentreX = boxLeft + el.scrollLeft - centred + pageWidth * scale / 2
+    }
+    const interruptScrollMomentum = (): void => {
+      const top = getScrollTop()
+      if (phone) window.scrollTo({ left: window.scrollX, top, behavior: 'auto' })
+      else {
+        const left = el.scrollLeft
+        // A same-position imperative scroll cancels the compositor's outstanding kinetic scroll;
+        // later momentum wheel events are then preventDefaulted by the active zoom gesture.
+        el.scrollTo({ left, top, behavior: 'auto' })
       }
+      guardScrollTop = getScrollTop()
+    }
+    const applyMagnifyAnchor = (
+      before: number,
+      after: number,
+      cY: number | null,
+      localY: number | null,
+      boxTop: number | null,
+      cX: number | null,
+    ) => {
+      if (!magnifyBoxRef.current || after === before) return
+      if (cY != null && localY != null && boxTop != null) {
+        // Keep the gesture-start PAGE-LOCAL point, including through a release-well animation.
+        el.scrollTop = anchoredScrollTarget(boxTop - el.scrollTop, el.scrollTop, cY, localY, after)
+      }
+      if (cX == null || magnifyHorizontalCentreX == null || magnifyHorizontalPageWidth == null) return
+      const detents = getMagnifyDetentScales()
+      const focus = magnifyHorizontalFocus(after, detents.page, detents.text)
+      if (focus <= 0) return // subscriber's centred scrollLeft is complete at/below page-fit
+      const centred = el.scrollLeft // the subscriber has just written the scale's centred target
+      const centredPageLeft = magnifyHorizontalCentreX - magnifyHorizontalPageWidth * after / 2
+      // Acquire at the mathematical boundary, not the first delivered frame beyond it. A coarse
+      // frame may cross the whole well; choosing that frame as the anchor made the path depend on
+      // cadence and jump sideways when the reverse path crossed the boundary at another scale.
+      if (magnifyAnchorLocalX == null) {
+        const boundaryScale = detents.text ?? after
+        const boundaryLeft = magnifyHorizontalCentreX - magnifyHorizontalPageWidth * boundaryScale / 2
+        magnifyAnchorLocalX = (cX - boundaryLeft) / boundaryScale
+      }
+      const cursorTarget = centred + centredPageLeft + magnifyAnchorLocalX * after - cX
+      el.scrollLeft = centred + (cursorTarget - centred) * focus
+    }
+    const applyMagnifyFrame = () => {
+      const net = mSteps
+      mSteps = 0
+      if (Math.abs(net) < 0.0001) return
+      const before = getMagnify()
+      const cY = magnifyAnchorY
+      const localY = magnifyAnchorLocalY
+      const boxTop = magnifyBoxDocumentTop
+      const factor = Math.pow(1.08, net)
+      // Advance the hidden track, not the painted scale. Its magnetic page/text-edge detents have
+      // one tiny symmetric centre plateau: scroll crosses it like latent heat, then motion resumes.
+      const after = advanceUserMagnify(factor) // subscriber applied var + wrapper sizes synchronously
+      // If a prior step hit a scroll boundary, the stable local point retains the hidden clamp
+      // offset. `boxTop - scrollTop` avoids a post-scale geometry read in the GPU frame.
+      applyMagnifyAnchor(before, after, cY, localY, boxTop, magnifyAnchorX)
       // Persist + zoom-settled ride the magnify subscriber's own settle timer (magnify plumbing).
+    }
+
+    const cancelMagnifyWell = () => {
+      if (magnifyWellTimer) clearTimeout(magnifyWellTimer)
+      magnifyWellTimer = undefined
+      if (magnifyWellRaf) cancelAnimationFrame(magnifyWellRaf)
+      magnifyWellRaf = 0
+      if (magnifyCoastRaf) cancelAnimationFrame(magnifyCoastRaf)
+      magnifyCoastRaf = 0
+    }
+    const releaseMagnifyIntoWell = (): boolean => {
+      if (!hybrid) return false
+      const target = getMagnifySnapTarget()
+      const from = getMagnify()
+      if (target == null) return false
+      cancelMagnifyWell()
+      if (Math.abs(Math.log(from / target)) < 0.00005) {
+        // The visible plateau has many hidden track positions. Release centres that latent
+        // distance even when the page already looks snapped, so either direction feels the same.
+        setUserMagnify(target)
+        return false
+      }
+      const fromLog = Math.log(from), targetLog = Math.log(target)
+      const cY = magnifyAnchorY, localY = magnifyAnchorLocalY, boxTop = magnifyBoxDocumentTop
+      const started = performance.now()
+      const tick = (now: number) => {
+        const elapsed = now - started
+        const next = Math.exp(criticallyDampedWellValue(fromLog, targetLog, elapsed))
+        const before = getMagnify()
+        const after = setUserMagnify(elapsed >= ZOOM_WELL_DURATION_MS ? target : next)
+        applyMagnifyAnchor(before, after, cY, localY, boxTop, magnifyAnchorX)
+        if (elapsed < ZOOM_WELL_DURATION_MS) magnifyWellRaf = requestAnimationFrame(tick)
+        else {
+          magnifyWellRaf = 0
+          waterVelocityStepsPerMs = 0
+          waterLastPhysicalAt = 0
+          waterTrackpadGesture = false
+        }
+      }
+      magnifyWellRaf = requestAnimationFrame(tick)
+      return true
+    }
+    const releaseMagnifyWithCoast = (): void => {
+      // A queued frame belongs to the fingers. Commit it before choosing the release trajectory;
+      // otherwise a timer/key-up can snap the preceding pose and silently discard the final input.
+      if (mSteps) applyMagnifyFrame()
+      // A well catches the release immediately. Letting inertia run first could carry the page out
+      // of the neighbourhood and made a plainly visible Chrome snap appear to do nothing.
+      if (getMagnifySnapTarget() != null) {
+        releaseMagnifyIntoWell()
+        waterVelocityStepsPerMs = 0
+        waterLastPhysicalAt = 0
+        waterTrackpadGesture = false
+        return
+      }
+      // A mouse notch is already an impulse and should settle directly. Fine pixel streams get one
+      // short analytic tail, capped to less than one historical 8% step, so Chrome no longer feels
+      // abruptly dead while WebKit cannot accumulate an unbounded native momentum train.
+      const initialVelocity = waterTrackpadGesture
+        ? Math.max(-0.018, Math.min(0.018, waterVelocityStepsPerMs))
+        : 0
+      if (Math.abs(initialVelocity) < 0.0007) {
+        releaseMagnifyIntoWell()
+        waterVelocityStepsPerMs = 0
+        waterLastPhysicalAt = 0
+        waterTrackpadGesture = false
+        return
+      }
+      cancelMagnifyWell()
+      const started = performance.now()
+      let travelled = 0
+      const tick = (now: number) => {
+        const elapsed = now - started
+        const velocity = initialVelocity * Math.exp(-elapsed / WATER_COAST_TAU_MS)
+        const offset = exponentialCoastOffset(initialVelocity, elapsed, WATER_COAST_TAU_MS, WATER_COAST_MAX_STEPS)
+        const step = offset - travelled
+        if (step) {
+          travelled = offset
+          mSteps += step
+          applyMagnifyFrame()
+        }
+        if (elapsed < WATER_COAST_DURATION_MS
+          && Math.abs(velocity) >= 0.0007
+          && Math.abs(travelled) < WATER_COAST_MAX_STEPS) {
+          magnifyCoastRaf = requestAnimationFrame(tick)
+          return
+        }
+        magnifyCoastRaf = 0
+        releaseMagnifyIntoWell()
+        waterVelocityStepsPerMs = 0
+        waterLastPhysicalAt = 0
+        waterTrackpadGesture = false
+      }
+      magnifyCoastRaf = requestAnimationFrame(tick)
+    }
+    const scheduleMagnifyWell = () => {
+      if (magnifyWellTimer) clearTimeout(magnifyWellTimer)
+      magnifyWellTimer = setTimeout(() => {
+        magnifyWellTimer = undefined
+        // Gesture end is finger/wheel inactivity, not Shift-up. This lets a writer keep Shift held
+        // across several trackpad strokes; a later physical sample cancels the fall immediately.
+        releaseMagnifyWithCoast()
+      }, ZOOM_WELL_IDLE_MS)
+    }
+
+    const cancelTextWell = () => {
+      if (textWellTimer) clearTimeout(textWellTimer)
+      textWellTimer = undefined
+      if (textWellRaf) cancelAnimationFrame(textWellRaf)
+      textWellRaf = 0
+    }
+    const releaseTextIntoWell = (): boolean => {
+      textNeedsKickstart = true
+      const current = zoomToStep(editorZoomRef.current)
+      const target = textZoomSnapTarget(current)
+      if (target == null) return false
+      cancelTextWell()
+      // The text lattice cannot render fractional layouts: a critically damped step trajectory is
+      // sampled to that lattice and therefore commits exactly one final reflow near 100%, while
+      // the hidden trajectory supplies the short release delay rather than a broad sticky zone.
+      const started = performance.now()
+      const waitForCrossing = (now: number) => {
+        const position = criticallyDampedWellValue(current, target, now - started)
+        if (Math.round(position) === current && now - started < ZOOM_WELL_DURATION_MS) {
+          textWellRaf = requestAnimationFrame(waitForCrossing)
+          return
+        }
+        textWellRaf = 0
+        gestureRebased = true
+        steps = target - current
+        requestApplyFrame()
+      }
+      textWellRaf = requestAnimationFrame(waitForCrossing)
+      return true
+    }
+    const scheduleTextWell = () => {
+      cancelTextWell()
+      textWellTimer = setTimeout(() => {
+        textWellTimer = undefined
+        textNeedsKickstart = true
+        if (!pinchDist) releaseTextIntoWell()
+      }, ZOOM_WELL_IDLE_MS)
     }
     const applyFrame = () => {
       raf = 0
       rafQueuedAt = 0
+      if (rafFallback) { clearTimeout(rafFallback); rafFallback = undefined }
       holdWavesFor(350) // zoom corrections (and the clamps they trigger) must not sway the waves
       applyMagnifyFrame()
       // GESTURE REBASE: a busy main thread at gesture start bursts its queued touchmoves in
@@ -514,15 +897,16 @@ export function Scroll({
       if (!gestureRebased) { gestureRebased = true; steps = 0 }
       const net = Math.trunc(steps) // commit whole lattice steps; the fractional remainder carries
       steps -= net
+      // Whole-page magnify runs through this same RAF, but it has no text step to commit. Bail
+      // before measuring the editor so water zoom remains a compositor-only frame after its
+      // gesture anchor has been captured.
+      if (!net) return
       const vr = el.getBoundingClientRect()
       const anchorX = phone ? pinchX : vr.left + vr.width / 2
-      const anchorY = phone ? pinchY : vr.top + vr.height / 2
-      // No step committed this frame → nothing to apply. Between-commit drift (native pan on
-      // phone, content-visibility relevancy waves on both) is owned by the zoom GUARD loop.
-      if (!net) return
-      // Pick (or re-pick, if the node was destroyed) the content anchor under the pinch midpoint /
-      // viewport centre; phone picks at touchstart.
-      if (!anchorEl || !anchorEl.isConnected) pickAnchor(anchorX, anchorY)
+      const anchorY = phone ? pinchY : readingZoomAnchor(vr.top, vr.height, getScrollTop()).y
+      // Pick (or re-pick, if the node was destroyed) the content anchor under the phone pinch
+      // midpoint / desktop quarter-height reading line; phone picks at touchstart.
+      if (!anchorTopLocked && (!anchorEl || !anchorEl.isConnected)) pickAnchor(anchorX, anchorY)
       const keepLeft = el.scrollLeft // desktop only; the phone helper pins window.scrollX itself
       // ⚠ THE RATIO MUST BE CLAMPED — this is the "doc keeps jumping down to the bottom" (R1: a
       // defensive `max(1,…)` silently became a measurement). See scrollRatioOf above.
@@ -530,8 +914,8 @@ export function Scroll({
       const tPick0 = performance.now()
       const topBefore = anchorTop() ?? 0 // at the CURRENT size
       probePerf('zoom-anchorPre', performance.now() - tPick0)
-      // LATTICE COMMIT: level = 1.08^step exactly, so every reachable level is a shared lattice
-      // point the pagination step cache can precompute.
+      // LATTICE COMMIT: every reachable level is an integral shared lattice point the pagination
+      // step cache can precompute; only the ±1/±2 neighbours bend toward exact 100%.
       const stepNext = zoomToStep(editorZoomRef.current) + net // zoomToStep clamps; re-clamped inside stepToZoom
       const next = stepToZoom(stepNext)
       if (next === editorZoomRef.current) return // pinned at a lattice bound — nothing to apply
@@ -569,7 +953,10 @@ export function Scroll({
       const tStep0 = performance.now()
       window.dispatchEvent(new CustomEvent('inkwave:zoom-step', { detail: { step: zoomToStep(next), surface: el, z0: zoomLiveZ0 } }))
       probePerf('zoom-stepEvent', performance.now() - tStep0)
-      if (topAfter != null) {
+      if (anchorTopLocked) {
+        setScrollTop(anchorScrollTop0)
+        if (!phone) el.scrollLeft = keepLeft
+      } else if (topAfter != null) {
         // ⚠ LIVE WINDOW: pin to the GESTURE-START viewport top, not last frame's. The
         // content-visibility set re-evaluates between frames, and per-frame displacement correction
         // PRESERVES that inter-frame drift instead of undoing it (~200px over a big gesture). The
@@ -596,18 +983,24 @@ export function Scroll({
         ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false // gesture idle → painters may run
         holdWavesFor(800) // …but the re-measure + re-anchor below must not sway the waves either
         setEditorZoom(editorZoomRef.current) // same var value → no visual change, just React catch-up
-        try { localStorage.setItem('inkwave:editorZoom', String(editorZoomRef.current)) } catch { /* private mode */ }
+        try { localStorage.setItem(zoomStorageKey, String(editorZoomRef.current)) } catch { /* private mode */ }
         // ZOOM-SETTLE RE-MEASURE: breaks stay pinned DURING the gesture (re-measuring live made the
         // text lurch), so the gaps + panels are still at the OLD font size. One clean re-measure,
         // re-anchored around the same held anchor so the adjustment moves no text.
         const heldNode = anchorNode, heldOff = anchorOff, heldEl = anchorEl
-        anchorEl = null; anchorNode = null // gesture over → next gesture picks a fresh anchor
+        const heldTopLocked = anchorTopLocked, heldScrollTop = anchorScrollTop0
+        const retainKeyboardAnchor = keyboardZoomHeld()
+        if (!retainKeyboardAnchor) {
+          anchorTopLocked = false
+          anchorEl = null; anchorNode = null // idle pinch → next gesture picks a fresh anchor
+        }
         const topBeforeMeasure = anchorTopFor(heldNode, heldOff, heldEl)
         const onMeasured = () => {
           window.removeEventListener('inkwave:pagination-measured', onMeasured)
           requestAnimationFrame(() => { // re-anchor is a zoom correction too — inside the hold window
             const topAfterMeasure = anchorTopFor(heldNode, heldOff, heldEl)
-            if (topBeforeMeasure != null && topAfterMeasure != null)
+            if (heldTopLocked) setScrollTop(heldScrollTop)
+            else if (topBeforeMeasure != null && topAfterMeasure != null)
               setScrollTop(getScrollTop() + (topAfterMeasure - topBeforeMeasure))
           })
         }
@@ -623,18 +1016,61 @@ export function Scroll({
     // Repair only requests older than 100ms, preserving ordinary per-frame coalescing.
     const requestApplyFrame = () => {
       const now = performance.now()
-      if (raf && now - rafQueuedAt <= 100) return
-      if (raf) cancelAnimationFrame(raf)
-      rafQueuedAt = now
-      raf = requestAnimationFrame(applyFrame)
+      if (!raf || now - rafQueuedAt > 100) {
+        if (raf) cancelAnimationFrame(raf)
+        rafQueuedAt = now
+        raf = requestAnimationFrame(applyFrame)
+      }
+      // Background/throttled Chromium can retain a request id without delivering its callback.
+      // One bounded fallback prevents the NEXT gesture from becoming the accidental trigger. It
+      // is cancelled by the healthy rAF, so the ordinary path still performs one pre-paint commit.
+      if (!rafFallback) rafFallback = setTimeout(() => {
+        rafFallback = undefined
+        if (!raf) return
+        cancelAnimationFrame(raf)
+        raf = 0
+        applyFrame()
+      }, 50)
     }
-    // MODE LATCH + COOLDOWN: natural pinch or Shift+movement is font reflow; ⌘ is whole-page
-    // magnify. Cursor position is irrelevant. The first event stays latched for the full gesture.
+    // MODE LATCH + COOLDOWN: natural pinch or Command is font reflow; Shift is whole-page
+    // magnify. Cursor position never CHOOSES the mode, but its vertical position anchors water
+    // magnify. The first event stays latched for the full gesture.
     // → docs/archive/editor-surface.md#scroll-zone
     const latch = createZoomLatch(() => surfaceRef.current)
+    const momentumRouter = createWheelMomentumRouter()
+    let waterVelocityStepsPerMs = 0
+    let waterLastPhysicalAt = 0
+    let waterTrackpadGesture = false
     const onWheel = (e: WheelEvent) => {
-      const requestedMode = zoomModeForWheel(e, hybrid)
+      // Workspace swipe and nested tools claim their event in capture. A claimed horizontal swipe
+      // must never also enter the deep-zoom scroll path and move the outgoing page underneath it.
+      if (e.defaultPrevented) return
+      // A physical Shift transaction is authoritative even when WebKit reports an inconsistent
+      // modifier tuple on a wheel sample. The key boundary has already discarded text remainder;
+      // never let one event from that same gesture fall back through the font-zoom path.
+      const requestedMode = physicalShiftHeld && hybrid ? 'water' : zoomModeForWheel(e, hybrid)
+      const momentum = wheelIsMomentum(e)
       if (!requestedMode) {
+        const plainMomentum = momentumRouter.route(false, momentum)
+        if (plainMomentum.kind === 'discard') {
+          e.preventDefault()
+          if (plainMomentum.interrupt) interruptScrollMomentum()
+          return
+        }
+        if (!momentum) {
+          // A new ordinary scroll owns the viewport immediately. A leftover release spring must
+          // not restore its old zoom anchor after the browser has already scrolled somewhere new.
+          cancelTextWell()
+          cancelMagnifyWell()
+          waterVelocityStepsPerMs = 0
+          waterLastPhysicalAt = 0
+          waterTrackpadGesture = false
+          latch.dispose()
+        }
+        // A fresh native scroll after whole-page zoom must not spend its opening frames inside the
+        // zoom-hold and then pay a mid-scroll Safari timeline reattachment. Restore at the input
+        // boundary, before the browser applies this wheel delta.
+        releaseZoomWaterHoldForScroll()
         // CONTENT-PROPORTIONAL PLAIN SCROLL below the knee only: the wrapper sizes scroll space to
         // VISUAL dims, so at a deep zoom-out a native notch covers 1/scale× the document distance
         // and the tiny page zips past. Scale 1 returns without preventDefault.
@@ -656,39 +1092,127 @@ export function Scroll({
         else { el.scrollTop += dy; el.scrollLeft += dx }
         return
       }
+      // Any new PHYSICAL input takes control from a release well immediately. Native momentum is
+      // the trackpad's finger-up signal and must not cancel the fall it just initiated.
+      if (!momentum) {
+        cancelTextWell()
+        cancelMagnifyWell()
+      }
       e.preventDefault()
-      const zoomDelta = requestedMode === 'text'
-        ? e.shiftKey
-          ? omnidirectionalZoomDelta(e.deltaX, e.deltaY)
-          // The OS has already classified ctrl+wheel as a natural pinch. Preserve deltaY's true
-          // scale direction whenever present, but accept a purely horizontal residue too — every
-          // pinch event the browser gives us should work even though raw finger angles are hidden.
-          : projectedZoomDelta(e.deltaX, e.deltaY) || e.deltaX
-        : projectedZoomDelta(e.deltaX, e.deltaY)
+      const naturalPinch = requestedMode === 'text'
+        && e.ctrlKey && !physicalControlHeld && !e.metaKey && !physicalShiftHeld
+      const zoomDelta = requestedMode === 'water'
+        ? omnidirectionalZoomDelta(e.deltaX, e.deltaY)
+        // Natural pinch keeps its physical scale direction. Command/physical-Control uses the same
+        // magnitude but reverses the up/down axis; a horizontal-only residue stays established.
+        : textZoomDelta(e.deltaX, e.deltaY, naturalPinch)
+      const momentumDecision = momentumRouter.route(true, momentum)
+      if (momentum) {
+        // Where a browser exposes the new momentum bit, replace its engine-specific tail with our
+        // short bounded coast. Where it does not, the same coast begins at the idle boundary.
+        if (requestedMode === 'water') {
+          if (magnifyCoastRaf || magnifyWellRaf) return
+          if (mSteps) applyMagnifyFrame()
+          releaseMagnifyWithCoast()
+        } else {
+          if (steps) applyFrame()
+          releaseTextIntoWell()
+        }
+        return
+      }
+      if (momentumDecision.kind === 'discard') {
+        if (momentumDecision.interrupt) interruptScrollMomentum()
+        return
+      }
       if (zoomDelta === 0) return
-      // ⚠ `isIdle()` must be read BEFORE `resolve()`, which latches a mode on its first call.
-      const freshGesture = latch.isIdle()
+      // Read the old mode before resolve applies the current modifier immediately. A switch owns
+      // a fresh anchor and discards any fractional input the previous mode had not yet painted.
+      const previousMode = latch.activeMode()
+      const freshGesture = previousMode === null
       const mode = latch.resolve(
         () => requestedMode,
         requestedMode === 'water' ? zoomDelta < 0 : zoomDelta > 0,
+        keyboardZoomHeld(),
       )
-      // LATTICE QUANTIZATION: a full wheel notch (|ΔY| ≥ 100) is exactly ±1 step; fine-deltas
-      // contribute proportional FRACTIONS that accumulate until a whole step commits, so every
-      // input lands on the shared lattice rather than an arbitrary float between points.
-      // TRACKPAD_ZOOM_SENSITIVITY scales ONLY the fraction — a discrete notch stays one step.
+      const modeChanged = previousMode !== null && previousMode !== mode
+      if (modeChanged || freshGesture) {
+        if (mode === 'water') steps = 0
+        else {
+          mSteps = 0
+          waterVelocityStepsPerMs = 0
+          waterLastPhysicalAt = 0
+          waterTrackpadGesture = false
+          magnifyAnchorY = null
+          magnifyAnchorLocalY = null
+          magnifyBoxDocumentTop = null
+          magnifyAnchorX = null
+          magnifyAnchorLocalX = null
+          magnifyHorizontalCentreX = null
+          magnifyHorizontalPageWidth = null
+        }
+      }
+      if (freshGesture) interruptScrollMomentum()
+      if (mode === 'water') {
+        const startingWaterGesture = freshGesture || modeChanged || magnifyAnchorLocalY == null
+        const settledBoxRect = startingWaterGesture ? magnifyBoxRef.current?.getBoundingClientRect() : null
+        const settledScale = getMagnify()
+        // Shift-down leaves the sharp settled CSS-zoom face untouched. The first ACTUAL water
+        // sample switches to transform before anchor measurement, so WebKit does not capture the
+        // VERTICAL start on one geometry and finish the bottom-edge round trip on another.
+        // Horizontal intent is different: preserve the pixel the writer saw on the settled face.
+        el.setAttribute('data-iw-magnify-moving', '')
+        const cursor = cursorZoomAnchor(e.clientX, e.clientY, el.getBoundingClientRect())
+        if (startingWaterGesture) {
+          magnifyAnchorX = cursor.x
+          magnifyAnchorY = cursor.y
+          const box = magnifyBoxRef.current
+          const rect = box?.getBoundingClientRect()
+          const scale = getMagnify()
+          magnifyAnchorLocalY = rect ? (cursor.y - rect.top) / scale : null
+          magnifyBoxDocumentTop = rect ? rect.top + el.scrollTop : null
+          if (settledBoxRect && rect) {
+            if (magnifyHorizontalCentreX == null || magnifyHorizontalPageWidth == null)
+              captureMagnifyHorizontalGeometry(settledBoxRect.left, settledScale)
+            const stableLeft = magnifyPreShiftBoxLeft ?? settledBoxRect.left
+            const detents = getMagnifyDetentScales()
+            magnifyAnchorLocalX = magnifyHorizontalFocus(settledScale, detents.page, detents.text) > 0
+              ? (cursor.x - stableLeft) / settledScale
+              : null
+          } else {
+            magnifyAnchorLocalX = null
+            magnifyHorizontalCentreX = null
+            magnifyHorizontalPageWidth = null
+          }
+        }
+      } else if ((freshGesture || modeChanged) && !phone) {
+        beginDesktopTextAnchor()
+      }
+      // Input distance is expressed first in the historical 8%-step units so the overall gesture
+      // speed does not change. Text then maps that distance onto ~3.89 dense 2% steps; water keeps
+      // the fractional value and applies it directly as a continuous transform.
       const mag = Math.abs(zoomDelta)
       const dir = zoomDelta < 0 ? 1 : -1
-      let stepDelta = dir * (mag >= 100 ? 1 : Math.min(1, (mag / 100) * TRACKPAD_ZOOM_SENSITIVITY))
-      // FIRST-STEP HEAD START, once per gesture and applied AFTER the mode is decided (the mode
-      // does not affect which accumulator gets it; `freshGesture` was captured pre-resolve).
-      if (freshGesture) stepDelta += dir * FIRST_STEP_BONUS
+      const stepDelta = dir * (mag >= 100 ? 1 : Math.min(1, (mag / 100) * TRACKPAD_ZOOM_SENSITIVITY))
       if (mode === 'water') {
-        // Whole-page direction is intentionally the physical-pinch direction: fingers together
-        // (the browser's negative delta) means zoom IN. Its wheel stream is opposite the text
-        // lattice's historical sign, so reverse only this accumulator.
-        mSteps -= stepDelta
+        // Shift's vertical axis was reversed in omnidirectionalZoomDelta; preserve that resolved
+        // direction here instead of applying the native-pinch inversion used by the old binding.
+        const waterStep = stepDelta * WATER_ZOOM_SENSITIVITY
+        const now = performance.now()
+        const dt = waterLastPhysicalAt ? Math.max(4, Math.min(40, now - waterLastPhysicalAt)) : 16
+        const instantVelocity = waterStep / dt
+        waterVelocityStepsPerMs = waterLastPhysicalAt
+          ? waterVelocityStepsPerMs * 0.42 + instantVelocity * 0.58
+          : instantVelocity
+        waterLastPhysicalAt = now
+        waterTrackpadGesture ||= e.deltaMode === WheelEvent.DOM_DELTA_PIXEL
+          && Math.abs(zoomDelta) < TRACKPAD_NOTCH_CUTOFF
+        mSteps += waterStep
+        scheduleMagnifyWell()
       } else {
-        steps += stepDelta
+        steps += stepDelta * ZOOM_STEPS_PER_NOTCH
+        if (freshGesture || modeChanged || textNeedsKickstart) steps += dir * FIRST_TEXT_STEP_BONUS
+        textNeedsKickstart = false
+        scheduleTextWell()
       }
       requestApplyFrame()
     }
@@ -749,7 +1273,12 @@ export function Scroll({
       guardStats.ticks++
       const st = getScrollTop()
       const t = anchorTop()
-      if (t != null) {
+      if (anchorTopLocked) {
+        if (Math.abs(st - anchorScrollTop0) > 0.5) {
+          guardStats.pin++
+          setScrollTop(anchorScrollTop0)
+        }
+      } else if (t != null) {
         if (!phone && Math.abs(st - guardScrollTop) > 0.5) {
           guardStats.rebase++
           anchorTop0 = t // user scrolled mid-window (desktop) — keep guarding from the new pose
@@ -884,10 +1413,14 @@ export function Scroll({
     }
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return
+      cancelTextWell()
+      cancelMagnifyWell()
       pinchDist = touchDist(e.touches)
       pinchX = (e.touches[0].clientX + e.touches[1].clientX) / 2
       pinchY = (e.touches[0].clientY + e.touches[1].clientY) / 2
       steps = 0
+      anchorTopLocked = false
+      anchorScrollTop0 = getScrollTop()
       gestureRebased = false // first responsive frame discards the backlog (see applyFrame)
       // Fresh gesture → anchor the TEXT POSITION under THIS midpoint, from the PRE-gesture layout,
       // so the pin holds exactly what the fingers grabbed. This hit-test is the touchstart task's
@@ -929,15 +1462,33 @@ export function Scroll({
       // Final commit LANDS NEAREST the fingers (round the fractional remainder), then the
       // live-reflow window closes — both in this same task, one paint, anchored throughout.
       if (raf) { cancelAnimationFrame(raf); raf = 0 }
+      if (rafFallback) { clearTimeout(rafFallback); rafFallback = undefined }
       steps = Math.round(steps)
       applyFrame()
-      exitZoomLive()
+      const fallingIntoWell = releaseTextIntoWell()
+      if (!fallingIntoWell) exitZoomLive()
       // A pinch that never committed a step arms no settle — release the deferred work now.
-      if (editorZoomRef.current === gestureStartZoom)
+      if (!fallingIntoWell && editorZoomRef.current === gestureStartZoom)
         (window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false
     }
     // iOS Safari's non-standard gesture events drive the native pinch — suppress them over the editor.
     const onGesture = (e: Event) => e.preventDefault()
+    const onResetTextZoom = (event: Event) => {
+      const target = (event as CustomEvent<{ surface?: Element }>).detail?.surface
+      if (target && target !== el) return
+      const currentStep = zoomToStep(editorZoomRef.current)
+      if (!currentStep) {
+        window.dispatchEvent(new Event('inkwave:zoom-settled'))
+        return
+      }
+      // A button reset has no gesture cursor, so preserve the normal quarter-height reading line.
+      // It still enters the exact same reflow/cache/remeasure path as Command/pinch zoom.
+      beginDesktopTextAnchor()
+      gestureRebased = true
+      steps = -currentStep
+      requestApplyFrame()
+    }
+    window.addEventListener('inkwave:reset-text-zoom', onResetTextZoom)
     let cleanupWheelArming: (() => void) | undefined
     if (phone) {
       el.addEventListener('touchstart', onTouchStart, { passive: true })
@@ -956,6 +1507,73 @@ export function Scroll({
       let wheelArmed = false
       const armWheel = () => { if (!wheelArmed) { wheelArmed = true; el.addEventListener('wheel', onWheel, { passive: false }) } }
       const disarmWheel = () => { if (wheelArmed) { wheelArmed = false; el.removeEventListener('wheel', onWheel) } }
+      // A scale-1 parchment has deliberately not been compositor-promoted at rest (power/VRAM).
+      // Shift is the advance signal that whole-page zoom is about to begin, so give WebKit the
+      // layer hint here instead of making the first wheel frame allocate + raster the page before
+      // it can move. This imperative modifier attribute is removed at key-up/blur.
+      const setMagnifyArmed = (armed: boolean) => {
+        if (hybrid) el.toggleAttribute('data-iw-magnify-armed', armed)
+      }
+      let frozenInlineStyles: Array<[string, string, string]> | null = null
+      const setShiftScrollFrozen = (frozen: boolean) => {
+        if (!hybrid) return
+        // This is the actual transaction boundary. A same-position scroll alone did not cancel
+        // Safari's compositor-owned kinetic scroll reliably; temporarily making the scroller
+        // non-scrollable does. Programmatic anchor corrections still work with overflow:hidden,
+        // so the very same first Shift-wheel sample can start cursor-anchored GPU zoom.
+        if (frozen) {
+          // Preserve both classic-scrollbar gutters as ordinary padding while native scrolling is
+          // disabled. WebKit's stable-both-edges gutter changed again after horizontal overflow,
+          // so a one-time translate correction was eventually applied twice (a measured 13px
+          // return error). Equal content-box geometry avoids that second coordinate system.
+          const style = getComputedStyle(el)
+          const gutter = Math.max(0, el.offsetWidth - el.clientWidth)
+          frozenInlineStyles = ['padding-left', 'padding-right', 'scrollbar-gutter'].map((property) =>
+            [property, el.style.getPropertyValue(property), el.style.getPropertyPriority(property)])
+          const paddingLeft = parseFloat(style.paddingLeft) || 0
+          const paddingRight = parseFloat(style.paddingRight) || 0
+          interruptScrollMomentum()
+          el.style.setProperty('scrollbar-gutter', 'auto')
+          el.style.setProperty('padding-left', `${paddingLeft + gutter}px`)
+          el.style.setProperty('padding-right', `${paddingRight + gutter}px`)
+          el.style.setProperty('overflow-y', 'hidden')
+          el.setAttribute('data-iw-shift-scroll-frozen', '')
+        } else {
+          for (const [property, value, priority] of frozenInlineStyles ?? []) {
+            if (value) el.style.setProperty(property, value, priority)
+            else el.style.removeProperty(property)
+          }
+          frozenInlineStyles = null
+          el.style.removeProperty('overflow-y')
+          el.removeAttribute('data-iw-shift-scroll-frozen')
+        }
+      }
+      const beginShiftTransaction = () => {
+        if (physicalShiftHeld) return
+        // A fresh Shift transaction owns ONLY whole-page zoom. Drop any fractional text input
+        // or queued 100% well before the shared rAF can mistake it for a font-size command.
+        steps = 0
+        cancelTextWell()
+        cancelMagnifyWell()
+        mSteps = 0
+        waterVelocityStepsPerMs = 0
+        waterLastPhysicalAt = 0
+        waterTrackpadGesture = false
+        const boxRect = magnifyBoxRef.current?.getBoundingClientRect()
+        if (boxRect) captureMagnifyHorizontalGeometry(boxRect.left, getMagnify())
+        setShiftScrollFrozen(true)
+        physicalShiftHeld = true
+        setMagnifyArmed(true)
+      }
+      const endShiftTransaction = () => {
+        if (!physicalShiftHeld) return
+        // Key-up may arrive before the next display frame. The final wheel input still counts;
+        // apply it while the same frozen geometry and anchors own the transaction.
+        if (mSteps) applyMagnifyFrame()
+        physicalShiftHeld = false
+        setMagnifyArmed(false)
+        setShiftScrollFrozen(false)
+      }
       let ctrlHeld = false
       // ⚠ A TRACKPAD PINCH PRESSES NO KEY — trackpads synthesise `wheel` with `ctrlKey: true` and
       // NO keydown ever fires, so arming on a real Control/Meta key left the listener unattached
@@ -968,11 +1586,61 @@ export function Scroll({
       // → docs/archive/editor-surface.md#scroll-zone
       let pointerOver = false
       const syncWheelArming = () => { if (shouldArmWheel({ ctrlHeld, pointerOver, magnify: getMagnify() })) armWheel(); else disarmWheel() }
-      const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') { ctrlHeld = true; syncWheelArming() } }
-      const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Control' || e.key === 'Meta') { ctrlHeld = false; syncWheelArming() } }
-      const onBlurWin = () => { ctrlHeld = false; syncWheelArming() }
+      const clearGestureAnchors = () => {
+        anchorTopLocked = false
+        anchorEl = null
+        anchorNode = null
+        magnifyAnchorY = null
+        magnifyAnchorLocalY = null
+        magnifyBoxDocumentTop = null
+        magnifyAnchorX = null
+        magnifyAnchorLocalX = null
+        magnifyHorizontalCentreX = null
+        magnifyHorizontalPageWidth = null
+        magnifyPreShiftBoxLeft = null
+        mSteps = 0
+        waterVelocityStepsPerMs = 0
+        waterLastPhysicalAt = 0
+        waterTrackpadGesture = false
+      }
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Control') { physicalControlHeld = true; cancelTextWell(); cancelMagnifyWell() }
+        if (e.key === 'Meta') { physicalMetaHeld = true; cancelTextWell(); cancelMagnifyWell() }
+        if (e.key === 'Shift') beginShiftTransaction()
+        if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Shift') {
+          ctrlHeld = keyboardZoomHeld()
+          syncWheelArming()
+        }
+      }
+      const onKeyUp = (e: KeyboardEvent) => {
+        if (e.key === 'Control') physicalControlHeld = false
+        if (e.key === 'Meta') physicalMetaHeld = false
+        if (e.key === 'Shift') endShiftTransaction()
+        if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Shift') {
+          ctrlHeld = keyboardZoomHeld()
+          if (!ctrlHeld) {
+            latch.dispose()
+            const fallingIntoWell = !!(textWellTimer || textWellRaf || magnifyWellTimer || magnifyWellRaf || magnifyCoastRaf)
+            if (!fallingIntoWell) clearGestureAnchors()
+          }
+          syncWheelArming()
+        }
+      }
+      const onBlurWin = () => {
+        physicalControlHeld = false; physicalMetaHeld = false
+        ctrlHeld = false
+        endShiftTransaction()
+        momentumRouter.reset()
+        latch.dispose()
+        if (!(textWellTimer || textWellRaf || magnifyWellTimer || magnifyWellRaf || magnifyCoastRaf)) clearGestureAnchors()
+        syncWheelArming()
+      }
       const onPointerCheck = (e: PointerEvent) => { // came-in-held: reveal the modifier before the first wheel
-        const held = e.ctrlKey || e.metaKey
+        physicalControlHeld = e.ctrlKey
+        physicalMetaHeld = e.metaKey
+        if (e.shiftKey) beginShiftTransaction()
+        else endShiftTransaction()
+        const held = keyboardZoomHeld()
         if (held !== ctrlHeld || !pointerOver) { ctrlHeld = held; pointerOver = true; syncWheelArming() }
       }
       const onPointerEnter = () => { if (!pointerOver) { pointerOver = true; syncWheelArming() } }
@@ -994,10 +1662,13 @@ export function Scroll({
         el.removeEventListener('pointerleave', onPointerLeave)
         unsubArm()
         disarmWheel()
+        setMagnifyArmed(false)
+        setShiftScrollFrozen(false)
       }
     }
     return () => {
       cleanupWheelArming?.()
+      window.removeEventListener('inkwave:reset-text-zoom', onResetTextZoom)
       el.removeEventListener('touchstart', onTouchStart)
       disarmPinchMove()
       el.removeEventListener('touchend', onTouchEnd)
@@ -1005,7 +1676,10 @@ export function Scroll({
       el.removeEventListener('gesturestart', onGesture)
       el.removeEventListener('gesturechange', onGesture)
       if (raf) cancelAnimationFrame(raf)
+      if (rafFallback) clearTimeout(rafFallback)
       if (settle) clearTimeout(settle)
+      cancelTextWell()
+      cancelMagnifyWell()
       exitZoomLive() // never leave the live-reflow window (content-visibility) on the editor
       if (restUnskipTimer) { clearTimeout(restUnskipTimer); restUnskipTimer = undefined }
       if (zoomLiveResting) { // the fast exit rests the window ON — tear it down for real here
@@ -1016,7 +1690,7 @@ export function Scroll({
       latch.dispose() // drop the mode latch + zoom-cursor classes with the listeners
       ;(window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold = false // never leave painters pinned
     }
-  }, [phone, hybrid]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [phone, hybrid, zoomStorageKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const sideMarginPx  = getSideMarginPx()
   const topMarginPx   = getTopMarginPx()
   const btmMarginPx   = getBtmMarginPx()
@@ -1030,21 +1704,110 @@ export function Scroll({
     // Phone attaches NO listener: waves exist only DURING load there, and at rest the surface is
     // parchment, so the sway var would be a style recalc per scroll frame for nothing.
     if (!el || phone) return
+    // Safari 26.4+ owns the low-resolution canvas pose through a THREADED CSS scroll timeline: no
+    // per-frame JS and no main-thread competition with native scrolling. Older WebKit keeps the
+    // same artwork static. Chrome retains the proven 30Hz JS path below.
+    if (!scrollWaterMovesFor(navigator.userAgent)) {
+      const cssTimeline = typeof CSS !== 'undefined'
+        && !!CSS.supports?.('animation-timeline', 'scroll()')
+      if (threadedScrollWaterFor(navigator.userAgent, cssTimeline)) {
+        el.removeAttribute('data-iw-static-scroll-water')
+        el.setAttribute('data-iw-threaded-scroll-water', '')
+        const syncRange = () => {
+          const range = Math.max(0, el.scrollHeight - el.clientHeight)
+          el.style.setProperty('--iw-wave-scroll-iterations', String(range / (140 / WAVE_SWAY)))
+        }
+        const ro = new ResizeObserver(syncRange)
+        ro.observe(el)
+        if (paperElRef.current) ro.observe(paperElRef.current)
+        let holdRaf = 0
+        const rebaseHeldScroll = () => {
+          holdRaf = 0
+          const top = el.scrollTop
+          if (performance.now() < zoomHoldUntilRef.current)
+            waveBaseRef.current -= (top - threadedHoldScrollTopRef.current) * WAVE_SWAY
+          threadedHoldScrollTopRef.current = top
+        }
+        const onScroll = () => {
+          // Ordinary scroll is compositor-owned: do not even schedule a JS frame. This listener
+          // wakes only for zoom's short scroll-hold window, where it rebases anchor corrections.
+          if (!el.hasAttribute('data-iw-zoom-water-hold')) return
+          if (!holdRaf) holdRaf = requestAnimationFrame(rebaseHeldScroll)
+        }
+        el.addEventListener('scroll', onScroll, { passive: true })
+        syncRange()
+        if (waveModeRef.current === 'off') {
+          const carried = instantReveal ? peekWorkspaceWaterMotion() : null
+          if (carried) waveBaseRef.current = carried.pose - el.scrollTop * WAVE_SWAY
+          swayFields(el, el.hasAttribute('data-iw-workspace-wave')
+            ? carried?.pose ?? waveBaseRef.current : waveBaseRef.current)
+        }
+        return () => {
+          ro.disconnect()
+          el.removeEventListener('scroll', onScroll)
+          if (holdRaf) cancelAnimationFrame(holdRaf)
+          if (threadedHoldTimerRef.current) clearTimeout(threadedHoldTimerRef.current)
+          if (threadedHoldRafRef.current) cancelAnimationFrame(threadedHoldRafRef.current)
+          threadedHoldTimerRef.current = undefined
+          threadedHoldRafRef.current = 0
+          el.removeAttribute('data-iw-threaded-scroll-water')
+          el.removeAttribute('data-iw-zoom-water-hold')
+          el.style.removeProperty('--iw-wave-scroll-iterations')
+        }
+      }
+      el.setAttribute('data-iw-static-scroll-water', '')
+      return () => el.removeAttribute('data-iw-static-scroll-water')
+    }
+    el.removeAttribute('data-iw-static-scroll-water')
     const target: HTMLElement | Window = el
     let raf = 0
+    let waveRaf = 0
+    let waveTimer = 0
+    let lastWavePaintAt = -Infinity
+    let pendingSceneTop: number | null = null
     let lastTop = el.scrollTop
+    let lastWaveX: number | null = null
     // FULLSCREEN PDF SWAY: the PDF viewer dispatches its absolute scrollTop, folded into the SAME
     // base+top formula as a second scroll source (R2) — one write path, so the zoom-hold and coast
     // rules stay intact.
     let pdfTop = 0
+    const carried = instantReveal ? peekWorkspaceWaterMotion() : null
+    if (carried) waveBaseRef.current = carried.pose - el.scrollTop * WAVE_SWAY
     const writeWave = () => {
       // ONE rounded value for both consumers: the surface var and the twinkle fields' LITERAL
       // transforms (`swayFields`). ⚠ `--wave-x` MUST NEVER INVALIDATE THE PAGE SUBTREE — index.css
       // firebreaks it to 0px under the page roots, and a NEW `var(--wave-x)` consumer must not sit
       // beneath them. Without that, desktop scroll frames were p50 417ms; with it, 50ms.
       const wx = Number((waveBaseRef.current + (el.scrollTop + pdfTop) * WAVE_SWAY).toFixed(1))
+      // Cursor-anchored magnify writes scrollTop every frame, but the zoom hold rebases that delta
+      // so the wave position is intentionally unchanged. Do not dirty the wave pseudo or rewrite
+      // every twinkle transform when the rounded visual value is already on screen.
+      if (wx === lastWaveX) return
+      lastWaveX = wx
       el.style.setProperty('--wave-x', `${wx}px`)
       swayFields(el, wx)
+    }
+    const paintWave = (at: number) => {
+      waveRaf = 0
+      if (el.hasAttribute('data-iw-workspace-wave')) return
+      lastWavePaintAt = at
+      if (pendingSceneTop != null) {
+        setScrollScene(el, pendingSceneTop)
+        pendingSceneTop = null
+      }
+      writeWave()
+    }
+    const scheduleWavePaint = () => {
+      if (waveRaf || waveTimer) return
+      const wait = lastWavePaintAt + WAVE_SCROLL_FRAME_MS - performance.now()
+      if (wait <= 1) {
+        waveRaf = requestAnimationFrame(paintWave)
+        return
+      }
+      waveTimer = window.setTimeout(() => {
+        waveTimer = 0
+        waveRaf = requestAnimationFrame(paintWave)
+      }, wait)
     }
     const apply = () => {
       raf = 0
@@ -1054,6 +1817,9 @@ export function Scroll({
       // re-rasters the overdraw layers on it). The coast's finish() writes the handoff value.
       if (waveModeRef.current !== 'off') return
       const top = el.scrollTop
+      // A swipe owns the water even while the incoming editor restores scroll underneath it.
+      // Keep the native-scroll baseline current so returning ownership adds only future movement.
+      if (el.hasAttribute('data-iw-workspace-wave')) { lastTop = top; return }
       // Zoom-driven scroll (gesture / settle / clamp): hold --wave-x exactly still by absorbing
       // the delta into the base. Rebased (not skipped), so sway resumes with no jump.
       if (performance.now() < zoomHoldUntilRef.current) {
@@ -1061,27 +1827,38 @@ export function Scroll({
       } else if (top !== lastTop) {
         // GENUINE scroll (zoom-hold deltas excluded): the fixed speck loop is a pure function of
         // absolute scrollTop. No velocity clock means zoom cannot leave it running or re-phase it.
-        setScrollScene(el, top + pdfTop)
+        pendingSceneTop = top + pdfTop
       }
       lastTop = top
-      writeWave()
+      scheduleWavePaint()
     }
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(apply) }
+    const onPositionRestored = (event: Event) => {
+      if ((event as CustomEvent<{ surface?: HTMLElement }>).detail?.surface !== el) return
+      lastTop = el.scrollTop
+      pendingSceneTop = null
+    }
     const onPdfSway = (e: Event) => {
       const top = (e as CustomEvent<{ top: number }>).detail?.top ?? 0
       const prev = pdfTop
       pdfTop = top
       if (waveModeRef.current !== 'off') return // drift/coast own the wave position
-      if (top !== prev) setScrollScene(el, el.scrollTop + top)
-      writeWave()
+      if (top !== prev) pendingSceneTop = el.scrollTop + top
+      scheduleWavePaint()
     }
-    apply()
+    writeWave()
+    lastWavePaintAt = performance.now()
     target.addEventListener('scroll', onScroll, { passive: true })
     window.addEventListener('inkwave:pdf-sway', onPdfSway)
+    window.addEventListener('inkwave:scroll-position-restored', onPositionRestored)
     return () => {
       target.removeEventListener('scroll', onScroll)
       window.removeEventListener('inkwave:pdf-sway', onPdfSway)
+      window.removeEventListener('inkwave:scroll-position-restored', onPositionRestored)
       if (raf) cancelAnimationFrame(raf)
+      if (waveRaf) cancelAnimationFrame(waveRaf)
+      if (waveTimer) clearTimeout(waveTimer)
+      el.removeAttribute('data-iw-static-scroll-water')
     }
   }, [phone]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1091,12 +1868,93 @@ export function Scroll({
   // events, each a one-shot write: SETTLE ('inkwave:reveal-imminent') adds the brake on top of
   // the still-running drift, and the rest handoff hands the final offset to the scroll sway as
   // its persistent base — no boundary snapping, so the waves can never stop or move backward.
-  const startedHiddenRef = useRef(!revealed) // instances that mount revealed (SnapshotView) never drift
+  const startedHiddenRef = useRef(!revealed && !instantReveal) // workspace targets inherit swipe-driven water, not loading drift
   const [waveMode, setWaveMode] = useState<'anim' | 'coast' | 'off'>(startedHiddenRef.current ? 'anim' : 'off')
   // Ref mirror for the scroll-sway rAF (declared above, runs later) — it must not write --wave-x
   // while the drift/coast animations own the wave position.
   const waveModeRef = useRef(waveMode)
   waveModeRef.current = waveMode
+
+  useLayoutEffect(() => {
+    const el = surfaceRef.current
+    if (!el || !fill || phone || waveMode !== 'off') return
+    return registerWorkspaceWaterReader(el, () => {
+      const active = el.hasAttribute('data-iw-workspace-wave')
+      const threaded = el.hasAttribute('data-iw-threaded-scroll-water')
+        && !el.hasAttribute('data-iw-zoom-water-hold') && !active
+      const inlinePose = Number.parseFloat(el.style.getPropertyValue('--wave-x'))
+      return {
+        active,
+        pose: threaded ? waveBaseRef.current + el.scrollTop * WAVE_SWAY
+          : Number.isFinite(inlinePose) ? inlinePose : waveBaseRef.current,
+      }
+    })
+  }, [fill, phone, waveMode])
+
+  // Interactive workspace swipes keep this surface's water stationary in the viewport while the
+  // paper card moves above it. Horizontal samples use the same 0.06 displacement ratio as vertical
+  // scroll; trackpad momentum therefore supplies its own immediate exponential decay. The event's
+  // final inactive pose is folded into the ordinary scroll base so the next scroll cannot snap it.
+  useEffect(() => {
+    const el = surfaceRef.current
+    if (!el || phone) return
+    const onWorkspaceWave = (event: Event) => {
+      if (waveModeRef.current !== 'off') return
+      const detail = (event as CustomEvent<{ pose?: number; active?: boolean }>).detail
+      const pose = detail?.pose
+      if (!Number.isFinite(pose)) return
+      const active = !!detail?.active
+      const threaded = el.hasAttribute('data-iw-threaded-scroll-water')
+      const jsScroll = scrollWaterMovesFor(navigator.userAgent)
+      const scrollContribution = threaded || jsScroll ? el.scrollTop * WAVE_SWAY : 0
+      waveBaseRef.current = pose! - scrollContribution
+      if (active) {
+        // A new horizontal motion owns the water immediately, including when it begins inside a
+        // previous zoom's short hold window. Cancel that old owner before presenting this pose.
+        zoomHoldUntilRef.current = 0
+        if (threadedHoldTimerRef.current) clearTimeout(threadedHoldTimerRef.current)
+        if (threadedHoldRafRef.current) cancelAnimationFrame(threadedHoldRafRef.current)
+        threadedHoldTimerRef.current = undefined
+        threadedHoldRafRef.current = 0
+        el.setAttribute('data-iw-workspace-wave', '')
+        el.removeAttribute('data-iw-zoom-water-hold')
+        el.style.setProperty('--wave-x', `${pose}px`)
+        swayFields(el, pose!)
+        return
+      }
+      el.style.setProperty('--wave-x', `${pose}px`)
+      // A threaded animation adds scroll displacement to the inline base; other engines consume
+      // the absolute pose now and derive the same value on their next scroll sample.
+      swayFields(el, threaded && !el.hasAttribute('data-iw-zoom-water-hold') ? waveBaseRef.current : pose!)
+      el.removeAttribute('data-iw-workspace-wave')
+    }
+    window.addEventListener('inkwave:workspace-wave-motion', onWorkspaceWave)
+    return () => window.removeEventListener('inkwave:workspace-wave-motion', onWorkspaceWave)
+  }, [phone])
+
+  // Restoring a panel's remembered vertical position is not a new scroll gesture. Rebase the water
+  // by the inverse contribution in the same task so the page can return to its old reading line
+  // without making the fixed water jump underneath it.
+  useEffect(() => {
+    const el = surfaceRef.current
+    if (!el || phone) return
+    const onRestored = (event: Event) => {
+      const detail = (event as CustomEvent<{ surface?: HTMLElement; before?: number; after?: number }>).detail
+      if (detail?.surface !== el || !Number.isFinite(detail.before) || !Number.isFinite(detail.after)) return
+      const threaded = el.hasAttribute('data-iw-threaded-scroll-water')
+      const held = el.hasAttribute('data-iw-workspace-wave') || el.hasAttribute('data-iw-zoom-water-hold')
+      const movesWithScroll = scrollWaterMovesFor(navigator.userAgent) || threaded
+      const oldInlinePose = Number.parseFloat(el.style.getPropertyValue('--wave-x'))
+      const pose = threaded && !held ? waveBaseRef.current + detail.before! * WAVE_SWAY
+        : Number.isFinite(oldInlinePose) ? oldInlinePose : waveBaseRef.current
+      waveBaseRef.current = pose - (movesWithScroll ? detail.after! * WAVE_SWAY : 0)
+      threadedHoldScrollTopRef.current = detail.after!
+      el.style.setProperty('--wave-x', `${pose}px`)
+      swayFields(el, threaded && !held ? waveBaseRef.current : pose)
+    }
+    window.addEventListener('inkwave:scroll-position-restored', onRestored)
+    return () => window.removeEventListener('inkwave:scroll-position-restored', onRestored)
+  }, [phone])
 
   // ⚠ REACT'S className WRITE SILENTLY STRIPS AN IMPERATIVELY-ADDED CLASS. The surface's className
   // is a JSX template keyed on `waveMode`/`covered`, which walk over the several-second reveal, and
@@ -1182,6 +2040,32 @@ export function Scroll({
   // compensate; every surface adopts ONE record. → docs/archive/editor-surface.md#scroll-coast
   const coastT0Ref = useRef(0)
   const coastEndRef = useRef<number | null>(null) // device-pixel-snapped coast end offset (see below)
+  const resolveCoastBeforeClass = (el: HTMLElement, sc: LoadCoast): boolean => {
+    let startTime: number | null = null
+    try {
+      const drift = el.getAnimations({ subtree: true }).find((animation) => {
+        const name = (animation as CSSAnimation).animationName
+        const target = (animation.effect as KeyframeEffect | null)?.target
+        return name === 'iw-wave-drift-l'
+          && !(target instanceof Element && target.matches('.iw-twk-field'))
+      })
+      if (typeof drift?.startTime === 'number') startTime = drift.startTime
+    } catch { /* unresolved animation keeps the rAF fallback below */ }
+    if (startTime == null) return false
+    const resolved = resolveWaveCoast({
+      driftStartTime: startTime,
+      now: timelineNow(),
+      coastMs: sc.phone ? 2000 : 2500,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      anchorSlackMs: ANCHOR_SLACK_MS,
+    })
+    if (!resolved) return false
+    sc.resolvedT0 = resolved.t0
+    sc.d = resolved.d
+    sc.end = resolved.end
+    injectAdditiveCoastFrames(sc.phone, sc.d)
+    return true
+  }
   const settleToCoast = () => {
     const el = surfaceRef.current
     if (!el) { setWaveMode('off'); return }
@@ -1209,9 +2093,14 @@ export function Scroll({
     let sc = loadCoast
     if (!sc || now - sc.t0 > T) { // a stale record is an abandoned choreography (self-heals)
       const d0 = phone ? 72 : 90 // v·T/2 — snapped to a device pixel at the anchor
-      injectAdditiveCoastFrames(phone, d0)
       sc = loadCoast = { t0: now, resolvedT0: null, d: d0, end: null, phone }
     }
+    // Resolve and publish the FINAL keyframes while the old drift class still owns the pixels.
+    // The former next-rAF rewrite let Safari show one provisional coast frame, perceived as a
+    // backwards flick exactly when the slowdown began. If the drift clock is not resolved yet,
+    // retain the paused provisional set and let the existing anchored fallback finish it.
+    if (sc.resolvedT0 == null && !resolveCoastBeforeClass(el, sc))
+      injectAdditiveCoastFrames(phone, sc.d)
     coastT0Ref.current = sc.resolvedT0 ?? sc.t0
     coastEndRef.current = sc.end
     setWaveMode('coast')
@@ -1290,6 +2179,10 @@ export function Scroll({
       if (!sc) return
       let tA = sc.resolvedT0
       if (tA == null) {
+        resolveCoastBeforeClass(el, sc)
+        tA = sc.resolvedT0
+      }
+      if (tA == null) {
         tA = timelineNow() + ANCHOR_SLACK_MS
         // The drift pose at t_a, from the drift's own clock — shared across surfaces by the
         // sticky sibling adopt.
@@ -1329,18 +2222,32 @@ export function Scroll({
     const el = surfaceRef.current
     if (!el || !fill || phone || waveMode !== 'off') return
     let t = 0
-    el.classList.add('iw-sb-idle')
+    el.removeAttribute('data-iw-scroll-active')
     const show = () => {
-      el.classList.remove('iw-sb-idle')
+      // Cursor-anchor corrections emit real scroll events on every zoom frame, but the wave sway
+      // is deliberately held through them. Promoting the two 2,800×1,680 mark fields for a scroll
+      // we will not draw wastes the exact GPU budget this activity marker exists to protect.
+      if ((window as unknown as { __iwZoomHold?: boolean }).__iwZoomHold
+        || performance.now() < zoomHoldUntilRef.current) {
+        clearTimeout(t)
+        el.removeAttribute('data-iw-scroll-active')
+        return
+      }
+      el.setAttribute('data-iw-scroll-active', '')
       clearTimeout(t)
-      t = window.setTimeout(() => el.classList.add('iw-sb-idle'), 1400)
+      t = window.setTimeout(() => el.removeAttribute('data-iw-scroll-active'), 1400)
     }
     const onMove = (e: PointerEvent) => {
       if (el.getBoundingClientRect().right - e.clientX < 28) show()
     }
     el.addEventListener('scroll', show, { passive: true })
     el.addEventListener('pointermove', onMove, { passive: true })
-    return () => { clearTimeout(t); el.removeEventListener('scroll', show); el.removeEventListener('pointermove', onMove) }
+    return () => {
+      clearTimeout(t)
+      el.removeAttribute('data-iw-scroll-active')
+      el.removeEventListener('scroll', show)
+      el.removeEventListener('pointermove', onMove)
+    }
   }, [fill, phone, waveMode])
 
   // Deterministic water marks (see waveTwinkle.ts + waveSceneData.ts). The complete checked-in scene
@@ -1372,6 +2279,7 @@ export function Scroll({
 
   return (
     <div ref={surfaceRef} className={`inkwave-editor-surface${phone ? ' is-phone' : ''}${fill ? ' iw-fill' : ''}${phone && covered ? '' : waveMode === 'anim' ? ' iw-wave-anim' : waveMode === 'coast' ? ' iw-wave-coast' : ''}${covered ? ' iw-wave-covered' : ''}`}
+      data-iw-live-editor={containerRef ? '' : undefined}
       style={{
         '--iw-editor-zoom': editorZoom,
         // The shell's atomic reveal: fade the whole covering surface out over the LAST 0.5s of the
@@ -1423,7 +2331,9 @@ export function Scroll({
           // the fade lands at 2.0s, the moment the waves reach rest.
           visibility: revealed ? 'visible' : 'hidden',
           opacity: revealed ? 1 : 0,
-          transition: `opacity ${phone ? 560 : 700}ms cubic-bezier(0.4, 0, 0.2, 1)`, // 30% shorter: 0.56s phone / 0.7s desktop
+          transition: instantReveal
+            ? 'none'
+            : `opacity ${phone ? 560 : 700}ms cubic-bezier(0.4, 0, 0.2, 1)`, // 30% shorter: 0.56s phone / 0.7s desktop
         }}
       >
         {/* Paper body. The side padding is the text margin: a roomy fixed margin on DESKTOP (driven

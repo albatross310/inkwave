@@ -91,6 +91,15 @@ describe('theming (CLAUDE.md — a panel without iw-nightable is white-on-white 
   })
 })
 
+describe('viewport fit', () => {
+  it('bounds the dialog to the dynamic viewport and lets its document rows shrink', () => {
+    expect(CODE).toContain("maxHeight: 'calc(100dvh - 1rem)'")
+    expect(CODE).toMatch(/min-h-0[^"\n]*overflow-x-hidden[^"\n]*overflow-y-auto/)
+    expect(CODE).toMatch(/data-testid="opfs-row"[\s\S]*?className="flex min-w-0 flex-col/)
+    expect(CODE).not.toContain('min-w-max')
+  })
+})
+
 describe('the entry point exists', () => {
   it('the hamburger (OptionsMenu) has a Storage item that opens the inspector', () => {
     expect(MENU).toMatch(/label: 'Storage', run: \(\) => setInspector\(true\)/)

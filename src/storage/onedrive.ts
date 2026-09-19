@@ -2,6 +2,8 @@
 // Chromium-only). Sign in with a Microsoft account (OAuth 2.0 PKCE via MSAL), then PUT into the
 // chosen folder. ONLY an access token + the file bytes leave the browser, straight to Graph — no
 // Inkwave server is involved.
+// Browser tabs use the established redirect flow; any installed PWA uses loginPopup so a
+// failed Microsoft page cannot replace the chrome-less document window with no route back.
 //
 // ⚠ It MIRRORS gdrive.ts, and the two have drifted apart twice with a data-loss bug on one side only.
 // The safety rule is `planWriteback`, shared; this file owns only the mapping of GRAPH's failure
@@ -92,12 +94,53 @@ export function oneDriveConfigured(): boolean {
 }
 
 // MSAL is browser-only and heavy — load it on demand.
-let appPromise: Promise<unknown> | null = null
-async function getApp(): Promise<{
+type OneDriveMsalApp = {
   getAllAccounts: () => Array<{ username: string }>
   acquireTokenSilent: (o: unknown) => Promise<{ accessToken: string }>
+  loginPopup: (o: unknown) => Promise<unknown>
   loginRedirect: (o: unknown) => Promise<void>
-}> {
+}
+
+let appPromise: Promise<unknown> | null = null
+let lastAuthError: string | null = null
+
+export type OneDriveSignInResult =
+  | { ok: true; mode: 'popup' | 'redirect' }
+  | { ok: false; error: string }
+
+/** Installed PWAs have no browser Back button, so keep the document in the parent window. */
+export function oneDriveSignInMode(input: {
+  standalone: boolean
+}): 'popup' | 'redirect' {
+  return input.standalone ? 'popup' : 'redirect'
+}
+
+function currentOneDriveSignInMode(): 'popup' | 'redirect' {
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string }; standalone?: boolean }
+  const standalone = nav.standalone === true
+    || (typeof matchMedia !== 'undefined' && matchMedia('(display-mode: standalone)').matches)
+  return oneDriveSignInMode({ standalone })
+}
+
+function authFailureMessage(error: unknown): string {
+  const code = typeof error === 'object' && error !== null && 'errorCode' in error
+    ? String((error as { errorCode?: unknown }).errorCode ?? '')
+    : ''
+  if (/user_cancelled|user_canceled/i.test(code)) return 'Microsoft sign-in was cancelled.'
+  if (/popup.*(blocked|window)|empty_window_error/i.test(code)) {
+    return 'Microsoft sign-in could not open its window. Allow pop-ups for Inkwave and try again.'
+  }
+  return 'Microsoft could not complete OneDrive sign-in. Your document is still open and unchanged.'
+}
+
+/** Read the most recent redirect/initialisation failure once, for the editor recovery UI. */
+export function takeOneDriveAuthError(): string | null {
+  const error = lastAuthError
+  lastAuthError = null
+  return error
+}
+
+async function getApp(): Promise<OneDriveMsalApp> {
   if (!CLIENT_ID) throw new Error('OneDrive not configured')
   if (!appPromise) {
     appPromise = import('@azure/msal-browser').then(async (m) => {
@@ -117,7 +160,16 @@ async function getApp(): Promise<{
       return app
     })
   }
-  return appPromise as Promise<Awaited<ReturnType<typeof getApp>>>
+  const pending = appPromise as Promise<OneDriveMsalApp>
+  try {
+    return await pending
+  } catch (error) {
+    // A rejected module/redirect promise cannot be the permanent singleton: Retry must construct a
+    // fresh MSAL client instead of immediately replaying the same settled rejection.
+    if (appPromise === pending) appPromise = null
+    lastAuthError = authFailureMessage(error)
+    throw error
+  }
 }
 
 /** The signed-in Microsoft account's username/email, or null. */
@@ -146,13 +198,26 @@ export async function getSilentToken(): Promise<string | null> {
 
 const PENDING_KEY = 'inkwave:onedrive-pending'
 
-/** Begin sign-in in the SAME window (full-page redirect to Microsoft and back). Flags that a sync
- *  is wanted on return. The page navigates away; work is restored from OPFS when it comes back. */
-export async function startOneDriveSignIn(): Promise<void> {
-  if (!CLIENT_ID) return
+/** Begin sign-in and report any failure rather than stranding a void caller. Installed PWAs
+ *  use a popup so their chrome-less window never loses the document; browser tabs and other engines
+ *  retain the established redirect flow. */
+export async function startOneDriveSignIn(): Promise<OneDriveSignInResult> {
+  if (!CLIENT_ID) return { ok: false, error: 'OneDrive is not configured.' }
   try { sessionStorage.setItem(PENDING_KEY, '1') } catch { /* private mode */ }
-  const app = await getApp()
-  await app.loginRedirect({ scopes: SCOPES })
+  try {
+    const app = await getApp()
+    const mode = currentOneDriveSignInMode()
+    if (mode === 'popup') {
+      await app.loginPopup({ scopes: SCOPES })
+      return { ok: true, mode }
+    }
+    await app.loginRedirect({ scopes: SCOPES })
+    return { ok: true, mode }
+  } catch (error) {
+    const message = authFailureMessage(error)
+    lastAuthError = message
+    return { ok: false, error: message }
+  }
 }
 
 /** True if we just returned from a sign-in redirect and should sync now. */

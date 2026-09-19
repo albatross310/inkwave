@@ -20,6 +20,8 @@ import {
   type WaveIntroMark,
   type WaveScrollMark,
 } from './waveSceneData'
+import { createLowPowerWaterCanvas, type LowPowerWaterCanvas } from './lowPowerWaterCanvas'
+import { readSurfaceWaterMotion, WATER_SCROLL_GAIN } from '../workspace/waterMotion'
 
 export const SPARK_COLOR = '#f3edcf'
 export const SPARK_CORE = '#f3edcf'
@@ -46,6 +48,9 @@ type HostState = {
   host: HTMLElement
   set: HTMLElement
   fields: Record<Group, HTMLElement>
+  lowPowerWater: LowPowerWaterCanvas | null
+  lowPowerEligible: boolean
+  cancelLowPowerWarm?: () => void
   intro: IntroNode[]
   scroll: ScrollNode[]
   mode: Mode
@@ -66,6 +71,8 @@ function pruneHosts(): void {
   for (const [host, state] of hosts) {
     if (host.isConnected) continue
     cancelIntro(state)
+    state.cancelLowPowerWarm?.()
+    state.lowPowerWater?.destroy()
     hosts.delete(host)
   }
 }
@@ -87,6 +94,10 @@ function makeMark(kind: 'dash' | 'spark', x: number, y: number, angle: number, s
     el.style.transform = 'translate(-50%, -50%)'
   }
   return el
+}
+
+export function isRestWaterSurface(surface: Element | null): boolean {
+  return !!surface?.matches('.iw-fill[data-iw-live-editor]:not(.is-phone)')
 }
 
 function prepareHost(host: HTMLElement): HostState {
@@ -124,12 +135,17 @@ function prepareHost(host: HTMLElement): HostState {
   })
 
   host.replaceChildren(set)
-  // Materialise both CSS field animations while the atomic gate still holds every spatial clock
-  // paused at currentTime 0. WebKit otherwise defers child animation creation until after the gate
-  // opens and starts the fields a frame (or more) behind the already-existing wave pseudos.
+  const surface = host.parentElement
+  // Loading coverage is not editor identity: a workspace target mounts already revealed. Both
+  // live paths need the same resting water; the temporary shell/facsimile needs no canvas pair.
+  const lowPowerEligible = isRestWaterSurface(surface)
+  // Materialise both CSS field animations while the ornament gate holds the fields paused and
+  // hidden. Base wave pseudos are prepared paused at the same zero pose; alignFieldClocks binds the
+  // fields before the tip+twinkle gate releases every clock together. WebKit otherwise defers
+  // creation and starts the fields a frame (or more) behind.
   void fields.a.offsetWidth
   const state: HostState = {
-    host, set, fields, intro, scroll, mode: 'anim', phone: false,
+    host, set, fields, lowPowerWater: null, lowPowerEligible, intro, scroll, mode: 'anim', phone: false,
     holding: false, epoch: null, scrollTop: host.parentElement?.scrollTop ?? 0,
   }
   hosts.set(host, state)
@@ -140,6 +156,43 @@ function prepareHost(host: HTMLElement): HostState {
     window.dispatchEvent(new Event('inkwave:twinkles-ready'))
   }
   return state
+}
+
+function ensureLowPowerWater(state: HostState): LowPowerWaterCanvas | null {
+  if (!state.lowPowerEligible || !state.host.isConnected) return null
+  state.cancelLowPowerWarm?.()
+  state.cancelLowPowerWarm = undefined
+  return (state.lowPowerWater ??= createLowPowerWaterCanvas(state.host))
+}
+
+function warmLowPowerWaterDuringCoast(state: HostState): void {
+  if (!state.lowPowerEligible || state.lowPowerWater || state.cancelLowPowerWarm) return
+  const w = window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number
+    cancelIdleCallback?: (id: number) => void
+  }
+  let cancelIdle: (() => void) | undefined
+  const begin = () => {
+    window.removeEventListener('inkwave:editor-revealed', begin)
+    if (w.requestIdleCallback && w.cancelIdleCallback) {
+      const id = w.requestIdleCallback(() => {
+        state.cancelLowPowerWarm = undefined
+        ensureLowPowerWater(state)
+      }, { timeout: 1000 })
+      cancelIdle = () => w.cancelIdleCallback?.(id)
+      return
+    }
+    const id = window.setTimeout(() => {
+      state.cancelLowPowerWarm = undefined
+      ensureLowPowerWater(state)
+    }, 0)
+    cancelIdle = () => clearTimeout(id)
+  }
+  window.addEventListener('inkwave:editor-revealed', begin, { once: true })
+  state.cancelLowPowerWarm = () => {
+    window.removeEventListener('inkwave:editor-revealed', begin)
+    cancelIdle?.()
+  }
 }
 
 function introFrames(mark: WaveIntroMark): Keyframe[] {
@@ -200,8 +253,9 @@ function stamp(animation: Animation, epoch: number): void {
 function alignFieldClocks(state: HostState): void {
   const surface = state.host.parentElement
   if (!surface) return
-  // The gate's pre-ready CSS created every spatial animation paused at currentTime 0. Bind each
-  // field to its matching pseudo clock now, then repeat once both pending CSS animations resolve:
+  // The gate's pre-ready CSS created every hidden wave/field animation paused. Bind each field to
+  // its matching pseudo clock as the shared gate releases them, then repeat once both pending CSS
+  // animations resolve:
   // WebKit can otherwise replace the provisional field startTime after the first correct frame.
   void surface.offsetWidth
   let animations: Animation[] = []
@@ -302,8 +356,8 @@ function startRestSparkleHold(state: HostState): void {
 
 function setFieldRest(field: HTMLElement, group: Group, waveX: number): void {
   field.style.transform = group === 'a'
-    ? `translate3d(${waveX.toFixed(2)}px, 0, 0)`
-    : `translate3d(${(-waveX).toFixed(2)}px, 0, 0)`
+    ? `translateX(${waveX.toFixed(2)}px)`
+    : `translateX(${(-waveX).toFixed(2)}px)`
 }
 
 function installListeners(): void {
@@ -334,6 +388,11 @@ export function syncTwinkles(
   const previous = state.mode
   state.mode = want.mode
   state.phone = want.phone
+  const surface = host.parentElement as HTMLElement
+  if (want.mode !== 'off' || want.phone || want.hold) {
+    surface?.removeAttribute('data-iw-low-power-water')
+    state.lowPowerWater?.element.classList.remove('is-active')
+  }
   state.set.style.display = want.sparks || want.dashes ? '' : 'none'
 
   if (want.mode === 'anim') {
@@ -346,9 +405,18 @@ export function syncTwinkles(
     }
     return
   }
-  if (want.mode === 'coast') return
+  if (want.mode === 'coast') {
+    // The first-paint gate must never wait for two canvas allocations/draws. Warm them only after
+    // readiness has started the compositor coast; the off handoff ensures synchronously if idle
+    // time was unavailable.
+    warmLowPowerWaterDuringCoast(state)
+    return
+  }
 
-  const surface = host.parentElement as HTMLElement
+  const lowPowerWater = !want.phone && !want.hold ? ensureLowPowerWater(state) : null
+  const lowPowerRest = !!lowPowerWater
+  surface?.toggleAttribute('data-iw-low-power-water', lowPowerRest)
+  lowPowerWater?.element.classList.toggle('is-active', lowPowerRest)
   const restTop = surface?.scrollTop ?? state.scrollTop
   state.scrollTop = restTop
   // The resting inline opacity must exist BEFORE the fill-mode WAAPI tracks are cancelled. A
@@ -357,7 +425,15 @@ export function syncTwinkles(
   if (want.hold) startRestSparkleHold(state)
   else if (previous !== 'off' || state.holding) settleIntroAtRest(state, restTop, !want.phone && want.dashes)
   else for (const item of state.intro) item.el.style.opacity = '0'
-  const waveX = parseFloat(surface?.style.getPropertyValue('--wave-x') || '') || 0
+  const waveX = readSurfaceWaterMotion(surface)?.pose
+    ?? (parseFloat(surface?.style.getPropertyValue('--wave-x') || '') || 0)
+  // The inline surface variable is an absolute visual pose. Safari's active scroll animation
+  // adds the current document displacement, so a newly prepared canvas must receive only the
+  // base. Otherwise restoring a panel doubles its scroll contribution on the first live paint.
+  const threaded = surface?.hasAttribute('data-iw-threaded-scroll-water')
+    && !surface.hasAttribute('data-iw-workspace-wave')
+    && !surface.hasAttribute('data-iw-zoom-water-hold')
+  state.lowPowerWater?.setPose(waveX - (threaded ? surface.scrollTop * WATER_SCROLL_GAIN : 0))
   for (const group of ['a', 'b'] as const) setFieldRest(state.fields[group], group, waveX)
   if (want.phone || !want.dashes) {
     for (const item of state.scroll) item.el.style.opacity = '0'
@@ -371,6 +447,10 @@ export function swayFields(surface: HTMLElement, waveX: number): void {
   const host = surface.querySelector('.iw-wave-twinkles') as HTMLElement | null
   const state = host ? hosts.get(host) : undefined
   if (!state || state.mode !== 'off') return
+  if (state.lowPowerWater) {
+    state.lowPowerWater.setPose(waveX)
+    return
+  }
   for (const group of ['a', 'b'] as const) setFieldRest(state.fields[group], group, waveX)
 }
 
@@ -381,6 +461,9 @@ export function setScrollScene(surface: HTMLElement, absoluteScrollTop: number):
   if (!state) return
   state.scrollTop = absoluteScrollTop
   if (state.mode !== 'off' || state.phone || state.holding) return
+  // The low-power desktop scene deliberately omits scroll-phase spark/dash repainting. Its two
+  // pre-rendered wave layers still sway, but only their small canvas transforms change.
+  if (state.lowPowerWater) return
   for (const item of state.scroll)
     item.el.style.opacity = String(scrollMarkOpacity(item.mark, absoluteScrollTop))
 }

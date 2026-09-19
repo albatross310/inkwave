@@ -39,6 +39,7 @@ export function duplicateEmailAsNew(source: InkwaveDocument): InkwaveDocument {
     title: titleForEmail(email),
     contentJson: cloneJson(source.contentJson) as TiptapJSON,
     email,
+    emailAttachments: source.emailAttachments ? cloneJson(source.emailAttachments) : undefined,
     createdAt: now,
     updatedAt: now,
     scasSessionSeed: seed,

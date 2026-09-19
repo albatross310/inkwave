@@ -819,11 +819,12 @@ and put the fields on literal sway transforms at that exact value.
 ## `Scroll.tsx` — the paper chrome, the two zooms, and the wave choreography
 
 <a id="scroll-zoom-tuning"></a>
-### The four zoom-input constants, and why each moved
+### Zoom-input constants and the dense reflow lattice
 
-`TRACKPAD_ZOOM_SENSITIVITY = 4`. Trackpad ctrl-pinch fine-deltas: multiplier on the fractional step
-per 100px of deltaY. A discrete mouse-wheel notch (|ΔY| ≥ 100) is ALWAYS exactly one 1.08 step —
-this only speeds up the sub-notch accumulation, capped at one step per event.
+`TRACKPAD_ZOOM_SENSITIVITY = 4`. Trackpad ctrl-pinch fine-deltas: multiplier on the fractional
+historical 8%-step distance per 100px of deltaY. Text reflow converts that distance to the universal
+1.02 lattice (`ZOOM_STEPS_PER_NOTCH ≈ 3.89`), preserving overall gesture speed while exposing dense
+intermediate layouts. Whole-page magnify consumes the fraction directly as a continuous transform.
 2026-08-20 (Peter, real Mac trackpad: *"takes way too much movement to zoom even one step"*) — the
 commit itself is a hard `Math.trunc()` with ZERO visual feedback below a whole step (applyFrame /
 applyMagnifyFrame), so at the old value of 2 a real trackpad's small per-event deltas needed many
@@ -831,14 +832,10 @@ accumulated events before ANYTHING moved, which read as "nothing happens" rather
 slowly". Raised 2 → 4; still capped at one committed step per event so a single frame can never
 leap multiple lattice steps.
 
-`FIRST_STEP_BONUS = 0.92`. One-time bonus added to the FIRST wheel event of a fresh gesture
-(`latch.isIdle()`), on top of its own normal contribution — makes the first commit land sooner than
-steady-state cadence would, so the very start of a zoom gesture reacts immediately rather than
-needing to "warm up" the accumulator from zero. Purely additive; steady-state per-step distance
-(TRACKPAD_ZOOM_SENSITIVITY above) is unchanged once a gesture is under way. 0.5 → 0.92 (Peter,
-still felt slow to start): at 0.92 almost any nonzero first tick — even a very light touch —
-crosses the 1.0 commit threshold on its own; it doesn't reach 1.0 by itself only so a literal
-zero-delta event can't spuriously commit a step.
+`FIRST_TEXT_STEP_BONUS = 0.85`. One-time bonus in DENSE steps, text only. Almost any nonzero first
+tick crosses the 1.0 commit threshold, so response remains immediate, but the first visible commit
+is now ~2% rather than the old ~8%. Water receives no bonus because its fractional transform moves
+on the first frame without a threshold.
 
 `ZOOM_SETTLE_MS = 450`. How long after the last committed zoom step the SETTLE runs — the heavy
 half of zooming: it exits the live-reflow window, re-measures page breaks canonically and re-anchors
@@ -891,6 +888,11 @@ lands. The twinkle fields ride the SAME injected keyframes via CSS (index.css), 
 decelerates in lockstep. ONE COAST PER LOAD: every surface (shell + editor) swaps class in the
 same event dispatch and shares the injected keyframes + the resolved clock.
 
+PAGE REVEAL BEAT (2026-09-07): readiness starts the brake, but desktop page/text cannot appear until
+the writer's Continue boundary and at least 420ms of the slowdown have both elapsed. This makes the
+change of speed legible before parchment fades in. A later Continue does not add another delay;
+touch keeps its stricter full-rest boundary.
+
 ZERO-JERK S-CURVE (2026-07-11 live-tick round): total velocity = −v·(1 − smoothstep(τ)) — the
 water holds full speed with ZERO initial deceleration, eases into the slowdown, and lands with
 zero end velocity: a true S-curve slow down (Peter's spec), and any residual anchor lag ε now
@@ -925,14 +927,17 @@ the just-armed listeners, leaving `.iw-wave-coast` stuck forever.
 <a id="scroll-forward-anchor"></a>
 ### The forward anchor — brakes are born CSS-paused
 
-FORWARD ANCHOR (2026-07-11, Peter's live *"backward tick"*). The brake animations are born
+FORWARD ANCHOR (2026-07-11, tightened 2026-09-07 after Peter again saw a coast-start flick). The brake animations are born
 CSS-PAUSED (zero additive value — the drift alone keeps rendering, byte-identical), so
 engines that resolve a pending CSS animation at STYLE time (Firefox; Chromium under
 starved compositor acks) can never present brake(lag) as a first frame — the old tick:
 when a CPU spike delayed the swap commit, the compositor had drifted past the brake's
 recorded start and its first presented frame applied a cancellation computed for a pose
-N frames ago (a backward step proportional to the spike). Instead, ONE rAF after the swap
-commit we stamp the load's anchor t_a = now + slack ON THE TIMELINE CLOCK, compute the
+N frames ago (a backward step proportional to the spike). The primary path now reads the still-live
+drift clock, computes and publishes the final snapped keyframes BEFORE the coast class is mounted,
+then stamps the shared future anchor after the swap. The old next-rAF keyframe rewrite let WebKit
+briefly present the provisional brake set. Only an unresolved drift clock uses that rAF fallback.
+We stamp the load's anchor t_a = now + slack ON THE TIMELINE CLOCK and compute the
 drift pose AT t_a analytically from the drift animation's own startTime (presentation-
 exact for a long-running compositor animation), snap the rest pose to a device pixel,
 inject the final keyframes, and start every coast animation (tiles + twinkle-field brakes
@@ -990,11 +995,17 @@ treats every scroll delta as zoom-driven and rebases the base EQUAL-AND-OPPOSITE
 is held exactly constant through gesture, settle, re-measure and any clamp. When the window
 closes, sway resumes from exactly where the waves were (same rebase pattern as the coast
 handoff) — no jump. Trade-off: a user scroll INSIDE the window doesn't sway (decorative, and
-scrolling mid-zoom is rare); the moment the window lapses, normal sway is untouched. The old
+scrolling mid-zoom is rare). A genuine unmodified wheel after whole-page zoom closes this hold at
+the input boundary, before native scroll changes `scrollTop`; this prevents Safari from attaching
+the threaded timeline in the middle of the first post-zoom scroll. Text reflow retains its hold
+until canonical remeasure ends. The old
 approach — skip one sway frame when the zoom var changed — leaked: coalesced and clamp-induced
 scroll events after the skipped one still swayed.
 
-`WAVE_SWAY = 0.06`, two thirds of the old 0.09, shared by the sway and both rebases. The sway rides
+`WAVE_SWAY = 0.06`, two thirds of the old 0.09, shared by the sway and both rebases. Chromium caps
+the settled decorative pose at 30Hz. Safari 26.4+ maps the same 140px/2333.333px phase onto a named
+threaded CSS scroll timeline; older WebKit keeps the water static. Zoom removes the timeline at its
+current pose and restores it only after the equal-and-opposite base rebase. The sway rides
 on a persistent BASE offset: where the loading coast came to rest. It starts at 0, so surfaces that
 never drift (SnapshotView) keep the plain scrollTop·WAVE_SWAY sway.
 
@@ -1004,19 +1015,43 @@ sway var would be a style recalc per scroll frame for nothing.
 
 FULLSCREEN PDF SWAY (Peter, 2026-07-10): while the PDF viewer floats over the water it dispatches
 its absolute scrollTop ('inkwave:pdf-sway'); folded into the SAME base+top formula as a second
-scroll source, so the waves at the pane's sides sway with PDF scrolling exactly like editor
-scrolling — one write path, and the zoom-hold/coast rules stay intact.
+scroll source, so Chromium's waves at the pane's sides sway with PDF scrolling exactly like editor
+scrolling — one write path, and the zoom-hold/coast rules stay intact. Safari's threaded timeline is
+bound to the editor scroll container; PDF sway remains static there rather than reintroducing JS.
 
 ONE rounded value for both consumers: the surface var (wave pseudos) and the twinkle fields' literal
 transforms (`swayFields` — no var inheritance into the instance leaves; see the `--wave-x` firebreak
 block in index.css).
 
 <a id="scroll-magnify"></a>
-### Magnify plumbing, the fit cap, and the scroll lock through the squeeze
+### Magnify plumbing, magnetic page/text detents, and scroll lock through the squeeze
 
 HYBRID ZOOM scope: only the desktop LIVE editor (`fill`) with a fixed-size paper gets the
-transform-magnify + fit-to-width cap. Phone has its own model (canonically-narrower render +
+transform-magnify + responsive fitted baseline/magnetic detents. Phone has its own model (canonically-narrower render +
 pinch font zoom); SnapshotView's in-flow Scroll and 'scroll' paper (no mm width) stay plain.
+
+WHOLE-PAGE ZOOM COLD START (2026-09-07): at magnify 1 the parchment intentionally has no transform
+layer at rest; retaining one for a long document would undo the idle power correction. Physical
+Shift-down sets `data-iw-magnify-armed`, whose only job is to give WebKit `will-change: transform`
+before the first wheel sample. Pressing Shift alone must not reraster or visually resize text.
+Chromium can retain its settled CSS-zoom face until the first actual scale write; WebKit is already
+on transform at rest, so its first sample performs no rendering-mode exchange. Shift-up, window blur and effect cleanup remove
+the arm immediately. The
+real transform continues to own the layer only when the page is actually magnified. Keep this state
+in an imperative data attribute—React className writes must not erase a held modifier between
+events.
+
+SETTLED TEXT RASTER (2026-09-08): movement stays on the compositor transform. After 200ms of scale
+quiet, an `@supports(zoom:1)` rule may give Chromium a fresh CSS-zoom raster. WebKit is excluded:
+although its canonical dimensions matched, exchanging CSS zoom for transform visibly changed glyph
+texture/size at gesture start. `data-iw-webkit-transform-magnify` keeps one face throughout. Canonical pagination
+removes `.iw-magnified`, so neither scaling face exists inside the measurement window.
+
+WEBKIT WORD-START CARET (2026-09-07): the focused SCAS span hides its original glyphs with inline
+`color:transparent` while the reel paints the candidate. WebKit sometimes locates a caret at the
+first character inside that decoration; with automatic caret colour the valid insertion point then
+painted transparent. `.ProseMirror` now owns `caret-color:var(--iw-ink, #302438)` independently of
+descendant glyph colour. Selection and the SCAS transparency mechanism remain unchanged.
 
 ONE subscriber applies the module's effective magnify to the DOM: the `--iw-magnify` var (the
 CSS transform reads it), the `.iw-magnified` class (`scaleFor()` keys off it; also gates the
@@ -1028,12 +1063,17 @@ visual, so the scroll range always matches what's on screen and mx-auto centring
 `useLayoutEffect`: the first fit/magnify application lands BEFORE the browser paints the mounted
 surface, so a narrow window (or a persisted magnify) never flashes one frame at scale 1.
 
-FIT CAP: recompute from the surface's width on every resize (and page-settings change).
-`clientWidth` excludes the scrollbar (`scrollbar-gutter: stable`), so the fit page never sits
-under it; WATER_MARGIN_PX keeps a strip of water visible either side.
+FIT/DETENT CONTEXT: recompute from the surface's width on every resize (and page-settings change).
+`clientWidth` excludes the scrollbar (`scrollbar-gutter: stable both-edges`), so the fitted baseline never
+sits under it. `fitAvailableWidth` subtracts the greater of the existing surface padding and
+WATER_MARGIN_PX on each side: padding already IS water and must be counted exactly once. Peter's live
+test caught the old `clientWidth − 2×WATER_MARGIN_PX` rule making the box 8px wider than the padded
+content area at the cap; `mx-auto` then collapsed to a left alignment and the paper centre moved
+3.98px. The matching empty scrollbar gutter on the left separately keeps classic-scrollbar engines
+from centring in an asymmetrical content box.
 
 SCROLL LOCK THROUGH THE SQUEEZE (Peter, 2026-07-10): when a width change re-binds the fit
-cap — the PDF panel opening/closing (its `--iw-pdf-room` inset narrows this fixed surface over
+context — the PDF panel opening/closing (its `--iw-pdf-room` inset narrows this fixed surface over
 a 0.18s transition), or a window resize — the effective magnify changes, the wrapper's
 height changes with it, and the reading position would scroll away. Anchor the TOP-visible
 text line: read its viewport top, apply the new fit (setFitContext → the subscriber's
@@ -1055,11 +1095,11 @@ Applying a new scale resizes the wrapper, and the browser may CLAMP scrollTop ag
 inside a wheel frame or standalone on a resize-driven fit change. Hence the 350ms hold on the
 magnify subscriber and 800ms at settle.
 
-The module's fit cap is deliberately NOT reset on unmount — the loading shell and the live editor
-are BOTH hybrid surfaces during the load handoff, and the shell unmounting must not yank the cap
+The module's fit/detent context is deliberately NOT reset on unmount — the loading shell and the live editor
+are BOTH hybrid surfaces during the load handoff, and the shell unmounting must not yank the mapping
 from under the editor. A remount recomputes it immediately.
 
-Settings change: recompute the fit cap for the new page width, and re-apply AFTER React's own
+Settings change: recompute the paper/text detents for the new page width and side margins, and re-apply AFTER React's own
 settings rerender commits (rAF lands post-commit, pre-paint) — otherwise React's fresh mm width on
 the wrapper would clobber the imperative pageWidth·s px while magnified.
 
@@ -1113,22 +1153,26 @@ catch-up setEditorZoom). Do NOT re-assign the ref from state on render — any r
 MID-GESTURE (reveal chain, panel updates) reset it to the stale state and the next commit
 stepped from zoom 1: a visible multi-step snap-back (probed: a −9-step jump mid-pinch).
 
-Anchor the font zoom to the pointer, SYNCHRONOUSLY (no flicker): set the zoom var, force layout by
-reading the anchored element's new position, then correct scrollTop in the SAME frame — all before
-the browser paints. The anchor is the actual element under the cursor (exact — a fraction estimate
+Anchor desktop font zoom to the READING LINE 25% down the viewport, SYNCHRONOUSLY (no flicker): set
+the zoom var, force layout by reading that text position's new location, then correct scrollTop in
+the SAME frame — all before the browser paints. Near the beginning (scrollTop within that top 25%
+band), preserve the current top offset exactly instead: zoom at scrollTop=0 stays at 0, and zooming
+near the top does not pull the opening away or snap the writer abruptly to zero. Phone retains the
+physical pinch midpoint. The anchor is a real text position (exact — a document fraction estimate
 drifts badly further down the page since reflow doesn't grow uniformly). scrollLeft is held so it
 never jumps to the left edge. React state is updated after, to the same value (no re-paint).
 
 FRAME COALESCING (the zoom-flicker fix): trackpads/pinch emit several wheel events per frame,
-and each zoom step forces a FULL-document reflow (the font-size is calc'd from the zoom var).
+and each committed zoom frame forces reflow (the font-size is calc'd from the zoom var).
 2–3 reflows per 16ms blows the frame budget on a long doc → visible stutter. So wheel events
-only accumulate ±1 steps; ONE rAF applies the net step count — one reflow per painted frame,
+only accumulate distance; ONE rAF applies the net dense-step count — one reflow per painted frame,
 and rAF runs before paint so the synchronous anchor logic stays single-frame/flicker-free.
 React state + localStorage persist are deferred to a settle timer: neither changes pixels
 (the var is already on the DOM), and the per-tick setState re-rendered PageGuides for nothing.
 BOTH accumulators are FRACTIONAL and commit WHOLE lattice steps per frame (Math.trunc, the
-remainder carries) — wheel notches contribute ±1, trackpad fine-deltas and phone pinch
-contribute proportional fractions, so every input quantizes onto the shared zoomStep.ts
+remainder carries) — wheel notches contribute the old 8% distance mapped across dense steps;
+trackpad fine-deltas and phone pinch contribute proportional fractions, so every text input
+quantizes onto the shared zoomStep.ts
 lattice. That's what makes zoom levels precomputable (the pagination step cache).
 
 ONE STABLE anchor per gesture — a TEXT POSITION (caret range), not a block top. Re-picking
@@ -1139,8 +1183,8 @@ element per gesture). But holding a BLOCK's TOP was still too coarse (Peter, 202
 paragraph's height ≈ zoom² (line count × line height), so text N px into the block slides to
 N·zoom² while the block top sits perfectly pinned — on a phone one paragraph can exceed the
 screen, so the pinched-on words sailed off by hundreds of px (measured: 1300px over one
-gesture at the lattice cap). The anchor is now the CARET position at the pinch midpoint /
-cursor (caretRangeFromPoint), whose line-box rect tracks the exact content through any
+gesture at the lattice cap). The anchor is now the CARET position at the phone pinch midpoint /
+desktop quarter-height reading line (caretRangeFromPoint), whose line-box rect tracks the exact content through any
 reflow; the block element is kept for connectivity checks and as the fallback when no text
 caret resolves (margins, gaps, empty paragraphs).
 
@@ -1170,15 +1214,76 @@ defensive default (max(1,…)) silently became a measurement.
 So: a degenerate range answers 0 — the honest position when everything fits is the top —
 and a real one is clamped to [0,1], which a proportion cannot leave anyway.
 
-MAGNIFY frame (hybrid, wheel over the water/gaps): scale the whole page about the VIEWPORT
-CENTRE (Peter: *"centre it around the centrepoint of screen"* — the cursor position picks the
-ZONE only, never the anchor). The wrapper box's rect IS the page's visual bounds (layout ≡
-visual), so the content point at the screen centre is the offset (centre − box.top) into the page;
+MAGNETIC TRACK (2026-09-08): the former `effective = min(user, fitCap)` made movement disappear at
+the paper edge. The replacement works continuously in log scale. Track 1 still maps to
+`min(1, pageFit)` so a narrow window opens fitted. A compact detent attracts and brakes at
+1.025× page fit, releases to ordinary response, repeats at 1.015× the current text-area fit (paper
+width minus both live side margins), then continues to the distant numerical safety guard. The
+potential neighbourhood is broad but non-overlapping (up to ±13% in log scale, narrowed only by a
+nearby second well). At its exact centre is a tiny ±0.45% hidden-track
+plateau: visual scale stays exactly on the detent while the scroll crosses that latent-heat distance,
+then resumes continuously. Direct/release setters choose the plateau centre rather than an inverse
+edge; otherwise the next movement would resist in only one direction. Finger/wheel inactivity for
+82ms inside that support starts a 112ms analytic critically damped trajectory for the
+quadratic potential `½k(x-target)²`, taking the visual scale to the exact detent without overshoot.
+Shift-up is not the boundary: a writer can keep it held across strokes. A later physical sample
+cancels the fall immediately and continues from its current position. The short inactivity delay
+also gives discrete mouse-wheel notches a fall after each increment without fighting a quick next
+notch.
+The v2 key persists track position. The old visual value migrates through the inverse mapping so an
+upgrade begins at the scale the writer last saw rather than jumping.
+
+MAGNIFY frame (hybrid, Shift+two-finger movement): scale the whole page about the cursor's VERTICAL
+position. Horizontally, remain centred through the page-edge well and all the way to the inner/text-
+margin well. Calculate the page-local X under the cursor at that exact mathematical boundary;
+beyond it, keep that point fully cursor-anchored. This makes coarse and fine input pick the same
+anchor. The subscriber's centred screen baseline is captured before Shift changes the scrollbar
+gutter. The hot path is then pure arithmetic: centred page left + local X ×
+scale gives the cursor target. There is no delayed calibration frame; reversing retraces the same
+path.
+Once the visual paper exceeds the usable viewport, CSS auto margins become zero; the centred half
+of that blend uses explicit `scrollLeft` so both sides crop equally.
+WebKit omits the matching start-side `scrollbar-gutter` from `clientWidth`; the fit calculation also
+subtracts the physical `offsetWidth - clientWidth` gutter, avoiding a half-gutter centre drift.
+While Shift's momentum-cancellation transaction temporarily hides vertical overflow,
+ResizeObserver updates neither centring nor fit/detent width: the temporary vanished gutter cannot
+move the snap map or overwrite the horizontal cursor target underneath the active gesture.
+The wrapper box's rect IS the page's visual bounds (layout ≡ visual), so the content point
+at cursorY is the offset (cursorY − box.top) into the page;
 after the scale change it sits at box'.top + offset·(after/before) — correct the scroll by its
-displacement so it stays pinned at the centre (the shared conversion: paper-local = visual ÷ scale;
-new visual = local × new scale). Multiply the EFFECTIVE scale (not the raw intent): while the fit
-cap binds, intent hovers just above it instead of silently running to 2.5 and snapping huge when the
-window widens.
+vertical displacement so it stays pinned under the pointer (the shared conversion: paper-local = visual ÷ scale;
+new visual = local × new scale). Advance the hidden magnetic track rather than deriving the next
+position from a cap-clamped painted value. The page-local cursor point is picked ONCE per water gesture and retained even when
+the requested scroll position exceeds the top or bottom boundary (Peter, 2026-09-06). The browser
+may display its clamped position, but reversing scale inside the same active gesture reconstructs
+the original scroll position from that stable local point; after the mode goes idle, the next
+gesture starts fresh. Fine pixel streams derive a smoothed release velocity and receive one analytic
+exponential coast capped at 0.34 historical steps; discrete mouse notches fall directly into a well.
+If an engine exposes the standardising `momentum` bit, its native tail is replaced immediately by
+that bounded coast. Otherwise the same coast begins at the 82ms idle boundary, so Chrome and WebKit
+share the same release physics rather than depending on engine-specific tail magnitudes.
+
+SHIFT DURING AN ACTIVE NATIVE SCROLL is now a hard input boundary. Shift-down first cancels at the
+current scrollTop and sets the desktop scroller to `overflow-y:hidden`; this prevents Safari's
+compositor-owned kinetic scroll from advancing at all, while programmatic cursor-anchor scrolls
+remain available. The first modified sample starts GPU zoom immediately without a timed dead zone;
+key-up flushes any remaining queued input. WebKit's unexposed finger-up phase means release uses
+input inactivity unless a browser supplies an explicit momentum bit. Shift-up, blur and cleanup
+restore CSS-owned `overflow-y:scroll`. That boundary also zeros pending fractional text steps and cancels any queued
+100% text well before freezing scroll. While physically held, Shift is the authoritative mode even
+if a WebKit wheel sample reports a conflicting modifier tuple; direction and accumulation both use
+that single resolved water mode, so pressing Shift cannot change the font size.
+
+GPU MAGNIFY FRAME COST (Peter, 2026-09-06: usable but not yet enjoyable): the transform path still
+forced main-thread layout twice per painted scale frame. The magnify subscriber read
+`paper.offsetHeight`, then the anchor correction read the resized wrapper's
+`getBoundingClientRect()`, before writing scrollTop. Water magnify cannot change the paper's layout
+height, so that height now refreshes only from the paper ResizeObserver. The wrapper's document-space
+top is captured with the gesture anchor; each frame reconstructs its viewport top algebraically from
+scrollTop. Scale, compensated wrapper size and anchored scroll are therefore one pre-paint write path
+with no gesture-time geometry read after the initial anchor pick. Water-only frames also return
+before the shared text path reads editor geometry. Cursor anchoring emits a scroll event each frame;
+the sway loop now skips its wave/twinkle writes when the held visual wave position is unchanged.
 
 GESTURE REBASE (Peter, 2026-07-11: *"if it has to load, it has to measure the zoom from when it
 starts working, not the finger width at the start — so there's not a big jump"*): when the main
@@ -1192,8 +1297,18 @@ actually responds. Costs at most one frame's worth of spread on a responsive sta
 Between-commit drift (native pan on phone, content-visibility relevancy waves on both platforms) is
 owned by the zoom GUARD loop, which runs every frame while the live window is up.
 
-LATTICE COMMIT: level = 1.08^step exactly (same 8%-per-notch feel as the old multiply, but every
-reachable level is a shared lattice point the pagination step cache can precompute).
+LATTICE COMMIT: every level is an integral key on one near-geometric lattice. Away from step zero,
+level = 1.02^step. Inside the wider compact-support well, the ±1/±2/±3 keys bend toward exact
+100% while remaining strictly ordered; releasing from any of those neighbours follows the same 112ms
+critically damped well clock and commits exact step zero. No fractional text layout is introduced,
+so predictive-cache identity remains integral. Adjacent ordinary editable block layouts differ by
+~2%; input maps
+the former 8%-notch travel across about 3.89 such steps, so the range and speed remain familiar while
+the reflow appears continuous. The live cache predicts the observed stride (±1 for fine movement,
+about ±4 for a traditional notch), rather than assuming every event advances one dense key. It warms
+only the next predicted key between notches of an active gesture. No background neighbourhood is
+precomputed: even ±12 meant 25 full-document hypothetical reflows after reveal and edits, turning
+document length into idle power use.
 
 Pin pagination's RO-driven painters for the whole gesture (`__iwZoomHold`): per-frame LIVE
 repositioning lagged the reflowing text 1–2 frames — the page-boundary up/down flicker. The step
@@ -1238,27 +1353,30 @@ scripts/textrender-probe/zoomcost.prove.mjs.
 ### Modifier mode, the gesture latch, and arming the wheel listener
 
 MODIFIER MODE (Peter, 2026-09-06): cursor position does not select zoom behaviour.
-Natural trackpad pinch (reported by browsers as ctrl+wheel) performs font reflow; Shift makes any
-two-finger movement perform the same reflow, using its dominant axis so no direction is dead.
-Command+scroll/pinch performs whole-page magnify. Ordinary unmodified two-finger scrolling remains
+Natural trackpad pinch (reported by browsers as ctrl+wheel) and Command+two-finger movement perform
+font reflow. Shift makes any two-finger movement perform whole-page magnify, using its dominant axis
+so no direction is dead; its vertical direction is reversed while its established horizontal
+direction is retained. Ordinary unmodified two-finger scrolling remains
 native document scrolling. Diagonal pinch events project a bounded amount of deltaX into the deltaY scale
 magnitude, so an angled approach does not feel dead; deltaY retains the zoom direction and a purely
-horizontal event remains ignored. Latched per gesture — see zoomZone.ts.
-`isIdle()` must be read BEFORE `resolve()` — resolve() itself latches a mode on its first
-call, so that is the only point that can still see "no gesture in progress yet".
+horizontal event remains ignored. Command/physical-Control text zoom also reverses its vertical
+up/down axis (Peter, 2026-09-06); natural pinch keeps its physical scale direction, and a purely
+horizontal residue keeps its established direction. A physical Shift transaction overrides an
+inconsistent per-wheel modifier tuple; the resolved mode also owns direction calculation, so one
+sample cannot be interpreted as water for routing and text for accumulation.
 
-MODE LATCH + COOLDOWN: the FIRST zoom event of a gesture picks the modifier mode and it stays
-LOCKED until 0.3s after the last zoom event. The latch also drives the zoom-cursor
-classes on the surface (zoomZone.ts + the `.iw-zooming-*` rules in index.css).
+MODE + CURSOR COOLDOWN (Peter, 2026-09-06: switching quickly was *"stuck on wave zoom"*): each
+event applies its CURRENT modifier-selected mode immediately, including replacing the water/text
+cursor class. A keyboard zoom session lasts until the physical Shift/Command/Control key is released,
+however long wheel input pauses; key-up clears its cursor and gesture anchors immediately. Only a
+lone trackpad pinch (synthetic ctrl+wheel with no physical keydown) uses the 0.3s wheel-idle timer.
+Read `activeMode()` before `resolve()` so a transition can discard the old mode's unpainted
+fractional accumulator and establish the new text anchor in the same event.
 
-LATTICE QUANTIZATION: a full mouse-wheel notch (|ΔY| ≥ 100 in Chrome/Firefox) = exactly
-±1 step (identical to the old feel); trackpad ctrl-pinch fine-deltas (small |ΔY|)
-contribute proportional FRACTIONS that accumulate until a whole step commits — so every
-input lands on the shared zoomStep lattice instead of an arbitrary float in between.
-TRACKPAD_ZOOM_SENSITIVITY scales ONLY the fine-delta fraction — a discrete notch stays exactly one
-step; retune the constant, not the formula. The FIRST-STEP HEAD START is applied AFTER the mode is
-decided (mode doesn't affect which accumulator gets it) and only ever once per gesture
-(`freshGesture` is captured pre-resolve).
+LATTICE QUANTIZATION: trackpad fine-deltas contribute proportional fractions of the historical 8%
+distance. Text converts that to dense 1.02 steps and commits whole cache keys; water applies the
+fraction directly. The text-only first-step head start is applied after the mode is decided and only
+once per gesture (`freshGesture` is captured pre-resolve).
 
 SCROLL LATENCY: the non-passive wheel listener exists ONLY when it can actually
 preventDefault (Peter, 2026-07-10: ~100ms wheel→scroll lag). A non-passive wheel listener
@@ -1475,10 +1593,12 @@ drift pose from the animation clock, hand it to the sway, done. A hard stop, not
 acceptable degrade on engines none of our targets ship.
 
 Scrollbar idle-fade (desktop fill only): the thumb shows while scrolling or when the pointer is
-near the right edge, and fades out (via `.iw-sb-idle`) after 1.4s of inactivity, so at rest only
-the waves remain in the channel. ARMED ONLY AFTER THE LOAD WAVES REST (waveMode 'off' — 2026-07-09
-regression fix): the toggles used to land during the drift (classList.add at hydration; the
-restore-scroll's show() + its 1.4s re-add timer), and each one ran the 0.3s scrollbar-color
+near the right edge, and fades out when `data-iw-scroll-active` drops after 1.4s of inactivity, so
+at rest only the waves remain in the channel. The attribute also scopes the expensive compositor
+promotions to actual scroll activity. It is an attribute rather than an imperative class because a
+later React className write silently erased `.iw-sb-idle`, leaving the idle state stuck active.
+ARMED ONLY AFTER THE LOAD WAVES REST (waveMode 'off' — 2026-07-09 regression fix): the toggles used
+to land during the drift (at hydration; the restore-scroll's show() + its 1.4s timer), and each one ran the 0.3s scrollbar-color
 transition — a per-frame repaint of the scroll container's bar region (Firefox repaints the whole
 scroller) that read as the "jump at ~0.7s / bigger jump at ~1.4s" in the wave drift.
 
@@ -1700,6 +1820,12 @@ quotes, math shortcuts, citation triggers) behave identically. Backspace/Enter a
 keydown-synchronous via the keymaps. Guards: no modifiers (shift ok), no IME composition, no open
 word-cycle (it owns j/k/space/tab), text selections only.
 
+WEBKIT INLINE-PREDICTION LOOKALIKE (2026-09-08): the recorded “caret lag” showed
+`consis|tently`, with the suffix visibly pale. That suffix was macOS/WebKit predictive text painted
+after the real insertion caret—not ProseMirror content, SCAS decoration, or a stale selection. The
+contenteditable now carries `writingsuggestions=false`, `autocorrect=off`, `autocomplete=off`, and
+`spellcheck=false` from one tested attribute object. Inkwave's own SCAS suggestion UI is unaffected.
+
 <a id="editor-scas-tick"></a>
 ### The SCAS tick: deferred, windowed, and parked during a zoom
 
@@ -1847,8 +1973,8 @@ vv events can be missed around load/orientation races, so the bar can never stic
 The toolbar band is RESERVED space: `--iw-toolbar-h` mirrors the footer pill's LIVE height (it grows
 when the style/review rows open — the RO tracks the animation) so index.css can pad the phone
 surface's bottom and scroll-padding every scroller, keeping the caret, selection handles and
-scrollIntoView targets ABOVE the toolbar + keyboard. Rect height, not offsetHeight: it includes the
-desktop ×1.12 scale transform.
+scrollIntoView targets ABOVE the toolbar + keyboard. The footer has no browser-zoom counter-scale;
+the rect is its ordinary painted layout height.
 
 ENTER-CARET FIX (2026-07-11, Peter: *"press Enter … the cursor isn't visible until you type"*):
 ProseMirror's own scrollIntoView (what Tiptap's Enter/splitBlock dispatches) IGNORES CSS
@@ -2043,44 +2169,29 @@ job — so it stays outside the themed surface. The info background stays a lite
 would have to carry a day value that disagrees with `--iw-subtle-bg`'s `#fcfcfb`.
 
 <a id="editor-side-reserve"></a>
-### The footer band is three independent fixed elements
+### The footer band and its fixed desktop proportions
 
-`TOOLBAR_SIDE_RESERVE_PX` is the visual px reserved on EACH SIDE of the centred footer toolbar for
-the edge-anchored pills that share its band — SyncStatus (`right:0`, ~138px painted: max-w-7.5rem +
-padding, ×1.12 scale) and ReceiptPanel's snaps pill (`left:0`, ~96px painted). Sized to the larger
-of the two plus a ~12px gap. All three are independently `position: fixed` with no awareness of each
-other, so without this reserve the centred toolbar grows straight into the sync pill on a narrow
-window (measured: collision begins at ~650px viewport width).
+The footer pill is centred while SyncStatus and ReceiptPanel are edge-anchored. A previous fix used
+`--iw-bar-budget = 100vw - side reserves` and independently derived desktop circle and gap sizes from
+it. Browser zoom changes `100vw` in CSS pixels, so this accidentally counter-scaled normal zoom: the
+pill grew toward 100%, then shrank, while the style row retained different intrinsic constants and
+could spill through the border.
 
-THE SIDE-PILL COLLISION, AND THE ONE BUDGET THAT PREVENTS IT (2026-08-20).
-MEASURED (viewport sweep, real browser): the footer pill is CENTRED (its wrapper is
-`fixed left-0 right-0 flex justify-center`) while the sync pill (SyncStatus, `right:0`)
-and the snaps pill (ReceiptPanel, `left:0`) are EDGE-anchored — three independently
-positioned fixed elements sharing one band, with nothing making them aware of each
-other. At ≥700px they never touch, which is why every earlier attempt (tested at
-900–2000px) "passed" while Peter's screenshots still showed the sync pill sitting on
-top of the toolbar's right edge: he runs a ~600px-wide window (half-screen on a
-Retina Mac). Overlap begins at ~650px and worsens below it.
+Desktop now has one fixed 318px border box. Both rows equal its 316px content width by construction:
+main = `8×30 + 7×8 + 2×10`; style = `2×36 + 7×28 + 8×4 + 2×8`. There is no viewport-relative
+desktop circle/gap/budget calculation. Browser zoom scales the completed pill as one ordinary DOM
+box, and opening the style row cannot change its width or overflow it. Phone retains its dedicated
+responsive geometry. If an unusually narrow desktop window makes the independent side pills
+collide, move/stack those side pills; never solve it by deforming the centre pill again.
 
-TWO EARLIER FIXES FAILED FOR THE OPPOSITE REASONS, and both lessons are baked in:
-
-1. A bare `maxWidth: 58vw` on the box alone → the box shrank but the CIRCLES did
-   not (their clamp keys off a different budget), so the row overflowed its own
-   rounded border: "the right button is falling off".
-2. Removing the cap entirely → nothing bounded the centred pill at all, so at a
-   narrow window it simply grew into the sync pill again.
-
-So: ONE number, `--iw-bar-budget`, is the maximum width the toolbar may occupy, and
-BOTH constraints derive from it — the box's max-width and the per-circle
-shrink clamp in index.css (`.iw-desktop-toolbar`, which inherits the var). They cannot disagree,
-because there is only one of them. The reserve is per SIDE and is measured, not guessed. Divided by
-the transform scale, because max-width is a LAYOUT property while the collision happens in VISUAL px
-— a 421px layout pill paints 471px wide at ×1.12, and it is the painted box that hits the sync pill.
-
-The pill counters browser zoom with `transform`, not `zoom`: `zoom` scales the positioned `bottom`
-offset and the pill drifts up/down on zoom. ×1.12 = the "bigger pills" boost, desktop only — on a
-phone the bar is `w-full`, so any upscale makes it VISUALLY 12% wider than the screen and the end
-buttons clip.
+BROWSER-ZOOM COUNTER-SCALE RETIRED (2026-09-08). The inverse-`devicePixelRatio` `useZoomScale`
+hook was introduced on 2026-06-13, before Inkwave gained its dedicated GPU/text zoom on 2026-07-09.
+It made sense when browser page zoom was being used to size the document, but it later froze only the
+centre and side pills while every other DOM element followed normal browser zoom. It also required a
+paint-only ×1.12 transform, transformed collision budgets, scaled offsets, persistent DPR baselines,
+and width-specific repair code. That layer is deleted. Browser zoom now scales the entire interface
+normally, while document zoom and PDF control sizing remain independent, scoped systems. Keep the
+phone keyboard dock; it is not zoom compensation.
 
 ⚠ A COLLAPSED ROW STILL HAS A WIDTH (2026-08-20 — the real cause of the toolbar's
 proportions repeatedly looking "wrong again"). `max-height: 0` hides the style row but
@@ -2090,10 +2201,8 @@ B/H/align/list/∀) is WIDER than the circle row. So the pill was being sized by
 nobody can see, leaving the circles adrift in it (measured: 86px of empty pill to the
 right of the last circle) and no amount of tuning the circle rules could fix it,
 because they were never what set the width.
-`width: 0` drops the row's intrinsic contribution so the VISIBLE row sizes the pill;
-`min-width: 100%` then makes it fill whatever width that turns out to be, so it still
-lays out correctly when it expands. Growing the pill when the style bar opens is
-correct and intended — it just must not do so while collapsed.
+`width: 0` drops the collapsed row's intrinsic contribution; `min-width: 100%` restores its layout
+when expanded. The fixed desktop width now means opening it changes height only, never width.
 
 Phone: the keyboard/URL-bar lift is NOT part of `bottom` — the dock (editor/toolbarDock.ts) writes
 `translate3d(0,-kbOffset,0)` imperatively on the wrapper per frame. transform composites during iOS

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SnapshotMeta } from '../types/document'
 import { groupByVersion, type SnapshotGroup } from '../provenance/snapshots'
-import { useZoomScale } from '../editor/useZoomScale'
 import { SIDE_PILL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
 
 // Peter, 2026-09-05: +50% horizontal breathing room (10px → 15px). The surrounding fixed-left
@@ -116,7 +115,6 @@ export function ReceiptPanel({
   const toastTimers = useRef<{ show?: ReturnType<typeof setTimeout>; fade?: ReturnType<typeof setTimeout> }>({})
   const prevN = useRef(snapshots.length)
 
-  const zoom = useZoomScale()
   // Below this the centred toolbar and the two edge pills start competing for the same row.
   const [narrowPill, setNarrowPill] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900)
   useEffect(() => {
@@ -177,15 +175,13 @@ export function ReceiptPanel({
           color: 'var(--iw-ink, #302438)',
           // MIDLINE-matched to the toolbar and to the sync pill opposite (2026-08-20) — this used to be
           // `28*zoom + 10`, a bottom-edge offset with a stray +10 that put this pill 10px above the
-          // sync pill's baseline and neither on the toolbar's centre. transform:scale for size (see
-          // SyncStatus — css `zoom` multiplied the offset, lifting the pill when a panel opened).
+          // sync pill's baseline and neither on the toolbar's centre. Browser zoom now scales the
+          // pill normally; there is no separate paint transform to reconcile with this layout.
           bottom: hideTrigger
             ? 'calc(env(safe-area-inset-bottom) + 80px + var(--iw-pdf-room-bottom, 0px))'
-            : sidePillBottom(zoom),
+            : sidePillBottom(),
           padding: hideTrigger ? '0 1rem' : '0 10px',
           transition: 'bottom 0.18s ease',
-          transform: `scale(${zoom * 1.12})`, // ×1.25 to match the 25%-bigger toolbar pill
-          transformOrigin: 'bottom left',
         }}
       >
         {!hideTrigger && (

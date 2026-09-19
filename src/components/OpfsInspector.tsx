@@ -301,7 +301,7 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
   const blockedDeletes = deletePlan?.rows.filter((row) => row.busyElsewhere) ?? []
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden p-2 sm:p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       {/* iw-nightable: without it this panel renders white-on-white in night mode (CLAUDE.md).
           iw-touch-guard: portaled panel over the editor — taps must not blur the contenteditable
@@ -309,8 +309,8 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
       <div
         role="dialog" aria-modal="true" aria-label="Documents on this device"
         onMouseDown={e => e.stopPropagation()}
-        className="iw-nightable iw-touch-guard iw-no-print relative bg-white w-[820px] max-w-[96vw] max-h-[86vh] flex flex-col shadow-xl font-serif text-stone-600"
-        style={{ border: `1px solid ${INK}bf`, borderRadius: 14 }}
+        className="iw-nightable iw-touch-guard iw-no-print relative flex max-h-[calc(100vh-1rem)] min-w-0 w-full max-w-[820px] flex-col overflow-hidden bg-white shadow-xl font-serif text-stone-600"
+        style={{ border: `1px solid ${INK}bf`, borderRadius: 14, maxHeight: 'calc(100dvh - 1rem)' }}
       >
         <div className="flex items-start justify-between px-5 pt-4">
           <div>
@@ -343,7 +343,7 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
             : 'Every local recovery copy Inkwave can find. Delete permanently removes that local document and its snapshot history; recognised files and cloud copies are not deleted.'}
         </p>
 
-        <div className="flex-1 overflow-auto px-5 py-3 flex flex-col gap-1.5">
+        <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-x-hidden overflow-y-auto px-5 py-3">
           {rows === null && <p className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>Scanning…</p>}
           {rows && visibleRows.length === 0 && <p className="text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>{tab === 'current' ? 'No documents are in the auto-open workflow.' : 'No documents are stored on this device.'}</p>}
           {visibleRows.map((r, index) => {
@@ -351,26 +351,32 @@ export function OpfsInspector({ onClose }: { onClose: () => void }) {
             const saveLive = recognisedSaveIsLive(r.id, now)
             return (
             <div key={r.id} data-testid="opfs-row" data-doc-id={r.id}
-              className="px-3 py-2 flex items-center gap-2 min-w-max"
+              className="flex min-w-0 flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center"
               title={r.preview || undefined}
               style={{ border: '1px solid var(--iw-nightable-border, #e7e5e4)', borderRadius: 10 }}
             >
-              <span className="truncate max-w-[13rem]" style={{ color: 'var(--iw-ink, #302438)' }}>{r.title}</span>
-              {r.isThisTab && <Badge kind="tab">this window</Badge>}
-              {r.busyElsewhere && <Badge kind="busy">another window</Badge>}
-              {r.orphaned && <Badge kind="orphan">not indexed</Badge>}
-              {!r.readable && <Badge kind="orphan">unreadable</Badge>}
-              <span className="text-[11px] tabular-nums whitespace-nowrap" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
-                last written {fmtWhen(r.updatedAt)} · {r.words.toLocaleString()} words · {fmtBytes(r.size)}
-                {snapCounts[r.id] ? ` · ${snapCounts[r.id]} snapshots` : ''}
-              </span>
-              <span role="switch" aria-checked={saveLive}
-                className="text-[11px] whitespace-nowrap inline-flex items-center gap-1"
-                title={save ? `${save.destination} save ${new Date(save.at).toLocaleString()}` : 'No recognised destination save recorded'}
-                style={{ color: saveLive ? 'var(--iw-verified, #15803d)' : 'var(--iw-pill-fg, #78716c)' }}>
-                <span aria-hidden="true">{saveLive ? '●' : '○'}</span>{saveLive ? 'saved <20s' : 'not saved <20s'}
-              </span>
-              <div className="ml-auto flex gap-1.5 whitespace-nowrap">
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="min-w-0 max-w-full truncate sm:max-w-[13rem]" style={{ color: 'var(--iw-ink, #302438)' }}>{r.title}</span>
+                  {r.isThisTab && <Badge kind="tab">this window</Badge>}
+                  {r.busyElsewhere && <Badge kind="busy">another window</Badge>}
+                  {r.orphaned && <Badge kind="orphan">not indexed</Badge>}
+                  {!r.readable && <Badge kind="orphan">unreadable</Badge>}
+                </div>
+                <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-[11px] tabular-nums" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
+                    last written {fmtWhen(r.updatedAt)} · {r.words.toLocaleString()} words · {fmtBytes(r.size)}
+                    {snapCounts[r.id] ? ` · ${snapCounts[r.id]} snapshots` : ''}
+                  </span>
+                  <span role="switch" aria-checked={saveLive}
+                    className="inline-flex items-center gap-1 whitespace-nowrap text-[11px]"
+                    title={save ? `${save.destination} save ${new Date(save.at).toLocaleString()}` : 'No recognised destination save recorded'}
+                    style={{ color: saveLive ? 'var(--iw-verified, #15803d)' : 'var(--iw-pill-fg, #78716c)' }}>
+                    <span aria-hidden="true">{saveLive ? '●' : '○'}</span>{saveLive ? 'saved <20s' : 'not saved <20s'}
+                  </span>
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap justify-end gap-1.5 whitespace-nowrap sm:ml-auto">
                 {tab === 'current' ? (
                   <>
                     <RowButton onClick={() => moveCurrent(r.id, -1)} disabled={index === 0} title="Move earlier">↑</RowButton>

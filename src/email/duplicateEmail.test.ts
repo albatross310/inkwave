@@ -25,6 +25,10 @@ const source = {
     bcc: [],
     subject: 'Project update',
   },
+  emailAttachments: [{
+    id: 'attachment-1', name: 'proposal.pdf', mimeType: 'application/pdf', size: 12,
+    sha256: 'ab'.repeat(32), addedAt: '2026-09-01T00:00:00.000Z',
+  }],
   toolbar: { row: ['page', 'style', 'info', 'settings', 'media', 'review'] },
 } as unknown as InkwaveDocument
 
@@ -44,6 +48,8 @@ describe('duplicateEmailAsNew', () => {
     expect(copy.contentJson).toEqual(source.contentJson)
     expect(copy.title).toBe('Project update')
     expect(copy.toolbar).toEqual(source.toolbar)
+    expect(copy.emailAttachments).toEqual(source.emailAttachments)
+    expect(copy.emailAttachments).not.toBe(source.emailAttachments)
   })
 
   it('does not carry identity-bound provenance or live SCAS state', () => {

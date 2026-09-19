@@ -25,13 +25,17 @@ import { getDocSource } from '../storage/docSource'
 import { inkwaveFileName } from '../provenance/bundle'
 import { switchTabToDocument, tabDocId } from '../storage/tabDoc'
 import { OpfsInspector } from './OpfsInspector'
+import { openReadAlong } from '../readalong/launch'
 import {
   cycleInkwaveWindow,
   inkwaveWindowCycleDirection,
   openNewBlankInkwaveWindow,
   openNewInkwaveWindow,
 } from '../pwa/windows'
-import { recognisedSaveIsLive } from '../storage/docSource'
+import { shouldWarnBeforeDocumentChange } from '../storage/docSource'
+import { NewEmailPlacementDialog } from './NewEmailPlacementDialog'
+import { newEmailDocument } from '../email/newEmail'
+import { placeNewEmail, type ContainerDescriptor } from '../workspace/manifest'
 
 const INK = '#302438'
 // Shared gap between a footer button and the panel it opens (same across all footer panels).
@@ -79,6 +83,7 @@ async function createDocument(
   // respect (same storage, same meta index, same open flow) or none of the inherited behaviour
   // (edit history, provenance hashing, session capture) applies to it.
   extra: Partial<InkwaveDocument> = {},
+  onCreated?: (doc: InkwaveDocument) => Promise<void>,
 ): Promise<void> {
   const now = new Date().toISOString()
   const doc = withScasDefaults({
@@ -88,7 +93,8 @@ async function createDocument(
   })
   await saveDocument(doc)
   await upsertMeta({ id: doc.id, title: doc.title, updatedAt: doc.updatedAt })
-  openDocument(doc.id)
+  if (onCreated) await onCreated(doc)
+  else openDocument(doc.id)
 }
 
 export function OptionsMenu({
@@ -116,6 +122,9 @@ export function OptionsMenu({
   onVerifyRecord,
   onWorkReport,
   onFileOpenError,
+  hasCurrentDocumentChanges,
+  onOpenWorkspaceDocument,
+  onOpenWorkspaceDocumentId,
 }: {
   paperRight: number
   installPrompt?: any
@@ -142,6 +151,12 @@ export function OptionsMenu({
   /** Flag-gated work report (§A7.1). Absent ⇒ the menu item does not exist. */
   onWorkReport?: () => void
   onFileOpenError?: (msg: string) => void
+  /** True only after this editor instance has applied a writer-caused document mutation. */
+  hasCurrentDocumentChanges?: () => boolean
+  /** Open a just-created ordinary document as the panel immediately left of this one. */
+  onOpenWorkspaceDocument?: (doc: InkwaveDocument) => Promise<void>
+  /** Open an existing ordinary document into this tab's spatial panel sequence. */
+  onOpenWorkspaceDocumentId?: (id: string) => Promise<void>
 }) {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -149,6 +164,10 @@ export function OptionsMenu({
   // The OPFS inspector is NOT a ModalKey: it is a full recovery panel with its own portal +
   // sizing, not one of the little drop-ups anchored over the kebab.
   const [inspector, setInspector] = useState(false)
+  const [newEmailPlacementOpen, setNewEmailPlacementOpen] = useState(false)
+  // A membership write can fail after the canonical blank email is safely stored. Keep that exact
+  // identity across Retry so a transient OPFS failure never creates a trail of duplicate drafts.
+  const pendingNewEmailRef = useRef<InkwaveDocument | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -176,11 +195,34 @@ export function OptionsMenu({
 
   function changeToBlankDocument() {
     const current = tabDocId()
-    if (current && !recognisedSaveIsLive(current)) {
+    if (current && shouldWarnBeforeDocumentChange(current, hasCurrentDocumentChanges?.() ?? false)) {
       setModal('changeunsaved')
       return
     }
     void createDocument('Untitled', emptyTiptapDoc())
+  }
+
+  async function startNewEmail(additionalContainers: ContainerDescriptor[]) {
+    let email = pendingNewEmailRef.current
+    try {
+      if (!email) {
+        email = withScasDefaults(newEmailDocument())
+        await saveDocument(email)
+        pendingNewEmailRef.current = email
+        await upsertMeta({ id: email.id, title: email.title, updatedAt: email.updatedAt })
+      }
+      await placeNewEmail(email, additionalContainers)
+      if (onOpenWorkspaceDocument) await onOpenWorkspaceDocument(email)
+      else openDocument(email.id)
+      pendingNewEmailRef.current = null
+      setNewEmailPlacementOpen(false)
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      if (pendingNewEmailRef.current) {
+        throw new Error(`The email is saved locally, but Inkwave couldn't record all of its document memberships. Nothing was lost; try again. ${detail}`)
+      }
+      throw new Error(`Inkwave couldn't create the email, so the current document was left unchanged. ${detail}`)
+    }
   }
 
   // Keyboard shortcuts: ⌘/Ctrl+S Save · ⌘/Ctrl+⇧S Save a copy · ⌘/Ctrl+O Open ·
@@ -231,16 +273,13 @@ export function OptionsMenu({
   // with Sign in/Logout (AccountMenuItems renders after the left column).
   const fileItems: Array<{ label: string; run: () => void }> = [
     { label: 'Change doc', run: changeToBlankDocument },
-    { label: 'New doc', run: openNewInkwaveWindow },
-    { label: 'New blank', run: openNewBlankInkwaveWindow },
+    { label: 'New window', run: openNewInkwaveWindow },
+    { label: 'New doc', run: openNewBlankInkwaveWindow },
     // An email is created exactly like any other document (§B2.1) — same path, one extra field.
-    // Flag-gated, so the menu is unchanged until `?email=1`.
+    // Email is live by default; the retained flag is only an explicit compatibility opt-out.
     ...(emailEnabled() ? [{
       label: 'New email',
-      run: () => void createDocument('Untitled email', emptyTiptapDoc(), uuidv4(), {
-        docType: 'email' as const,
-        email: { to: [], cc: [], bcc: [], subject: '' },
-      }),
+      run: () => setNewEmailPlacementOpen(true),
     }] : []),
     { label: 'Open…', run: () => setModal('upload') },
     { label: 'Recent', run: () => setModal('recent') },
@@ -258,6 +297,7 @@ export function OptionsMenu({
     // Peter's "opfs button" (2026-07-17) — named for what a WRITER is looking for, not for the
     // API. Every document this device is actually holding, including any the Recent list can't
     // see, with Open + Download on each. See OpfsInspector.tsx.
+    { label: 'Read along', run: () => { setMenuOpen(false); openReadAlong(btnRef.current) } },
     { label: 'Storage', run: () => setInspector(true) },
     {
       label: 'Snapshots',
@@ -378,13 +418,21 @@ export function OptionsMenu({
 
       {inspector && <OpfsInspector onClose={() => setInspector(false)} />}
 
+      {newEmailPlacementOpen && (
+        <NewEmailPlacementDialog
+          currentDocumentId={tabDocId()}
+          onClose={() => setNewEmailPlacementOpen(false)}
+          onConfirm={startNewEmail}
+        />
+      )}
+
       {modal && (
         <Modal title={MODAL_TITLES[modal]} anchorStyle={panelAnchor()} onClose={() => setModal(null)}>
           {modal === 'save' && <SavePanel onExportBundle={onExportBundle} onSave={onSave} folderAvailable={folderAvailable} folderName={folderName} onSyncOneDrive={onSyncOneDrive} onChooseOneDriveFolder={onChooseOneDriveFolder} oneDriveAccount={oneDriveAccount} onSyncGoogleDrive={onSyncGoogleDrive} onChooseGoogleDriveFolder={onChooseGoogleDriveFolder} googleDriveActive={googleDriveActive} onDone={() => setModal(null)} />}
           {modal === 'upload' && <UploadPanel onComputer={() => { void openViaPicker(fileInputRef.current); setModal(null) }} onGoogleDrive={onUploadGoogleDrive} onOneDrive={onUploadOneDrive} onDone={() => setModal(null)} />}
           {modal === 'savecopy' && <SaveCopyPanel folderAvailable={folderAvailable} onSaveAs={onSaveAs} onSaveAsOneDrive={onSaveAsOneDrive} onSaveAsGoogleDrive={onSaveAsGoogleDrive} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
           {modal === 'export' && <ExportPanel onExportPdf={onExportPdf} onExportLatex={onExportLatex} onExportEquations={onExportEquations} onExportBundle={onExportBundle} onDone={() => setModal(null)} />}
-          {modal === 'recent' && <RecentPanel />}
+          {modal === 'recent' && <RecentPanel onOpenDocumentId={onOpenWorkspaceDocumentId} />}
           {modal === 'changeunsaved' && (
             <div className="flex flex-col gap-3 text-sm" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
               <p>
@@ -588,7 +636,7 @@ function UploadPanel({ onComputer, onGoogleDrive, onOneDrive, onDone }: { onComp
   )
 }
 
-function RecentPanel() {
+function RecentPanel({ onOpenDocumentId }: { onOpenDocumentId?: (id: string) => Promise<void> }) {
   const [recents, setRecents] = useState<DocumentMeta[] | null>(null)
   const [names, setNames] = useState<Record<string, string>>({})
   const [sources, setSources] = useState<Record<string, string>>({})
@@ -615,7 +663,10 @@ function RecentPanel() {
       {recents === null && <p className="text-sm text-stone-400 px-1">Loading…</p>}
       {recents?.length === 0 && <p className="text-sm text-stone-400 px-1">No documents yet.</p>}
       {recents?.map(m => (
-        <button key={m.id} type="button" onClick={() => openDocument(m.id)}
+        <button key={m.id} type="button" onClick={() => {
+          if (onOpenDocumentId) void onOpenDocumentId(m.id)
+          else openDocument(m.id)
+        }}
           className="w-full text-left px-4 py-2 font-serif hover:bg-stone-50 transition-colors flex items-center justify-between gap-2"
           style={{ border: '1px solid #eee', borderRadius: 8 }}
         >

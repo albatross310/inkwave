@@ -8,8 +8,10 @@ export const NEW_BLANK_INKWAVE_WINDOW_URL = '/?new-window=1&blank=1'
 const WINDOW_NAME_PREFIX = 'inkwave-window:'
 const WINDOW_REGISTRY_KEY = 'inkwave:windows:v1'
 const WINDOW_CHANNEL_NAME = 'inkwave:windows'
-const WINDOW_ALIVE_MS = 15_000
-const WINDOW_HEARTBEAT_MS = 4_000
+// Presence does not need chat-like freshness. Thirty seconds removes 87% of the former idle
+// localStorage/BroadcastChannel writes; a closed window ages out after three missed heartbeats.
+export const WINDOW_HEARTBEAT_MS = 30_000
+export const WINDOW_ALIVE_MS = 90_000
 
 type WindowEntry = { id: string; openedAt: number; seenAt: number; slot: number }
 type WindowRegistry = WindowEntry[]

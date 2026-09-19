@@ -50,11 +50,11 @@ await page.route('**/api/ots', async (route) => {
 
 page.on('pageerror', (e) => console.log('  [pageerror]', e.message))
 
-// ── 1. The flag is OFF by default ───────────────────────────────────────────
+// ── 1. Email is live by default ──────────────────────────────────────────────
 await page.goto(`http://localhost:${port}/`, { waitUntil: 'load' })
 await page.waitForTimeout(2500)
 const offPanel = await page.locator('input[aria-label="To"]').count()
-ok('flag OFF by default → no compose panel', offPanel === 0, `panel count ${offPanel}`)
+ok('an ordinary starting page is not itself an email', offPanel === 0, `panel count ${offPanel}`)
 
 // ── 2. Turn it on; create an email through the real menu ─────────────────────
 await page.goto(`http://localhost:${port}/?email=1`, { waitUntil: 'load' })
@@ -69,7 +69,7 @@ ok('the Options menu trigger exists', (await menu.count()) > 0)
 if (await menu.count()) { await menu.click(); await page.waitForTimeout(600) }
 const newEmail = page.getByText('New email', { exact: true })
 const foundNewEmail = await newEmail.count()
-ok('"New email" appears in the Options menu when the flag is on', foundNewEmail > 0)
+ok('"New email" appears in the Options menu', foundNewEmail > 0)
 if (foundNewEmail) { await newEmail.click() }
 
 // ── 3. The panel renders, with the honesty copy ──────────────────────────────

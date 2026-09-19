@@ -189,7 +189,10 @@ try {
         // Seed Inkwave ablation flags into localStorage BEFORE any page script runs.
         if (ed.kind === 'inkwave') {
           await context.addInitScript((flags) => {
-            try { for (const [k, v] of Object.entries(flags)) localStorage.setItem(k, v) } catch { /* private */ }
+            try {
+              sessionStorage.setItem('inkwave:benchmark', '1')
+              for (const [k, v] of Object.entries(flags)) localStorage.setItem(k, v)
+            } catch { /* private */ }
           }, ed.flags || {})
         }
         const page = await context.newPage()

@@ -14,6 +14,7 @@ dist-ssr
 # React Router framework generated types
 .react-router/
 /build/
+/public/readalong/vendor/
 
 # Internal security audit — keep out of the repo (git add -f to commit deliberately)
 PROVENANCE-SECURITY-AUDIT.md
@@ -28,3 +29,4 @@ scripts/bench/static/tiptap/
 scripts/bench/dbg*.mjs
 scripts/scrub-probe/results-*.json
 scratch-shots/
+/tools/readalong-local/models/

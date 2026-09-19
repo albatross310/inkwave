@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { CSSProperties } from 'react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { ApplicationSurface, ApplicationSurfaceModeSwitch } from './ApplicationSurface'
+import { ApplicationSurface, ApplicationSurfaceModeSwitch, applicationZoomStatus } from './ApplicationSurface'
 
 const css = readFileSync(resolve(__dirname, '../styles/index.css'), 'utf8')
 
@@ -16,6 +17,28 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('ApplicationSurface', () => {
+  it('names text zoom and window fit as separate percentages', () => {
+    expect(applicationZoomStatus(1, 1)).toBe('Text 100% · Fit 100%')
+    expect(applicationZoomStatus(1.24, 2 / 3)).toBe('Text 124% · Fit 67%')
+  })
+
+  it('shows both scales and emits a scoped reset action', () => {
+    let detail: unknown = null
+    const listener = (event: Event) => { detail = (event as CustomEvent).detail }
+    window.addEventListener('inkwave:reset-text-zoom', listener)
+    const { container } = render(
+      <div className="inkwave-editor-surface" style={{ '--iw-editor-zoom': 1.24 } as CSSProperties}>
+        <ApplicationSurface app="email" label="Email draft" showZoomStatus nativeFit><p>Message</p></ApplicationSurface>
+      </div>,
+    )
+
+    const reset = screen.getByRole('button', { name: 'Reset email text zoom to 100%' })
+    expect(reset.textContent).toBe('Text 124% · Fit 100%')
+    fireEvent.click(reset)
+    expect((detail as { surface?: Element }).surface).toBe(container.querySelector('.inkwave-editor-surface'))
+    window.removeEventListener('inkwave:reset-text-zoom', listener)
+  })
+
   it('defaults every tool to the reusable isolated frame', () => {
     render(<ApplicationSurface app="email" label="Email draft"><p>Message</p></ApplicationSurface>)
     const surface = screen.getByRole('region', { name: 'Email draft' })
@@ -51,6 +74,11 @@ describe('ApplicationSurface', () => {
     expect(block).toContain('var(--iw-application-inset)')
     expect(block).not.toContain('--iw-page-side-margin')
     expect(block).not.toContain('--iw-page-bottom-margin')
+  })
+
+  it('starts email correspondence at 16px while leaving explicit zoom visible', () => {
+    const block = css.match(/\.iw-email-message-body \.ProseMirror\s*\{[\s\S]*?\n\s*\}/)?.[0] ?? ''
+    expect(block).toContain('font-size: calc(1rem * var(--iw-editor-zoom, 1))')
   })
 
   it('ends after its content instead of manufacturing a blank page-height tail', () => {
@@ -109,6 +137,25 @@ describe('ApplicationSurface', () => {
     expect(surface.classList.contains('iw-application-surface--fit-capped')).toBe(false)
     expect(fitBox.style.width).toBe('900px')
     expect(fitBox.style.height).toBe('600px')
+  })
+
+  it('keeps a natively fitted email at 100% and lets its layout reflow to the window', () => {
+    render(<ApplicationSurface app="email" label="Email draft" nativeFit showZoomStatus><p>Message</p></ApplicationSurface>)
+    const surface = screen.getByRole('region', { name: 'Email draft' })
+    const fitBox = surface.parentElement!
+    const container = fitBox.parentElement!
+    Object.defineProperty(surface, 'offsetWidth', { configurable: true, value: 900 })
+    Object.defineProperty(surface, 'offsetHeight', { configurable: true, value: 600 })
+    Object.defineProperty(container, 'clientWidth', { configurable: true, value: 624 })
+
+    fireEvent.resize(window)
+
+    expect(surface.classList.contains('iw-application-surface--native-fit')).toBe(true)
+    expect(surface.classList.contains('iw-application-surface--fit-capped')).toBe(false)
+    expect(surface.style.getPropertyValue('--iw-application-fit-scale')).toBe('')
+    expect(fitBox.style.width).toBe('100%')
+    expect(screen.getByRole('button', { name: 'Reset email text zoom to 100%' }).textContent)
+      .toBe('Text 100% · Fit 100%')
   })
 
   it('offers symmetric side handles and an independent bottom handle when enabled', () => {

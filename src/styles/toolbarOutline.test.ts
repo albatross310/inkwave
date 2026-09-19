@@ -26,6 +26,21 @@ describe('footer chrome outlines', () => {
     expect(editor).toMatch(/label="Reconnect to keep saving"\s+multiline/)
     expect(sync).toContain('SIDE_PILL_TALL_H')
     expect(sync).toContain("multiline ? 'justify-center text-center whitespace-normal'")
-    expect(sync).toContain('sidePillBottom(zoom, triggerHeight)')
+    expect(sync).toContain('sidePillBottom(triggerHeight)')
+  })
+
+  it('lets browser zoom scale all footer chrome through normal layout', () => {
+    const editor = read('src/editor/TiptapEditor.tsx')
+    const sync = read('src/components/SyncStatus.tsx')
+    const receipt = read('src/components/ReceiptPanel.tsx')
+    for (const source of [editor, sync, receipt]) {
+      expect(source).not.toContain('useZoomScale')
+      expect(source).not.toMatch(/transform:\s*`scale\(\$\{zoom/)
+    }
+    expect(editor).toContain('const DESKTOP_TOOLBAR_WIDTH_PX = 318')
+    expect(editor).toContain("width: `${DESKTOP_TOOLBAR_WIDTH_PX}px`")
+    expect(editor).not.toContain('--iw-bar-budget')
+    expect(editor).not.toContain('TOOLBAR_SIDE_RESERVE_PX')
+    expect(editor).not.toContain('/ ${(zoom * 1.12).toFixed(4)}')
   })
 })

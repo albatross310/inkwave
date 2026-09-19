@@ -167,6 +167,12 @@ was actually SERIALIZED behind the whole storage read (measured on Chromium: chu
 the fetch+eval overlap the OPFS/IndexedDB load, and any storage stall no longer adds to boot.
 (Browser only: the prerender/SSR pass must not eval the editor graph at module scope.)
 
+FRESH-WINDOW FAST PATH (2026-09-07): do not enumerate and JSON-parse every OPFS document before
+opening one. Walk the lightweight newest-first IndexedDB metadata rows and read candidates one at a
+time; the first unheld readable document wins. Only if that path is exhausted may startup pay for a
+strict direct OPFS scan to recover orphaned documents. This keeps the common Safari standalone load
+O(one document) while preserving the directory itself as recovery ground truth.
+
 DOUBLE-MOUNT FIX (2026-07-11, "the editor mounts TWICE per load"): the module is consumed via
 STATE, NOT React.lazy/Suspense. `lazy` always suspends its first render (even with the
 promise long resolved), and React retries suspended boundaries at TRANSITION priority — a
@@ -199,6 +205,11 @@ water visible underneath. The translucent waves/marks therefore composited twice
 brightness during the fade, and then changed again when the shell unmounted; hiding the editor copy
 instead made the marks fade away with the shell and return at unmount. Both are the same two-owner
 bug. Desktop now switches shell → editor atomically; only the parchment fades.
+
+Desktop does not wait for the coast to finish before this atomic swap: readiness plus Continue is
+enough, and the paper reveals over the compositor-owned slowdown. Safari uses a one-second loading
+tip countdown instead of the general three-second presentation floor, so its PWA is not held behind
+decorative choreography after the editor is ready. Touch retains the wave-rest gate below.
 
 `'up'` → covering; `'down'` → unmounted. Phone stays `'up'` through wave-rest as described below.
 
@@ -256,6 +267,13 @@ calls — it must also RELEASE any lock a cancelled invocation already claimed, 
 still happens even with mismatched UI state avoided. `claimedId` tracks whatever THIS invocation
 currently holds; every commit point clears it (the claim is now "real", owned by the component for
 its lifetime) and every early-exit / cancellation path releases it first.
+
+The same replay applies to the installed app's `?blank=1` one-shot launch (2026-09-08). Its first
+implementation consumed the parameter and called `openFresh()` synchronously. The discarded pass
+therefore minted blank A and removed the only evidence of the launch; the surviving pass saw A's
+session identity before A had saved any bytes, classified it as absent, and minted blank B. The
+blank branch now yields once and checks `cancelled` before deleting the parameter or generating an
+id. Both StrictMode passes see the launch, but only the surviving one is allowed to consume it.
 
 <a id="edit-tab-identity"></a>
 ### Whose document, and who gets the blocked screen

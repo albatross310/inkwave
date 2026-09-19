@@ -22,6 +22,11 @@ describe('round trip', () => {
     localStorage.setItem('inkwave:scrollPos:doc-x', '{not json')
     expect(readScrollMemory('doc-x')).toBeNull()
   })
+  it('never replaces a usable pose with detached zero-height geometry', () => {
+    writeScrollMemory('doc-a', 420, 9000)
+    writeScrollMemory('doc-a', 0, 0)
+    expect(readScrollMemory('doc-a')).toMatchObject({ top: 420, height: 9000 })
+  })
 })
 
 describe('restoreOffset', () => {

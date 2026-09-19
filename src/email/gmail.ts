@@ -12,20 +12,22 @@ const CLIENT_ID = import.meta.env?.VITE_GOOGLE_CLIENT_ID as string | undefined
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send'
 const SEND_ENDPOINT = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send'
 
-type TokenResponse = { access_token?: string; expires_in?: number; error?: string; error_description?: string }
-type PopupError = { type?: 'popup_failed_to_open' | 'popup_closed' | 'unknown' | string }
-type TokenClient = {
+export type GoogleTokenResponse = { access_token?: string; expires_in?: number; scope?: string; error?: string; error_description?: string }
+export type GooglePopupError = { type?: 'popup_failed_to_open' | 'popup_closed' | 'unknown' | string }
+export type GoogleTokenClient = {
   requestAccessToken: (options?: { prompt?: string }) => void
 }
-type Gis = {
+export type GoogleIdentityServices = {
   accounts: {
     oauth2: {
       initTokenClient: (options: {
         client_id: string
         scope: string
-        callback: (response: TokenResponse) => void
-        error_callback?: (error: PopupError) => void
-      }) => TokenClient
+        include_granted_scopes?: boolean
+        callback: (response: GoogleTokenResponse) => void
+        error_callback?: (error: GooglePopupError) => void
+      }) => GoogleTokenClient
+      hasGrantedAllScopes?: (response: GoogleTokenResponse, ...scopes: string[]) => boolean
     }
   }
 }
@@ -34,19 +36,23 @@ type Gis = {
 export const GMAIL_AUTHORISATION_TIMEOUT_MS = 120_000
 
 let gisLoad: Promise<void> | null = null
-let tokenClient: TokenClient | null = null
+let tokenClient: GoogleTokenClient | null = null
 let cached: { token: string; expiry: number } | null = null
-let tokenResponse: ((response: TokenResponse) => void) | null = null
-let popupError: ((error: PopupError) => void) | null = null
+let tokenResponse: ((response: GoogleTokenResponse) => void) | null = null
+let popupError: ((error: GooglePopupError) => void) | null = null
 
 export function gmailConfigured(): boolean {
   return !!CLIENT_ID
 }
 
-function loadGis(): Promise<void> {
+/** OAuth client IDs are public browser configuration, not credentials. Shared by the separately
+ * consented mailbox token client without coupling its scope/cache to send-only. */
+export function gmailClientId(): string | undefined { return CLIENT_ID }
+
+export function loadGis(): Promise<void> {
   if (gisLoad) return gisLoad
   gisLoad = new Promise((resolve, reject) => {
-    if ((window as unknown as { google?: Gis }).google?.accounts?.oauth2) return resolve()
+    if ((window as unknown as { google?: GoogleIdentityServices }).google?.accounts?.oauth2) return resolve()
     const script = document.createElement('script')
     script.src = 'https://accounts.google.com/gsi/client'
     script.async = true
@@ -61,14 +67,15 @@ function loadGis(): Promise<void> {
   return gisLoad
 }
 
-async function ensureClient(): Promise<TokenClient> {
+async function ensureClient(): Promise<GoogleTokenClient> {
   if (!CLIENT_ID) throw new Error('Gmail sending is not configured')
   await loadGis()
   if (!tokenClient) {
-    const gis = (window as unknown as { google: Gis }).google
+    const gis = (window as unknown as { google: GoogleIdentityServices }).google
     tokenClient = gis.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID,
       scope: GMAIL_SEND_SCOPE,
+      include_granted_scopes: true,
       // The GIS client is created once. Route its callbacks to the currently active request rather
       // than mutating undocumented properties on the returned TokenClient object.
       callback: (response) => tokenResponse?.(response),
@@ -142,20 +149,112 @@ function crlf(value: string): string {
   return value.replace(/\r\n|\r|\n/g, '\r\n')
 }
 
-/** Build the exact UTF-8 RFC 5322 message submitted to Gmail. Exported for boundary tests. */
-export function buildGmailRawMessage(draft: MailDraft): string {
-  const headers = normaliseHeaders(draft.headers)
-  const lines = [
-    `To: ${headers.to.join(', ')}`,
-    ...(headers.cc.length ? [`Cc: ${headers.cc.join(', ')}`] : []),
-    ...(headers.bcc.length ? [`Bcc: ${headers.bcc.join(', ')}`] : []),
-    `Subject: ${headers.subject}`,
-    'MIME-Version: 1.0',
+function bytesBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary).replace(/.{1,76}/g, '$&\r\n').replace(/\r\n$/, '')
+}
+
+function safeMimeType(value: string): string {
+  return /^[\w!#$&^_.+-]+\/[\w!#$&^_.+-]+$/.test(value) ? value : 'application/octet-stream'
+}
+
+function attachmentFilenameHeaders(filename: string): { fallback: string; encoded: string } {
+  const clean = filename.replace(/[\u0000-\u001f\u007f]/g, '').trim() || 'attachment'
+  return {
+    fallback: clean.replace(/["\\]/g, '_').replace(/[^\x20-\x7e]/g, '_').slice(0, 120) || 'attachment',
+    encoded: encodeURIComponent(clean).replace(/'/g, '%27'),
+  }
+}
+
+function boundaryFor(base: string, draft: MailDraft): string {
+  let boundary = base
+  while (draft.body.includes(boundary) || draft.html?.includes(boundary)) boundary += '-x'
+  return boundary
+}
+
+function plainPart(draft: MailDraft): string[] {
+  return [
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: 8bit',
     '',
     crlf(draft.body),
   ]
+}
+
+function alternativeBody(draft: MailDraft, boundary: string): string[] {
+  return [
+    `--${boundary}`,
+    ...plainPart(draft),
+    `--${boundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    crlf(draft.html ?? ''),
+    `--${boundary}--`,
+  ]
+}
+
+/** Build the exact UTF-8 RFC 5322 message submitted to Gmail. Exported for boundary tests. */
+export function buildGmailRawMessage(draft: MailDraft): string {
+  const headers = normaliseHeaders(draft.headers)
+  const headerLines = [
+    `To: ${headers.to.join(', ')}`,
+    ...(headers.cc.length ? [`Cc: ${headers.cc.join(', ')}`] : []),
+    ...(headers.bcc.length ? [`Bcc: ${headers.bcc.join(', ')}`] : []),
+    `Subject: ${headers.subject}`,
+    'MIME-Version: 1.0',
+  ]
+  const attachments = draft.attachments ?? []
+  if (!attachments.length && !draft.html) {
+    return utf8Base64Url([...headerLines,
+      ...plainPart(draft),
+    ].join('\r\n'))
+  }
+
+  if (!attachments.length) {
+    const alternative = boundaryFor('inkwave-alternative-boundary', draft)
+    return utf8Base64Url([
+      ...headerLines,
+      `Content-Type: multipart/alternative; boundary="${alternative}"`,
+      '',
+      ...alternativeBody(draft, alternative),
+      '',
+    ].join('\r\n'))
+  }
+
+  const boundary = boundaryFor('inkwave-mixed-boundary', draft)
+  const lines = [
+    ...headerLines,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    '',
+    `--${boundary}`,
+  ]
+  if (draft.html) {
+    const alternative = boundaryFor('inkwave-alternative-boundary', draft)
+    lines.push(
+      `Content-Type: multipart/alternative; boundary="${alternative}"`,
+      '',
+      ...alternativeBody(draft, alternative),
+    )
+  } else lines.push(...plainPart(draft))
+  for (const attachment of attachments) {
+    if (!attachment.bytes || attachment.bytes.byteLength !== attachment.size) {
+      throw new Error(`“${attachment.filename}” was not fully loaded. Nothing was sent.`)
+    }
+    const filename = attachmentFilenameHeaders(attachment.filename)
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: ${safeMimeType(attachment.mimeType)}; name="${filename.fallback}"`,
+      `Content-Disposition: attachment; filename="${filename.fallback}"; filename*=UTF-8''${filename.encoded}`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      bytesBase64(attachment.bytes),
+    )
+  }
+  lines.push(`--${boundary}--`, '')
   return utf8Base64Url(lines.join('\r\n'))
 }
 

@@ -20,18 +20,26 @@ describe('day water palette', () => {
   it('routes every day water surface through the shared palette', () => {
     expect(css.match(/background-color: var\(--iw-water-base, #3b6f75\)/g)?.length).toBeGreaterThanOrEqual(5)
     expect(css.match(/background-image: var\(--iw-water-gradient\)/g)?.length).toBeGreaterThanOrEqual(4)
-    expect(css).toContain('var(--iw-wave-a), var(--iw-wave-b), var(--iw-water-gradient)')
+    expect(css).toContain('background-image: var(--iw-wave-a)')
+    expect(css).toContain('background-image: var(--iw-wave-b)')
   })
 
   it('keeps the browser chrome colour aligned with the shared water base', () => {
     expect(root).toContain('media="(prefers-color-scheme: light)" content="#3b6f75"')
   })
 
-  it('holds a pure-white first paint until the complete water field is ready', () => {
-    expect(css).toMatch(/:root:not\(\.iw-water-ready\),\s*:root:not\(\.iw-water-ready\) body \{ background-color: #fff; \}/)
-    expect(css).toMatch(/:root:not\(\.iw-water-ready\) \.inkwave-editor-surface \{\s*background-color: #fff;/)
-    expect(css).toMatch(/:root\[data-theme="night"\]:not\(\.iw-water-ready\) body,\s*:root\[data-theme="night"\]:not\(\.iw-water-ready\) \.inkwave-editor-surface \{/)
+  it('paints white first, then starts the complete water with the chosen tip and twinkles', () => {
+    expect(css).toMatch(/:root:not\(\.iw-water-ready\),\s*:root:not\(\.iw-water-ready\) body \{ background-color: #ffffff; \}/)
+    expect(css).toMatch(/:root:not\(\.iw-water-ready\) \.inkwave-editor-surface \{[\s\S]*?background-color: #ffffff;[\s\S]*?background-image: none;/)
+    expect(css).toMatch(/:root:not\(\.iw-water-ready\) \.inkwave-editor-surface\.iw-wave-anim::before,[\s\S]*?visibility: hidden;[\s\S]*?animation-play-state: paused !important;/)
+    expect(css).toMatch(/:root:not\(\.iw-water-ready\) \.iw-wave-twinkles,[\s\S]*?visibility: hidden;/)
+    expect(css).toMatch(/:root:not\(\.iw-water-ready\) \.iw-boot-water \{[\s\S]*?background-color: #ffffff;[\s\S]*?background-image: none;/)
+    expect(css).toMatch(/\.iw-boot-water::before \{[\s\S]*?animation: iw-wave-drift-l 1\.944s linear infinite;/)
+    expect(css).toMatch(/\.iw-boot-water::after \{[\s\S]*?animation: iw-wave-drift-r 1\.944s linear infinite;/)
     expect(entry).toContain('const WATER_GATE_TIMEOUT_MS = 30_000')
+    expect(entry).toContain("window.addEventListener('inkwave:loading-tip-ready'")
+    expect(entry).toContain('Promise.all([tip, twinkles])')
+    expect(entry).not.toContain('Promise.all([tiles, twinkles])')
     expect(entry).not.toContain('setTimeout(ready, 1500)')
     expect(entry).toContain("ready('complete')")
   })

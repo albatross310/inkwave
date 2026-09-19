@@ -7,24 +7,40 @@
 // THEMING (CLAUDE.md, mandatory): the outer container carries `iw-nightable`, and every custom
 // colour is a theme token with a day fallback — no hard-coded hex.
 
-import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { lazy, Suspense, useState, useRef, useEffect, type ReactNode } from 'react'
 import type { InkwaveDocument, EmailHeaders } from '../types/document'
 import { parseAddressList, suspectAddresses, hasRecipient } from '../email/headers'
-import { draftFor, canHandOff } from '../email/draft'
+import { draftFor, hydratedDraftFor, canHandOff } from '../email/draft'
 import { handoffSender, fits, type HandoffSenderId } from '../email/sender'
 import { authoriseGmailSend, gmailConfigured, gmailSender, preloadGmail } from '../email/gmail'
 import { titleForEmail } from '../email/newEmail'
 import * as copy from '../email/copy'
 import { ApplicationSurface, ApplicationSurfaceModeSwitch, type ApplicationSurfaceMode } from './ApplicationSurface'
 import { EmailDraftSaveStatus } from './EmailDraftSaveStatus'
+import { ConnectedMailboxConsentDialog } from '../email/ConnectedMailboxConsentDialog'
+import { connectedGmailMailboxToken, disconnectGmailMailbox } from '../email/gmailMailboxAuth'
+import type { MailboxDraft } from '../email/mailbox'
+import { readGmailDraftBinding, writeGmailDraftBinding, type GmailDraftBinding } from '../email/gmailDraftBinding'
 import type { ManualSnapshotResult } from '../provenance/snapshots'
+import { EmailAttachmentBar } from './EmailAttachmentBar'
+import { emailHtmlHasFormatting } from '../email/html'
+
+// Connected mail is experimental and interaction-only. Do not add its MIME/parser/UI graph to the
+// ordinary editor's Safari startup chunk; the consent button is the preload boundary.
+const GmailMailboxPanel = lazy(() =>
+  import('./GmailMailboxPanel').then((module) => ({ default: module.GmailMailboxPanel })),
+)
 
 interface Props {
   doc: InkwaveDocument
   /** Rebuild the document from the live editor before any record/send boundary. The `doc` prop may
    *  deliberately lag typing by one autosave beat; actions must never inherit that performance lag. */
   getCurrentDoc: () => InkwaveDocument
+  /** Sanitised live HTML for direct Gmail send. Provider-link handoff intentionally stays plain. */
+  getCurrentHtml?: () => string
   onDocChange: (updated: InkwaveDocument) => void
+  /** Local durability must complete before a connected-draft write reaches Gmail. */
+  onPersistCurrent?: (current: InkwaveDocument) => Promise<void>
   /** Presentation only. The same email subdoc/data path serves both modes. */
   surfaceMode?: ApplicationSurfaceMode
   onSurfaceModeChange?: (mode: ApplicationSurfaceMode) => void
@@ -32,6 +48,13 @@ interface Props {
   onSnapshotDraft: (source: InkwaveDocument) => Promise<ManualSnapshotResult>
   /** Create a fresh email identity from the exact current editor state. */
   onDuplicateAsNew?: (source: InkwaveDocument) => Promise<void>
+  /** Restricted mailbox authorization is injected so this panel can enforce the consent-first
+   *  boundary without owning provider tokens or silently widening send-only permission. */
+  onConnectMailbox?: () => Promise<string | null>
+  /** Deliberate remote-draft conversion into an ordinary local email document. */
+  onOpenMailboxDraft?: (draft: MailboxDraft<'gmail'>, context: { accountEmail: string; historyId: string }) => Promise<void>
+  /** The ordinary editor StyleBar, placed visibly inside the email instead of hidden in the footer. */
+  formattingBar?: ReactNode
   children?: ReactNode
 }
 
@@ -44,23 +67,47 @@ const PROVIDERS: { id: HandoffSenderId; label: string }[] = [
 export function EmailComposePanel({
   doc,
   getCurrentDoc,
+  getCurrentHtml,
   onDocChange,
+  onPersistCurrent,
   surfaceMode = 'isolated',
   onSurfaceModeChange,
   onSnapshotDraft,
   onDuplicateAsNew,
+  onConnectMailbox,
+  onOpenMailboxDraft,
+  formattingBar,
   children,
 }: Props) {
   const headers = doc.email
   const [showCc, setShowCc] = useState(() => !!(headers?.cc?.length || headers?.bcc?.length))
   const [status, setStatus] = useState<string | null>(null)
-  const [busyAction, setBusyAction] = useState<'record' | 'gmail' | 'duplicate' | null>(null)
+  const [busyAction, setBusyAction] = useState<'record' | 'gmail' | 'duplicate' | 'mailbox' | 'mailbox-sync' | null>(null)
   const [handoffOpen, setHandoffOpen] = useState(false)
+  const [mailboxConsentOpen, setMailboxConsentOpen] = useState(false)
+  const [mailboxOpen, setMailboxOpen] = useState(false)
+  const [mailboxToken, setMailboxToken] = useState<string | null>(() =>
+    onConnectMailbox ? connectedGmailMailboxToken() : null)
+  const [gmailDraftBinding, setGmailDraftBinding] = useState<GmailDraftBinding | null>(null)
+  const [unknownDraftCreate, setUnknownDraftCreate] = useState(false)
   const handoffRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     preloadGmail()
   }, [])
+
+  useEffect(() => {
+    let alive = true
+    setGmailDraftBinding(null)
+    setUnknownDraftCreate(false)
+    if (!mailboxToken) return () => { alive = false }
+    void readGmailDraftBinding(doc.id).then((binding) => {
+      if (alive) setGmailDraftBinding(binding)
+    }).catch((error: unknown) => {
+      if (alive) setStatus(error instanceof Error ? error.message : 'Could not read the local Gmail draft link')
+    })
+    return () => { alive = false }
+  }, [doc.id, mailboxToken])
 
   useEffect(() => {
     if (!handoffOpen) return
@@ -129,7 +176,8 @@ export function EmailComposePanel({
       // for up to one autosave beat while typing; rebuild after the popup returns so the recorded
       // bytes and the Gmail bytes are the same latest body, even if the writer typed during auth.
       const current = getCurrentDoc()
-      const draft = draftFor(current)
+      if (current.emailAttachments?.length) setStatus('Checking attachments…')
+      const draft = await hydratedDraftFor(current, getCurrentHtml?.())
       if (!draft) {
         setStatus('This is no longer an email draft. Nothing was sent.')
         return
@@ -173,6 +221,75 @@ export function EmailComposePanel({
     }
   }
 
+  const onGmailDraftSync = async () => {
+    if (!mailboxToken || unknownDraftCreate) return
+    setBusyAction('mailbox-sync')
+    setStatus('Saving locally before Gmail…')
+    try {
+      const current = getCurrentDoc()
+      await onPersistCurrent?.(current)
+      if (emailHtmlHasFormatting(getCurrentHtml?.())) {
+        setStatus('Saved locally. Formatted Gmail draft sync is not available yet; Send with Gmail preserves the formatting.')
+        return
+      }
+      const local = await hydratedDraftFor(current)
+      if (!local) throw new Error('This is no longer an email draft')
+      setStatus(gmailDraftBinding ? 'Checking the Gmail draft…' : 'Creating a Gmail draft…')
+      const { syncGmailDraft } = await import('../email/gmailDraftSyncController')
+      const result = await syncGmailDraft({
+        accessToken: mailboxToken,
+        documentId: current.id,
+        local,
+        binding: gmailDraftBinding,
+      })
+      if (result.kind === 'synced') {
+        await writeGmailDraftBinding(result.binding)
+        setGmailDraftBinding(result.binding)
+        setStatus(result.action === 'created' ? 'Saved to Gmail Drafts.'
+          : result.action === 'updated' ? 'Gmail draft synced.'
+            : 'Local and Gmail drafts already match.')
+      } else if (result.kind === 'remote-newer') {
+        setStatus('Gmail has a newer version. Your local draft was not overwritten; open Gmail Drafts to review it.')
+      } else if (result.kind === 'conflict') {
+        setStatus('Both this draft and Gmail changed. Both were preserved; open Gmail Drafts to compare them.')
+      } else if (result.kind === 'unknown') {
+        // An ambiguous CREATE cannot be retried blindly: Gmail may already hold the first copy.
+        if (!gmailDraftBinding) setUnknownDraftCreate(true)
+        setStatus(`Gmail draft status is unknown: ${result.reason}. Open Gmail Drafts before trying again.`)
+      } else {
+        setStatus(result.reason)
+      }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not sync the Gmail draft')
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
+  const onMailboxConnect = async () => {
+    if (!onConnectMailbox) return
+    setBusyAction('mailbox')
+    setStatus('Waiting for Google…')
+    try {
+      // This callback must be the first awaited boundary from the explicit Continue tap so a
+      // provider cannot be asked for restricted scopes before the writer sees the capabilities.
+      const token = await onConnectMailbox()
+      if (!token) {
+        setStatus('Google did not grant connected-mailbox access. The mailbox remains disconnected.')
+        return
+      }
+      setMailboxToken(token)
+      setMailboxConsentOpen(false)
+      setMailboxOpen(true)
+      setStatus('Gmail mailbox connected for this session.')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not connect the Gmail mailbox')
+      setMailboxConsentOpen(false)
+    } finally {
+      setBusyAction(null)
+    }
+  }
+
   const suspect = suspectAddresses(headers)
   const draft = draftFor(doc)
   const ready = canHandOff(doc)
@@ -199,6 +316,8 @@ export function EmailComposePanel({
       mode={surfaceMode}
       nightable
       resizable={surfaceMode === 'isolated'}
+      showZoomStatus
+      nativeFit
     >
       {/* ── Headers ───────────────────────────────────────────────────────── */}
       <div className={row} style={borderStyle}>
@@ -254,6 +373,22 @@ export function EmailComposePanel({
         />
       </div>
 
+      {formattingBar && (
+        <div className="iw-email-formatting-bar" aria-label="Email text formatting">
+          {formattingBar}
+        </div>
+      )}
+
+      <EmailAttachmentBar
+        attachments={doc.emailAttachments ?? []}
+        onError={setStatus}
+        onChange={(emailAttachments) => onDocChange({
+          ...doc,
+          emailAttachments,
+          updatedAt: new Date().toISOString(),
+        })}
+      />
+
       {/* ── Warnings (never blocks) ───────────────────────────────────────── */}
       {suspect.length > 0 && (
         <div className="px-3 py-1.5 text-xs" style={{ color: 'var(--iw-pill-fg, #78716c)' }}>
@@ -281,6 +416,35 @@ export function EmailComposePanel({
             title={ready ? 'Snapshot this draft, then send it with Gmail' : 'Add a recipient first'}
           >
             {busyAction === 'gmail' ? 'Working…' : 'Send with Gmail'}
+          </button>
+        )}
+
+        {onConnectMailbox && (
+          <button
+            className="text-xs px-2.5 py-1 rounded border disabled:opacity-40"
+            style={{ color: 'var(--iw-ink, #302438)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
+            onClick={() => {
+              setStatus(null)
+              if (mailboxToken) setMailboxOpen(true)
+              else setMailboxConsentOpen(true)
+            }}
+            disabled={busy}
+          >
+            {mailboxToken ? 'Open Gmail mailbox' : copy.MAILBOX_CONNECT_LABEL}
+          </button>
+        )}
+
+        {mailboxToken && (
+          <button
+            className="text-xs px-2.5 py-1 rounded border disabled:opacity-40"
+            style={{ color: 'var(--iw-ink, #302438)', borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}
+            onClick={() => void onGmailDraftSync()}
+            disabled={busy || unknownDraftCreate}
+            title={unknownDraftCreate ? 'Open Gmail Drafts and check whether the first save succeeded' : undefined}
+          >
+            {busyAction === 'mailbox-sync' ? 'Syncing…'
+              : unknownDraftCreate ? 'Check Gmail Drafts before retrying'
+                : gmailDraftBinding ? 'Sync Gmail draft' : 'Save to Gmail Drafts'}
           </button>
         )}
 
@@ -347,6 +511,7 @@ export function EmailComposePanel({
         style={{ color: 'var(--iw-pill-fg, #78716c)' }}
       >
         <p>{copy.PROVENANCE_BRIEF}</p>
+        {!!doc.emailAttachments?.length && <p className="mt-1">{copy.ATTACHMENT_PROVENANCE_NOTE}</p>}
         {!hasRecipient(headers) && <p className="mt-1">Add a recipient to hand this draft to your provider.</p>}
         <details className="mt-1.5">
           <summary className="cursor-pointer" style={{ color: 'var(--iw-ink, #302438)' }}>
@@ -360,8 +525,33 @@ export function EmailComposePanel({
             <p>{copy.LEDGER_NOTE}</p>
           </div>
         </details>
-        <EmailDraftSaveStatus initialSavedAt={doc.updatedAt} />
+        <EmailDraftSaveStatus initialSavedAt={doc.updatedAt} lastSyncedAt={gmailDraftBinding?.syncedAt} />
       </div>
+
+      {mailboxConsentOpen && (
+        <ConnectedMailboxConsentDialog
+          busy={busyAction === 'mailbox'}
+          onCancel={() => setMailboxConsentOpen(false)}
+          onContinue={onMailboxConnect}
+        />
+      )}
+      {mailboxOpen && mailboxToken && (
+        <Suspense fallback={null}>
+          <GmailMailboxPanel
+            accessToken={mailboxToken}
+            onClose={() => setMailboxOpen(false)}
+            onDisconnect={() => {
+              disconnectGmailMailbox()
+              setMailboxToken(null)
+              setGmailDraftBinding(null)
+              setUnknownDraftCreate(false)
+              setMailboxOpen(false)
+              setStatus('Gmail mailbox disconnected. Nothing in Gmail or Inkwave was deleted.')
+            }}
+            onOpenDraft={onOpenMailboxDraft}
+          />
+        </Suspense>
+      )}
     </ApplicationSurface>
   )
 }

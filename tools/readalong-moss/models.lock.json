@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "upstream_commit": "934d6826b084c46a0d033402174d5f8ac4ed2519",
+  "source": "https://github.com/OpenMOSS/MOSS-TTS",
+  "image": "runpod/pytorch@sha256:cb154fcca15d1d6ce858cfa672b76505e30861ef981d28ec94bd44168767d853",
+  "image_tag_observed": "2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04",
+  "models": {
+    "voice_generator": {
+      "id": "OpenMOSS-Team/MOSS-VoiceGenerator",
+      "revision": "97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4",
+      "files": [{"path": "model.safetensors", "sha256": "dbe345257ff9f6cc84195bed830a268b39d5e0b728ff3ba90e715150a49b16d4", "bytes": 4228278872}]
+    },
+    "dialogue": {
+      "id": "OpenMOSS-Team/MOSS-TTSD-v1.0",
+      "revision": "c7cd852d87aff71cab5bd2b9b05509cedc0ef1ba",
+      "files": [
+        {"path": "model-00001-of-00004.safetensors", "sha256": "ad8bb115b6c87c902c76e7a4ef90a6eee98041a87f741fcd163fbe81d855d87a", "bytes": 4932667368},
+        {"path": "model-00002-of-00004.safetensors", "sha256": "7cb9641e2f25651a43bc7f681337d79ab57ca50d63355660787712fcee393c40", "bytes": 4915961640},
+        {"path": "model-00003-of-00004.safetensors", "sha256": "646b345809967a41308d95afcf5af233ae94de7997befac287017af602c59687", "bytes": 4983069760},
+        {"path": "model-00004-of-00004.safetensors", "sha256": "ab0a0ed173b7a86a8cb16b82ca981ad0f1866c2c2d0ecb47c97e72b68ccbaba6", "bytes": 1879339648}
+      ]
+    },
+    "audio_tokenizer": {
+      "id": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
+      "revision": "3cd226ba2947efa357ef453bcad111b6eafba782",
+      "files": [
+        {"path": "model-00001-of-00002.safetensors", "sha256": "037f441ed30a0ab59f6049de83b824a1b3bd6feb7dbd46c3fbca41fc2f649f28", "bytes": 4998259168},
+        {"path": "model-00002-of-00002.safetensors", "sha256": "a187d73d2cda1c2d0676586d9d03c09c0a5813450266af32029c871493fc9582", "bytes": 2100202560}
+      ]
+    }
+  }
+}

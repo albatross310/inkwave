@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { STUDIO_FILE_SETUP_TIP } from '../pwa/studioFileSetup'
+import { isWebKitEngine } from '../editor/browserCadence'
 
 export const LOADING_TIPS = [
   'Install Inkwave from your browser’s Share or app menu for a focused writing window.',
-  'Choose New doc to open the next available recent document in another window.',
+  'Choose New window to open the next available recent document in another window.',
+  'Choose New doc from the app menu to start a blank document in another window.',
   'Press ⌘/Ctrl+N to change this window to a blank document.',
   'Press ⌘/Ctrl+Shift+N to create a blank document in a new window.',
   'On Mac, use ⌥Tab for the next Inkwave window and ⌃⌥Tab for the previous one.',
@@ -14,6 +16,11 @@ export const LOADING_TIPS = [
 ] as const
 
 export const LOADING_TIP_COUNTDOWN_MS = 3000
+export const WEBKIT_LOADING_TIP_COUNTDOWN_MS = 0
+
+export function loadingTipCountdownMsFor(userAgent: string): number {
+  return isWebKitEngine(userAgent) ? WEBKIT_LOADING_TIP_COUNTDOWN_MS : LOADING_TIP_COUNTDOWN_MS
+}
 
 export function loadingTipIndex(random: () => number = Math.random): number {
   return Math.min(LOADING_TIPS.length - 1, Math.max(0, Math.floor(random() * LOADING_TIPS.length)))
@@ -39,6 +46,14 @@ export function LoadingTip({ ready, onContinue }: { ready: boolean; onContinue: 
   const continuingRef = useRef(false)
   const [secondsRemaining, setSecondsRemaining] = useState(LOADING_TIP_COUNTDOWN_MS / 1000)
   const [continuing, setContinuing] = useState(false)
+
+  // Keep server/client markup identical, then remove the decorative countdown before Safari's
+  // first post-hydration paint. Tip + twinkle readiness and the short visible coast are enough;
+  // WebKit must not pay another arbitrary second after doing the real work.
+  useLayoutEffect(() => {
+    const ms = loadingTipCountdownMsFor(navigator.userAgent)
+    if (ms < LOADING_TIP_COUNTDOWN_MS) setSecondsRemaining(ms / 1000)
+  }, [])
 
   useEffect(() => {
     if (secondsRemaining <= 0) return
@@ -66,6 +81,11 @@ export function LoadingTip({ ready, onContinue }: { ready: boolean; onContinue: 
     }
     root.querySelector<HTMLElement>(`[data-loading-tip-text="${index}"]`)?.setAttribute('data-active', '')
     root.setAttribute('data-loading-tip', String(index))
+    // Askable one-shot readiness for the atomic loading scene. The wave/twinkle animation may
+    // begin as soon as this chosen line and the complete twinkle field are both mounted; pills and
+    // a separate hydration condition are deliberately irrelevant.
+    ;(window as unknown as { __iwLoadingTipReady?: boolean }).__iwLoadingTipReady = true
+    window.dispatchEvent(new Event('inkwave:loading-tip-ready'))
   }, [])
 
   const showTip = (index: number) => {

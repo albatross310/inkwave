@@ -12,6 +12,9 @@ const authorise = vi.fn()
 const snapshotDraft = vi.fn()
 const send = vi.fn()
 const draftFor = vi.fn()
+const readDraftBinding = vi.fn()
+const writeDraftBinding = vi.fn()
+const syncConnectedDraft = vi.fn()
 
 vi.mock('../email/gmail', () => ({
   gmailConfigured: () => true,
@@ -22,7 +25,21 @@ vi.mock('../email/gmail', () => ({
 
 vi.mock('../email/draft', () => ({
   draftFor: (...args: unknown[]) => draftFor(...args),
+  hydratedDraftFor: async (...args: unknown[]) => draftFor(...args),
   canHandOff: () => true,
+}))
+
+vi.mock('./GmailMailboxPanel', () => ({
+  GmailMailboxPanel: () => <div role="dialog" aria-label="Gmail mailbox">Mailbox</div>,
+}))
+
+vi.mock('../email/gmailDraftBinding', () => ({
+  readGmailDraftBinding: (...args: unknown[]) => readDraftBinding(...args),
+  writeGmailDraftBinding: (...args: unknown[]) => writeDraftBinding(...args),
+}))
+
+vi.mock('../email/gmailDraftSyncController', () => ({
+  syncGmailDraft: (...args: unknown[]) => syncConnectedDraft(...args),
 }))
 
 import { EmailComposePanel } from './EmailComposePanel'
@@ -46,9 +63,10 @@ beforeEach(() => {
     calls.push('authorise')
     return 'token'
   })
-  draftFor.mockReset().mockReturnValue({
+  draftFor.mockReset().mockImplementation((_doc: unknown, html?: string) => ({
     headers: { to: ['ada@example.com'], cc: [], bcc: [], subject: 'S' }, body: 'Body',
-  })
+    ...(html ? { html } : {}),
+  }))
   snapshotDraft.mockReset().mockImplementation(async () => {
     calls.push('record')
     return { snapshot: { id: 'snap-1', createdAt: '2026-08-31T00:01:00+10:00' }, stamped: true }
@@ -57,11 +75,35 @@ beforeEach(() => {
     calls.push('send')
     return { kind: 'sent', providerMessageId: 'gmail-1' }
   })
+  readDraftBinding.mockReset().mockResolvedValue(null)
+  writeDraftBinding.mockReset().mockResolvedValue(undefined)
+  syncConnectedDraft.mockReset().mockResolvedValue({
+    kind: 'synced', action: 'created', binding: {
+      v: 1, provider: 'gmail', documentId: 'email-1', accountHash: 'account-hash', historyId: 'h-1',
+      draftId: 'draft-1', messageId: 'message-1', threadId: null, lastSyncedHash: 'hash',
+      syncedAt: '2026-09-07T00:00:00Z',
+    },
+  })
 })
 
 afterEach(cleanup)
 
 describe('EmailComposePanel Gmail integration', () => {
+  it('keeps the ordinary formatting bar and attachment control visible inside the email', () => {
+    render(
+      <EmailComposePanel
+        doc={doc}
+        getCurrentDoc={() => doc}
+        onDocChange={() => {}}
+        onSnapshotDraft={snapshotDraft}
+        formattingBar={<div>Usual formatting controls</div>}
+      />,
+    )
+    expect(screen.getByLabelText('Email text formatting').textContent).toContain('Usual formatting controls')
+    expect(screen.getByRole('button', { name: 'Attach files' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Reset email text zoom to 100%' })).toBeTruthy()
+  })
+
   it('places the editable message inside the default isolated application surface', () => {
     render(
       <EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} onSnapshotDraft={snapshotDraft}>
@@ -148,11 +190,12 @@ describe('EmailComposePanel Gmail integration', () => {
   })
 
   it('authorises, records, and only then sends', async () => {
-    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} onDocChange={() => {}} onSnapshotDraft={snapshotDraft} />)
+    render(<EmailComposePanel doc={doc} getCurrentDoc={() => doc} getCurrentHtml={() => '<p><strong>Body</strong></p>'} onDocChange={() => {}} onSnapshotDraft={snapshotDraft} />)
     fireEvent.click(screen.getByRole('button', { name: 'Send with Gmail' }))
 
     await screen.findByText(/Sent with Gmail/)
     expect(calls).toEqual(['authorise', 'record', 'send'])
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ html: '<p><strong>Body</strong></p>' }))
     expect(snapshotDraft).toHaveBeenCalledWith(doc)
     expect(screen.queryByText(/^Recorded /)).toBeNull()
   })
@@ -199,7 +242,7 @@ describe('EmailComposePanel Gmail integration', () => {
 
     await screen.findByText(/Sent with Gmail/)
     expect(getCurrentDoc).toHaveBeenCalledOnce()
-    expect(draftFor).toHaveBeenCalledWith(fresh)
+    expect(draftFor).toHaveBeenCalledWith(fresh, undefined)
     expect(snapshotDraft).toHaveBeenCalledWith(fresh)
   })
 
@@ -216,5 +259,119 @@ describe('EmailComposePanel Gmail integration', () => {
     expect(status.textContent).toMatch(/check (your )?Gmail Sent before trying again/i)
     expect(status.textContent).not.toMatch(/was not sent/i)
     expect(calls).toEqual(['authorise', 'record', 'send'])
+  })
+
+  it('shows the connected-mailbox capability step-up before invoking restricted authorization', async () => {
+    const connectMailbox = vi.fn(async () => 'mailbox-token')
+    render(
+      <EmailComposePanel
+        doc={doc}
+        getCurrentDoc={() => doc}
+        onDocChange={() => {}}
+        onSnapshotDraft={snapshotDraft}
+        onConnectMailbox={connectMailbox}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail mailbox' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Connect your Gmail mailbox?' })
+    expect(connectMailbox).not.toHaveBeenCalled()
+    expect(dialog.textContent).toMatch(/separate from Send with Gmail/i)
+    expect(dialog.textContent).toMatch(/View your Inbox and Sent/i)
+    expect(dialog.textContent).toMatch(/Create, read, replace and send Gmail drafts/i)
+    expect(dialog.textContent).toMatch(/does not let Inkwave mark messages read or unread/i)
+    expect(dialog.textContent).toMatch(/do not pass through or stay on Inkwave servers/i)
+    expect(dialog.textContent).toMatch(/does not delete your Inkwave documents or anything in Gmail/i)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }))
+    expect(connectMailbox).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog', { name: 'Connect your Gmail mailbox?' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail mailbox' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Google' }))
+
+    await waitFor(() => expect(connectMailbox).toHaveBeenCalledOnce())
+    await screen.findByText(/Gmail mailbox connected for this session/i)
+    expect(screen.queryByRole('dialog', { name: 'Connect your Gmail mailbox?' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Gmail mailbox' })).toBeTruthy()
+  })
+
+  it('surfaces a mailbox authorization failure without reporting a connection', async () => {
+    const connectMailbox = vi.fn(async () => { throw new Error('Google mailbox permission was not granted.') })
+    render(
+      <EmailComposePanel
+        doc={doc}
+        getCurrentDoc={() => doc}
+        onDocChange={() => {}}
+        onSnapshotDraft={snapshotDraft}
+        onConnectMailbox={connectMailbox}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail mailbox' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Google' }))
+
+    await screen.findByText('Google mailbox permission was not granted.')
+    expect(screen.queryByText(/mailbox connected/i)).toBeNull()
+  })
+
+  it('saves locally before creating a connected Gmail draft', async () => {
+    const order: string[] = []
+    const connectMailbox = vi.fn(async () => 'mailbox-token')
+    const persistCurrent = vi.fn(async () => { order.push('local') })
+    syncConnectedDraft.mockImplementationOnce(async () => {
+      order.push('gmail')
+      return {
+        kind: 'synced', action: 'created', binding: {
+          v: 1, provider: 'gmail', documentId: 'email-1', accountHash: 'account-hash', historyId: 'h-1',
+          draftId: 'draft-1', messageId: 'message-1', threadId: null, lastSyncedHash: 'hash',
+          syncedAt: '2026-09-07T00:00:00Z',
+        },
+      }
+    })
+    render(
+      <EmailComposePanel
+        doc={doc}
+        getCurrentDoc={() => doc}
+        onDocChange={() => {}}
+        onSnapshotDraft={snapshotDraft}
+        onConnectMailbox={connectMailbox}
+        onPersistCurrent={persistCurrent}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail mailbox' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Google' }))
+    await screen.findByRole('button', { name: 'Save to Gmail Drafts' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Gmail Drafts' }))
+
+    await screen.findByText('Saved to Gmail Drafts.')
+    expect(order).toEqual(['local', 'gmail'])
+    expect(writeDraftBinding).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a formatted draft local rather than flattening it during Gmail draft sync', async () => {
+    const connectMailbox = vi.fn(async () => 'mailbox-token')
+    const persistCurrent = vi.fn(async () => {})
+    render(
+      <EmailComposePanel
+        doc={doc}
+        getCurrentDoc={() => doc}
+        getCurrentHtml={() => '<p><strong>Body</strong></p>'}
+        onDocChange={() => {}}
+        onSnapshotDraft={snapshotDraft}
+        onConnectMailbox={connectMailbox}
+        onPersistCurrent={persistCurrent}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Gmail mailbox' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Google' }))
+    await screen.findByRole('button', { name: 'Save to Gmail Drafts' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Gmail Drafts' }))
+
+    await screen.findByText(/Formatted Gmail draft sync is not available yet/i)
+    expect(persistCurrent).toHaveBeenCalledWith(doc)
+    expect(syncConnectedDraft).not.toHaveBeenCalled()
+    expect(writeDraftBinding).not.toHaveBeenCalled()
   })
 })

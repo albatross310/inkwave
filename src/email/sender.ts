@@ -32,6 +32,17 @@ export interface MailDraft {
   headers: EmailHeaders
   /** The body as plain text. The handoff carries plain text only — see the limits below. */
   body: string
+  /** Sanitised Tiptap formatting for direct provider APIs. Compose-link handoff remains plain. */
+  html?: string
+  attachments?: MailAttachment[]
+}
+
+export interface MailAttachment {
+  filename: string
+  mimeType: string
+  size: number
+  /** Present at a Gmail mutation boundary; metadata-only drafts deliberately omit it. */
+  bytes?: Uint8Array
 }
 
 export interface MailSender {
@@ -126,6 +137,14 @@ const LIMIT: Record<HandoffSenderId, number> = {
 export function fits(id: HandoffSenderId, draft: MailDraft): { ok: boolean; length: number; max: number; reason?: string } {
   const length = urlFor(id, draft).length
   const max = LIMIT[id]
+  if (draft.attachments?.length) {
+    return {
+      ok: false,
+      length,
+      max,
+      reason: 'Compose links cannot transfer attachments. Use direct Gmail send, or attach the files again in your provider.',
+    }
+  }
   return length <= max
     ? { ok: true, length, max }
     : {

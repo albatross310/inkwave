@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "title": "The Offer — Inkwave voice audition",
+  "source": "Original synthetic audition text; no user manuscript",
+  "seed": 1729,
+  "models": {
+    "voice_generator": {"id": "OpenMOSS-Team/MOSS-VoiceGenerator", "revision": "97521ec2b6f3ec5026ac1f5751f8fc302d82c2d4"},
+    "dialogue": {"id": "OpenMOSS-Team/MOSS-TTSD-v1.0", "revision": "c7cd852d87aff71cab5bd2b9b05509cedc0ef1ba"},
+    "audio_tokenizer": {"id": "OpenMOSS-Team/MOSS-Audio-Tokenizer", "revision": "3cd226ba2947efa357ef453bcad111b6eafba782"}
+  },
+  "generation": {"dtype": "bfloat16", "attention": "sdpa", "max_scene_seconds": 180},
+  "cast": [
+    {
+      "id": "S1", "name": "Narrator", "role": "narrator",
+      "voice_prompt": "An adult Australian female narrator, with a clear natural Australian English accent, a warm lower-middle register, thoughtful and observant. Understated audiobook delivery, conversational pacing, precise words, gentle variation. An intimate, believable human voice without theatrical emphasis.",
+      "reference_text": "By the time the rain stopped, the decision had already been made. She put the kettle on and waited for her brother to explain himself.",
+      "persona": {"stance": "Observant and humane; understands both siblings without excusing either", "pace": "Unhurried, but never portentous"}
+    },
+    {
+      "id": "S2", "name": "Mara", "role": "character",
+      "voice_prompt": "An Australian woman in her early forties, with a natural Australian English accent, a slightly husky medium-low voice, direct and intelligent. Dry humour and warmth beneath a guarded exterior. Natural conversational phrasing with restrained emotion, capable of quiet firmness and tenderness. Distinct from a polished narrator.",
+      "reference_text": "I left the spare key under the blue pot. If you arrive before me, make yourself a cup of tea. I'll be home by six.",
+      "persona": {"history": "Stayed in Brisbane and cared for their father for six months", "need": "To be consulted and to have her work acknowledged", "contradiction": "Wants help but is reluctant to admit how badly she needs it"}
+    },
+    {
+      "id": "S3", "name": "Daniel", "role": "character",
+      "voice_prompt": "An Australian man in his late thirties, with a natural Australian English accent and a warm medium-pitched voice. Practical, quick-thinking and amiable, with a slight nervous edge when challenged. Informal believable speech, capable of dropping the easy confidence to sound sincere. No exaggerated gravel or announcer delivery.",
+      "reference_text": "The train gets in just after four. I can pick up dinner on the way, unless you've already cooked. Either way, I'll do the washing up.",
+      "persona": {"history": "Lives in Sydney and has mistaken arranging practical matters for sharing the burden", "need": "To be useful without facing his guilt", "contradiction": "Loves his sister but tries to manage her feelings as another problem to solve"}
+    }
+  ],
+  "scenes": [
+    {
+      "id": "the_offer", "title": "The offer",
+      "context": {
+        "situation": "Their father has died. Daniel has accepted an offer on the family house without consulting Mara.",
+        "arc": "Restrained confrontation becomes a small, imperfect attempt at honesty",
+        "performance_target": "Human conversational timing; no melodramatic anger or conspicuous acting",
+        "direction_support": "Context is retained for evaluation. This adapter does not claim MOSS accepts separate nonspoken motive instructions."
+      },
+      "turns": [
+        {"speaker": "S1", "text": "For six months, Mara had cared for their father in this house. Now he was dead, and Daniel had flown up from Sydney to help her sell it. She wanted to sell it too. What she had wanted, until this morning, was to be asked."},
+        {"speaker": "S2", "text": "You accepted the offer."},
+        {"speaker": "S3", "text": "I told them we were interested."},
+        {"speaker": "S2", "text": "Daniel. Your email says accepted."},
+        {"speaker": "S1", "text": "He looked at the kettle. It was an ordinary, useful thing, and he wished she had given him an ordinary, useful problem."},
+        {"speaker": "S3", "text": "It was a good offer. I thought I was taking something off your plate."},
+        {"speaker": "S2", "text": "You could have asked what was on it."},
+        {"speaker": "S3", "text": "I know you've had a difficult few months."},
+        {"speaker": "S2", "text": "Don't say it like you're thanking the caterer."},
+        {"speaker": "S1", "text": "That hurt him, and for once he resisted the urge to explain why it should not have."},
+        {"speaker": "S3", "text": "All right. I'm sorry. What do you need me to do?"},
+        {"speaker": "S2", "text": "Stay until Sunday."},
+        {"speaker": "S3", "text": "I can do that."},
+        {"speaker": "S2", "text": "And stop offering the furniture to people. I'm sitting on that chair."}
+      ]
+    },
+    {
+      "id": "sunday", "title": "Continuation — Sunday morning", "continuation_of": "the_offer",
+      "context": {
+        "situation": "Three days later, Daniel has stayed and helped. The house is almost packed.",
+        "arc": "The same people are warmer with one another without becoming different voices",
+        "performance_target": "Carry vocal identity and relationship across the scene boundary; allow affection and dry humour"
+      },
+      "turns": [
+        {"speaker": "S1", "text": "On Sunday morning, Daniel found Mara sitting on the kitchen floor between two empty boxes. He sat beside her. There was work to do, but he was beginning to understand that work was not always the answer."},
+        {"speaker": "S3", "text": "I've moved my flight."},
+        {"speaker": "S2", "text": "Again?"},
+        {"speaker": "S3", "text": "Monday. If that's all right."},
+        {"speaker": "S2", "text": "You're learning."},
+        {"speaker": "S1", "text": "She leaned against his shoulder, briefly, as though it had happened by accident."},
+        {"speaker": "S3", "text": "What about the chair?"},
+        {"speaker": "S2", "text": "I'm keeping it."},
+        {"speaker": "S3", "text": "I thought you hated that chair."},
+        {"speaker": "S2", "text": "I do. It's a family tradition."}
+      ]
+    }
+  ]
+}

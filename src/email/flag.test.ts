@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { emailEnabled } from './flag'
 
-// The flag must DEFAULT OFF (the brief). And the OFF must be real: a flag that throws its way to
-// `true`, or that a stray localStorage value flips on, is not a default-off flag.
+// Email is live by default. The explicit OFF must still be durable because absence now means ON;
+// SSR remains off so the prerender does not claim client-only state.
 
 function stubEnv(search: string, store: Record<string, string> = {}) {
   vi.stubGlobal('location', { search })
@@ -14,17 +14,17 @@ function stubEnv(search: string, store: Record<string, string> = {}) {
   return store
 }
 
-describe('emailEnabled — default OFF', () => {
+describe('emailEnabled — default ON in browsers and installed PWAs', () => {
   beforeEach(() => vi.unstubAllGlobals())
 
-  it('is OFF with no param and nothing stored', () => {
+  it('is ON with no param and nothing stored — the fresh Safari PWA case', () => {
     stubEnv('')
-    expect(emailEnabled()).toBe(false)
+    expect(emailEnabled()).toBe(true)
   })
 
-  it('is OFF for an unrelated param', () => {
+  it('stays ON for an unrelated param', () => {
     stubEnv('?auth=1&snapThumbs=debug')
-    expect(emailEnabled()).toBe(false)
+    expect(emailEnabled()).toBe(true)
   })
 
   it('?email=1 turns it on AND persists (sticky across a URL rewrite)', () => {
@@ -36,17 +36,17 @@ describe('emailEnabled — default OFF', () => {
     expect(emailEnabled()).toBe(true)
   })
 
-  it('?email=off clears the sticky flag', () => {
+  it('?email=off stores a durable opt-out (absence would mean ON)', () => {
     const store = stubEnv('?email=off', { 'inkwave:email': '1' })
     expect(emailEnabled()).toBe(false)
-    expect(store['inkwave:email']).toBeUndefined()
+    expect(store['inkwave:email']).toBe('0')
   })
 
-  it('is OFF (never throws) when storage is denied — private mode / SSR', () => {
+  it('stays available when storage is denied in a browser/private window', () => {
     vi.stubGlobal('location', { search: '?email=1' })
     vi.stubGlobal('localStorage', { getItem: () => { throw new Error('denied') },
       setItem: () => { throw new Error('denied') }, removeItem: () => {} })
-    expect(emailEnabled()).toBe(false)
+    expect(emailEnabled()).toBe(true)
   })
 })
 
@@ -74,11 +74,11 @@ describe('emailEnabled — characterization', () => {
 
   it('is NOT cached: a mid-session storage change is seen on the next call', () => {
     const store = stubEnv('')
-    expect(emailEnabled()).toBe(false)
-    store['inkwave:email'] = '1'
     expect(emailEnabled()).toBe(true)
-    delete store['inkwave:email']
+    store['inkwave:email'] = '0'
     expect(emailEnabled()).toBe(false)
+    delete store['inkwave:email']
+    expect(emailEnabled()).toBe(true)
   })
 
   it('is OFF with no location/localStorage at all (node/prerender)', () => {

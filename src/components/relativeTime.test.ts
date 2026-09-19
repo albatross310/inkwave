@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { relativeTime } from './relativeTime'
+import { relativeTime, relativeTimeRefreshDelay } from './relativeTime'
 
 describe('relativeTime', () => {
   const now = 2_000_000
@@ -15,5 +15,11 @@ describe('relativeTime', () => {
 
   it('treats a future clock value as just now', () => {
     expect(relativeTime(now + 10_000, now)).toBe('just now')
+  })
+
+  it('backs relative-time refreshes off from seconds to minutes to hours', () => {
+    expect(relativeTimeRefreshDelay(now, now)).toBe(5_000)
+    expect(relativeTimeRefreshDelay(now - 2 * 60_000, now)).toBe(60_000)
+    expect(relativeTimeRefreshDelay(now - 2 * 60 * 60_000, now)).toBe(60 * 60_000)
   })
 })

@@ -21,6 +21,7 @@ import { describe, it, expect } from 'vitest'
 import {
   shouldWarnUnsynced,
   unsyncedReducer,
+  unsyncedNoticeDelay,
   initialUnsyncedState,
   UNSYNCED_WARN_MS,
   type UnsyncedState,
@@ -55,6 +56,18 @@ describe('shouldWarnUnsynced', () => {
 
   it('five minutes means five minutes', () => {
     expect(UNSYNCED_WARN_MS).toBe(5 * 60 * 1000)
+  })
+})
+
+describe('unsyncedNoticeDelay', () => {
+  it('schedules one wake-up at the five-minute boundary', () => {
+    expect(unsyncedNoticeDelay(T0, T0)).toBe(UNSYNCED_WARN_MS)
+    expect(unsyncedNoticeDelay(T0, T0 + 42_000)).toBe(UNSYNCED_WARN_MS - 42_000)
+  })
+
+  it('fires immediately when the boundary has already passed and honours the probe threshold', () => {
+    expect(unsyncedNoticeDelay(T0, T0 + UNSYNCED_WARN_MS + 1)).toBe(0)
+    expect(unsyncedNoticeDelay(T0, T0 + 250, 500)).toBe(250)
   })
 })
 

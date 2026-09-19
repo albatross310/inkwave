@@ -29,6 +29,7 @@ function decodeRaw(raw: string): string {
 }
 
 type GisConfig = {
+  include_granted_scopes?: boolean
   callback: (response: { access_token?: string; expires_in?: number; error?: string }) => void
   error_callback?: (error: { type?: string }) => void
 }
@@ -79,6 +80,52 @@ describe('Gmail send boundary', () => {
   it('handles a long Unicode body without argument-stack truncation', () => {
     const body = 'writing 🌊\n'.repeat(20_000)
     expect(decodeRaw(buildGmailRawMessage(draft(body)))).toContain(body.replace(/\n/g, '\r\n'))
+  })
+
+  it('carries the formatted body as HTML with a plain-text fallback', () => {
+    const mime = decodeRaw(buildGmailRawMessage({
+      ...draft('Hello Ada'),
+      html: '<p>Hello <strong>Ada</strong></p>',
+    }))
+    expect(mime).toContain('Content-Type: multipart/alternative; boundary="inkwave-alternative-boundary"')
+    expect(mime).toContain('Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\nHello Ada')
+    expect(mime).toContain('Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n<p>Hello <strong>Ada</strong></p>')
+  })
+
+  it('builds a multipart Gmail message with verified attachment bytes', () => {
+    const mime = decodeRaw(buildGmailRawMessage({
+      ...draft('Attached.'),
+      attachments: [{
+        filename: 'résumé.pdf',
+        mimeType: 'application/pdf',
+        size: 5,
+        bytes: Uint8Array.from([0, 1, 2, 3, 4]),
+      }],
+    }))
+    expect(mime).toContain('Content-Type: multipart/mixed; boundary="inkwave-mixed-boundary"')
+    expect(mime).toContain("filename*=UTF-8''r%C3%A9sum%C3%A9.pdf")
+    expect(mime).toContain('Content-Transfer-Encoding: base64\r\n\r\nAAECAwQ=')
+    expect(mime).toContain('--inkwave-mixed-boundary--')
+  })
+
+  it('nests formatted text and attachments in standards-shaped MIME boundaries', () => {
+    const mime = decodeRaw(buildGmailRawMessage({
+      ...draft('Body'),
+      html: '<p><em>Body</em></p>',
+      attachments: [{ filename: 'note.txt', mimeType: 'text/plain', size: 2, bytes: Uint8Array.of(72, 105) }],
+    }))
+    expect(mime).toContain('Content-Type: multipart/mixed; boundary="inkwave-mixed-boundary"')
+    expect(mime).toContain('Content-Type: multipart/alternative; boundary="inkwave-alternative-boundary"')
+    expect(mime).toContain('<p><em>Body</em></p>')
+    expect(mime).toContain('Content-Disposition: attachment; filename="note.txt"')
+    expect(mime).toContain('\r\n\r\nSGk=')
+  })
+
+  it('refuses attachment metadata without the complete local bytes', () => {
+    expect(() => buildGmailRawMessage({
+      ...draft(),
+      attachments: [{ filename: 'missing.pdf', mimeType: 'application/pdf', size: 10 }],
+    })).toThrow(/not fully loaded.*Nothing was sent/i)
   })
 
   it('POSTs the raw message directly to Gmail and reports a real sent outcome', async () => {

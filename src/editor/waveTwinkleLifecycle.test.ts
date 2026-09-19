@@ -138,4 +138,28 @@ describe('the compositor-to-rest handoff', () => {
 
     expect(order).toEqual(['opacity:0.47', 'cancel'])
   })
+
+  it('replaces the large rest fields with a resolution-capped canvas pair', () => {
+    const source = readFileSync(resolve(__dirname, 'waveTwinkle.ts'), 'utf8')
+    const css = readFileSync(resolve(__dirname, '../styles/index.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    const fieldBase = css.match(/\.iw-twk-field\s*\{([^}]*)\}/)?.[1] ?? ''
+    const waveBase = css.match(/\.inkwave-editor-surface::before\s*\{([^}]*)\}/)?.[1] ?? ''
+
+    expect(fieldBase).not.toContain('will-change')
+    expect(fieldBase).not.toContain('translateZ')
+    expect(waveBase).not.toContain('will-change')
+    expect(waveBase).not.toContain('translateZ')
+    expect(css).toContain('.inkwave-editor-surface.iw-wave-anim .iw-twk-field,')
+    expect(css).not.toContain('[data-iw-scroll-active]:not(.iw-wave-anim):not(.iw-wave-coast) .iw-twk-field')
+    expect(css).toContain('.inkwave-editor-surface[data-iw-low-power-water]::before')
+    expect(css).toContain('.iw-low-power-water-canvas-set.is-active')
+    const prepare = source.slice(source.indexOf('function prepareHost'), source.indexOf('function ensureLowPowerWater'))
+    expect(prepare).not.toContain('createLowPowerWaterCanvas')
+    expect(source).toContain('createLowPowerWaterCanvas(state.host)')
+    expect(source).toContain('warmLowPowerWaterDuringCoast(state)')
+    expect(source).toContain('state.lowPowerWater.setPose(waveX)')
+    expect(source).toContain('if (state.lowPowerWater) return')
+    expect(source).toContain('translateX(${waveX.toFixed(2)}px)')
+    expect(source).not.toContain('translate3d(${waveX.toFixed(2)}px, 0, 0)')
+  })
 })

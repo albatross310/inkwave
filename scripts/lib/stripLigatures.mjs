@@ -34,6 +34,11 @@ import { writeFileSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { execFileSync } from 'child_process'
 
+// CI normally exposes python3 directly. Codex/Desktop and other hermetic workspaces may provide a
+// separate Python runtime, so let the caller name it without rewriting PATH or weakening the
+// mandatory fontTools preflight.
+const PYTHON = process.env.INKWAVE_FONT_PYTHON || 'python3'
+
 export const DROPPED_FEATURES = ['liga', 'clig', 'dlig', 'hlig', 'calt']
 export const KEPT_FEATURE = 'rlig'
 
@@ -105,7 +110,7 @@ for path in sys.argv[1:]:
 /** Throws with a clear message if the toolchain isn't available — never silently skip the strip. */
 export function requireFontTools() {
   try {
-    execFileSync('python3', ['-c', 'import fontTools'], { stdio: 'pipe' })
+    execFileSync(PYTHON, ['-c', 'import fontTools'], { stdio: 'pipe' })
   } catch {
     throw new Error(
       'fonttools is REQUIRED to strip ligature features from the served faces, and the build must\n' +
@@ -134,7 +139,7 @@ export function stripLigaturesInDir(dir) {
   writeFileSync(tmp, PY_STRIP)
   let stripped = 0, failed = []
   for (let i = 0; i < files.length; i += 60) {
-    const out = execFileSync('python3', [tmp, ...files.slice(i, i + 60)], { encoding: 'utf8', maxBuffer: 1 << 26 })
+    const out = execFileSync(PYTHON, [tmp, ...files.slice(i, i + 60)], { encoding: 'utf8', maxBuffer: 1 << 26 })
     for (const line of out.trim().split('\n')) {
       if (!line) continue
       const [st, name, info] = line.split('\t')
@@ -158,7 +163,7 @@ export function verifyStripped(dir) {
   const bad = []
   let withRlig = 0
   for (let i = 0; i < files.length; i += 60) {
-    const out = execFileSync('python3', [tmp, ...files.slice(i, i + 60)], { encoding: 'utf8', maxBuffer: 1 << 26 })
+    const out = execFileSync(PYTHON, [tmp, ...files.slice(i, i + 60)], { encoding: 'utf8', maxBuffer: 1 << 26 })
     for (const line of out.trim().split('\n')) {
       if (!line) continue
       const [st, name, live, rl] = line.split('\t')

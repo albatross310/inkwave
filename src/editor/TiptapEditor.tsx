@@ -1,6 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { useZoomScale } from './useZoomScale'
 import { TOOLBAR_BOTTOM_PX } from '../components/sidePill'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
@@ -8,7 +7,7 @@ import { Fragment as PmFragment, Slice as PmSlice } from '@tiptap/pm/model'
 import { v4 as uuidv4 } from 'uuid'
 import { buildEditorExtensions } from './extensions/editorExtensions'
 import type { InkwaveDocument } from '../types/document'
-import { scheduleSave } from '../storage/opfs'
+import { flushPendingSave, scheduleSave } from '../storage/opfs'
 import { upsertMeta } from '../storage/indexeddb'
 import { SCAS_HINT_META, getGreenAnchors } from './extensions/RedHighlightExtension'
 import { applyCrossoutMode } from './crossout'
@@ -18,7 +17,7 @@ import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
 import { syncReviewVisibilityStyles, clearLegacySuggestFlag, setSuggestOn } from './review/reviewState'
 import { rememberReturn } from '../citations/citationNav'
-import { readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemory'
+import { announceScrollPositionRestored, readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemory'
 import { CommentNotes } from '../components/CommentNotes'
 import { ReviewBar } from '../components/ReviewBar'
 import { Scroll, isTouchDevice } from './Scroll'
@@ -30,10 +29,10 @@ import {
   slotIndexForDigit, hotkeyHintFor,
   readToolbarConfig, resolveToolbarRow, mayPersistConfig, mergeRowIntoConfig,
 } from './toolbarContract'
-import { subscribe as subscribeMagnify } from './magnify'
+import { restoreUserMagnify, subscribe as subscribeMagnify } from './magnify'
+import { readWorkspaceViewState, workspaceTextZoomKey } from '../workspace/viewState'
 import { ThesaurusPopover } from './suggestions/ThesaurusPopover'
 import { CaretGutter } from './CaretGutter'
-import { prefetchSynonyms } from './suggestions/thesaurus'
 import { OptionsMenu } from '../components/OptionsMenu'
 import { MathMenuButton } from '../components/MathMenu'
 import { StyleBar } from '../components/StyleBar'
@@ -48,21 +47,27 @@ import { EmailComposePanel } from '../components/EmailComposePanel'
 import type { ApplicationSurfaceMode } from '../components/ApplicationSurface'
 import { readApplicationSurfaceMode, writeApplicationSurfaceMode } from '../components/applicationSurfaceMode'
 import { emailEnabled } from '../email/flag'
+import { authoriseGmailMailbox } from '../email/gmailMailboxAuth'
+import { gmailConfigured } from '../email/gmail'
+import type { MailboxDraft } from '../email/mailbox'
 import { titleForDocument } from './docTitle'
+import { emailHtmlFromEditor } from '../email/html'
 import { SessionRunner } from '../provenance/session'
 import { CadenceTap } from '../provenance/cadence'
 import { cadenceTierActive, getClerkToken } from '../auth/entitlement'
 import { prodLedgerEnabled } from '../productivity/ledgerFlag'
 import { getCapture } from '../productivity/capture'
 import { buildExportBundleWithPdfs, bundleFilename, downloadBundle, downloadBundleGz, pmToText } from '../provenance/bundle'
-import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat, preMergeSaveFile } from '../storage/folder'
-import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, getOneDriveItemTag, readRemoteHeartbeat, getRemoteFileInfo, preMergeRemote, fetchMissingSidecars, type OneDriveFolder } from '../storage/onedrive'
-import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, getGDriveFileTag, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo, preMergeGDrive } from '../storage/gdrive'
+import { fileSaveAvailable, pickSaveFile, getSaveFileHandle, getSaveFileName, writeBundleToFile, readLocalHeartbeat } from '../storage/folder'
+import { oneDriveConfigured, oneDriveAccount, syncToOneDrive, startOneDriveSignIn, oneDriveSyncPending, clearOneDriveSyncPending, takeOneDriveAuthError, oneDrivePath, setChosenFolder, addRecentFolder, renameOneDriveFile, oneDriveFilename, downloadOneDriveFile, getOneDriveItemTag, readRemoteHeartbeat, getRemoteFileInfo, type OneDriveFolder } from '../storage/onedrive'
+import { googleDriveConfigured, startGoogleDriveSignIn, syncToGoogleDrive, clearGoogleDriveFile, setChosenGDriveFolder, gDriveFilename, renameGoogleDriveFile, downloadGoogleDriveFileBlob, getGDriveFileTag, googleDriveFileId, addRecentGDriveFolder, getGDriveFileInfo } from '../storage/gdrive'
 import { isOtherDeviceActive } from '../sync/presence'
 import { SyncStatus } from '../components/SyncStatus'
 import { UnsyncedNotice } from '../components/UnsyncedNotice'
-import { shouldWarnUnsynced, unsyncedReducer, initialUnsyncedState } from './unsyncedWatch'
+import { shouldWarnUnsynced, unsyncedNoticeDelay, unsyncedReducer, initialUnsyncedState } from './unsyncedWatch'
+import { canBeginEditorReveal, DESKTOP_COAST_BEFORE_REVEAL_MS } from './loadReveal'
 import { VerifyModal } from '../components/VerifyModal'
+import { EDITOR_WRITING_ASSISTANCE_ATTRIBUTES } from './writingAssistance'
 // ⚠ LAZY, AND IT MUST STAY LAZY. A static import puts the whole report lane in THIS chunk, which
 // every writer loads, flag or no flag: a render guard and a runtime guard are both invisible to
 // the bundler. VERIFY IN `react-router build` OUTPUT, never in the source — a separate chunk file
@@ -108,9 +113,10 @@ import { OneDriveFolderPicker } from '../components/OneDriveFolderPicker'
 import { GoogleDriveFolderPicker } from '../components/GoogleDriveFolderPicker'
 import { OneDriveFileOpener } from '../components/OneDriveFileOpener'
 import { GoogleDriveFileOpener } from '../components/GoogleDriveFileOpener'
+import { OneDriveSignInRecoveryDialog } from '../components/OneDriveSignInRecoveryDialog'
 import { getRecognisedSave, markDocumentDirty, setDocSource, getDocSource, markRecognisedSave, recognisedSaveIsLive } from '../storage/docSource'
 import { openInkwaveFile } from '../storage/openDoc'
-import { getCachedOpen, putCachedOpen, warmCloudOpen, type OpenCacheProvider } from '../storage/openCache'
+import { getCachedOpen, putCachedOpen, type OpenCacheProvider } from '../storage/openCache'
 import { openPerfStart, openPerfStep, openPerfAbort } from '../storage/openPerf'
 import { reportOpenError, takeOpenError } from '../storage/openError'
 import { contentHash } from '../provenance/hash'
@@ -125,26 +131,41 @@ import type { Snapshot, SnapshotMeta, SignedReceipt, WordNudgeEvent } from '../t
 // `editor/toolbarContract.ts` and are never re-declared here. Register a button by adding a member
 // to `SlotId` + `ALL_SLOTS` there and the row, the ▲ overflow, drag-to-swap and migration follow.
 
-/**
- * ⚠ Visual px reserved on EACH SIDE of the centred footer toolbar for the edge-anchored pills that
- * share its band. All three are independently `position: fixed` with no awareness of each other,
- * so without this the centred toolbar grows into the sync pill below ~650px of viewport width. It
- * must stay ONE number shared with the per-circle shrink clamp in index.css.
- * → docs/archive/editor-surface.md#editor-side-reserve
- */
-const TOOLBAR_SIDE_RESERVE_PX = 140
+// Desktop footer geometry is deliberately intrinsic and fixed in CSS pixels. Browser zoom scales
+// the complete 318px pill normally; it must not feed back through viewport-relative size formulas.
+const DESKTOP_TOOLBAR_WIDTH_PX = 318
 
 interface TiptapEditorProps {
   doc: InkwaveDocument
   onDocChange: (updated: InkwaveDocument) => void
   onDuplicateEmail: (source: InkwaveDocument) => Promise<void>
+  onOpenGmailDraft: (draft: MailboxDraft<'gmail'>, context: { accountEmail: string; historyId: string }) => Promise<void>
+  onOpenWorkspaceDocument: (doc: InkwaveDocument) => Promise<void>
+  onOpenWorkspaceDocumentId: (id: string) => Promise<void>
+  /** In-place panel navigation has no loading screen/Continue control; reveal as soon as this
+   * document's loading scene is ready. */
+  autoReveal?: boolean
 }
 
-export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEditorProps) {
+export function TiptapEditor({
+  doc,
+  onDocChange,
+  onDuplicateEmail,
+  onOpenGmailDraft,
+  onOpenWorkspaceDocument,
+  onOpenWorkspaceDocumentId,
+  autoReveal = false,
+}: TiptapEditorProps) {
   const docRef = useRef(doc)
+  const changedSinceLoadRef = useRef(false)
   useEffect(() => {
     docRef.current = doc
   }, [doc])
+  useEffect(() => { changedSinceLoadRef.current = false }, [doc.id])
+  useLayoutEffect(() => {
+    const pose = readWorkspaceViewState(doc.id)
+    if (pose) restoreUserMagnify(pose.magnify)
+  }, [doc.id])
 
   // ── ⚠ ONE COMMIT PATH FOR A DOCUMENT MUTATION (R2) ────────────────────────────────────────────
   // Every mutation does the same three things in the same order: docRef, onDocChange, scheduleSave.
@@ -153,6 +174,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // NB `ensureDocFresh` deliberately does NOT use this: it CACHES a lazily-built document and is not
   // a mutation. → docs/archive/editor-surface.md#editor-commit-doc
   const commitDoc = (updated: InkwaveDocument) => {
+    changedSinceLoadRef.current = true
     markDocumentDirty(updated.id)
     setLastFileSave(null)
     setLastSync(null)
@@ -169,39 +191,111 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // and restoring against that shorter range clamps the offset to nothing. The rule itself is pure
   // (editor/scrollMemory.ts). → docs/archive/editor-surface.md#editor-scroll-memory
   useEffect(() => {
-    const el = document.querySelector('.inkwave-editor-surface.iw-fill:not(.is-phone)') as HTMLElement | null
-    if (!el) return
     const id = docRef.current?.id
     if (!id) return
+    const el = containerRef.current?.closest('.inkwave-editor-surface.iw-fill:not(.is-phone)') as HTMLElement | null
+    if (!el) {
+      const onPhoneRevealed = (event: Event) => {
+        if ((event as CustomEvent<{ id?: string }>).detail?.id === id)
+          window.dispatchEvent(new CustomEvent('inkwave:workspace-view-ready', { detail: { id } }))
+      }
+      window.addEventListener('inkwave:editor-revealed', onPhoneRevealed)
+      return () => window.removeEventListener('inkwave:editor-revealed', onPhoneRevealed)
+    }
     let saveTimer: ReturnType<typeof setTimeout> | undefined
+    let lastTop = el.scrollTop
+    let lastHeight = el.scrollHeight
+    const samplePose = () => {
+      if (!el.isConnected) return
+      lastTop = el.scrollTop
+      if (el.scrollHeight > 0) lastHeight = el.scrollHeight
+    }
     const onScroll = () => {
+      samplePose()
       clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => writeScrollMemory(id, el.scrollTop, el.scrollHeight), 400)
+      saveTimer = setTimeout(() => writeScrollMemory(id, lastTop, lastHeight), 400)
     }
     const mem = readScrollMemory(id)
+    const workspacePose = readWorkspaceViewState(id)
     let restored = false
+    let revealed = !autoReveal
+    let restoreRevealTimer: ReturnType<typeof setTimeout> | undefined
+    let viewReadySent = false
+    const announceViewReady = () => {
+      if (viewReadySent) return
+      viewReadySent = true
+      window.dispatchEvent(new CustomEvent('inkwave:workspace-view-ready', { detail: { id } }))
+    }
+    const restoreStartedAt = performance.now()
     const tryRestore = () => {
       if (restored) return
+      if (workspacePose) el.scrollLeft = workspacePose.scrollLeft
       const range = Math.max(0, el.scrollHeight - el.clientHeight)
-      const want = restoreOffset(mem, el.scrollHeight, range)
-      if (want == null) { restored = true; el.addEventListener('scroll', onScroll, { passive: true }); return }
+      const want = mem && mem.top <= 8 ? 0 : restoreOffset(mem, el.scrollHeight, range)
+      if (want == null) {
+        // No saved position is a final answer. A saved position that is temporarily implausible is
+        // not: pagination/font layout may still be growing underneath the landed swipe preview.
+        const layoutReady = (window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady === true
+          && document.fonts?.status !== 'loading'
+        if (revealed && (!mem || layoutReady || performance.now() - restoreStartedAt >= 4000)) {
+          restored = true
+          el.addEventListener('scroll', onScroll, { passive: true })
+          announceViewReady()
+        }
+        return
+      }
+      const before = el.scrollTop
       el.scrollTop = want
+      samplePose()
+      announceScrollPositionRestored(el, before)
       // Only call it restored once it actually took — the height keeps growing while pages measure.
-      if (Math.abs(el.scrollTop - want) <= 2) {
+      if (revealed && Math.abs(el.scrollTop - want) <= 2) {
         restored = true
         el.addEventListener('scroll', onScroll, { passive: true })
+        announceViewReady()
       }
+    }
+    const onRevealed = (event: Event) => {
+      if ((event as CustomEvent<{ id?: string }>).detail?.id !== id) return
+      // Pagination/reveal can restore the EditorView's initial selection and scroll once more.
+      // Keep the neighbour covering it until the final local view has been reinstated.
+      // View Transitions pause rendering while their update promise is pending, so waiting for
+      // rAF here deadlocks that promise until its safety timer. The next task follows React's
+      // reveal commit and can restore layout synchronously before the browser takes its snapshot.
+      restoreRevealTimer = setTimeout(() => {
+        revealed = true
+        tryRestore()
+      }, 0)
     }
     // Try across the settling window rather than once: fonts, pagination and the reveal each change
     // the height, so a single attempt lands before the document is its real size.
-    const timers = [900, 1600, 2600, 4000].map((t) => setTimeout(tryRestore, t))
+    const timers = (autoReveal
+      ? [0, 50, 150, 300, 600, 900, 1600, 2600, 4000]
+      : [900, 1600, 2600, 4000]
+    ).map((t) => setTimeout(tryRestore, t))
+    window.addEventListener('inkwave:pagination-measured', tryRestore)
+    window.addEventListener('inkwave:editor-revealed', onRevealed)
+    const restoreObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(tryRestore)
+    const measuredPaper = el.querySelector('.scroll-paper')
+    if (restoreObserver && measuredPaper) restoreObserver.observe(measuredPaper)
+    tryRestore()
     return () => {
+      // A panel switch often occurs inside the old 400ms debounce. Persist the actual departure
+      // pose synchronously so returning to this panel cannot jump to an older vertical position.
+      if (el.isConnected && (restored || !mem)) {
+        samplePose()
+        writeScrollMemory(id, lastTop, lastHeight)
+      }
       timers.forEach(clearTimeout)
+      clearTimeout(restoreRevealTimer)
       clearTimeout(saveTimer)
       el.removeEventListener('scroll', onScroll)
+      window.removeEventListener('inkwave:pagination-measured', tryRestore)
+      window.removeEventListener('inkwave:editor-revealed', onRevealed)
+      restoreObserver?.disconnect()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc.id])
+  }, [doc.id, autoReveal])
 
   // Mirror the saved cross-out mode onto the document root so the memory cross-out CSS applies.
   useEffect(() => { applyCrossoutMode() }, [])
@@ -260,6 +354,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const folderActiveRef = useRef(false)
   // OneDrive sync (Microsoft Graph) — cross-browser cloud storage for non-Chromium writers.
   const [oneDriveAcct, setOneDriveAcct] = useState<string | null>(null)
+  const [oneDriveSignInRecovery, setOneDriveSignInRecovery] = useState<{
+    message: string
+    retry: () => Promise<void>
+  } | null>(null)
   const oneDriveActiveRef = useRef(false)
   // OneDrive write throttle: rapid PUTs to the same file race the OneDrive DESKTOP client (which
   // then makes "<name>-MACHINE.json" conflict copies). Local folder writes are instant; OneDrive is
@@ -297,7 +395,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const [gdriveActive, setGdriveActive] = useState(false)
   const [lastGdriveSync, setLastGdriveSync] = useState<number | null>(null)
   const [gdriveUrl, setGdriveUrl] = useState<string | null>(null)
-  const zoom = useZoomScale() // counter page zoom so the toolbar stays a constant size (CSS `zoom`)
   const [otherDevice, setOtherDevice] = useState(false) // another device looks active on this doc
   const [conflictDismissed, setConflictDismissed] = useState(false)
   const [wordCount, setWordCount] = useState(0) // live document word count (shown in the record panel)
@@ -311,7 +408,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // reveal. Uncovering mid-coast made iOS composite/rasterize the just-shown copy late = the
   // freeze-frame + gradient shift Peter saw. At rest the phone editor has no waves at all
   // (parchment), so the uncover is inert; the flag exists to hold `covered` through the coast.
-  const [waveRest, setWaveRest] = useState(false)
+  const [waveRest, setWaveRest] = useState(autoReveal)
   // wave-rest ALWAYS arrives on a live page (the rest handoff is a resolved-clock timer over
   // compositor-only playback); the 30s load watchdog (Scroll.tsx, 'inkwave:load-watchdog') is
   // the one backstop — it force-lifts `covered` too.
@@ -331,7 +428,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // index.css). 'hold' → 'in' swap in the SAME commit settled flips (no bare frame between), and
   // 'in' is one-shot — removed after the animation so later-mounted panels never replay the fade.
   // Desktop keeps the shell cross-fade; no hold there (the chrome lands under the fading shell).
-  const [chromeDone, setChromeDone] = useState(false)
+  const [chromeDone, setChromeDone] = useState(autoReveal)
   useEffect(() => {
     if (!settled) return
     const t = setTimeout(() => setChromeDone(true), 650)
@@ -389,16 +486,21 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   const [unsyncedNow, setUnsyncedNow] = useState(() => Date.now())
   useEffect(() => { if (syncActive) dispatchUnsynced({ type: 'sync-active' }) }, [syncActive])
   useEffect(() => { dispatchUnsynced({ type: 'doc-switch' }) }, [doc.id])
-  // A slow tick, and ONLY while a warning is actually pending — the reducer returns its input
-  // unchanged on a no-op edit, so typing never re-renders the shell (the console-snappy rule).
+  // ONE wake-up at the warning boundary, and only while a warning is actually pending. The old
+  // fallback accidentally polled every 6.67s for the entire five-minute wait and re-rendered the
+  // full editor tree each time; neither the answer nor the displayed UI can change before the
+  // deadline.
   // PROBE SEAM (the `__iwRasterDprCap` pattern): shorten the threshold so the wiring can be DRIVEN
   // in a live browser rather than waited out for five real minutes (R3).
   // → docs/archive/editor-surface.md#editor-unsynced-notice
   const warnAfterMs = (window as unknown as { __iwUnsyncedWarnMs?: number }).__iwUnsyncedWarnMs
   useEffect(() => {
     if (syncActive || unsynced.dismissed || unsynced.firstUnsyncedEditAt === null) return
-    const t = setInterval(() => setUnsyncedNow(Date.now()), Math.min(20_000, (warnAfterMs ?? 20_000) / 3))
-    return () => clearInterval(t)
+    const t = setTimeout(
+      () => setUnsyncedNow(Date.now()),
+      unsyncedNoticeDelay(unsynced.firstUnsyncedEditAt, Date.now(), warnAfterMs),
+    )
+    return () => clearTimeout(t)
   }, [syncActive, unsynced.dismissed, unsynced.firstUnsyncedEditAt, warnAfterMs])
   const warnUnsynced = shouldWarnUnsynced({
     syncActive,
@@ -984,7 +1086,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         (window as unknown as { __iwZoomHoldSince?: number }).__iwZoomHoldSince = 0
       }
       void lastSaved // (gap detection rides onSaved; the toast on failure is the primary signal)
-    }, 10_000)
+    }, 60_000)
     return () => { window.removeEventListener('inkwave:save-failed', onFail); window.removeEventListener('inkwave:doc-saved', onSaved); clearInterval(watchdog) }
   }, [])
 
@@ -1031,9 +1133,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
 
   // Shared mutable ref read synchronously by the decoration plugin.
   const hintStateRef = useRef<HintState>({ focusedPos: null, showHints: true, focusedMinWidth: null, lineCompressionRange: null, animate: true, durationMs: REFLOW_OPEN_MS })
-
-  // Debounced prefetch — fires after typing pauses so popover opens instantly.
-  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const compliance = useComplianceProvider()
   const emailDocument = emailEnabled() && doc.docType === 'email'
@@ -1152,7 +1251,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         class: 'tiptap-editor',
         'data-placeholder': 'Begin writing…',
         'aria-label': doc.docType === 'email' ? 'Message body editor' : 'Document body editor',
-        spellcheck: 'false',
+        ...EDITOR_WRITING_ASSISTANCE_ATTRIBUTES,
       },
       handlePaste: (view, event) => {
         const images = clipboardImageFiles(event.clipboardData)
@@ -1322,6 +1421,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       // The unsynced clock: only a change the WRITER caused counts. The reducer returns its input
       // unchanged once started, so this costs nothing per keystroke.
       if (sawUserInputRef.current) {
+        changedSinceLoadRef.current = true
         dispatchUnsynced({ type: 'edit', now: Date.now(), syncActive: syncActiveRef.current })
       }
       scheduleSave(() => {
@@ -1337,15 +1437,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         }
         void upsertMeta({ id: d.id, title: d.title, updatedAt: d.updatedAt })
       })
-
-      // Prefetch synonyms for all visible red words after a short pause.
-      if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current)
-      prefetchTimerRef.current = setTimeout(() => {
-        const words = Array.from(
-          e.view.dom.querySelectorAll<HTMLElement>('.scas-red')
-        ).map(el => el.dataset.word ?? '').filter(Boolean)
-        if (words.length > 0) prefetchSynonyms([...new Set(words)])
-      }, 600)
 
       // ── ⚠ Paragraph snapshot: ENTER MUST DO NO O(doc) WORK ON THE KEYSTROKE. A cheap top-level
       // count first; the paragraph TEXTS are collected only when the count actually grew by one.
@@ -1633,7 +1724,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     if (!el) return
     const root = document.documentElement
     const write = () => {
-      // Rect height (not offsetHeight): includes the desktop ×1.12 scale transform.
+      // Rect height gives the toolbar's actual painted height at the current browser zoom.
       const h = Math.ceil(el.getBoundingClientRect().height)
       root.style.setProperty('--iw-toolbar-h', `${h}px`)
       syncPmScrollReserve(h)
@@ -1777,15 +1868,22 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return () => { editor.off('selectionUpdate', onChange); editor.off('update', onChange); editor.off('focus', onChange); cancelAnimationFrame(raf) }
   }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Readiness gate (see `settled` above): fonts.ready + first pagination measure, capped at 1.2s.
-  // Ready starts the water coast and enables the loading-screen invitation; it does NOT reveal the
-  // page. Reveal waits for both the writer's Continue gesture and the atomic wave-rest handoff.
+  // Readiness gate (see `settled` above): chosen tip + complete twinkle scene, with a liveness cap.
+  // Fonts and pagination continue behind the shell but are not reveal blockers. Ready starts the
+  // water coast and enables the loading-screen invitation; it does NOT reveal the
+  // page by itself. Desktop reveals only after Continue AND a visible 420ms coast beat; touch
+  // retains the stricter Continue + wave-rest boundary because its shell is the sole water owner.
   useEffect(() => {
     if (!editor) return
     let readyAnnounced = false
     let revealStarted = false
-    let continueRequested = false
-    let waterRested = false
+    // A workspace switch has no loading-tip owner and therefore no Continue button to press. It
+    // also must not hold the newly mounted phone editor behind a multi-second decorative coast.
+    // Its own readiness gate still runs; these values remove only the user/animation wait.
+    let continueRequested = autoReveal
+    let waterRested = autoReveal
+    let coastVisible = autoReveal
+    let coastVisibleTimer: ReturnType<typeof setTimeout> | undefined
     let revealTimer: ReturnType<typeof setTimeout> | undefined
     let revealRaf = 0
     let revealed = false
@@ -1796,14 +1894,26 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       // Same-task dispatch → React batches Edit's loading-shell unmount with this reveal into ONE
       // commit: the shell disappears in the exact frame the parchment fades in on this surface
       // (which the shell was covering, already phase-synced, coasting and rastered).
-      window.dispatchEvent(new Event('inkwave:editor-revealed'))
+      window.dispatchEvent(new CustomEvent('inkwave:editor-revealed', { detail: { id: doc.id } }))
     }
     const beginReveal = () => {
-      if (revealStarted || !readyAnnounced || !continueRequested || !waterRested) return
+      if (revealStarted || !canBeginEditorReveal({
+        ready: readyAnnounced,
+        continued: continueRequested,
+        waterRested,
+        coastVisible,
+        touch: isTouchDevice(),
+      })) return
       revealStarted = true
-      // Readiness already started the coast, and this path cannot run until wave-rest. Give the
-      // rest handoff two clean frames before the heavy editor reveal so the stationary tile pose +
-      // twinkle hold are painted before the paper begins appearing.
+      if (autoReveal) {
+        // A View Transition suspends rendering while it waits for this editor. Its live target
+        // must finish in ordinary tasks; a rAF dependency would turn every switch into a timeout.
+        queueMicrotask(reveal)
+        return
+      }
+      // Desktop's shell/editor wave copies share one clock, so the parchment can reveal after the
+      // opening slowdown beat and over the remaining coast without a visual jump. Touch still
+      // reaches this path only after wave-rest. Two frames keep either handoff atomic.
       revealRaf = requestAnimationFrame(() => { revealRaf = requestAnimationFrame(reveal) })
       revealTimer = setTimeout(reveal, 500)
     }
@@ -1824,14 +1934,17 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       // the writer chooses to continue. Scroll stops on its existing atomic handoff; the loading
       // shell then holds that still pose and loops sparkles until beginReveal removes it.
       window.dispatchEvent(new Event('inkwave:reveal-imminent'))
+      coastVisibleTimer = setTimeout(() => {
+        coastVisible = true
+        beginReveal()
+      }, DESKTOP_COAST_BEFORE_REVEAL_MS)
       ;(window as unknown as { __iwEditorLoadReady?: boolean }).__iwEditorLoadReady = true
       window.dispatchEvent(new Event('inkwave:editor-load-ready'))
       if (continueRequested) beginReveal()
     }
     // ── THE DELIBERATE DELAY: show at least one wave-video loop before the document appears.
-    // "Warm up the document" needs no code of its own — fonts.ready, the first pagination measure
-    // and the editor's mount are ALREADY running through this window; the delay only stops the
-    // reveal cutting them short.
+    // "Warm up the document" needs no code of its own — fonts, pagination and editor work continue
+    // through this window; none is allowed to turn a decorative warm-up into a blocking gate.
     // ⚠ THE FLAG IS READ INLINE, never imported from waveVideo: importing a helper to decide
     // whether to wait would pull the whole video module into the editor bundle on every load.
     let waveVideoOn = false
@@ -1849,30 +1962,41 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           window.addEventListener('inkwave:wave-video-loop', on)
           setTimeout(() => { console.warn('[inkwave] wave video never reported a loop — revealing anyway'); on() }, 7000)
         })
-    // The 1200ms safety cap predates the video and would fire straight through a ~2s loop; with the
-    // video ON it becomes the loop gate's own backstop plus the old margin, and OFF it is untouched.
-    const cap = setTimeout(markReady, waveVideoOn ? 8200 : 1200)
-    const fontsReady: Promise<unknown> = (typeof document !== 'undefined' && document.fonts?.ready) || Promise.resolve()
-    // Pagination measures in BOTH page modes, so always wait for its first measure — the cap covers
-    // any mode where it never fires.
-    const paginationReady: Promise<void> =
-      (window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady
+    // Normal CSS water starts when the chosen tip + complete twinkle field are ready. Ask first:
+    // the one-shot event can precede this effect on a fast remount. This signal already implies the
+    // relevant hydration commit; fonts and pagination deliberately do not participate.
+    const loadingSceneReady: Promise<void> =
+      (window as unknown as { __iwWaterReady?: boolean }).__iwWaterReady
         ? Promise.resolve()
         : new Promise((res) => {
-            const on = () => { window.removeEventListener('inkwave:pagination-ready', on); res() }
+            const on = () => { window.removeEventListener('inkwave:water-ready', on); res() }
+            window.addEventListener('inkwave:water-ready', on)
+          })
+    // The liveness cap remains independent: a missing scene signal or video chunk must never leave
+    // the document inaccessible. With video ON it still allows the requested full-loop wait.
+    const cap = setTimeout(markReady, waveVideoOn ? 8200 : 1200)
+    if (autoReveal) {
+      const paginationReady = (window as unknown as { __iwPaginationReady?: boolean }).__iwPaginationReady
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            const on = () => { window.removeEventListener('inkwave:pagination-ready', on); resolve() }
             window.addEventListener('inkwave:pagination-ready', on)
           })
-    void Promise.all([fontsReady, paginationReady, waveLooped]).then(() =>
-      requestAnimationFrame(() => requestAnimationFrame(markReady)), // one clean frame after the last reflow
-    )
+      void Promise.all([document.fonts?.ready ?? Promise.resolve(), paginationReady]).then(markReady)
+    } else {
+      void Promise.all([loadingSceneReady, waveLooped]).then(() =>
+        requestAnimationFrame(() => requestAnimationFrame(markReady)), // one clean frame after the last reflow
+      )
+    }
     return () => {
       clearTimeout(cap)
       if (revealTimer) clearTimeout(revealTimer)
       if (revealRaf) cancelAnimationFrame(revealRaf)
+      if (coastVisibleTimer) clearTimeout(coastVisibleTimer)
       window.removeEventListener('inkwave:continue-load', onContinue)
       window.removeEventListener('inkwave:wave-rest', onWaterRest)
     }
-  }, [editor])
+  }, [editor, autoReveal, doc.id])
 
   // ── iOS break-table store test (`inkwave:btDebug`, default OFF) — the on-device half of the OPFS
   // store's proof: Chromium has createWritable, iOS takes opfsWrite.ts's OTHER branch, and CI
@@ -1991,17 +2115,6 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return () => { window.removeEventListener('resize', update); unsubMagnify(); if (raf) cancelAnimationFrame(raf) }
   }, [])
 
-
-  // Warm the synonym cache as soon as the editor is ready (existing red words).
-  useEffect(() => {
-    if (!editor || editor.isDestroyed) return
-    requestAnimationFrame(() => {
-      const words = Array.from(
-        editor.view.dom.querySelectorAll<HTMLElement>('.scas-red')
-      ).map(el => el.dataset.word ?? '').filter(Boolean)
-      if (words.length > 0) prefetchSynonyms([...new Set(words)])
-    })
-  }, [editor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
@@ -2321,11 +2434,29 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     else oneDriveTrailingRef.current = setTimeout(oneDriveWriteNow, ONEDRIVE_MIN_INTERVAL - since)
   }
 
+  async function requestOneDriveSignIn(resume: () => void | Promise<void>): Promise<void> {
+    const result = await startOneDriveSignIn()
+    if (!result.ok) {
+      setOneDriveSignInRecovery({
+        message: result.error,
+        retry: () => requestOneDriveSignIn(resume),
+      })
+      return
+    }
+    // A redirect normally destroys this component before resolving. Popup mode completes here in
+    // the installed Windows PWA, so resume the exact action the writer asked for.
+    if (result.mode === 'popup') {
+      clearOneDriveSyncPending()
+      setOneDriveSignInRecovery(null)
+      await resume()
+    }
+  }
+
   // "Sync to OneDrive". If signed in → sync silently now. If not → start the same-window sign-in
   // redirect (sets a pending flag); on return we sync automatically (see the reconnect effect).
   async function syncOneDrive() {
     const acct = await oneDriveAccount()
-    if (!acct) { await startOneDriveSignIn(); return } // navigates away, comes back signed in
+    if (!acct) { await requestOneDriveSignIn(syncOneDrive); return }
     const snaps = await snapshotsForAction('the sync to OneDrive')
     if (!snaps) return
     const r = await syncToOneDrive(docRef.current, snaps)
@@ -2339,7 +2470,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       oneDriveLastWriteRef.current = Date.now()
     } else {
       // Signed in but the token/scope isn't valid (e.g. the new Files.ReadWrite consent) → re-consent.
-      await startOneDriveSignIn()
+      await requestOneDriveSignIn(syncOneDrive)
     }
   }
 
@@ -2399,7 +2530,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // (we resume on return). On pick, remember the folder and sync there now.
   async function chooseOneDriveFolder() {
     const acct = await oneDriveAccount()
-    if (!acct) { await startOneDriveSignIn(); return }
+    if (!acct) { await requestOneDriveSignIn(chooseOneDriveFolder); return }
     setFolderPickerOpen(true)
   }
   async function onFolderPicked(folder: OneDriveFolder) {
@@ -2503,7 +2634,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // Upload from OneDrive (esp. phone). Open the file browser; on pick, download + adopt + resume.
   async function uploadFromOneDrive() {
     const acct = await oneDriveAccount()
-    if (!acct) { await startOneDriveSignIn(); return }
+    if (!acct) { await requestOneDriveSignIn(uploadFromOneDrive); return }
     setOdOpenerOpen(true)
   }
   async function onOneDriveFileOpen(f: { itemId: string; name: string; folder: OneDriveFolder; cTag?: string; fresh?: boolean }) {
@@ -2532,7 +2663,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // folder/name writes a new file there, leaving the old one. Same UI as choosing a sync folder.
   async function saveAsOneDrive() {
     const acct = await oneDriveAccount()
-    if (!acct) { await startOneDriveSignIn(); return }
+    if (!acct) { await requestOneDriveSignIn(saveAsOneDrive); return }
     setFolderPickerOpen(true)
   }
 
@@ -2575,6 +2706,15 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               }
             })
           })
+      } else if (!acc && oneDriveSyncPending()) {
+        // A cancelled/failed redirect has returned to this same document. Make recovery explicit;
+        // a Windows installed app has no browser Back button to fall back on.
+        const message = takeOneDriveAuthError()
+          ?? 'Microsoft did not finish OneDrive sign-in. Your document is still open and unchanged.'
+        setOneDriveSignInRecovery({
+          message,
+          retry: () => requestOneDriveSignIn(syncOneDrive),
+        })
       } else if (acc && getDocSource(docRef.current.id) === 'onedrive' && oneDriveFilename(docRef.current.id)) {
         // A OneDrive-synced doc loaded (e.g. opened via Upload) → resume syncing it (no Save needed).
         // LOAD-PATH RULE: metadata GET only — no bundle rebuild/upload on open (see gdrive resume).
@@ -2666,36 +2806,9 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return () => window.removeEventListener('inkwave:save-file-linked', onLinked)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Warm the once-per-session grow-only merges at IDLE. The first mirror to a linked target fires on
-  // a provenance checkpoint MID-TYPING, so paying the whole-archive read+parse there was an
-  // inconsistent typing spike. Doing it here heals OPFS while the writer is idle; if the idle pass
-  // doesn't run (no permission yet / offline), the first sync still merges as before.
-  useEffect(() => {
-    let cancelled = false
-    runWhenQuiet(() => {
-      if (cancelled) return
-      void preMergeSaveFile(docRef.current.id)
-      if (oneDriveActiveRef.current) void preMergeRemote(docRef.current)
-      if (gdriveActiveRef.current) void preMergeGDrive(docRef.current.id)
-      // Heal missing PDF sidecars (idempotent — skips bytes already local). iOS trap: savePdf threw
-      // on WebKit until the OPFS write shim, so earlier sidecar passes could complete with nothing
-      // stored; this quiet-pass refetch restores them for the cited items.
-      if (oneDriveActiveRef.current) {
-        void loadLibrary().then(() => fetchMissingSidecars(docRef.current.id, bibProvider.getAll())).catch(() => {})
-      }
-    })
-    return () => { cancelled = true }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Warm the cloud OPEN paths at idle: silent tokens (MSAL chunk / GIS script), the pickers' folder
-  // listings (so "Open from OneDrive/Drive" paints instantly), and the bytes of the most recent
-  // .studio files (so even a first open after sign-in skips the download). Entirely silent — no
-  // auth UI can ever appear from here, and every failure is swallowed (see warmCloudOpen).
-  useEffect(() => {
-    runWhenQuiet(() => warmCloudOpen(), 3000)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Advisory multi-device guard: read the synced file's heartbeat (on load + every 45s) and warn if
+  // Advisory multi-device guard: read the synced file's heartbeat on load, on a return to the app,
+  // and at a low-rate visible fallback. It never needs to wake or touch the network every 45s while
+  // an unchanged document sits open.
   // ANOTHER device wrote it recently — i.e. it looks open on another computer. Never locks: the doc
   // stays editable and saved locally. Resets the dismissal when the document switches.
   useEffect(() => {
@@ -2711,8 +2824,16 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       if (!cancelled) setOtherDevice(!!hb && isOtherDeviceActive(hb.session, hb.exportedAt))
     }
     void check()
-    const id = setInterval(() => void check(), 45_000)
-    return () => { cancelled = true; clearInterval(id) }
+    const checkIfVisible = () => {
+      if (document.visibilityState === 'visible') void check()
+    }
+    const id = setInterval(checkIfVisible, 180_000)
+    document.addEventListener('visibilitychange', checkIfVisible)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', checkIfVisible)
+    }
   }, [doc.id])
 
   // Open a live-composition signing session when the document opens / switches. On success the
@@ -2956,7 +3077,9 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // (the --iw-kb-offset tracker above), so it stays visible and usable the whole time.
   const showMainRow = true
   // Style bar auto-expands on phone text selection or desktop text selection.
-  const styleBarExpanded = (selectionOnPhone || selectionOnDesktop || styleBarOpen) && !!editor
+  // Email owns an always-visible StyleBar inside its compose frame. Never mount a second subscribed
+  // instance in the footer merely because text was selected.
+  const styleBarExpanded = !emailDocument && (selectionOnPhone || selectionOnDesktop || styleBarOpen) && !!editor
   const barVisible = showMainRow || selectionOnPhone
   keyboardUpRef.current = keyboardUp
   barVisibleRef.current = barVisible
@@ -2978,7 +3101,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       )}
       {id === 'receipt' && (
         <button type="button"
-          data-iw-bar="review" onClick={() => toggleBar('review')}
+          data-iw-bar="review" aria-pressed={reviewOpen} onClick={() => toggleBar('review')}
           className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
           title="Review — comments & track changes"
         >
@@ -2989,24 +3112,40 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       {id === 'style' && (
         <button
           type="button"
-          aria-pressed={styleBarOpen}
+          aria-pressed={emailDocument || styleBarOpen}
           data-iw-bar="style"
-          onClick={() => toggleBar('style')}
-          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
-          title="Style"
+          onClick={() => {
+            if (emailDocument) document.querySelector('.iw-email-formatting-bar')?.scrollIntoView({ block: 'nearest' })
+            else toggleBar('style')
+          }}
+          className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${styleBarOpen && !emailDocument ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
+          title={emailDocument ? 'Email formatting is shown in the compose window' : 'Style'}
         >
           <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">S</span>
         </button>
       )}
       {id === 'settings' && <SettingsMenu limitN={doc.scasLimitN} onLimitChange={handleLimitChange} />}
-      {id === 'media' && (
+      {id === 'media' && (emailDocument ? (
+        <button
+          type="button"
+          onClick={() => document.querySelector<HTMLButtonElement>('[data-iw-email-attach]')?.click()}
+          className="flex items-center justify-center min-w-[44px] min-h-[44px] text-stone-400 transition-colors hover:text-stone-600"
+          title="Attach files to this email"
+        >
+          <span className="flex h-9 w-9 items-center justify-center rounded-full border-[1.5px] border-current" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M8.5 12.5l6.8-6.8a3 3 0 014.2 4.2l-8.6 8.6a5 5 0 01-7.1-7.1l8.4-8.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+        </button>
+      ) : (
         <MediaMenu
           assets={doc.media ?? []}
           // The bytes are already in OPFS; both picker/camera imports and clipboard pastes use this
           // one reference-commit path so no caller can forget the document save.
           onImported={rememberMediaAsset}
         />
-      )}
+      ))}
       {id === 'clock' && <ClockSlotButton open={ledgerOpen} onToggle={() => setLedgerOpen(o => !o)} />}
       {id === 'music' && (
         // A SLOT IS A TRIGGER, NEVER AN OWNER (toolbarContract.ts): this opens the music BAR layer;
@@ -3106,26 +3245,38 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           phone={isTouch}
           fill
           presentation={isolatedEmail ? 'application' : 'document'}
+          zoomStorageKey={workspaceTextZoomKey(doc.id, !!emailDocument)}
           revealed={settled}
-          covered={isTouch ? !waveRest : !settled}
+          instantReveal={autoReveal}
+          covered={autoReveal ? false : isTouch ? !waveRest : !settled}
         >
           {emailDocument ? (
             <EmailComposePanel
               doc={doc}
               getCurrentDoc={ensureDocFresh}
+              getCurrentHtml={() => emailHtmlFromEditor(editor?.getHTML() ?? '')}
               surfaceMode={emailSurfaceMode}
               onSurfaceModeChange={(mode) => {
                 writeApplicationSurfaceMode('email', doc.id, mode)
                 setEmailSurfaceMode(mode)
               }}
               onSnapshotDraft={createManualSnapshot}
+              onPersistCurrent={async (current) => {
+                commitDoc(current)
+                await flushPendingSave()
+              }}
               onDuplicateAsNew={onDuplicateEmail}
+              onConnectMailbox={gmailConfigured() ? authoriseGmailMailbox : undefined}
+              onOpenMailboxDraft={onOpenGmailDraft}
               onDocChange={(updated) => {
                 // ⚠ A header edit is a document edit and NOTHING else saves it — autosave is driven
                 // by the editor's own update handler, which a header field never fires. This is the
                 // live instance of the commitDoc rule.
                 commitDoc(updated)
               }}
+              formattingBar={editor ? (
+                <StyleBar editor={editor} phone={isTouch} barVisible baseSizePx={16} />
+              ) : null}
             >
               {editorBody}
             </EmailComposePanel>
@@ -3263,7 +3414,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               {...syncProps}
             />
           ) : (
-            <SyncStatus compact={isTouch} label={<span className="inline-flex items-center gap-1.5"><span className="iw-subtle-flash" style={{ fontSize: '1.5em', lineHeight: 1, position: 'relative', top: '-0.14em' }}>…</span><span style={{ fontSize: '1.4em', lineHeight: 1 }}>☁</span></span>} synced={false} tooltip="OneDrive — disconnected, sign in to sync" onClick={syncOneDrive} {...syncProps} />
+            <SyncStatus compact={isTouch} label={<span className="inline-flex items-center gap-1.5"><span style={{ fontSize: '1.5em', lineHeight: 1, position: 'relative', top: '-0.14em' }}>…</span><span style={{ fontSize: '1.4em', lineHeight: 1 }}>☁</span></span>} synced={false} tooltip="OneDrive — disconnected, sign in to sync" onClick={syncOneDrive} {...syncProps} />
           )
         })()}
 
@@ -3299,6 +3450,17 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
             onRename={renameOneDriveFileNow}
             onPick={onFolderPicked} onClose={() => setFolderPickerOpen(false)} />
         )}
+        {oneDriveSignInRecovery && (
+          <OneDriveSignInRecoveryDialog
+            message={oneDriveSignInRecovery.message}
+            onRetry={oneDriveSignInRecovery.retry}
+            onBack={() => {
+              clearOneDriveSyncPending()
+              takeOneDriveAuthError()
+              setOneDriveSignInRecovery(null)
+            }}
+          />
+        )}
 
         {/* Footer bar. On a phone it docks flush to the bottom (the top of the Safari URL
             bar) with flat bottom corners; on desktop it floats as a rounded pill. */}
@@ -3308,7 +3470,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
           style={{
             // Phone: the safe-area padding melts away as the keyboard overlap grows (max() keeps the
             // slide continuous) so the bar sits truly flush on the keyboard's top edge.
-            paddingBottom: isTouch ? 'max(0px, calc(env(safe-area-inset-bottom) - var(--iw-kb-offset, 0px)))' : `${TOOLBAR_BOTTOM_PX * zoom}px`,
+            paddingBottom: isTouch ? 'max(0px, calc(env(safe-area-inset-bottom) - var(--iw-kb-offset, 0px)))' : `${TOOLBAR_BOTTOM_PX}px`,
             // Landscape phones (viewport-fit=cover): keep the docked bar clear of the notch/home-bar
             // side insets, matching the bottom inset above. Zero in portrait / on desktop.
             paddingLeft: isTouch ? 'env(safe-area-inset-left)' : undefined,
@@ -3328,30 +3490,19 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
         >
           <div
             ref={footerRef}
+            onPointerDown={() => { sawUserInputRef.current = true }}
             className={`iw-nightable iw-touch-guard iw-toolbar-outline pointer-events-auto flex flex-col bg-white shadow-sm ${barsAnimating ? 'overflow-hidden' : ''} ${isTouch ? 'w-full' : ''}`}
             style={{
-              // ── ⚠ ONE BUDGET, TWO CONSUMERS. `--iw-bar-budget` is the maximum width the toolbar
-              // may occupy, and BOTH this box's max-width and the per-circle shrink clamp in
-              // index.css derive from it — they cannot disagree, because there is only one of them.
-              // Capping only the box leaves the circles spilling past the rounded border; capping
-              // neither lets the centred pill grow into the edge-anchored sync pill below ~650px.
-              // ⚠ Divided by the transform scale, because max-width is a LAYOUT property while the
-              // collision happens in PAINTED px. Sweep the WIDTH RANGE when testing this: it is
-              // invisible above ~700px. → docs/archive/editor-surface.md#editor-side-reserve
-              ...(isTouch ? {} : {
-                ['--iw-bar-budget' as string]: `calc((100vw - ${TOOLBAR_SIDE_RESERVE_PX * 2}px) / ${(zoom * 1.12).toFixed(4)})`,
-                maxWidth: 'var(--iw-bar-budget)',
-              }),
+              // Both desktop rows are certified against this same border-box width: the main row
+              // is 8×30px + 7×8px gaps + 2×10px padding; the style row is 2×36px pills +
+              // 7×28px circles + 8×4px gaps + 2×8px padding. No child can size or overflow
+              // the parent, and browser zoom simply scales the finished pill as one ordinary DOM box.
+              ...(isTouch ? {} : { width: `${DESKTOP_TOOLBAR_WIDTH_PX}px` }),
               border: '1px solid var(--iw-nightable-border, rgb(var(--iw-ink-rgb) / 0.75))',
               borderRadius: isTouch ? '15px 15px 0 0' : '15px',
               opacity: barVisible ? 1 : 0,
               pointerEvents: barVisible ? 'auto' : 'none',
               transition: 'opacity 160ms ease',
-              // Counter browser zoom so the pill stays a constant physical size. TRANSFORM, never
-              // `zoom`: zoom scales the positioned `bottom` offset and the pill drifts. ×1.12 is
-              // the "bigger pills" boost, desktop ONLY — the phone bar is w-full and would clip.
-              transform: `scale(${zoom * (isTouch ? 1 : 1.12)})`,
-              transformOrigin: 'bottom center',
             }}
           >
             {/* Style bar — animates down/up; max-height:0 collapses it without removing from DOM.
@@ -3372,7 +3523,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 ...(styleBarExpanded ? {} : { width: 0, minWidth: '100%' }),
               }}>
                 {/* Phone: slim side padding — nine 38px circles + the font/size pills need the room */}
-                <div className={`flex items-center ${isTouch ? 'px-1.5' : 'px-4'} py-2 border-b border-stone-200`}>
+                <div className={`flex items-center ${isTouch ? 'px-1.5' : 'px-2'} py-2 border-b border-stone-200`}>
                   {editor && <StyleBar editor={editor} onActivity={armStyleTimer} phone={isTouch} barVisible={styleBarExpanded} />}
                 </div>
               </div>
@@ -3585,6 +3736,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
               ))}
               <OptionsMenu
                 paperRight={paperRight}
+                hasCurrentDocumentChanges={() => changedSinceLoadRef.current}
                 installPrompt={installPrompt}
                 onExportBundle={exportBundle}
                 onSave={saveRecord}
@@ -3608,6 +3760,8 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
                 onVerifyRecord={() => setVerifyOpen(true)}
                 onWorkReport={reportFlag ? () => setReportOpen(true) : undefined}
                 onFileOpenError={reportOpenError}
+                onOpenWorkspaceDocument={onOpenWorkspaceDocument}
+                onOpenWorkspaceDocumentId={onOpenWorkspaceDocumentId}
               />
             </div>
             )}

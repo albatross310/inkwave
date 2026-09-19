@@ -145,6 +145,12 @@ export async function writeAppJson(name: string, data: unknown): Promise<void> {
   } catch { /* private mode / quota — convenience state only */ }
 }
 
+/** Write app-level state whose caller must know whether persistence succeeded. */
+export async function writeAppJsonStrict(name: string, data: unknown): Promise<void> {
+  const write = await writeJson(await getRoot(), name)
+  await write(data)
+}
+
 /** Save the full document to OPFS. */
 let _persistRequested = false
 function requestPersistence(): void {
@@ -292,15 +298,23 @@ export interface OpfsDocEntry {
  * file is still a document the writer may want back.
  * → docs/archive/storage-and-sync.md#opfs-list-direct
  */
-export async function listOpfsDocuments(): Promise<OpfsDocEntry[]> {
+export async function listOpfsDocumentsStrict(): Promise<OpfsDocEntry[]> {
   let docsDir: FileSystemDirectoryHandle
   try {
     docsDir = await (await getRoot()).getDirectoryHandle('documents')
-  } catch {
-    return [] // no documents/ yet, or private mode with no OPFS at all
+  } catch (err) {
+    if (isNotFound(err)) return [] // genuinely no documents directory yet
+    throw err instanceof StorageReadError ? err : new StorageReadError('documents', err)
   }
   const out: OpfsDocEntry[] = []
-  for (const id of await listDocumentIds()) {
+  const ids: string[] = []
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for await (const id of (docsDir as any).keys()) ids.push(id)
+  } catch (err) {
+    throw err instanceof StorageReadError ? err : new StorageReadError('documents', err)
+  }
+  for (const id of ids) {
     try {
       const dir = await docsDir.getDirectoryHandle(id)
       const file = await (await dir.getFileHandle('current.json')).getFile()
@@ -312,6 +326,12 @@ export async function listOpfsDocuments(): Promise<OpfsDocEntry[]> {
     }
   }
   return out
+}
+
+/** Recovery/inspection compatibility surface. Startup uses the strict variant: a failed root read
+ * must never become evidence that the writer has no documents. */
+export async function listOpfsDocuments(): Promise<OpfsDocEntry[]> {
+  try { return await listOpfsDocumentsStrict() } catch { return [] }
 }
 
 /** Permanently remove one complete local document directory, including its snapshot archive.

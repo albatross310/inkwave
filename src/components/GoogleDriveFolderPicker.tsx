@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { listGoogleDriveFolders, createGoogleDriveFolder, getChosenGDriveFolder, getRecentGDriveFolders, addRecentGDriveFolder, type GDriveRecent } from '../storage/gdrive'
+import { listGoogleDriveFolders, listGoogleDriveFiles, createGoogleDriveFolder, getChosenGDriveFolder, getRecentGDriveFolders, addRecentGDriveFolder, type GDriveFileEntry, type GDriveRecent } from '../storage/gdrive'
+import { cloudPickerFileRows } from './cloudPickerFiles'
 
 // Custom Google Drive folder picker — the counterpart to OneDriveFolderPicker, Google-coloured.
 // Because Inkwave uses the privacy-preserving `drive.file` scope, this can only see the folders the
@@ -49,6 +50,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
   const [syncing, setSyncing] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [folders, setFolders] = useState<Array<{ id: string; name: string }> | null>(null)
+  const [files, setFiles] = useState<GDriveFileEntry[] | null>(null)
   const [selected, setSelected] = useState<string>(getChosenGDriveFolder() ?? '')
   const [selectedName, setSelectedName] = useState<string>('My Drive (root)')
   const [reload, setReload] = useState(0)
@@ -68,6 +70,17 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
   }, [reload])
 
   useEffect(() => { void getRecentGDriveFolders().then(setRecent).catch(() => {}) }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    setFiles(null)
+    listGoogleDriveFiles(selected || 'root')
+      .then((next) => { if (!cancelled) setFiles(next) })
+      .catch(() => { if (!cancelled) setFiles([]) })
+    return () => { cancelled = true }
+  }, [selected, reload])
+
+  const fileRows = cloudPickerFileRows(files ?? [], currentName)
 
   // Pick a folder directly (used by the recent shortcuts): remember it, sync, close — same as the
   // main button. id '' = My Drive root.
@@ -115,7 +128,7 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-stone-900/20" aria-hidden="true" />
       <div role="dialog" aria-modal="true" aria-label="Choose Google Drive folder" onMouseDown={(e) => e.stopPropagation()}
-        className="relative iw-nightable bg-white w-full max-w-md p-6 flex flex-col shadow-xl" style={{ border: `1px solid ${G_BLUE}55`, borderRadius: 14 }}>
+        className="relative iw-nightable bg-white w-full max-w-md max-h-[calc(100vh-2rem)] overflow-y-auto p-6 flex flex-col shadow-xl" style={{ border: `1px solid ${G_BLUE}55`, borderRadius: 14 }}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <DriveMark />
@@ -173,6 +186,24 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
           ))}
         </div>
 
+        <div className="text-[11px] uppercase tracking-wide text-stone-400 mt-3 mb-1">
+          Studio files in {selectedName}
+        </div>
+        <div className="border rounded-lg max-h-40 overflow-auto" style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)' }}>
+          {files === null && <p className="text-sm text-stone-400 p-3">Loading…</p>}
+          {files !== null && fileRows.map(({ file, current, existsHere }) => (
+            <div key={`${file.id}-${file.name}`}
+              className="w-full px-3 py-2 text-sm font-sans font-medium border-b last:border-b-0 flex items-center gap-2"
+              style={{ borderColor: 'var(--iw-nightable-border, #e7e5e4)', color: current ? G_BLUE : 'var(--iw-ink, #302438)', background: current ? G_HOVER : 'transparent' }}>
+              <span aria-hidden="true">📄</span>
+              <span className="truncate">{file.name}</span>
+              <span className="ml-auto shrink-0 text-[10px] font-normal" style={{ color: current ? G_BLUE : 'var(--iw-pill-fg, #78716c)' }}>
+                {current ? (existsHere ? 'current sync file' : 'will be created here') : 'existing file'}
+              </span>
+            </div>
+          ))}
+        </div>
+
         {/* Inline file name with an explicit Rename button (double-click works too). While syncing,
             the name is replaced by "Loading…". */}
         {onRename && (
@@ -208,8 +239,8 @@ export function GoogleDriveFolderPicker({ currentName, onRename, onPick, onClose
 function FolderRow({ name, selected, onClick }: { name: string; selected: boolean; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick}
-      className="w-full text-left px-3 py-2 text-sm font-sans border-b last:border-b-0 flex items-center gap-2"
-      style={{ borderColor: '#f0f4f8', color: '#33414f', background: selected ? G_HOVER : 'transparent' }}
+      className="w-full text-left px-3 py-2 text-sm font-sans font-medium border-b last:border-b-0 flex items-center gap-2"
+      style={{ borderColor: '#f0f4f8', color: '#263746', background: selected ? G_HOVER : 'transparent' }}
       onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = '#fafbfc' }}
       onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = 'transparent' }}>
       <span aria-hidden="true">{selected ? '🗁' : '🗀'}</span>{name}

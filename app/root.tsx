@@ -2,6 +2,8 @@ import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router'
 import type { LinksFunction } from 'react-router'
 import { useEffect } from 'react'
 import { FONT_PRELOAD } from './fontPreload'
+import { faviconLinks } from './faviconLinks'
+import { BrowserZoomIndicator } from '../src/components/BrowserZoomIndicator'
 
 const TAB_TITLES = [
   'Inkwave Zero: writing that remembers',
@@ -29,21 +31,20 @@ export const links: LinksFunction = () => [
   // TiptapEditor effect swapped the first icon link to an inline document-glyph SVG at editor mount,
   // which at tab size looks like Firefox's default page icon. The swap is removed (see TiptapEditor);
   // ?v=20 displaces the doc glyph any returning Firefox profile has stored against the page URL.
-  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/fav-32.png?v=20' },
-  { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/fav-16.png?v=20' },
-  { rel: 'icon', type: 'image/png', sizes: '128x128', href: '/fav-128.png?v=20' },
-  { rel: 'icon', href: '/favicon.ico?v=20', sizes: 'any' },
-  { rel: 'shortcut icon', href: '/favicon.ico?v=20' },
+  // Localhost is visually distinct without a runtime favicon swap: Vite selects the black-backed
+  // raster set for the dev build, while production keeps these exact long-lived URLs unchanged.
+  ...faviconLinks(import.meta.env.DEV),
   { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=20' },
   // Version the manifest URL when install metadata/assets change. Chromium and macOS otherwise
   // keep a previously installed Dock icon even when the bytes behind the old icon URL changed.
-  { rel: 'manifest', href: '/manifest.webmanifest?v=studio-file-handler-2' },
+  { rel: 'manifest', href: '/manifest.webmanifest?v=new-window-shortcut-1' },
   // Fonts: SELF-HOSTED (public/fonts/inkwave-fonts.css → /fonts/*.woff2), not Google Fonts. Same-origin
   // so the calm serif identity is deterministic everywhere — including the server-side PDF/print render,
   // which previously raced the external Google fetch and fell back to Georgia. See src/editor/exportPdf.ts.
-  // Preload the latin/latin-ext faces (auto-generated list in app/fontPreload.ts → re-run
-  // scripts/fetch-fonts.mjs to refresh) so the body paints in the serif with no flash. `crossOrigin` is
-  // required on font preloads even same-origin, else the browser double-fetches.
+  // Preload only the default Latin face (auto-generated list in app/fontPreload.ts → re-run
+  // scripts/fetch-fonts.mjs to refresh). Other weights/styles/families remain self-hosted but load
+  // on demand, avoiding nearly 1 MB of speculative transfer. `crossOrigin` is required on font
+  // preloads even same-origin, else the browser double-fetches.
   ...FONT_PRELOAD.map((href) => ({
     rel: 'preload',
     as: 'font',
@@ -62,9 +63,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
             the bundle executes — night users got a bright flash for the whole JS fetch on cold
             loads. This runs before first paint; the CSP middleware nonces every inline script.
             (The warm-client iw-water-ready pre-stamp that used to live here is GONE, 2026-07-10:
-            the atomic-water gate now also waits for the twinkle field to mount, so pre-opening it
-            painted waves without twinkles. Every load holds pure white until the whole
-            water — tiles + twinkles — can land in one paint. See entry.client.tsx.) */}
+            the ornament gate waits for the twinkle field to mount, so pre-opening it exposed a
+            partial mark scene. The loading surface stays white; gradient, base wave pair,
+            twinkles and chosen tip wait paint-hidden for one atomic moving reveal. Pills are not
+            a gate. See entry.client.tsx.) */}
         <script dangerouslySetInnerHTML={{ __html:
           `try{document.documentElement.dataset.theme=localStorage.getItem('inkwave:theme')==='night'?'night':'day'}catch(e){}`,
         }} />
@@ -100,8 +102,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 // tab, /login, unknown paths) are served build/client/__spa-fallback.html, whose body is THIS
 // component rendered at build time. Without it the fallback painted bare parchment for the whole
 // JS fetch + hydration — the first stretch of the "white background early" on the snapshot
-// window. A static water placeholder (see .iw-boot-water in index.css) keeps the tab water-
-// coloured until the route mounts its real wave choreography (LoadingVeil).
+// window. The placeholder first paints white, then entry.client opens its no-surface gate and the
+// whole CSS-water scene begins together until the route mounts its real LoadingVeil. It does not
+// wait for tips or pills because neither exists in the fallback shell.
 export function HydrateFallback() {
   return <div className="iw-boot-water" aria-hidden="true" />
 }
@@ -111,5 +114,5 @@ export default function App() {
     const pick = TAB_TITLES[Math.floor(Math.random() * TAB_TITLES.length)]
     document.title = pick
   }, [])
-  return <Outlet />
+  return <><Outlet /><BrowserZoomIndicator /></>
 }

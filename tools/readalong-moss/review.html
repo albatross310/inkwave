@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>MOSS audition · Inkwave</title>
+  <link rel="stylesheet" href="./review.css">
+  <script src="./review.js" defer></script>
+</head>
+<body>
+  <header class="masthead"><a class="wordmark" href="#main">inkwave</a><span class="masthead-label">MOSS audition</span><span class="private-label">Local listening review</span></header>
+  <main id="main">
+    <section class="introduction" aria-labelledby="page-title">
+      <p class="eyebrow">THE CAST, THEN THE CONVERSATION</p>
+      <h1 id="page-title">Cast &amp; scene review</h1>
+      <p class="lead">Listen to the reference voices, then hear the cast together. Compare the main scene with its continuation for character consistency, natural delivery and missing words.</p>
+      <p class="small">This page plays supplied recordings. It does not generate speech. Speaker colours identify the source text; they are not playback timings.</p>
+      <div class="file-actions"><button id="open-folder" type="button" class="primary">Open audition folder</button><button id="open-files" type="button">Choose manifest &amp; audio files</button><button id="reload" type="button">Reload served files</button></div>
+      <input id="folder" type="file" webkitdirectory multiple hidden>
+      <input id="files" type="file" accept=".json,.wav,.mp3,.ogg,.flac,.m4a" multiple hidden>
+      <p id="status" role="status" aria-live="polite">Waiting for an audition manifest.</p>
+      <p id="source-info" class="small" hidden></p>
+      <p id="file-help" class="small">Open the folder containing manifest.json, references and scenes. You can also select a manifest and its audio files together. When served over HTTP, this page loads manifest.json beside it.</p>
+    </section>
+    <section id="empty" class="empty-panel"><h2>Not yet generated</h2><p>The cast and scenes will appear when you load a manifest. Audio controls appear only for recordings the browser can read.</p></section>
+    <div id="audition" hidden>
+      <p id="direction" class="direction" hidden></p>
+      <section aria-labelledby="cast-title"><div class="section-heading"><p class="eyebrow">01 / REFERENCE AUDITIONS</p><h2 id="cast-title">Meet the voices</h2></div><div id="cast" class="cast-grid"></div></section>
+      <section aria-labelledby="scenes-title"><div class="section-heading"><p class="eyebrow">02 / FULL SCENE CONTEXT</p><h2 id="scenes-title">Hear them together</h2><p class="small">Each player is one scene track, with the full input dialogue below. These are not independently rendered line clips. Check the recording against the text as you listen.</p></div><div id="scenes"></div></section>
+      <details id="run-details"><summary>Run details from the manifest</summary><pre id="metrics"></pre></details>
+      <section class="notes" aria-labelledby="notes-title"><h2 id="notes-title">Listening notes</h2><label for="review-notes">What should stay, and what needs another take?</label><textarea id="review-notes" rows="5" placeholder="Voice identities · accent · emotional transitions · interruptions · omissions · continuity"></textarea><p class="small">Notes stay in this tab until you download them. Loading another audition keeps your notes.</p><button id="save-notes" type="button">Download notes</button></section>
+    </div>
+  </main>
+  <footer>Inkwave · audition review only</footer>
+</body>
+</html>

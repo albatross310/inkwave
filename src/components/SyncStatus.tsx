@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useZoomScale } from '../editor/useZoomScale'
 import { SIDE_PILL_H, SIDE_PILL_TALL_H, SIDE_PILL_FONT, sidePillBottom } from './sidePill'
-import { relativeTime } from './relativeTime'
+import { relativeTime, relativeTimeRefreshDelay } from './relativeTime'
+import { PDF_DOCK_ROOM_CHANGED_EVENT } from './dockLayout'
 
 // Bottom-right sync indicator: a compact pill that, on hover/tap, opens a small panel ABOVE it (so
 // it never grows leftward into the text). The pill text is decided by the caller so it reads clearly
@@ -32,29 +32,37 @@ export function SyncStatus({
 }) {
   const [, tick] = useState(0)
   const [internalOpen, setInternalOpen] = useState(false)
+  const open = externalOpen !== undefined ? externalOpen : internalOpen
+  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
   // PDF panel open → shrink to the compact cloud so the pill never overlaps the toolbar
   // (Peter, 2026-07-10: the wrapped 'Synced to OneDrive' pill collided, dead space at its left).
   const [pdfOpen, setPdfOpen] = useState(false)
   useEffect(() => {
+    if (hideTrigger && !open) return
     const read = () => {
       const cs = getComputedStyle(document.documentElement)
       setPdfOpen(['--iw-pdf-room', '--iw-pdf-room-left', '--iw-pdf-room-top', '--iw-pdf-room-bottom']
         .some(v => parseFloat(cs.getPropertyValue(v)) > 0))
     }
     read()
-    const t = setInterval(read, 1200)
-    return () => clearInterval(t)
-  }, [])
-  const open = externalOpen !== undefined ? externalOpen : internalOpen
-  const setOpen = (v: boolean) => { onOpenChange ? onOpenChange(v) : setInternalOpen(v) }
-
-  const zoom = useZoomScale()
+    window.addEventListener(PDF_DOCK_ROOM_CHANGED_EVENT, read)
+    return () => window.removeEventListener(PDF_DOCK_ROOM_CHANGED_EVENT, read)
+  }, [hideTrigger, open])
   const triggerHeight = multiline && !compact && !pdfOpen ? SIDE_PILL_TALL_H : SIDE_PILL_H
 
   useEffect(() => {
-    const id = setInterval(() => tick((n) => n + 1), 5000)
-    return () => clearInterval(id)
-  }, [])
+    if (!open || !synced || !lastSync) return
+    let id = 0
+    const schedule = () => {
+      window.clearTimeout(id)
+      if (document.hidden) return
+      id = window.setTimeout(() => { tick((n) => n + 1); schedule() }, relativeTimeRefreshDelay(lastSync))
+    }
+    const onVisibility = () => { if (!document.hidden) tick((n) => n + 1); schedule() }
+    schedule()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { window.clearTimeout(id); document.removeEventListener('visibilitychange', onVisibility) }
+  }, [open, synced, lastSync])
 
   // Nothing to render when the trigger is external and the panel is closed.
   if (hideTrigger && !open) return null
@@ -66,18 +74,15 @@ export function SyncStatus({
         // Shift clear of the PDF panel (side dock → left of it; bottom dock → above it) so the pill
         // isn't covered, matching the toolbars.
         right: 'var(--iw-pdf-room, 0px)',
-        // Match the footer toolbar's baseline (room-bottom + 28*zoom). Use transform:scale (NOT css
-        // `zoom`) for size — css `zoom` also multiplies the bottom offset, so with a bottom-docked panel
-        // open + page zoom the pill lifted by room-bottom*zoom and flew up above the toolbar.
+        // Match the footer toolbar's baseline. All three pills now participate in ordinary browser
+        // zoom, so their layout and painted geometry remain the same instead of being counter-scaled.
         // ⚠ 2026-08-20: bottom-edge matching was never the right rule — two pills of DIFFERENT
         // heights sharing a bottom edge have different midlines. Both side pills now derive this from
         // `sidePillBottom()` so their MIDLINES land on the toolbar's; see components/sidePill.ts.
         bottom: hideTrigger
           ? 'calc(env(safe-area-inset-bottom) + 80px + var(--iw-pdf-room-bottom, 0px))'
-          : sidePillBottom(zoom, triggerHeight),
+          : sidePillBottom(triggerHeight),
         padding: hideTrigger ? '0 1rem' : '0 10px',
-        transform: `scale(${zoom * 1.12})`, // ×1.25 to match the 25%-bigger toolbar pill
-        transformOrigin: 'bottom right',
         transition: 'right 0.18s ease, bottom 0.18s ease',
       }}
     >
