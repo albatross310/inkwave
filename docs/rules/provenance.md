@@ -7,13 +7,20 @@
   important behavioural invariant. `RedHighlightExtension` RENDERS engine state (locked ∪ liveKicks),
   never recomputes vocab.
 - Snapshots (`provenance/snapshots.ts`, OPFS, append-only, grow-only) mint on a resolved kick when the
-  contentHash changed — typing and pastes never snapshot. Hashing: `provenance/hash.ts` (RFC 8785 JCS
-  + SHA-256 + bundleHash).
+  contentHash changed — typing and pastes never snapshot. Hashing: `provenance/hash.ts` (SHA-256 +
+  bundleHash; the RFC 8785 JCS canonicaliser it re-exports is `provenance/jcs.mjs`, ONE file shared
+  with the signing server — see M3, the signing-service bullet below).
 - **OTS never runs on load.** `javascript-opentimestamps` lives in a stateless relay (`api/ots.mjs` +
   `api/_ots-core.mjs`, mirrored by dev middleware in vite.config.ts): logs nothing, handles only a
   hash. `vercel.json` excludes `/api` from the SPA rewrite.
 - The signing service is stateless and content-free (`api/_provenance-core.mjs`, `session.mjs`,
-  `sign.mjs`): Ed25519, seed `H(masterSecret, docId, v)`, S_v index sampling → bitmask. The editor
+  `sign.mjs`): Ed25519, seed `H(masterSecret, docId, v)`, S_v index sampling → bitmask. It IMPORTS
+  the canonicaliser from `src/provenance/jcs.mjs` — the same file `hash.ts` re-exports, never a copy,
+  because the signature is over its output and one byte of drift makes every receipt unverifiable.
+  `provenance/jcs.test.ts` pins every canonical byte from BOTH entry points (19 RFC fixtures,
+  hand-written) plus a GOLDEN receipt signed by the pre-extraction core: a shared canonicaliser
+  cannot be checked by agreement — server and client consume the same mutant and agree — only by a
+  pin; a one-byte mutant reddens 36 tests. The editor
   drives SCAS off the server's S_v (`controller.useServerSet`) and signs each period's receipt (hashes
   only). Offline ⇒ fall back to local S_v and degrade VISIBLY. Keys from env
   (`INKWAVE_SIGNING_SK`/`INKWAVE_MASTER_SECRET`/`VITE_SIGNING_PK`), published at

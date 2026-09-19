@@ -10,6 +10,10 @@
 import * as ed from '@noble/ed25519'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { hmac } from '@noble/hashes/hmac.js'
+// ⚠ THE canonicaliser the client uses — one module, imported, never copied (the signature is over
+// its output; a byte of drift makes every receipt unverifiable). Re-exported for jcs.test.ts.
+import { canonicalize } from '../src/provenance/jcs.mjs'
+export { canonicalize }
 
 // ── dev placeholders (overridden by env in prod) ────────────────────────────────
 const DEV_SIGNING_SK = '5f6da0799c291ea99af6d588231ccd2db3c6cd1febbb49177d9ac5afe424e9f7'
@@ -45,21 +49,6 @@ export async function publicKeyHex() {
 }
 
 function sha256Hex(s) { return toHex(sha256(enc.encode(s))) }
-
-// RFC 8785 (JCS) subset — MUST match src/provenance/hash.ts byte-for-byte (the signature is over
-// this canonical string). Integers/strings/booleans/null/objects/arrays only.
-function canonicalize(value) {
-  if (value === null) return 'null'
-  const t = typeof value
-  if (t === 'number') { if (!Number.isFinite(value)) throw new Error('JCS: non-finite'); return JSON.stringify(value) }
-  if (t === 'boolean' || t === 'string') return JSON.stringify(value)
-  if (Array.isArray(value)) return '[' + value.map((v) => canonicalize(v === undefined ? null : v)).join(',') + ']'
-  if (t === 'object') {
-    const keys = Object.keys(value).filter((k) => value[k] !== undefined).sort()
-    return '{' + keys.map((k) => JSON.stringify(k) + ':' + canonicalize(value[k])).join(',') + '}'
-  }
-  throw new Error('JCS: unsupported type ' + t)
-}
 
 // Seeded PRNG (mulberry32) — same family the client engine uses.
 function mulberry32(seed) {

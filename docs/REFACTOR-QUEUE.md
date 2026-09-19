@@ -96,6 +96,24 @@ could not run at all — triage first, retire second.
 
 ---
 
+## 6. One JCS canonicaliser for the client and the signing server — DONE
+
+**What.** `src/provenance/hash.ts` and `api/_provenance-core.mjs` each carried the RFC 8785 subset,
+held byte-identical by a comment. A receipt's signature is over that string.
+
+**Done as.** `src/provenance/jcs.mjs` (dependency-free, Node-import-free; `jcs.d.mts` beside it) —
+the `src/reader/extract.mjs` precedent, which the reader function already imports from `src/` in
+production. `hash.ts` re-exports it (public API unchanged); the server core imports it.
+
+**How you would know.** `src/provenance/jcs.test.ts`: 19 hand-written RFC fixtures pinned as string
++ SHA-256 from both entry points and an offline hashlib hex, 5 quirks pinned-not-endorsed, 8 throw
+cases, a known-negative, and a GOLDEN receipt signed by the pre-extraction core. A one-byte mutant
+reddens 36 tests; the agreement tests (`verify/index.test.ts`) stay green on it by construction,
+which is why the golden exists. Not verifiable here: Vercel's function bundling of the new relative
+import — one POST to `/api/session` on the PR's preview URL settles it.
+
+---
+
 ## What is NOT on this list, and why
 
 - **Splitting a file purely to get under a line count.** Adds a false boundary and costs lines.
