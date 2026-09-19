@@ -6,7 +6,6 @@
 # A DOCS-ONLY LANE GETS NO ROW EITHER — #19 (zoomseam) changes no source file, so its tab would
 # render master and tell Peter nothing. Read those on GitHub.
 B	claude/refactor-daysummary	8
-C	claude/refactor-editorsplit	9
 E	claude/refactor-jcs	10
 F	claude/refactor-api-handler	12
 G	claude/refactor-cloudsync	15

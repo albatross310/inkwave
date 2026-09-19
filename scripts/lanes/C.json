@@ -1,9 +1,0 @@
-{"title": "C — #9 toolbar arrangement moved to its own file",
- "paragraphs": [
-  "The code that decides which six circles sit in the footer row, what lives behind the ▲ drawer, and how a drag reorders them has moved out of the 3,400-line editor file into useToolbarSlots.ts. This is seam 1 of the editor split.",
-  "Circles, the ▲ drawer and the Alt+1…6 hotkeys must behave exactly as before."],
- "checks": [
-  "Drag a circle to a new position. The order sticks after reload.",
-  "Open ▲ and drag a drawer entry onto a row slot. They swap.",
-  "Hold Alt: each circle shows its number. Alt+1 opens the first circle's panel.",
-  "Open S (style) then R (review). Only one row is open at a time."]}
