@@ -23,7 +23,9 @@ every zoom, on phone, and in print.
   break opportunity, so NodeView internals never become phantom lines and mid-line breaks. Atomhood
   comes from ProseMirror (`isInline && isAtom`), NEVER a CSS class; a block with no atoms takes the
   byte-identical old path; top-level atoms (refList, block math) keep `atomLike`. `mathEligible` is
-  passed FALSE deliberately.
+  passed FALSE deliberately. The rule is unit-held by `collectLines.nodeview.test.ts`
+  (`linecount.prove.mjs` and `isolate.prove.mjs` retired 2026-09-16 to
+  `docs/archive/probes/textrender-probe/`; `midline.prove.mjs` still live: `pnpm prove:midline`).
 - **The break rule exists in THREE copies** (`PaginationExtension.computeBreaks`,
   `arithmeticLayout.paginate`, `staticPagination.computeBreakPicks`). **Change one, check all three**,
   and compare break POSITIONS, not page counts.

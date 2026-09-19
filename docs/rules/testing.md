@@ -12,6 +12,13 @@ Narrative: docs/archive/working-model.md. -->
   **So: for every claim you prove, ask whether a cheap unit-level version can KEEP it true — if it is
   ~90ms and needs no browser, there is no excuse.** Browser probes stay as the in-browser truth and
   catch what unit tests structurally cannot; they are simply not guards.
+- **A `.prove.mjs` is truth where it is KEEP and a guard nowhere** (2026-09-16): 71 one-shot probes
+  were retired to `docs/archive/probes/` AFTER their claims moved into unit tests or archive anchors
+  (`docs/archive/probes/README.md` maps every file → its guard; `docs/REFACTOR-QUEUE.md` §5 has the
+  11-claim table). A probe path cited in these docs that no longer exists under `scripts/` resolves
+  one level down there. The 17 `scrub-probe/probe*.mjs` files are among them: the scrub constants
+  (`MAX_PER_FRAME`, `LAND_QUIET_MS`, `FREEZE_HOLD`, `RASTER_DPR_CAP`) and the wheel-debt reversal are
+  pinned by `src/routes/snapshotScrubDriver.test.ts` now, not by any probe.
 - **WRITE THE CHARACTERIZATION TEST BEFORE THE MOVE, NOT AFTER.** A test written after a refactor
   encodes what you BELIEVE the code does — and a refactor is exactly when that belief is least
   reliable, because you have just read the code closely enough to feel certain. Written first, against

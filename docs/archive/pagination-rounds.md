@@ -87,6 +87,38 @@ implementing `shouldSnapToBlock` — not the WebKit cross-device pass, which is 
 longer first. Graduating on a WebKit pass alone would ship an engine that cuts lines in half at
 every zoom, reintroducing verbatim the bug Peter reported on 2026-08-28.
 
+<a id="render-provers"></a>
+#### What the two render provers established before they were retired (2026-07-16; recorded 2026-09-16)
+
+`renderGap.prove.mjs` and `renderWrap.prove.mjs` (now `docs/archive/probes/`) were the only record of
+two facts about the engine's RENDER pass; neither is held by a unit test, and both are `?arithLayout`
+evidence, so they are written down here rather than lost with the files.
+
+- **Forced mid-paragraph break (`renderGap`).** A page-gap widget is `display:block` INSIDE the `<p>`,
+  so it ends the pre-gap line PARTIAL and text resumes on a fresh line. With a real `display:block`
+  gap inserted at a MID-render-line word boundary (real `.ProseMirror`, shipped stripped fonts,
+  iPhone-13 content box 390 − 2×20 = 350px), the engine's `forcedBreakChars` reproduced the DOM's
+  gap-forced line COUNT **18/18** and its byte-exact line STARTS **16/18**. The 2 start residuals were a
+  pre-existing gap-FREE sub-pixel wrap flip at 350px (one block's line-2 boundary word at the
+  canvas-vs-DOM precision limit) with the SAME line count — band-neutral, the same class as the
+  multi-space title below.
+- **Phone render size (`renderWrap`).** At 22.5px (1.125rem × the ×1.25 phone root — a size the 18px
+  canonical certification never exercised), across 138 real paragraphs, the arith RENDER wrap gave
+  every block the SAME LINE COUNT as the DOM, so the render band tops (`perBandΔ`) were exact. Two
+  fixes in `arithmeticLayout.ts` were driven by it: (1) the fit test quantises the line width to the
+  1/64 LayoutUnit grid (the browser floors it; canvas's raw float ran ~0.01px wider and flipped a
+  boundary word at the larger size); (2) a hyphen-minus is a soft-break opportunity (a hyphenated
+  compound the browser split but the engine kept whole added a line). Known, band-neutral residual:
+  a run of ≥2 CONSECUTIVE SPACES (manual title alignment) can break at a different WITHIN-run point
+  than the browser, with the LINE COUNT still equal — and such a title is one line at the wide 18px
+  canonical width, so canonical pagination never sees it.
+
+Neither prover was runnable outside the session that wrote it: both read
+`/tmp/iw-zoom-probe/honours-eligible.json` (derived from Peter's proposal — his prose never enters the
+repo) and hardcoded `/root/dev/Inkwave/node_modules/.pnpm`. If the engine is ever unparked, both need a
+repo-safe fixture (`scripts/textrender-probe/typefixtures.mjs`) before their numbers can be
+re-established; until then these are measurements, not guards.
+
 ---
 
 ## `editorSchema.ts` — the schema outside the editor
@@ -257,6 +289,20 @@ place to look.
 An unmodelled mark rides the run so `blockEligibility` can refuse the block. It is carried as a
 REASON rather than acted on in `runOf`: that function's job is metrics, and inventing a metric for
 a mark we have not certified is precisely the bug.
+
+<a id="fontfallback-refuted"></a>
+THE FONT-LOADING HYPOTHESIS FOR `textStyle:fontFamily`'s Δ76 WAS REFUTED (`fontfallback.prove.mjs`,
+2026-07-16, retired to `docs/archive/probes/` 2026-09-16). The hypothesis was that `makeFontLoaded`
+could not see a PROPORTIONAL fallback (Times for Crimson) and the model was measuring the fallback
+while the editor rendered the real face. Measured canvas advance vs the DOM's own rendered width, same
+string, same stack, inside the real `.ProseMirror`: they agree EXACTLY on every certified stack once
+the face is loaded (Crimson Pro 632.64 vs 632.64, Δ0); `document.fonts.check` returns FALSE for a
+stack whose primary family is missing, so the guard correctly refuses an unloaded face and its block
+DEFERS; and the line-height is `var(--inkwave-lh, 1.618)` — UNITLESS, so the line box is
+font-INDEPENDENT. So the Δ76 was NOT a font problem. Its actual cause is the mixed-family strut rule
+recorded under "Mixed family vs the strut is DOM-only" below (+1px per line for a non-body face; ~1.5
+lines/page of drift). The control that licensed the refutation: the DEFAULT `'EB Garamond'` stack had
+to agree, or no verdict could be read.
 
 <a id="forced-breaks"></a>
 ### `forcedBreaks` — the RENDER pass needs them; the CANONICAL pass must not have them

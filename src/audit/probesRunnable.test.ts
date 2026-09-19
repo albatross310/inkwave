@@ -50,9 +50,13 @@ const VOID_RE = /\bVOID\b|\bvoid_\b|INCONCLUSIVE|CANNOT-JUDGE|\bskip\b|UNRUNNABL
 
 describe('the probe suite is runnable', () => {
   // VOID GUARD for this guard: an empty sweep would satisfy every assertion below.
+  // The floor is a CENSUS, not a target: it exists to catch an empty or mis-rooted sweep. 80 wired
+  // probes when written; 48 after 2026-09-16 retired 32 one-shot .prove.mjs files to
+  // docs/archive/probes/ (their claims moved to unit tests or archive anchors first — see that
+  // folder's README). Lower it again only with a retirement that names where each claim went.
   it('found the probes it reasons about', () => {
-    expect(FILES.length).toBeGreaterThan(60)
-    expect(WIRED.size).toBeGreaterThan(60)
+    expect(FILES.length).toBeGreaterThan(40)
+    expect(WIRED.size).toBeGreaterThan(40)
   })
 
   it('every .prove.mjs is reachable as a pnpm script', () => {

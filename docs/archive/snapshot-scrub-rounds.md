@@ -1557,6 +1557,45 @@ about how to read every other comment here.
 > DEFERS that block to a labelled placeholder. We never invent an advance that is about to change.
 > Anything else atomic (inline math) still supplies no box and still defers, by the same rule.
 
+## <a id="tr-refchrome"></a>The back-ref chrome — the arithmetic is TRUE, the atom is FALSE
+
+Recorded 2026-09-16 from the headers of `reflchrome.prove.mjs`, `reflarrow.prove.mjs` and
+`reflharvest.prove.mjs` (all 2026-07-17, retired to `docs/archive/probes/`). The three established two
+separate claims about the bibliography's back-reference group (`<span .iw-backref-group>↩ MARK MARK…`),
+and keeping them apart is the finding — a probe that merged them reported a confusing average of the two.
+
+- **CLAIM A — THE ARITHMETIC — TRUE.** For a group that occupies ONE line, `backrefBox()`'s composed
+  advance equals the rect the browser laid out to **0.055px**, across every single-line group, and the
+  correct composition STRICTLY beat every mutated mark set (a negative that ties with the truth is not
+  a negative). Coverage guard: the uniform fixture rendered 0 quote previews and never harvested
+  `quote`/`esp`, so the quote branch passed BY NEVER RUNNING (14/14) — the fixture needs `refVariety`
+  and the check VOIDs unless quotes and multi-mark groups are present.
+- **CLAIM B — THE ATOM PRECONDITION — FALSE.** `.iw-backref-group` DECLARES `white-space: nowrap`, but
+  that declaration is DEAD: the group carries `contenteditable="false"`, and prosemirror-view's injected
+  `.ProseMirror [contenteditable="false"] { white-space: normal }` out-specifies it (0,2,0 vs 0,1,0).
+  Verified by asking the CASCADE. So the group WRAPS, and `getBoundingClientRect` returns a UNION OF
+  LINES — the first cut of the probe reported 300+px errors and blamed the quote term because it was
+  comparing a two-line union against a one-line advance. This is the identical trap `citeBox.ts`
+  documents for the citation label, and why `CitationNodeView` pins `nowrap` inline. **A multi-line
+  group is NOT composable without rendering**, which is why `backrefBox()` must never be handed to the
+  engine as an atom box (the refusal at the top of `refChrome.ts`).
+- **What raises the entry's last line (`reflarrow`, causal not arithmetic).** A two-line entry is
+  49.13px, not the 45.71px its 2 × 22.8528 line-height implies, because `.iw-backref-arrow` sets
+  `font-size: 1.15em` under `.csl-bib-body`'s UNITLESS `line-height: 1.38`: a unitless line-height
+  inherits as a ratio, so the arrow's line box is 16.56 × 1.15 × 1.38 = **26.2807**, taller than the
+  strut. Proved by REMOVING the arrow (height fell to within 0.5px of 2 × strut) with the `+` note
+  button (17.73px) removed as the KNOWN-NEGATIVE that must NOT move the height, and did not. The
+  rect-height rule read 22 for the group; the demand rule reads 26.2807 — a 3.42px/entry error.
+- **The harvest selectors (`reflharvest`).** `refList:wrap` harvested from `.node-referenceList` read
+  margin/padding/border 0/0/0 — that is the React-renderer DIV; the real 45px/18px/1px live on the
+  `<section>` INSIDE it. `refList:headerRow` from `.node-referenceList h2` read margin-bottom 0 — the
+  row's own 0.6em (10.8px) belongs to its flex PARENT, which now carries `iw-bib-header` precisely so
+  it can be selected. The OLD selectors are kept as live known-negatives: they must still read zeros,
+  or the check is not reading what it thinks it is. GUARD NOW: `src/editor/blockStyles.harvest.test.tsx`
+  renders the real `ReferenceListNodeView` and asserts every `refList:*` selector in `blockStyles.ts`
+  and every `SUB` selector in `refChrome.ts` resolves to an element that carries the box, with the old
+  selectors as the pair that must not.
+
 ## <a id="tr-window"></a>Window mode
 
 > WINDOW MODE (2026-07-17).

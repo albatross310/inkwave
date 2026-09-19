@@ -386,6 +386,38 @@ same drift, so it is derived instead: a token is a colour token when a call site
 colour. `transparent` and `currentColor` count — they are values of a colour property, and a token
 whose only fallback is `transparent` is still a colour a palette may want to re-point.
 
+<a id="rescue-arms-count"></a>
+THE `.iw-nightable` RESCUE ARMS, COUNTED (`rescuearms.prove.mjs`, run 2026-09-16 on build `c9563cf`,
+headless Chromium, editor screen with every reachable menu open, 15 `.iw-nightable` surfaces mounted;
+probe retired to `docs/archive/probes/` the same day). The arms are the blanket substring overrides that
+repaint UNAUDITED chrome at night. Each `[style*=…]` arm was given a PLANTED known-positive first and the
+sweep refused to report on any arm whose plant did not both match and repaint — so a zero below means
+"nothing matches", not "the probe was blind". Live matches per arm:
+
+| arm | live matches |
+|---|---:|
+| `[style*="background: #fff"]` (with a space) | **0** |
+| `[style*="background:#fff"]` (no space) | **0** |
+| `[class*="5c2d8a"]` | 0 |
+| `[class*="9b5ccc"]` | 0 |
+| `.bg-white` | 11 |
+| `[class*="text-stone"]` | 42 |
+| `[class*="text-gray"]` | 0 |
+| `[class*="text-neutral"]` | 0 |
+| `[class*="border-stone"]` | 27 |
+| `[class*="border-gray"]` | 0 |
+| `input` / `select` / `textarea` | 17 / 2 / 0 |
+
+The `[style*=…]` arms NEVER matched anything and cannot: React sets inline styles through the CSSOM,
+which SERIALISES (`#fff` → `rgb(255, 255, 255)`), and the CSSOM re-serialises even a hand-written
+`setAttribute` string the first time anything touches `el.style.anything` — measured on citationNav's
+back chip, the one consumer index.css had named as the reason to keep them (bg `rgb(69, 78, 89)`,
+`.iw-nightable`'s own fill, before and after the rAF; the attribute no longer even carried the
+substring afterwards). Removing them costs nothing. The CLASS arms ARE catching live elements
+(`.bg-white` 11, `text-stone` 42, `border-stone` 27, `input` 17), so retiring any of those is a
+per-surface job, not a one-line delete. Not covered by that run: /snapshot, /verify and the flagged
+panels. The token side of this contract is held by `src/styles/readerContrast.test.ts`.
+
 <a id="colourscan-normalise"></a>
 ### `normaliseColour` — two bugs that MANUFACTURED findings
 
