@@ -18,6 +18,22 @@
   only). Offline ⇒ fall back to local S_v and degrade VISIBLY. Keys from env
   (`INKWAVE_SIGNING_SK`/`INKWAVE_MASTER_SECRET`/`VITE_SIGNING_PK`), published at
   `/.well-known/inkwave-signing-key.json`.
+- **The api handlers — one wrapper, `api/_handler.mjs` (2026-09-15).** `jsonPost({rate, call, fail})`
+  is the shape session.mjs and sign.mjs share byte-for-byte (405 → per-IP 429 JSON → object-or-JSON-
+  string body → content-type → core → fixed error body); `readRawBody` is the one copy the two payment
+  webhooks read the exact bytes through. **A webhook keeps its raw body; a wrapper never parses it** —
+  Stripe/PayPal/Clerk sign the bytes they sent and a parse→stringify drops whitespace, which
+  `handlers.wire.test.ts` proves with a re-serialised payload that no longer verifies. Only 4 of 13
+  entry points fit; the other 9 are each one wire byte away (ots sets content-type AFTER the core and
+  answers 502; sync-profile ignores the body; summarise/pdf answer 429 without a content-type; reader is
+  GET; me answers any method) and a handler that needs a flag to fit is NOT wrapped. Every path of all
+  13 is pinned in `src/api/handlers.wire.test.ts` (76 tests, written BEFORE the wrapper, cores stubbed).
+  NB the dev middleware (vite.config.ts) calls the CORES for /api/session, /api/sign, /api/ots — a dev
+  server never runs those three handlers; only production and the wire test do.
+  Layout of `api/`: Vercel Node functions (plain .mjs; not in any tsconfig — see
+  apiFunctionsParse.test.ts); `_handler.mjs` = jsonPost (session, sign) + readRawBody (the webhooks),
+  wire pinned by src/api/handlers.wire.test.ts; `_*.mjs` = cores + helpers (provenance, ots, reader,
+  billing, auth, ratelimit), never routes.
 - `provenance/bundle.ts` builds the self-verifying bundle; `src/verify/index.ts` + `/verify` check it
   against the INDEPENDENTLY published key, client-side, no login.
 - **HONEST GAP:** full "no silent dodging" replay needs per-period content diffs (the bundle carries

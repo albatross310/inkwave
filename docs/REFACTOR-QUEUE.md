@@ -96,6 +96,32 @@ could not run at all — triage first, retire second.
 
 ---
 
+## 7. One wrapper for the api/*.mjs entry points — DONE (4 of 13; the rest deliberately not)
+
+**What.** The 13 Vercel functions repeated method check → 429 → body parse → content-type →
+try/catch → fixed error body, each by hand. Perf-report item 9 (`withHandler()`/`jsonPost()`).
+
+**Done as.** `api/_handler.mjs`: `jsonPost({ rate, call, fail })` for session.mjs and sign.mjs, the
+only two whose wire shape is byte-identical; `readRawBody` shared by stripe-webhook and
+paypal-webhook (identical text, R2). Entry points −49/+19; the repo +50 for the wrapper.
+
+**Why only four.** The inventory found seven distinct error conventions across 13 handlers, and
+ZERO wire change was the brief. ots sets content-type AFTER the core (its 400/502 bodies carry
+none) and answers 502; sync-profile never reads the body; summarise and pdf read the stream and
+answer 429 without a content-type; reader is GET-only with JSON 405s; me answers any method; the
+webhooks must see raw bytes. Each is one flag away from fitting, and a flag to preserve an accident
+is worse than the accident. If Peter wants them normalised, that is a wire change to decide first;
+the test then documents the new contract.
+
+**How you would know.** `src/api/handlers.wire.test.ts`, 76 tests written BEFORE the wrapper
+against the unmoved handlers: every path of all 13 pinned as status + headers (absent-means-absent)
++ exact body. Five wrapper mutants (404, header-after-call, message leak, 429 without header,
+reserialised raw body) each reddened 2–8 tests in exactly the handlers that take that piece.
+Not verifiable here: Vercel's bundling of the new `./_handler.mjs` import — one POST to
+`/api/session` and one GET to `/api/sign` on the PR's preview URL settle it.
+
+---
+
 ## What is NOT on this list, and why
 
 - **Splitting a file purely to get under a line count.** Adds a false boundary and costs lines.

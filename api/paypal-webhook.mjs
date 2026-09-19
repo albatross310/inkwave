@@ -5,20 +5,12 @@
 
 import { verifyPaypalWebhook } from './_paypal.mjs'
 import { setSubscription, alreadyProcessed } from './_billing-core.mjs'
+import { readRawBody } from './_handler.mjs'
 
 export const config = { api: { bodyParser: false } }
 
 const ACTIVATE = new Set(['BILLING.SUBSCRIPTION.ACTIVATED', 'BILLING.SUBSCRIPTION.RE-ACTIVATED'])
 const DEACTIVATE = new Set(['BILLING.SUBSCRIPTION.CANCELLED', 'BILLING.SUBSCRIPTION.EXPIRED', 'BILLING.SUBSCRIPTION.SUSPENDED'])
-
-function readRawBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = []
-    req.on('data', (c) => chunks.push(typeof c === 'string' ? Buffer.from(c) : c))
-    req.on('end', () => resolve(Buffer.concat(chunks)))
-    req.on('error', reject)
-  })
-}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') { res.statusCode = 405; return res.end('Method Not Allowed') }
