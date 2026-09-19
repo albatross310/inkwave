@@ -9,10 +9,26 @@ you would know it had. Ordered by value-per-risk.
 
 ---
 
-## 1. Three copies of the break rule → one
+## 1. Three copies of the break rule → one — DONE 2026-09-15 (`src/editor/breakRule.ts`)
 
 **What.** `PaginationExtension.computeBreaks`, `arithmeticLayout.paginate` and
-`staticPagination.computeBreakPicks` each implement the page-break rule.
+`staticPagination.computeBreakPicks` each implemented the page-break rule. They are now callers of
+one pure `pickBreaks(lines, blocks, policy)`; each supplies its geometry and a `snap` policy as data
+(`never` / `off-canonical` / `legacy-orphan`) and renders the picks its own way.
+
+**Proof.** Characterization written FIRST against the unmoved code (27 new hand-derived cases in
+`breakRuleParity.test.ts`, pinning sig + widget keys + band breaks + lastUsed); two first drafts
+failed on the original and were the assertions, not the code. `pnpm prove:breaks` byte-identical
+before/after (first-10 `2403,4856,7205,9476,11919,14374,16638,19042,21386,23575`, 15 gaps,
+`contentWidth` 601.7007874015749). `prove:arith` unchanged at 17/17 · 25/25 · 34/34 divergent — the
+splitter is shared, so that divergence is in the engine's lines/blocks, not the rule.
+
+**Found while pinning, NOT fixed (zero-change lane):** (a) a document whose FIRST block is the
+reference list gets a forced gap at the list's second line — an empty page 1 (`used > 4` is
+re-asked on every refList line); (b) off-canonical, a snapped break still carries the continuation
+bracket (`midBlock` is read from the lines, not the placement); (c) off-canonical, a first block
+taller than a page snaps to pos 1 with brokeUsed 0 — an empty page 1 — and page 2 then carries 28
+lines. Each is pinned in the test file with the reasoning.
 
 **Evidence it matters.** CLAUDE.md records a retired widow/orphan rule that was fixed in two of the
 three and missed in the third, putting the snapshot pane +2 pages out on plain prose. That is R2

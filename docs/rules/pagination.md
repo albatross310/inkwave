@@ -24,9 +24,18 @@ every zoom, on phone, and in print.
   comes from ProseMirror (`isInline && isAtom`), NEVER a CSS class; a block with no atoms takes the
   byte-identical old path; top-level atoms (refList, block math) keep `atomLike`. `mathEligible` is
   passed FALSE deliberately.
-- **The break rule exists in THREE copies** (`PaginationExtension.computeBreaks`,
-  `arithmeticLayout.paginate`, `staticPagination.computeBreakPicks`). **Change one, check all three**,
-  and compare break POSITIONS, not page counts.
+- **`staticPagination` re-runs the editor's canonical break pipeline, and THE BREAK RULE IS ONE
+  MODULE — `src/editor/breakRule.ts` `pickBreaks` (2026-09-15).** It used to exist in three
+  copies (`PaginationExtension.computeBreaks`, `arithmeticLayout.paginate`,
+  `staticPagination.computeBreakPicks`) and a retired widow/orphan rule was once fixed in two and
+  missed in the third, putting the pane +2 pages out on plain prose. The three are now CALLERS:
+  each supplies geometry (page box, phone) and POLICY (`refListPos`, `posOf`, `snap: never |
+  off-canonical | legacy-orphan`) and renders the picks its own way — widgets, char offsets, sig.
+  Do not grow a fourth loop, and do not add a policy branch a caller could express as data.
+  Guarded by `breakRuleParity.test.ts` (36 hand-derived cases pinning sig, widget keys, band
+  breaks and lastUsed for every shape where the copies could have differed) — and still compare
+  break POSITIONS, not page counts, whenever the rule or its callers move
+  (`pnpm prove:breaks`: byte-identical first-10 + `contentWidth` before and after).
 - **Never do per-line hit-tests in a measure** — `collectLines` carries sample coords and resolves
   positions LAZILY; block boundaries come from ONE `posAtDOM` per top-level block.
 - **`collectLines` caches block lines by PM NODE IDENTITY** (WeakMap). Replace the WeakMap whenever
@@ -48,11 +57,15 @@ every zoom, on phone, and in print.
   break, so auditing the GAPPED DOM for mid-line breaks is vacuous (`gapsLeftFlow`); a verdict is
   unreadable where rendering is non-canonical (`renderingIsCanonical`); measure the artifact per
   BLOCK, not a rate a rare NodeView can hide.
-- **⚠ `?arithLayout` — DO NOT GRADUATE.** `arithmeticLayout.ts` does not implement `8f5ae9d`'s
-  `shouldSnapToBlock`, and whole-doc arith is gated to exactly the condition that rule governs, so it
-  diverges on EVERY break (17/17, 25/25, 34/34). Graduating would reintroduce verbatim the
-  line-cut-in-half bug Peter reported 2026-08-28. The WebKit cross-device pass and the scoped-arith
-  typing A/B are still required, just no longer first. Any "0 divergences" claim is STALE.
+- **⚠ `?arithLayout` — DO NOT GRADUATE. THE REAL BLOCKER IS `arithmeticLayout.ts`, NOT WebKit.**
+  Its `paginate` selects the `never` snap policy of the one break rule (`breakRule.ts`, 2026-09-15)
+  — deliberately, because textRender and `prove:breaks` compare it against CANONICAL rendering,
+  where the editor never snaps either. The splitter is shared now, so the 17/17 · 25/25 · 34/34
+  divergence (re-measured unchanged after the fold) must come from the LINES/BLOCKS the engine
+  feeds it, not from the rule. Graduating on a WebKit pass alone would ship an engine that cuts
+  lines in half at every zoom — reintroducing verbatim the bug Peter reported on 2026-08-28. The
+  WebKit cross-device pass and the scoped-arith typing A/B are still required, just no longer
+  first. Any "0 divergences" claim is STALE.
 - **Fonts are MATH-CERTIFIED and device-independent.** 15 certified families ship; system fonts
   (Times/Cambria/Georgia/Palatino/Baskerville/system-ui) are GONE — device-dependent metrics cannot
   satisfy a cross-device canonical break. Each new css stack keeps the old system stack as its
