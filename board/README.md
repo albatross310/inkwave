@@ -1,6 +1,6 @@
 # The board — noticeboard and backlog
 
-Two files, managed by **Lambert** (project manager). Slack is where we talk;
+Two files, managed by **Lambert** (scrum master). Slack is where we talk;
 this is where what was decided and what is still to do gets written down, so a
 fresh session can catch up without reading a week of messages.
 
