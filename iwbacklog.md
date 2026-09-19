@@ -253,6 +253,21 @@ _(nothing claimed)_
     writes that relationship into its header. MnemonicEcologies `a329199` repoints
     `roster/max.md`. **Deleting MnemonicEcologies' copy waits on #31 merging**, so
     the file is never absent from both mainlines at once.
+- **At deep zoom, narrow the page margins so the text column widens.** Peter, 19 Sep,
+  off the July zoom-branch review: good idea, but **do NOT take the code from
+  `feat/hybrid-zoom`** — "that code was in the buggy GPT updates". Scrap it and
+  reimplement on master. What it does: once the font has roughly doubled, the left
+  and right margins narrow together, so zooming in to read gives you more words
+  rather than more scrolling. Master has no equivalent today; it grows the page
+  taller and nothing else.
+  - **Safe, and I checked the objection rather than assuming it.** The obvious
+    worry is canonical page breaks — the promise that the same words land on page N
+    at every zoom. They do not move: every break measurement forces the true page
+    width and the print margins (`canonicalMeasure.ts`), so live margins cannot
+    reach the paginator. This changes rendering only, exactly as live zoom does.
+  - yes · Max · 19 Sep 17:02 · eta 22 Sep 12:00 · mine unless someone wants it sooner; it
+    is small and it is on a surface I have just been in.
+
 - **`T + B` and `P` are undefined in the glossary.** Both came from Peter's
   replies to the desktop toolbar review. Max to confirm the expansions —
   unconfirmed guesses stay out, per `docs/rules/glossary.md`.
