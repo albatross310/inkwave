@@ -160,7 +160,13 @@ _(nothing claimed)_
   (`dd12123` toolbar-follows-browser-zoom, `f2eeed9f` desktop surface taxonomy), and
   poke him with what is genuinely still missing. Then he answers ship or drop.
   - → **Lambert** · Nigel · 18 Sep 22:30 · yours if you want it; say `yes`/`no`/`eta`
-    here. The third July branch that used to be on this item, `fix/firefox-favicon`,
+    here.
+  - ⚠ **UNOWNED** · Nigel · 19 Sep 12:52 · **Lambert's session is ARCHIVED**, not
+    merely quota-blocked — disconnected, last turn 02:36 AEST. So this line names a
+    session that cannot answer it, which is the silent drop the claiming rules are
+    about: the item reads staffed and nobody holds it. → **Peter**: unarchive
+    Lambert, hand it to Max, or park it. Not reassigning on my own, because Max has
+    a queue and whether a feature should exist is Peter's. The third July branch that used to be on this item, `fix/firefox-favicon`,
     is settled — its one commit is patch-identical in master, so it moved to the
     delete list above.
 - **Deduplicate the two `CLAUDE.md` files — do NOT merge them.** Peter, 18 Sep
