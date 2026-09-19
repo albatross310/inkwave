@@ -58,7 +58,14 @@ Why: `docs/archive/editor-surface.md`.
   · **THE TWO SIDE PILLS ARE ONE PAIR — `components/sidePill.ts` owns height, font and offset.**
   `sidePillBottom()` centres each on the toolbar MIDLINE, reading the live `--iw-toolbar-h`.
   · **`🗀` has no glyph on macOS** — check decorative codepoints on both platforms.
-- **Review layer is MERGED AND LIVE ON MASTER** (ReviewBar.tsx + the R button): live suggestion mode
-  behind a toggle, comments as sticky notes over the wave, nav (←/→, Alt+A accept, Alt+S discard),
-  named annotation sets via a drop-up.
+- **Review layer is MERGED AND LIVE ON MASTER** (ReviewBar.tsx + the ✎ trigger — Peter renamed it
+  **suggests** on 2026-09-19; the layer id in code stays `review`): live suggestion mode behind a
+  toggle, comments as sticky notes over the wave, nav (←/→, Alt+A accept, Alt+S discard), named
+  annotation sets via a drop-up.
+  - **The suggests row retracts like style, except while suggestion mode is on** (2026-09-18), and
+    **with the mode on another bar takes its place, then the row comes back** (2026-09-19: "change
+    back to another bar ... without doubling up, then revert"). Only the ✎ trigger's own toggle-off
+    ends the mode; any other retreat leaves it on, and an empty pill with the mode on re-lands the
+    row after `BAR_HANDOFF_MS`, never under an open panel. The trigger fills while the mode is on.
+    Guarded by `barClose.test.ts`.
 

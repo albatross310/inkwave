@@ -1,4 +1,5 @@
-// ReviewBar — the review-mode control strip (shown when the R button is toggled on). Add a comment on
+// ReviewBar — the suggests-row control strip (shown when the ✎ trigger is toggled on; Peter renamed
+// "review" to "suggests" on 2026-09-19 — the layer id stays `review` in code). Add a comment on
 // the selection, pick/create the active annotation SET (drop-up, with per-layer show/hide eyes + a
 // global show-changes toggle), toggle live suggestion mode, and step through changes. Styled to match
 // the footer toolbar. Sits just above the footer.

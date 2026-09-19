@@ -17,7 +17,7 @@ import { exportPdfToNewTab } from './exportPdf'
 import { exportLatexDownload, exportEquationsDownload } from './exportLatex'
 import type { HintState } from './extensions/RedHighlightExtension'
 import { REFLOW_OPEN_MS, type LineRange } from './suggestions/ThesaurusPopover/popoverConstants'
-import { syncReviewVisibilityStyles, clearLegacySuggestFlag, setSuggestOn } from './review/reviewState'
+import { syncReviewVisibilityStyles, clearLegacySuggestFlag, setSuggestOn, suggestOn, onReviewChanged } from './review/reviewState'
 import { rememberReturn } from '../citations/citationNav'
 import { readScrollMemory, writeScrollMemory, restoreOffset } from './scrollMemory'
 import { CommentNotes } from '../components/CommentNotes'
@@ -447,6 +447,9 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
   // member to BarLayerId and rendering on `activeBar === 'x'`.
   const [activeBar, setActiveBar] = useState<BarLayerId | null>(null)
   const reviewOpen = activeBar === 'review'   // review layer: sticky-note comments + track changes
+  // The trigger's lit state mirrors the module flag; the review-changed event is the only signal.
+  const [suggestLit, setSuggestLit] = useState(() => suggestOn())
+  useEffect(() => onReviewChanged(() => setSuggestLit(suggestOn())), [])
   const [verifyOpen, setVerifyOpen] = useState(false)
   // The free paste-back work report (§A7.1, Path 1).
   const [reportOpen, setReportOpen] = useState(false)
@@ -612,9 +615,25 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       // Desktop too (Peter, 2026-09-18: the style bar "only hides when you stop using anything from
       // it — same as phone"): the 5s idle timer is gone, so a pointerdown anywhere outside the
       // footer chrome and its panels is what retracts the style/music rows.
+      // A STYLE POPUP'S SCRIM IS PART OF THE POPUP, NOT THE OUTSIDE (Peter, 2026-09-18: releasing
+      // outside a picker "closes only the popup and keeps the style bar"). The pickers portal to
+      // <body> behind a full-screen scrim, so every click outside one lands on the scrim — and
+      // without this the same click retracted the whole bar, which is the behaviour he rejected.
+      // The scrim carries its own marker rather than `iw-touch-guard`: StyleBar's release-outside
+      // rule reads `[data-iw-stylepop]` to mean "inside the popup", and a scrim must NOT be that.
+      if (t?.closest('[data-iw-stylescrim]')) return
       if (t && !t.closest(`.iw-touch-guard, [${PANEL_ATTR}]`)) {
         closeBarLayer('style')
         closeBarLayer('music')
+        // REVIEW RETRACTS THE SAME WAY (Peter, 2026-09-18: "Review is also broken, it needs to be a
+        // bar like style with same behaviour") — with ONE qualification, and it is not a preference.
+        // Closing the row turns suggestion mode off (R4, below: the ✎ toggle lives on this row and
+        // nowhere else, so a closed row would leave the mode invisible, unreachable and still
+        // rewriting every keystroke). A writer in suggestion mode clicks INTO the paper to use it,
+        // which is a tap-away — so unqualified parity would switch the mode off at the exact moment
+        // it was about to be used, silently. While ✎ is on, the row stays; with ✎ off it behaves
+        // exactly like style. → docs/rules/toolbar.md
+        if (!suggestOn()) closeBarLayer('review')
       }
     }
     document.addEventListener('pointerdown', onDown, { capture: true })
@@ -643,6 +662,7 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       if (!t || !t.closest('.inkwave-editor-surface')) return          // footer/panels/portals: not ours
       if (t.closest('.ProseMirror, .scas-cycle-card, button, [role="menu"], [role="dialog"], input, select')) return
       closeBarLayer('style')
+      if (!suggestOn()) closeBarLayer('review')   // same qualification as the handler above
       const ed = editorRef.current
       if (ed && !ed.state.selection.empty) {
         ed.chain().setTextSelection(ed.state.selection.head).run()     // collapse → selection bar retracts
@@ -674,11 +694,26 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     return () => clearTimeout(t)
   }, [reviewOpen])
 
-  // ⚠ TRACK CHANGES CANNOT OUTLIVE ITS OWN CONTROL (R4). The ✎ toggle lives on the review row and
+  // ⚠ TRACK CHANGES CANNOT OUTLIVE ITS OWN CONTROL (R4). The ✎ toggle lives on the suggests row and
   // nowhere else, so a closed row left the mode invisible AND unreachable while it kept rewriting
   // every keystroke into a red insertion mark. The suggestions already made survive — they are
   // marks in the document. → docs/archive/editor-surface.md#editor-track-changes
-  useEffect(() => { if (!reviewOpen) setSuggestOn(false) }, [reviewOpen])
+  //
+  // HOW R4 IS KEPT NOW (Peter, 2026-09-19: with suggestion mode on, clicking another bar must
+  // "change back to another bar ... without doubling up, then revert to review"). The row used to
+  // end the mode the moment it was not open — which made a style-bar handoff switch the mode off
+  // as a side effect of looking at a font list. Instead: (1) only the ✎ trigger's own toggle-off
+  // ends the mode (in toggleBar); (2) while the mode is on, the pill never rests EMPTY — whenever
+  // no bar is up and no panel is open, the suggests row comes back after the retreat beat, so the
+  // lit ✎ is out of sight only for as long as another bar is standing in its place. The row and
+  // the mode are still one thing; the invariant is just "visible or about to be", not "visible".
+  const barHandoffRef = useRef(false) // a toggleBar retreat in flight: its own timeout lands next
+  useEffect(() => {
+    if (activeBar !== null || openPanel !== null || !suggestOn() || barHandoffRef.current) return
+    const seq = ++barSeqRef.current
+    const t = setTimeout(() => { if (barSeqRef.current === seq) setActiveBar('review') }, BAR_HANDOFF_MS)
+    return () => clearTimeout(t)
+  }, [activeBar, openPanel])
   // The exclusion RULE is pure and lives in toolbarContract.ts (`planBarToggle`). This function is
   // only its hands — timing, sequence guard, idle timer. Adding a layer changes NOTHING here.
   function toggleBar(which: BarLayerId) {
@@ -686,7 +721,13 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     setOpenPanel(null) // a bar button is "any other toolbar button" to an open panel (rule b)
     markBarsAnimating()
     const plan = planBarToggle(activeBar, which)
+    // The ✎ trigger closing its OWN row is the one act that ends suggestion mode (R4, above). Any
+    // other retreat of the row — a style handoff, a panel opening — leaves the mode on and the row
+    // comes back on its own; without this line the revert effect would reopen the row here too,
+    // and the trigger could never close it.
+    if (which === 'review' && plan.open === null) setSuggestOn(false)
     const land = (id: BarLayerId | null) => {
+      barHandoffRef.current = false
       setActiveBar(id)
       if (id === 'style') armStyleTimer()
       else clearStyleTimer()
@@ -695,9 +736,10 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
     // A different layer is open: it must fully retreat before this one rises (Peter, 2026-07-10 —
     // pressing S then R had the style bar riding the review bar). The seq guard is what stops a
     // fast double-tap landing a stale open on top of a newer one.
+    barHandoffRef.current = true
     setActiveBar(null)
     clearStyleTimer()
-    setTimeout(() => { if (barSeqRef.current === seq) land(plan.open) }, BAR_HANDOFF_MS)
+    setTimeout(() => { barHandoffRef.current = false; if (barSeqRef.current === seq) land(plan.open) }, BAR_HANDOFF_MS)
   }
 
   // SILENT-SAVE-FAILURE GUARD (2026-07-10: two hours of edits died silently — the save-failed
@@ -2857,11 +2899,16 @@ export function TiptapEditor({ doc, onDocChange, onDuplicateEmail }: TiptapEdito
       )}
       {id === 'receipt' && (
         <button type="button"
-          data-iw-bar="review" onClick={() => toggleBar('review')}
+          data-iw-bar="review" aria-pressed={reviewOpen} onClick={() => toggleBar('review')}
           className={`flex items-center justify-center min-w-[44px] min-h-[44px] transition-colors font-serif ${reviewOpen ? 'text-[#302438]' : 'text-stone-400 hover:text-[#302438]'}`}
-          title="Review — comments & track changes"
+          title="Suggests — comments & track changes"
         >
-          <span className="flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none">R</span>
+          {/* The face is the pencil (Peter, 2026-09-19: "let's rename it suggests and yes a pencil is
+              good"), and it FILLS while suggestion mode is on — so the lit state R4 promises the
+              writer can see is on the trigger itself, not only on the row it opens. */}
+          <span className={`flex items-center justify-center w-9 h-9 rounded-full border-[1.5px] border-current text-[15px] leading-none ${suggestLit ? 'bg-current' : ''}`}>
+            <span className={suggestLit ? 'text-white' : ''} aria-hidden="true">✎</span>
+          </span>
         </button>
       )}
       {id === 'page' && <PageMenu editor={editor ?? undefined} open={openPanel === 'page'} onOpenChange={v => setPanelOpen('page', v)} />}
