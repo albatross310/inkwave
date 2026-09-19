@@ -6,7 +6,7 @@
 // component, so this scans the authored source the way `prodType.test.ts` and `cssBlocks.test.ts`
 // already do in this repo.
 //
-//   1. REVIEW RETRACTS LIKE STYLE, EXCEPT IN SUGGESTION MODE. "Review is also broken, it needs to
+//   1. THE SUGGESTS ROW RETRACTS LIKE STYLE, EXCEPT IN SUGGESTION MODE. "Review is also broken, it needs to
 //      be a bar like style with same behaviour" (2026-09-18). The exception is not a preference:
 //      closing the row turns suggestion mode off (the ✎ toggle lives on the row and nowhere else),
 //      and a writer in that mode clicks INTO the paper to use it — which is a tap-away. Unqualified
@@ -44,8 +44,26 @@ describe('the review row retracts like style, except while suggestion mode is on
     expect(reviewCloses).toBe(styleCloses - 1) // style is also closed by the ▲ toggle; review is not
   })
 
-  it('still turns suggestion mode off when the row does close (R4)', () => {
-    expect(EDITOR).toMatch(/if \(!reviewOpen\) setSuggestOn\(false\)/)
+  // R4 KEPT A NEW WAY (Peter, 2026-09-19: with suggestion mode on, another bar must take the row's
+  // place "without doubling up, then revert"). The mode used to end whenever the row was not open,
+  // which made a style handoff switch it off as a side effect. Now only the trigger's own
+  // toggle-off ends it, and an empty pill with the mode on brings the row back. Three guards:
+  it('only the trigger closing its own row ends suggestion mode (R4)', () => {
+    expect(EDITOR, 'the old blanket effect is back: a style handoff would end the mode again')
+      .not.toMatch(/if \(!reviewOpen\) setSuggestOn\(false\)/)
+    expect(EDITOR).toMatch(/if \(which === 'review' && plan\.open === null\) setSuggestOn\(false\)/)
+  })
+
+  it('an empty pill with suggestion mode on brings the row back after the retreat beat', () => {
+    // The revert must wait for the bar in front to retreat (BAR_HANDOFF_MS), must not fire while a
+    // toggleBar retreat is mid-flight (that timeout lands next), and must not rise under a panel.
+    const m = /useEffect\(\(\) => \{\s*if \(activeBar !== null \|\| openPanel !== null \|\| !suggestOn\(\) \|\| barHandoffRef\.current\) return[\s\S]{0,300}?setActiveBar\('review'\) \}, BAR_HANDOFF_MS\)/
+    expect(EDITOR, 'the revert effect is gone or lost one of its four gates').toMatch(m)
+  })
+
+  it('the trigger wears the pencil and fills while the mode is on', () => {
+    expect(EDITOR).toMatch(/title="Suggests — comments & track changes"/)
+    expect(EDITOR).toMatch(/suggestLit \? 'bg-current' : ''/)
   })
 
   it('the R trigger reports its state, as the style and music triggers do', () => {
