@@ -17,7 +17,8 @@ import { pageBoxPx } from './pageModel'
 import { isLineRect, sameLine } from './lineRects'
 import { forceCanonicalContext } from './canonicalMeasure'
 import { gappedPagesEnabled } from './pageView'
-import { PHONE_PAGE_MARGIN, PHONE_PAGE_MARGIN_BOTTOM, phoneLike, gapEl } from './pageGap'
+import { PHONE_PAGE_MARGIN, phoneLike, gapEl } from './pageGap'
+import { pickBreaks } from './breakRule'
 
 // One page's REGION in the scroll container's content coordinates (live layout px) — the real
 // canonical page grid the minimap + diff-panel page rules consume (replacing the paper-width×√2
@@ -207,40 +208,28 @@ function collectStaticLines(root: HTMLElement, blocks: Block[]): StaticLine[] {
   return lines
 }
 
-// ── Break computation (mirrors PaginationExtension.compute's overflow rules; NO orphan snap) ───
-interface Pick { lineIdx: number; snap: boolean; brokeUsed: number }
+// ── Break computation — THE break rule (`breakRule.ts`), the same loop the editor renders ──────
+interface Pick { lineIdx: number; snap: boolean; brokeUsed: number; botMargin: number }
 
-// EXPORTED AS A TEST SEAM. This function is PURE — lines in, picks out, no DOM — so the rule it
-// carries is pinned in the GATE in milliseconds rather than only by a hand-run browser probe. A
-// proof that ran once is not a guard (R3). → docs/archive/pagination-rounds.md#three-copies
-export function _computeBreakPicksForTest(lines: Array<{ top: number; absTop: number; blockIdx: number }>, textArea: number): Pick[] {
-  return computeBreakPicks(lines as StaticLine[], textArea)
+// EXPORTED AS A TEST SEAM. Pure — lines in, picks out, no DOM — so the rule the pane rides is pinned
+// in the GATE in milliseconds rather than only by a hand-run browser probe (R3). Takes the text area
+// the older tests were written against; the rule itself takes the page box.
+// → docs/archive/pagination-rounds.md#three-copies
+export function _computeBreakPicksForTest(lines: Array<{ top: number; absTop: number; blockIdx: number }>, textArea: number): Array<Omit<Pick, 'botMargin'>> {
+  return computeBreakPicks(lines as StaticLine[], textArea + MARGIN_BOTTOM, 0, false)
+    .map(({ lineIdx, snap, brokeUsed }) => ({ lineIdx, snap, brokeUsed }))
 }
 
-function computeBreakPicks(lines: StaticLine[], textArea: number): Pick[] {
-  const picks: Pick[] = []
-  let used = 0
-  // `blockIdx` is all the block tracking this rule needs now — the rest existed only to feed the
-  // retired orphan snap.
-  let blockIdx = -2 // -2 forces the first line to (re)resolve its block (mirrors blockStart=-1)
-  for (let i = 0; i < lines.length; i++) {
-    const lh = i < lines.length - 1 ? Math.max(1, lines[i + 1].top - lines[i].top) : 24
-    if (lines[i].blockIdx !== blockIdx || blockIdx === -2) blockIdx = lines[i].blockIdx
-    if (i > 0 && used + lh > textArea) {
-      // ⚠ THE ORPHAN SNAP IS GONE, BECAUSE IT IS GONE IN THE EDITOR. This is the THIRD copy of the
-      // break rule (PaginationExtension.computeBreaks · arithmeticLayout.paginate · here);
-      // production retired the snap and THIS COPY WAS MISSED, under a comment claiming the rules
-      // were identical — which is exactly why nobody looked (R2). Change one, check all three, and
-      // compare break POSITIONS: equal page counts hide divergent offsets.
-      // → docs/archive/pagination-rounds.md#three-copies
-      const snap = false
-      picks.push({ lineIdx: i, snap, brokeUsed: used })
-      used = 0
-      blockIdx = -2 // re-resolve the block on the new page (mirrors the extension)
-    }
-    used += lh
-  }
-  return picks
+// The pane resolves a pick to a CHARACTER OFFSET after picking (resolvePicks), so it has no doc
+// positions to offer the rule: every line is placeable, and it models no reference list. This
+// stand-in never leaves the function.
+const PLACEABLE = 1
+
+function computeBreakPicks(lines: StaticLine[], pageH: number, topM: number, phone: boolean): Pick[] {
+  // ⚠ NO ORPHAN SNAP, BECAUSE THERE IS NONE IN THE EDITOR. This pane once carried the retired rule
+  // under a comment claiming the rules were identical (R2). The policy is data now, not a copy.
+  const r = pickBreaks(lines, [], { pageH, topM, phone, refListPos: -1, posOf: () => PLACEABLE, snap: { kind: 'never' } })
+  return r.picks.map((p) => ({ lineIdx: p.lineIdx, snap: p.snap, brokeUsed: p.brokeUsed, botMargin: p.botMargin }))
 }
 
 // ── Break-point resolution: line top → (text node, offset) → block char offset ────────────────
@@ -279,11 +268,11 @@ function lineStartOffsetIn(n: Text, target: number): number {
 }
 
 /** Resolve each pick's line start to a char offset within its block (canonical layout still forced). */
-function resolvePicks(blocks: Block[], lines: StaticLine[], picks: Pick[], pageH: number, topM: number, phone: boolean): BreakSpec[] {
+function resolvePicks(blocks: Block[], lines: StaticLine[], picks: Pick[], topM: number, phone: boolean): BreakSpec[] {
   const specs: BreakSpec[] = picks.map((p) => ({
     blockIdx: lines[p.lineIdx].blockIdx,
     charOffset: -1,
-    botMargin: phone ? PHONE_PAGE_MARGIN_BOTTOM : Math.max(MARGIN_BOTTOM, pageH - topM - p.brokeUsed),
+    botMargin: p.botMargin, // the rule's own fill-to-bottom margin (phone-aware) — one formula
     topMargin: phone ? PHONE_PAGE_MARGIN : topM,
   }))
   // Group the mid-block picks by block, resolve each block in one forward pass over its text nodes.
@@ -443,9 +432,8 @@ export function paginateStaticDoc(opts: {
     const savedLeft = scroller.scrollLeft
     try {
       const lines = collectStaticLines(root, blocks)
-      const textArea = Math.max(1, pageH - topM - MARGIN_BOTTOM)
-      const picks = lines.length ? computeBreakPicks(lines, textArea) : []
-      specs = resolvePicks(blocks, lines, picks, pageH, topM, phone)
+      const picks = lines.length ? computeBreakPicks(lines, pageH, topM, phone) : []
+      specs = resolvePicks(blocks, lines, picks, topM, phone)
     } finally {
       for (let i = zoomHosts.length - 1; i >= 0; i--) zoomHosts[i].el.style.setProperty('zoom', zoomHosts[i].prev)
       restore()

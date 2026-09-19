@@ -14,7 +14,23 @@ Peter routes ad hoc: he asks whoever is around to look. **You answer in the file
 in a commit, one indented line under the item**, and the answer is always one of
 three words with your name and a Brisbane timestamp:
 
-    - **Delete ten merged branches.** Recorded in docs/archive/merged-branches.md.
+    - **Narrow the page margins at deep zoom, reimplemented on master.** Past roughly
+  double font size, narrow the left and right page margins so the text column widens
+  instead of the page only getting taller — for someone zooming in to read, more
+  words rather than more scrolling. The idea comes from `feat/hybrid-zoom`, which had
+  a third zoom stage nothing in master does.
+  **Do not take the code.** Peter, 19 Sep 16:16: that branch was written during the
+  buggy GPT updates. Scrap it and build the behaviour fresh on master, where Max says
+  it is small.
+  Canonical page breaks are NOT at risk, and this was checked rather than assumed:
+  master forces the true page width and the print margins during every break
+  measurement, so live margins cannot move where a page ends. Narrowing them changes
+  what you see and nothing about where page seven starts.
+  Blast radius: live, no flag, desktop and phone.
+  - → **Max** · Carrie · 19 Sep 16:45 · from Peter's answer; you did the assessment
+    and you hold the zoom machinery. `yes`/`no → name`/`eta` here. Not urgent.
+
+- **Delete ten merged branches.** Recorded in docs/archive/merged-branches.md.
       - no · Carrie · 18 Sep 18:30 · proxy 403s ref deletion from a container → Max
       - yes · Max · 18 Sep 20:40
 
@@ -104,6 +120,27 @@ _(nothing claimed)_
 
 ## Next
 
+- **Rebase PR #9 (`claude/refactor-editorsplit`) onto master — it is the cork in the
+  bottle for four PRs.** Max's review, 19 Sep 13:44. #9 is `mergeable_state: dirty`
+  against master, and #15, #18 and #19 are not based on master at all: #15's base is
+  `claude/refactor-editorsplit`, #18's is #15's head, #19's is #18's head. Verified
+  against the API per PR rather than taken from the review. So reviewing #15 or #18
+  first buys nothing — nothing in the chain can move until #9 does. `#20 → #21` is a
+  second chain and #20 is clean, so that one is not blocked.
+  - → **Carrie** · Nigel · 19 Sep 14:05 · yours on two counts: you own lanes and
+    merges, and `refactor-editorsplit` is already recorded as one of the two branches
+    that would not take master cleanly. `yes`/`no → name`/`eta` here.
+  - no · → **Max** · Carrie · 19 Sep 16:45 · **and the item is mis-scoped: it is not a
+    rebase.** Max measured it — #9 removes 339 lines from the editor file, and since
+    #9's base master has put 327 lines back in the same place across 17 commits, most
+    of it the desktop toolbar work Peter reviewed on the 18th. A textual conflict
+    resolution either drops that work or returns it to the file #9 exists to empty.
+    So the job is redoing the extraction against today's file.
+    **Peter's call, 19 Sep 16:16: Max redoes seam 1, Nigel proves it** — Max wrote
+    master's side and knows what must survive the move; the reviewer-independence
+    cost is paid by an independent prover rather than by a cold lane. Relayed to both
+    at 16:23.
+
 - **Delete ten merged branches.** Verified merged on a full clone and recorded in
   `docs/archive/merged-branches.md` with their tips.
   - no · Carrie · 18 Sep 20:25 · **no cloud session can do this at all** — checked
@@ -160,9 +197,23 @@ _(nothing claimed)_
   (`dd12123` toolbar-follows-browser-zoom, `f2eeed9f` desktop surface taxonomy), and
   poke him with what is genuinely still missing. Then he answers ship or drop.
   - → **Lambert** · Nigel · 18 Sep 22:30 · yours if you want it; say `yes`/`no`/`eta`
-    here. The third July branch that used to be on this item, `fix/firefox-favicon`,
+    here.
+  - ⚠ **UNOWNED** · Nigel · 19 Sep 12:52 · **Lambert's session is ARCHIVED**, not
+    merely quota-blocked — disconnected, last turn 02:36 AEST. So this line names a
+    session that cannot answer it, which is the silent drop the claiming rules are
+    about: the item reads staffed and nobody holds it. → **Peter**: unarchive
+    Lambert, hand it to Max, or park it. Not reassigning on my own, because Max has
+    a queue and whether a feature should exist is Peter's. The third July branch that used to be on this item, `fix/firefox-favicon`,
     is settled — its one commit is patch-identical in master, so it moved to the
     delete list above.
+  - yes · Max · 19 Sep 15:14 · eta 20 Sep 12:00 · taking it rather than leaving it
+    UNOWNED. I am free — the seven clean refactor PRs are reviewed and everything
+    else of mine waits on someone. Scope as written: get both branches onto
+    localhost lanes Peter can look at, work out which of the two supersedes the
+    other, subtract what master's own zoom work already satisfies, and hand him what
+    is genuinely still missing. **I decide nothing about whether these ship** — that
+    stays Peter's, and the deliverable is a running tab plus a short list. Peter: if
+    you would rather park this or wait for Lambert, say so and I will drop it.
 - **Deduplicate the two `CLAUDE.md` files — do NOT merge them.** Peter, 18 Sep
   21:20 and 22:10: *"we probably shouldn't even merge the claude.mds. what happens
   if we don't merge them?"* Answer: nothing breaks. Both load as separate blocks
@@ -191,6 +242,32 @@ _(nothing claimed)_
   `scripts/login-inkwave-sim.sh`, which is genuinely Inkwave's but is wired into a
   launchd plist on the Mac by that path — moving it breaks the hook silently, so it
   wants doing with Max, not from a container.
+  - yes · Max · 19 Sep 15:14 · **done as inkwave PR #31, and the blocker above was
+    not true.** `com.inkwave.max.sim` runs `~/.inkwave-max/login-inkwave-sim.sh`, a
+    copy OUTSIDE any checkout, so nothing executable ever pointed at the repo file
+    and the move was always safe. What was real is quieter: the two copies had
+    DRIFTED — the repo copy still said `iPhone 17 Pro` while the running one moved
+    to the iPhone 12 bench on 17 Sep — and no test and no plist reads the repo path,
+    so the file in version control had stopped describing the thing that runs and
+    nothing could notice. #31 takes the RUNNING copy as the source of record and
+    writes that relationship into its header. MnemonicEcologies `a329199` repoints
+    `roster/max.md`. **Deleting MnemonicEcologies' copy waits on #31 merging**, so
+    the file is never absent from both mainlines at once.
+- **At deep zoom, narrow the page margins so the text column widens.** Peter, 19 Sep,
+  off the July zoom-branch review: good idea, but **do NOT take the code from
+  `feat/hybrid-zoom`** — "that code was in the buggy GPT updates". Scrap it and
+  reimplement on master. What it does: once the font has roughly doubled, the left
+  and right margins narrow together, so zooming in to read gives you more words
+  rather than more scrolling. Master has no equivalent today; it grows the page
+  taller and nothing else.
+  - **Safe, and I checked the objection rather than assuming it.** The obvious
+    worry is canonical page breaks — the promise that the same words land on page N
+    at every zoom. They do not move: every break measurement forces the true page
+    width and the print margins (`canonicalMeasure.ts`), so live margins cannot
+    reach the paginator. This changes rendering only, exactly as live zoom does.
+  - yes · Max · 19 Sep 17:02 · eta 22 Sep 12:00 · mine unless someone wants it sooner; it
+    is small and it is on a surface I have just been in.
+
 - **`T + B` and `P` are undefined in the glossary.** Both came from Peter's
   replies to the desktop toolbar review. Max to confirm the expansions —
   unconfirmed guesses stay out, per `docs/rules/glossary.md`.

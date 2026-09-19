@@ -9,10 +9,26 @@ you would know it had. Ordered by value-per-risk.
 
 ---
 
-## 1. Three copies of the break rule → one
+## 1. Three copies of the break rule → one — DONE 2026-09-15 (`src/editor/breakRule.ts`)
 
 **What.** `PaginationExtension.computeBreaks`, `arithmeticLayout.paginate` and
-`staticPagination.computeBreakPicks` each implement the page-break rule.
+`staticPagination.computeBreakPicks` each implemented the page-break rule. They are now callers of
+one pure `pickBreaks(lines, blocks, policy)`; each supplies its geometry and a `snap` policy as data
+(`never` / `off-canonical` / `legacy-orphan`) and renders the picks its own way.
+
+**Proof.** Characterization written FIRST against the unmoved code (27 new hand-derived cases in
+`breakRuleParity.test.ts`, pinning sig + widget keys + band breaks + lastUsed); two first drafts
+failed on the original and were the assertions, not the code. `pnpm prove:breaks` byte-identical
+before/after (first-10 `2403,4856,7205,9476,11919,14374,16638,19042,21386,23575`, 15 gaps,
+`contentWidth` 601.7007874015749). `prove:arith` unchanged at 17/17 · 25/25 · 34/34 divergent — the
+splitter is shared, so that divergence is in the engine's lines/blocks, not the rule.
+
+**Found while pinning, NOT fixed (zero-change lane):** (a) a document whose FIRST block is the
+reference list gets a forced gap at the list's second line — an empty page 1 (`used > 4` is
+re-asked on every refList line); (b) off-canonical, a snapped break still carries the continuation
+bracket (`midBlock` is read from the lines, not the placement); (c) off-canonical, a first block
+taller than a page snaps to pos 1 with brokeUsed 0 — an empty page 1 — and page 2 then carries 28
+lines. Each is pinned in the test file with the reasoning.
 
 **Evidence it matters.** CLAUDE.md records a retired widow/orphan rule that was fixed in two of the
 three and missed in the third, putting the snapshot pane +2 pages out on plain prose. That is R2
@@ -70,6 +86,40 @@ tests that logic never had. Do not run this expecting a smaller repo.
 your belief instead of the behaviour. Plus: every path-keyed guard that scans a moved file
 (`touchTargets`, `snapshotPalette`, `readerContrast`, `noAutoDelete`) must be re-pointed AND
 re-proved to fire in the same commit.
+
+**Seam 1 — toolbar slot customisation — DONE (2026-09-19), as a RE-EXTRACTION, not a rebase of PR #9.**
+`src/editor/useToolbarSlots.ts` owns the writer's arrangement of the footer row: which circles it
+holds and in what order, the phone touch-hold reorder, the touch-hold drag from the ▲ drop-up onto
+the row, the write-back to the document and to the writer's own default, and the positional hotkeys.
+TiptapEditor.tsx keeps the circles themselves and everything about what is OPEN. 3,916 → 3,605 lines.
+
+**Why #9 could not simply be rebased, in numbers.** #9 removed 339 lines from the component; master
+then put 327 lines back into the SAME region across 17 commits, most of them the desktop toolbar
+work of 17–18 September. Of the three conflict points, the large one is 342 lines of master's code
+sitting where #9 left an empty space. Resolving that textually would have meant choosing between
+#9's extraction and master's behaviour, and either choice loses something nobody decided to lose.
+
+**The seam moved, and that is the substantive change from #9.** #9's hook also owned
+`toolbarPickerOpen`. On master that value is DERIVED — from `openPanel`, `activeBar` and the row's
+own contents — so a hook cannot own it. The line is now: **the hook owns the ROW and how the writer
+rearranges it; the component owns what is OPEN.** The hook is told only how to CLOSE the drawer
+after a drop, and never learns what is open.
+
+**How you would know.** #9's 28 behaviour tests were ported FIRST and run against the re-extraction
+unchanged — they were written by another session against code that no longer exists, so they cannot
+have been shaped to fit this one. All 28 pass. Of #9's 8 wiring guards, 2 needed re-aiming (they
+pinned July's JSX literally) and 1 hook test moved out entirely, because rule (a) is the component's
+now and fires on POINTERdown, not mousedown. 9 wiring guards and 38 new tests in total. Eight
+mutants planted and killed, covering the stored-row write, the unparseable-config refusal, the
+hold-slop rule, the main-row drag exemption, the one-write-path drop, the pointerdown listener, and
+both halves of the commit path inside the new hook. `commitDoc.test.ts` was re-pointed to follow the
+commit path INTO the hook — it previously scanned the component alone, so the moment the write-back
+moved, a re-inlined triple there would have been invisible while every assertion stayed green.
+
+⚠ **Two guards survived their first mutation and had to be sharpened** — worth reading before
+writing another source-scan guard. `addEventListener('pointerdown'` matched other listeners in the
+file; anchoring to `const onDown = (e: PointerEvent)` ALSO matched, because two handlers share that
+exact name. A source-scan anchor has to be text that occurs exactly once.
 
 ---
 

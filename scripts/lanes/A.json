@@ -1,9 +1,0 @@
-{"title": "A — #7 one page-break rule",
- "paragraphs": [
-  "Pages used to be split by three separate copies of the same rule: the live editor, the parked arithmetic engine, and the snapshot review pane. One of them once missed a fix and put the review pane two pages out. This PR folds all three into one shared module.",
-  "If this lane looks identical to main, that is the point. Nothing should move."],
- "checks": [
-  "Open a real multi-page document. Page breaks land on the same lines as production at zoom 1.",
-  "Ctrl/⌘+wheel over the page to zoom 1.2. No line is cut in half; breaks may move by a paragraph.",
-  "Print preview: same breaks as zoom 1.",
-  "Open ◈ → a snapshot. The review pane's page count matches the editor."]}
