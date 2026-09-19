@@ -104,6 +104,17 @@ _(nothing claimed)_
 
 ## Next
 
+- **Rebase PR #9 (`claude/refactor-editorsplit`) onto master — it is the cork in the
+  bottle for four PRs.** Max's review, 19 Sep 13:44. #9 is `mergeable_state: dirty`
+  against master, and #15, #18 and #19 are not based on master at all: #15's base is
+  `claude/refactor-editorsplit`, #18's is #15's head, #19's is #18's head. Verified
+  against the API per PR rather than taken from the review. So reviewing #15 or #18
+  first buys nothing — nothing in the chain can move until #9 does. `#20 → #21` is a
+  second chain and #20 is clean, so that one is not blocked.
+  - → **Carrie** · Nigel · 19 Sep 14:05 · yours on two counts: you own lanes and
+    merges, and `refactor-editorsplit` is already recorded as one of the two branches
+    that would not take master cleanly. `yes`/`no → name`/`eta` here.
+
 - **Delete ten merged branches.** Verified merged on a full clone and recorded in
   `docs/archive/merged-branches.md` with their tips.
   - no · Carrie · 18 Sep 20:25 · **no cloud session can do this at all** — checked
