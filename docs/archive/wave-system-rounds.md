@@ -31,7 +31,7 @@ events cross from the app into it.
 data-URI tiles as vars `--iw-wave-a/b` (night re-points them; thick line on TOP), drawn by
 `::before`/`::after` with ±280px overdraw = exactly two tiles (keep it ≡0 mod 140 or the
 transform↔background-position handoff tears). Drift = CSS `iw-wave-drift-l/r`, 72px/s (140px per
-1.944s loop), in the prerendered class → runs from first paint.
+1.944s loop), prepared by the prerendered class and released atomically with tip + twinkles.
 
 **The pool** (`waveTwinkle.ts`). Sparks (glitters) + dashes (wave marks) are generated in ONE
 pass before playback: positions through the never-strike-twice sampler (`memPick`, per-band ring
@@ -49,10 +49,10 @@ hidden during drift) fades in over the coast; the blink layer fades out — twin
 as the water slows.
 
 **The two events.**
-1. START — implicit: prerendered `.iw-wave-anim` + pool mount. ATOMIC WATER: everything is gated
-   behind `.iw-water-ready` on `<html>` (entry.client decodes the tile URIs AND waits for
-   `inkwave:twinkles-ready`) — colour, waves, twinkles land in one paint. Add any NEW tile var to
-   that decode list.
+1. START — `.iw-water-ready`: the first paint is white while the gradient, prerendered
+   `.iw-wave-anim` pseudos and pool wait paint-hidden/paused. Entry.client waits for the chosen
+   loading tip and `inkwave:twinkles-ready`; pills and a separate hydration signal do not gate.
+   Gate removal reveals gradient, waves, tip and twinkles moving together in one paint.
 2. SETTLE — `inkwave:reveal-imminent` (TiptapEditor's settle gate / LoadingVeil's ready): the
    S-curve slow down. The drift is NEVER stopped — the coast class adds a BRAKE composited on top
    (`animation-composition: replace, add`): injected literal sampled keyframes (#iw-coast-kf,

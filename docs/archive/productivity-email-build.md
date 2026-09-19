@@ -62,9 +62,11 @@ The isolated email box now uses `900px × screen.width ÷ 1728` as its desktop d
 reference 1728-logical-pixel 16-inch display and a proportionally adjusted absolute pixel width on
 other screen resolutions. Browser APIs expose no trustworthy physical diagonal/PPI, so logical
 `screen.width` is the documented screen-size proxy; browser-window width is not the sizing input.
-A 12px-per-side fit boundary lets narrower desktop windows shrink the whole fixed-layout surface
-continuously, matching the main editor's too-small-window behaviour. Phone remains a native
-full-width layout, and contextual application surfaces do not inherit the email-specific width.
+A 12px-per-side fit boundary originally let narrower desktop windows transform-shrink the fixed
+layout. That was superseded on 2026-09-07: email is correspondence, not fixed A4 geometry, so its
+900px preferred frame now reflows down to the available width at native 100% instead of scaling a
+raster. Phone remains a native full-width layout, and contextual application surfaces do not inherit
+the email-specific width.
 The same shared surface owns resize handles: either side adjusts total width at twice the pointer
 delta while CSS auto-margins keep its centre fixed, and the bottom adjusts only an optional minimum
 height. Resized width is persisted as a multiplier of the screen-calibrated pixel baseline, so it
@@ -72,13 +74,29 @@ tracks a display change without becoming a percentage of the browser window. Wid
 stay local presentation state, have keyboard/reset paths, and never
 enter the document or its provenance.
 
-Application presentation remains separate from the document paper's magnify state, but its shared
-isolated-surface wrapper reuses the same fit ratio and 12px water boundary. Below the natural width it
-transform-shrinks the fixed layout and size-compensates its wrapper; at scale 1 there is no transform.
-Document presentation keeps the existing fixed-paper transform unchanged.
+Application presentation remains separate from the document paper's magnify state. Other fixed-layout
+application consumers may use the shared fit ratio, but email opts into `nativeFit`: its wrapper stays
+100% and its inner preferred width is CSS-clamped/reflowed, so there is no fractional transform at any
+window width. Document presentation keeps the existing fixed-paper transform unchanged.
 The calibration and centred fit/resize wrapper are shared `ApplicationSurface` behaviour. A future
 tool can provide a different reference surface/display width profile without copying email code;
 contextual surfaces continue to bypass isolated fitting.
+
+**Formatting, native scale, and attachments (2026-09-07).** Email now carries the ordinary StyleBar
+inside the message frame, always visible, with the same font, point-size, character, colour,
+highlight, alignment, list, and indent commands as document writing. The unmarked body starts at
+16px/12pt. Each email owns a separate text-zoom key and therefore starts at 100%; the frame shows
+`Text N% · Fit 100%`, and activating it resets through Scroll's anchored reflow path. Direct Gmail
+send takes a sanitised live HTML fragment plus the existing plain-text fallback. Connected Gmail
+Draft reconciliation remains plain-text-aware, so a formatted draft is kept locally and remote sync
+is explicitly refused until that reconciliation model can compare and preserve the HTML alternative.
+
+The attachment control accepts arbitrary local files under an 18MB total. Bytes live in OPFS and the
+email document carries only name/type/size/SHA-256 references. An explicit Gmail send or Draft sync
+rehydrates and verifies every byte before producing multipart MIME; provider compose links refuse
+attachments rather than omitting them. The v:3 email timestamp currently commits recipients,
+subject, and body—not attachment bytes—and `.studio` export does not yet embed those OPFS files, so
+that limit is stated whenever attachments exist.
 
 **W2 first seam (2026-09-05).** Email now exposes a Focus/Studio presentation switch. It moves the
 same `EditorContent` between the isolated application frame and contextual document paper without
@@ -606,7 +624,7 @@ answer until something observes otherwise). Now something does.
   `PdfViewer` scroll hook itself is wired-and-typechecked, not browser-exercised). The reading
   INDICATOR is browser-proved from seeded state.
 
-## Email layer — P1b (2026-07-17, `src/email/`, flag `?email`, DEFAULT OFF)
+## Email layer — P1b (2026-07-17, `src/email/`; graduated DEFAULT ON 2026-09-07)
 
 ### Gmail API send — P2a implementation (2026-08-31, `feat/gmail-send`)
 
@@ -662,18 +680,117 @@ and were removed once the premise was falsified. Process inspection separately f
 listeners; they were stopped, `strictPort: true` now catches the ordinary duplicate-instance case,
 and `CLAUDE.md` records both development rules.
 
-**Connected Gmail mailbox is SPEC ONLY (v0.5, §B3.1–B3.5).** Inbox/Sent (`gmail.readonly`) and Gmail
-draft sync (`gmail.compose`) are designed as a separate, explicit restricted-scope connection.
-Nothing in this build requests read/compose/modify access; current Gmail remains `gmail.send` only.
+**Connected Gmail mailbox foundation (2026-09-06, Productivity + Email v0.2, §B3.1–B3.3).**
+`email/mailbox.ts` defines a provider-neutral, inert mailbox-view contract, and
+`email/gmailMailbox.ts` implements the first browser-to-Google reader for lightweight Inbox/Sent
+thread indexes plus full, plain-text-first thread reads on deliberate open. Index rows retain the
+mailbox `historyId`, keep attachment state `unknown` while Gmail's metadata format omits MIME parts,
+and never manufacture Inkwave documents, snapshots, ledger sessions, or sync memberships. Opened
+threads return only decoded plain text and attachment metadata; HTML bytes and remote-image URLs are
+not exposed before the isolated sanitised renderer exists. An attachment's bytes are fetched only
+from its explicit Open action, capped and checked against Gmail's metadata; passive PDF/image/text
+signatures may open in a browser viewer, while native or active formats download for the OS rather
+than executing in the app origin. Failed/invalid Gmail reads throw a typed error and are never
+converted into an empty mailbox.
 
-**Dual email surfaces and multi-message sending are SPEC ONLY (v0.5, §D2).** New email work will
-default to a centred, content-height email surface. The present writing-page arrangement survives as a
+The browser adapter remains the data boundary. The now-visible experimental connection feature
+requests the exact `gmail.readonly` + `gmail.compose` pair only after Inkwave's consent dialog, keeps
+tokens/indexes/full bodies memory-only, and sends every request directly to Google. The original
+`gmail.send` action remains a separate minimum-scope token client and is never silently upgraded.
+
+**Connected-mailbox consent seam (2026-09-06).** `email/ConnectedMailboxConsentDialog.tsx` is the
+explicit capability step-up required by Productivity + Email v0.2 §B3.1. It distinguishes the
+optional mailbox from send-only, names the Inbox/Sent and Gmail Draft abilities before Google opens,
+and states the excluded mutations, browser-direct transport, inert browsing boundary, blocked remote
+content, and disconnect effect together. `EmailComposePanel` exposes an injected
+`onConnectMailbox` boundary only when a mailbox controller exists; opening or cancelling the dialog
+cannot invoke it, and only the dialog's “Continue to Google” action does. The caller now returns the
+short-lived connected token and opens `GmailMailboxPanel`; the scope request is justified by the
+Inbox/Sent reader and real Draft import/create/update controls that ship beside it.
+
+**Native Gmail classification views (2026-09-07).** The mailbox's Inbox is Gmail Primary
+(`INBOX` + `category:primary`), Promotions is `INBOX` + `CATEGORY_PROMOTIONS`, and Spam is `SPAM`
+with `includeSpamTrash=true`. These filters run on `threads.list`; no body is downloaded or scored
+to classify a row, and the same readonly scope covers them. Drafts and Sent retain their existing
+provider-resource paths.
+
+**Gmail Draft API + conflict seam (2026-09-06).** The provider-neutral mailbox contract now carries
+stable draft references, lightweight Drafts rows, opened draft content, mutation outcomes, and sent
+identities. `gmailMailboxDraftClient` implements Gmail's real list/get/create/update/send resource
+shapes without authorising itself: list/get keep `draft.id` as identity, update accepts that stable ID
+and records Gmail's replacement message ID, and create/update/send keep a lost or unreadable success
+response `unknown` rather than inviting a blind duplicate. Draft metadata/body failures remain typed
+failures, never an empty Drafts view. Open reads expose structured To/Cc/Bcc/Subject and plain text;
+HTML and remote-image URLs remain inert.
+
+`email/mailboxDraftSync.ts` adds the pure ancestry controller required by §B3.4. It hashes one
+canonical logical draft across header whitespace/case and line-ending variants, then chooses only
+from `in-sync`, `upload-local`, `import-remote`, or `preserve-both`. Upload/import is allowed solely
+when the other side still equals the last Google-acknowledged hash; a missing base or two independent
+changes preserves both, and timestamps never decide content. `gmailDraftBinding.ts` keeps the
+account hash/stable draft ID/current message ID/history marker/ancestor hash in local OPFS outside the
+portable document. Remote drafts become local documents only through “Edit in Inkwave”; current
+local drafts can create or update Gmail only after local persistence. Conflict/remote-newer results
+leave both copies intact and request review rather than overwriting. `GmailMailboxPanel` checks
+Gmail's history marker at a conservative one-minute foreground cadence, pauses hidden/offline, and
+rebuilds on change/expiry. The remaining public-launch work is tracked in
+`docs/GMAIL-CONNECTED-MAILBOX-NEXT-STEPS.md`.
+
+**Local spatial sequence — first W3 slice (2026-09-07).** Opening a new email, duplicating one, or
+editing a Gmail draft now inserts the ordinary document immediately to the left of the active item;
+the source page remains as an inert right-hand preview. The per-tab sequence persists ids only in
+sessionStorage. Switching flushes the outgoing save and transfers the single-document Web Lock before
+remounting the one live editor in place—no reload and no hidden editor farm. Edge previews are
+bounded rich read-only surfaces plus compact buttons with accessible neighbour titles. A deliberate
+unmodified horizontal trackpad or
+two-finger touch gesture is dominance-gated and latched to one item; its momentum tail and edge hit
+are consumed under the existing root overscroll guard so Safari/Chromium cannot turn it into browser
+back/forward. Vertical scrolling and the two current zoom modifiers are untouched: Command/Control
+continues text reflow and Shift continues whole-page/water zoom. The older v0.2 W3 line assigning
+Shift to workspace navigation is superseded by that later zoom interaction decision. Clear
+horizontal intent is now reserved after 6px—before Safari begins its native history gesture—while a
+panel still does not move until 34px. Each successful in-place switch also pushes a same-document
+panel entry, so the browser's Back/Forward buttons traverse panel selections without reloading;
+rapid traversal queues the latest entry until the one-live-editor transfer has landed.
+Direct manipulation uses a macOS-Spaces-style prepainted strip. The two inert, character-capped rich
+neighbours sit at exactly -100vw/+100vw before the gesture; the strip and live paper receive the same
+flat translate3d, while the water surface remains fixed and its marks follow input speed. Release
+lands the intended neighbour exactly at zero, freezes that preview during save/lock/remount, then
+uncovers the instantly revealed live target. There is no fade, angle, clip reveal, or duplicate live
+editor. Arrow and browser-history moves retain a bounded 240ms opaque View Transition; reduced-motion
+or an engine without that API switches instantly.
+
+**Safari PWA availability + switch-latch repair (2026-09-07).** Email graduated to default-on.
+Safari installed web apps can begin with a fresh storage partition, so the old browser-tab
+`?email=1` sticky value was absent and both New email and the email surface disappeared. Google
+controls remain independently configuration/consent gated; `?email=off` is the durable opt-out.
+`prove:emailpwa` starts WebKit with empty storage, creates an email without a URL flag, and reloads
+it. The first spatial implementation had two separate remount bugs: the new editor waited for a
+loading-tip Continue event that no in-place switch renders, and the trackpad latch lived in the old
+surface effect, so WebKit's momentum tail arrived at a fresh latch and could bounce straight back.
+In-place targets now auto-reveal after their own readiness signal, the latch lives across editor
+remounts, and the switch remains input-locked until the target announces `editor-revealed`.
+`prove:workspacenav` delivers momentum to the replacement WebKit surface and requires exactly one
+move plus visible editors in both directions.
+
+New email now opens an explicit local membership picker before composition. Every email is placed in
+the reserved provider-neutral Email manifest, and the writer can select zero, one, or many other
+local `.studio` documents. The picker reads OPFS directly, pins the current document first, and does
+not infer a destination. The canonical email is saved before the one-file manifest-store update; a
+failed membership write retains that same identity for Retry. Connected Gmail retains its own copy
+once draft sync succeeds; local creation alone must not be described as a Gmail backup.
+
+**Multi-message contextual composition and sending remain SPEC ONLY (v0.5, §D2).** New email work
+defaults to a centred, content-height email surface. The present writing-page arrangement survives as a
 purposeful contextual studio: one or more complete message boxes (body inside each box) can sit among
 journal prose and annotations, support recipient variants, and send as a reviewed batch. Every box
 remains its own email subdoc; surrounding notes are excluded from sent bytes by structure. Batch
 preflight records all selected messages before the first transmission and preserves per-message
 `sent` / `failed before acceptance` / `status unknown` results. No part of that UI or data model is
-implemented in the current Gmail-send build.
+implemented in the current Gmail-send build. The local one-live-editor sequence and inert immediate
+neighbours are implemented as the first W3 slice. The local manifest store and new-email membership
+picker are the first D4/D5 slice; archive-v2 projections, overview/reorder, later membership editing,
+multi-subdoc portable containers, and sync fan-out remain specification only.
 
 Spec: `Inkwave-Productivity-Email-BuildSpec-v0.2.md` §B (now COMMITTED at `docs/specs/` — Peter, 2026-07-17: "commit the specs"
 into the repo). MVP = compose in Inkwave, count it in the productivity ledger, OTS the draft, hand
@@ -746,7 +863,8 @@ in BOTH `types/document.ts` and `productivity/types.ts` (identical unions, writt
 whichever lands second should import from `types/document.ts` rather than keep the copy.
 
 **Live probe:** `scripts/email.prove.mjs` (headless, own port, nothing on Peter's screen) drives the
-REAL built app: flag-off → no panel, `?email=1` → menu → panel, the copy, header PERSISTENCE across
+REAL built app: an ordinary starting page is not an email → menu → New email → panel, the copy,
+header PERSISTENCE across
 a reload, global snapshot → frozen canonical headers + emailHash, and asserts the digest the browser
 submits to `/api/ots` is the v:3 bundleHash and NOT the contentHash. 16/16. It caught two bugs the
 unit tests structurally could not: a header edit never called `scheduleSave` (autosave is driven by
@@ -798,7 +916,9 @@ now ONE layer. What was decided on the merge, and what the merge FOUND. **All fl
 (`prodGraphs`, `prodReport`, `prodLedger`, `email`) — verified, not assumed **as of this 2026-07-17
 merge only.** Three of the four graduated to DEFAULT ON the following day under "STOP FLAGGING
 EVERYTHING" (`prodLedger`/`prodReport` in `77b8564`, `prodGraphs` in `92425e0`) — see each lane's own
-section above for the current status. `email` remains DEFAULT OFF (blocked on Google verification).
+section above for the current status. Email remained DEFAULT OFF at that merge, but graduated on
+2026-09-07 after compose/mailbox became real and provider controls gained their own configuration +
+consent gates; Safari PWA's separate fresh storage made the old opt-in disappear entirely.
 
 - **ONE SCHEMA: `productivity/types.ts`.** prod-graphs' `ledger.ts` was an explicit placeholder mirror
   of §A3.2 ("THE LEDGER SEAM: a one-line import swap when feat/prod-ledger lands") — retired exactly

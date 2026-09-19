@@ -9,6 +9,12 @@ Page breaks are CANONICAL — the same text on page N at every zoom, on phone, a
 every change here is verified by `pnpm prove:breaks` printing byte-identical break positions AND
 the same `contentWidth` (601.7007874015749).
 
+Production pagination cannot be disabled by a stale ablation flag (2026-09-07). Safari installed
+apps have an independent durable storage jar, so an old `inkwave:pagOff=1` from a performance run
+could make the PWA appear permanently unpaginated while the browser stayed healthy. The flag is now
+honoured only with the benchmark harness's `inkwave:benchmark=1` marker; ordinary editor mounts
+always install `PaginationExtension`.
+
 Convention: `docs/archive/README.md`. Rule form and the R1–R9 patterns: `docs/RULES.md`.
 
 ---
@@ -1408,10 +1414,11 @@ change") ──
 
 Zoom levels live on the shared zoomStep lattice, and the CANONICAL breaks don't move with zoom — so
 per step only the band GEOMETRY differs, and ONE hypothetical-reflow measure per step is the whole
-cost. While idle, the whole lattice is precomputed nearest-first (one step per frame, aborting on
-any activity); when a gesture commits a step (the 'inkwave:zoom-step' event Scroll dispatches
-synchronously with the zoom var), the cached geometry is applied IMMEDIATELY as pure style writes
-that batch into the same reflow as the font change — the pages track the zoom live. A cache MISS
+cost. The current step is cached by the normal paint and the next observed step may be warmed only
+between notches of an active gesture; there is no background lattice sweep. When a gesture commits
+a step (the 'inkwave:zoom-step' event Scroll dispatches synchronously with the zoom var), cached
+geometry is applied IMMEDIATELY as pure style writes that batch into the same reflow as the font
+change — the pages track the zoom live. A cache MISS
 reads the bands LIVE in the same task instead (one extra synchronous reflow that frame): leaving the
 panels pinned at stale geometry while the text reflowed made the gap visually collapse and let text
 paint out over the water (Peter, 2026-07-10) — bands and text must land in the SAME frame, cached or
@@ -1440,10 +1447,10 @@ the eye sees is pixel-matched to the reflowed text every frame.
 
 MEASURED (`pnpm prove:zoomcost`, 13k words / 325 blocks / 55 gaps): a notch's commit is ~110ms, of
 which the reflow+anchor is ~33 and the step event ~78 — and 98% of that 78 is `readBands()`, i.e.
-the MISS path, on 11 of 12 notches. The idle precompute is not broken and it does not help: it fills
+the MISS path, on 11 of 12 notches. The former idle precompute did not help this path: it filled
 `stepCache`, while a live gesture reads `liveCache`, because the placeholder regime is a different
-geometry regime and mixing them is forbidden. So during a gesture every step measured the bands
-synchronously, on the input path.
+geometry regime and mixing them is forbidden. That mismatch is also why the idle sweep was later
+removed instead of being made more aggressive.
 
 TWO WRONG THEORIES WERE MEASURED AND DISCARDED FIRST, and they are why the fix is scheduling rather
 than a cheaper read: (1) deriving the band from its gap's rect + the band's own inline top/height
@@ -1460,7 +1467,7 @@ is untouched), strictly BETWEEN notches:
 
 * armed on a committed step, and CANCELLED by the next one, so a fast trackpad stream (~16ms apart)
   never fires it — at that cadence there is no idle to spend and the warm would compete with the
-  gesture, which is the one thing the idle precompute exists to avoid. It also skips outright once
+  gesture, which is exactly what the scheduler must avoid. It also skips outright once
   the observed cadence is faster than the warm can finish in.
 * a MISS stays exactly as correct as before: it measures live in the same task. This only makes the
   miss rarer, never the answer different.
@@ -1491,71 +1498,19 @@ RESYNC: the zoom guard (Scroll.tsx) can detect a content-visibility relevancy wa
 the layout shifted, so every placeholder-regime entry is stale. Drop them and re-derive the bands
 from the CURRENT layout in the same task.
 
-### Idle precompute, the zoom-scoped window, and the early warm
+### No idle lattice sweep — the power-floor correction (2026-09-07)
 
-Idle precompute: one step per frame, nearest-first from the current step until the WHOLE lattice is
-warm (it's only ~18 steps — a fast gesture can cross any window, and a miss now costs a synchronous
-mid-gesture reflow, so warm everything). Each measure is the canonicalMeasure trick on the LIVE zoom
-var: force `--iw-editor-zoom` to the step's lattice value, read the band rects + content height,
-restore — all inside one task, so the hypothetical layout never paints. Strictly desktop + genuinely
-idle: never during a gesture (`__iwZoomHold`), never in a typing pause (the edit debounce is the
-typing signal), never on phone, never while hidden.
+The dense 2% lattice changed the cost shape. Even the later "bounded" ±12 window was 25 candidate
+steps, and every candidate was a FULL-DOCUMENT hypothetical reflow. It ran shortly after reveal,
+again after document edits invalidated the cache, and again after settles. On a long document this
+looked like unexplained loading jitter and sustained power use after the editor was already usable.
+Pacing it one step per frame changed the shape of the damage, not the amount of work.
 
-GENUINELY idle only (2026-07-11, "Chrome still a bit slow opening a document"): each precompute step
-is a full-document hypothetical reflow (~100ms+ of layout on a long doc), and the warm-up used to
-start 350ms after the mount's first measure — ~18 consecutive long frames landing exactly while the
-reveal chain, the wave coast and the writer's first scrolls run (profiled: the post-open longtask
-churn). Any input or load-choreography activity now pushes the warm-up back; a zoom during the cold
-window stays CORRECT — onZoomStep measures a miss live in the same task.
-
-`lastInputAt` is kept alongside `quietUntil` rather than derived from it: `quietUntil` is a POLICY (a
-1500ms hold tuned for the full-lattice sweep), and the early warm needs the underlying FACT so it can
-apply its own, much shorter hold.
-
-CANCEL the zoom-scoped warm on any input (round-4, Peter: "scrolling is jittery"): each warm step is
-a full-document hypothetical reflow — running them under a scroll/keystroke is exactly the jank Peter
-felt. The 150ms grace exempts the settle's OWN scroll events (the atomic exit's correction fires
-'scroll' right after zoomCb opens the window); anything later is a real user input.
-
-ZOOM-SCOPED WARM WINDOW (round-3, Peter: "build/refresh the step cache only on zoom-zone entry /
-first step / idle after settle — never on the typing path"): the genuine-idle gate's activity events
-include 'wheel'/'scroll', so a zoom session kept pushing its own warm-up out 1.5s forever — the cache
-was measured COLD through whole gestures (0 precomputed). A zoom SETTLE opens this window: inside it
-the quietUntil input gate is bypassed (typing/edit debounce + the gesture hold still block) and the
-warm is RADIUS-LIMITED to the steps around the current one — the next notches' exit/settle frames
-hit, without the full-lattice reflow burst on every settle. The full lattice still warms at genuine
-idle, exactly as before.
-
-EARLY WARM (2026-08-20, Peter: "are we warm loading the first few levels of zoom in and out… it
-feels slow coz its lagging, not the actual distance"). The full-lattice precompute is correctly gated
-behind `preBusy()`'s `quietUntil` — and EVERY reveal-chain event (open-begin / reveal-imminent /
-editor-revealed) bumps that gate by another 3000ms, so the FULL warm genuinely cannot start until
-several seconds after the page is already visible and interactive. A writer who opens a document and
-reaches for zoom immediately — an entirely ordinary thing to do — hits a stone-cold cache: the first
-notch is a synchronous, full-document hypothetical reflow measured live (onZoomStep's miss path),
-which is exactly what reads as "laggy" rather than "needs more finger travel" — the two are easy to
-conflate from the outside, which is why TRACKPAD_ZOOM_SENSITIVITY/FIRST_STEP_BONUS alone couldn't
-fully fix the feel.
-
-This does NOT touch quietUntil or preBusy — it is a SEPARATE warm fired once, a short beat after the
-editor is actually revealed, so it lands well before the full-lattice gate would even consider
-starting. It still defers behind a genuine gesture/edit in progress (never the reveal-chain's own 3s
-hold) — it only skips the PART of preBusy that exists to protect the reveal's OWN visual settling
-from a much bigger full-lattice sweep. Its own busy check uses 250ms, deliberately much shorter than
-the full-lattice precompute's 1500ms `quietUntil` bump: that gate is tuned to keep a ~20-step sweep
-away from the reveal choreography entirely, whereas this warm needs to resume promptly between a
-writer's interactions to be ready before their next zoom.
-
-WHOLE LATTICE, nearest-first (2026-08-20, round 2 — Peter: "goes like three zooms then stops then
-another three. so maybe we need to warm load more"). This was radius 2 (five steps: k0, k0±1, k0±2),
-and that symptom is precisely what a five-step cache produces: the first few notches present
-instantly off the warm cache, then the gesture walks off its edge into cold steps that each cost a
-synchronous full-document hypothetical reflow (onZoomStep's miss path), stalls, and only recovers
-once the post-settle zoom window (ZOOM_WARM_RADIUS, also 5) warms the next few — hence "another
-three". The lattice is only ~20 steps end to end, so warming all of it removes the cliff entirely
-rather than moving it a few notches further out. Cost is bounded and paced: one hypothetical reflow
-per frame, each deferred by the busy check, so it yields to the writer throughout and never lands a
-burst on the reveal choreography.
+The entire rest-time and early-reveal sweep is therefore retired. `paint()` caches the current step
+for free, `onZoomStep` measures a cold step exactly in the commit task, and `scheduleLiveWarm` may
+predict one next step only while a real zoom gesture is in progress. No startup, post-edit or
+post-settle path is allowed to enumerate zoom levels. This preserves the correctness contract and
+the useful predictive cache without making a document's length an idle-power multiplier.
 
 A hypothetical layout can be SHORTER than the live one → the browser would clamp the scroll; save
 and restore it exactly (the same pattern as the canonical measure window).
@@ -1568,14 +1523,13 @@ dispatch a no-op) — but it still drives the paint() pass that repositions the 
 against the REFLOWED live text, which IS zoom-dependent. Scroll.tsx re-anchors the viewport around
 it (pagination-measured).
 
-BOTH PLATFORMS defer everything heavy off the settle (round-4, Peter: "text reflow should be no
+Both platforms defer the exactness verification off the settle (round-4, Peter: "text reflow should be no
 slower than before; pages painted instantly from the math"): canonical breaks cannot move with zoom
 by construction, and the ATOMIC EXIT already applied full-regime band geometry in the exit task — so
 the settle needs NO immediate measure and NO immediate paint. The full verify re-measure runs at
-genuine idle (scheduleIdleFull — input-gated, cancelled by any activity), and the zoom-scoped
-step-cache warm runs in the same quiet gaps (cancelled on input; desktop only — precompute never
-runs on phone). The gesture being over also makes every placeholder-regime `liveCache` entry stale
-for the next gesture.
+genuine idle (`scheduleIdleFull` — input-gated, cancelled by any activity). No zoom-step warming runs
+after settle. The gesture being over also makes every placeholder-regime `liveCache` entry stale for
+the next gesture.
 
 <a id="measure-scheduling"></a>
 ### Scheduling — input priority, the ResizeObserver, and doc identity
